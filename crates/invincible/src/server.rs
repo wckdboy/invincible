@@ -10,16 +10,17 @@
 use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Request as HttpRequest, State};
+use axum::extract::{Path, Request as HttpRequest, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reason, Request, RouteInput, Tier, decide};
 use serde_json::{Value, json};
 
 use crate::engine::Engine;
+use crate::remote::{CODE_LIFETIME, Pairing};
 
 pub const DECISION_HEADER: &str = "invincible-decision";
 
@@ -28,6 +29,8 @@ pub struct AppState {
     pub node: NodeSettings,
     pub token: String,
     pub client: reqwest::Client,
+    /// Remote access; `None` when the config does not enable it.
+    pub pairing: Option<Arc<Pairing>>,
 }
 
 impl AppState {
@@ -36,16 +39,73 @@ impl AppState {
         // engine is instant or it is down.
         let client =
             reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(2)).build().expect("HTTP client");
-        Self { engines, node, token, client }
+        Self { engines, node, token, client, pairing: None }
+    }
+
+    pub fn with_pairing(mut self, pairing: Arc<Pairing>) -> Self {
+        self.pairing = Some(pairing);
+        self
     }
 }
 
+/// The inference API, the same for every caller.
+fn api() -> Router<Arc<AppState>> {
+    Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(chat_completions))
+}
+
+/// The loopback app: the API and the admin endpoints behind the token, plus `/health`.
 pub fn app(state: Arc<AppState>) -> Router {
-    let api = Router::new()
-        .route("/v1/models", get(models))
-        .route("/v1/chat/completions", post(chat_completions))
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
-    Router::new().route("/health", get(|| async { Json(json!({ "status": "ok" })) })).merge(api).with_state(state)
+    let admin = Router::new()
+        .route("/v1/admin/pairing", post(start_pairing))
+        .route("/v1/admin/devices", get(list_devices))
+        .route("/v1/admin/devices/{name}", delete(remove_device));
+    let guarded = api().merge(admin).route_layer(middleware::from_fn_with_state(state.clone(), require_token));
+    Router::new().route("/health", get(|| async { Json(json!({ "status": "ok" })) })).merge(guarded).with_state(state)
+}
+
+/// What paired devices reach through their encrypted session: the API only. They are
+/// authenticated by their pinned key, so no token, and they cannot administer the node.
+pub fn device_app(state: Arc<AppState>) -> Router {
+    api().with_state(state)
+}
+
+async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
+    let Some(pairing) = &state.pairing else {
+        return error(
+            StatusCode::CONFLICT,
+            "remote_disabled",
+            "remote access is off: set [remote] listen in the config",
+        );
+    };
+    match pairing.start() {
+        Ok(code) => Json(json!({
+            "code": code.encode(),
+            "node": pairing.name,
+            "fingerprint": crate::devices::fingerprint(&pairing.key.public),
+            "expires_in": CODE_LIFETIME.as_secs(),
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+async fn list_devices(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let devices = state.pairing.as_ref().map(|p| p.devices.list()).unwrap_or_default();
+    Json(json!({ "devices": devices }))
+}
+
+async fn remove_device(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
+    let Some(pairing) = &state.pairing else {
+        return error(StatusCode::NOT_FOUND, "not_found", "no such device");
+    };
+    match pairing.devices.remove(&name) {
+        Ok(true) => {
+            tracing::info!(device = %name, "device unpaired");
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "no such device"),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 async fn require_token(State(state): State<Arc<AppState>>, request: HttpRequest, next: Next) -> Response {

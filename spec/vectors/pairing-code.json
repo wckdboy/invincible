@@ -1,0 +1,147 @@
+{
+  "spec": "pairing-code",
+  "version": 0,
+  "cases": [
+    {
+      "name": "a code with one address",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=192.168.1.20:7778",
+      "expect": {
+        "node_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "secret": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+        "addrs": [
+          "192.168.1.20:7778"
+        ]
+      }
+    },
+    {
+      "name": "addresses are tried in order",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=192.168.1.20:7778,100.64.0.3:7778",
+      "expect": {
+        "node_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "secret": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+        "addrs": [
+          "192.168.1.20:7778",
+          "100.64.0.3:7778"
+        ]
+      }
+    },
+    {
+      "name": "an IPv6 address",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=[fd00::1]:7778",
+      "expect": {
+        "node_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "secret": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+        "addrs": [
+          "[fd00::1]:7778"
+        ]
+      }
+    },
+    {
+      "name": "parameters in any order",
+      "input": "invincible://pair?a=10.0.0.2:7778&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "expect": {
+        "node_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "secret": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+        "addrs": [
+          "10.0.0.2:7778"
+        ]
+      }
+    },
+    {
+      "name": "unknown parameters are ignored",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778&x=1",
+      "expect": {
+        "node_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "secret": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+        "addrs": [
+          "10.0.0.2:7778"
+        ]
+      }
+    },
+    {
+      "name": "surrounding whitespace is ignored",
+      "input": "  invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778\n",
+      "expect": {
+        "node_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "secret": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+        "addrs": [
+          "10.0.0.2:7778"
+        ]
+      }
+    },
+    {
+      "name": "empty addresses are dropped",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=,10.0.0.2:7778,",
+      "expect": {
+        "node_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "secret": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+        "addrs": [
+          "10.0.0.2:7778"
+        ]
+      }
+    },
+    {
+      "name": "another scheme is invalid",
+      "input": "https://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "another version is invalid",
+      "input": "invincible://pair?v=1&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "no version is invalid",
+      "input": "invincible://pair?k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "no key is invalid",
+      "input": "invincible://pair?v=0&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "a short key is invalid",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "a key with padding is invalid",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=10.0.0.2:7778",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "no secret is invalid",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&a=10.0.0.2:7778",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "no address is invalid",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "only empty addresses is invalid",
+      "input": "invincible://pair?v=0&k=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&s=CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk&a=,",
+      "expect": {
+        "error": true
+      }
+    }
+  ]
+}

@@ -1,43 +1,94 @@
-# Pairing (draft)
+# Pairing (v0)
 
-> **Draft.** Not normative and not implemented. Needs a security review before any code depends on
-> it (INV-13). No vectors yet.
+> **Implemented, not yet independently reviewed.** Invincible implements this document
+> (`crates/invincible/src/remote.rs`, with tests for the refusal cases). Treat it as unaudited
+> until a security review signs it off (INV-13). Autobot's side is INV-14.
 
-How a phone running Autobot and an Invincible node come to trust each other, with no accounts, no
-passwords and no third-party relay.
+How a device (a phone running Autobot, or another computer) and an Invincible node come to trust
+each other with no accounts, no passwords and no third-party relay, and how the device then reaches
+the node's API.
 
 ## Keys
 
-Each side has a long-lived X25519 static key for Noise. The node also has an Ed25519 key that signs
-receipts ([receipts.md](receipts.md)). Private keys never leave the device that made them; they live
-in the OS keychain, a TPM or the Secure Enclave where present.
+Each side has a long-lived X25519 static key: `node.key` on the node, `device.key` on a device
+(mode 0600, two base64url lines: private, public). Private keys never leave the machine that made
+them.
 
-## Pairing
+A key's **fingerprint**, for people to compare, is its first 8 bytes in hex, in groups of four
+digits: `3f2a-91c0-77de-0b14`.
 
-1. `invincible pair` prints a QR code holding:
-   - the node's static public key,
-   - its addresses (LAN, WireGuard / Tailscale, onion),
-   - a one-time pairing secret (32 random bytes) that expires after 10 minutes or one use.
-2. Autobot scans it and opens a `Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s` handshake: the phone already
-   knows the node's static key from the QR code; the pairing secret is the PSK, so only someone who
-   saw the code can complete it.
-3. On success both sides pin each other's static key. The node shows the phone's key fingerprint and
-   name; the pairing secret is burned.
+## Pairing code
 
-## Sessions
+The node shows a code as text and as a QR code:
 
-Later connections use `Noise_IK_25519_ChaChaPoly_BLAKE2s` with the pinned keys. A node refuses any
-initiator whose static key is not pinned. The transport carries the node API (to be specified).
+```
+invincible://pair?v=0&k=<node public key>&s=<secret>&a=<host:port>,<host:port>
+```
+
+- `k`: the node's static public key, 32 bytes, base64url without padding.
+- `s`: a one-time secret, 32 random bytes, base64url without padding.
+- `a`: where to reach the node (LAN, WireGuard / Tailscale, …), comma-separated, tried in order.
+- `v` must be `0`. Unknown parameters are ignored; a missing or malformed `k`, `s` or `a` makes the
+  code invalid.
+
+A code is valid for 10 minutes and for one successful pairing. Opening a new code replaces the old
+one. After 5 failed pairing handshakes the code is burned.
+
+## Connection
+
+A device opens a TCP connection and sends one byte, in the clear: `0x01` to pair, `0x02` for a
+session. Every message after that is a **frame**: a big-endian `u16` length, then that many bytes.
+
+| Mode | Noise protocol | Prologue |
+|---|---|---|
+| `0x01` pair | `Noise_IKpsk1_25519_ChaChaPoly_BLAKE2s`, PSK = the code's secret | `invincible/0 pair` |
+| `0x02` session | `Noise_IK_25519_ChaChaPoly_BLAKE2s` | `invincible/0 session` |
+
+The prologue binds the mode byte into the handshake, so changing it in transit breaks the handshake.
+
+Both are IK: the device already knows the node's static key (from the code, or pinned at pairing)
+and sends its own static key encrypted in the first message. The handshake fails unless the node
+holds the private key for the key the device expects, so an impostor node cannot answer.
+
+**Why `psk1`.** The secret has to be mixed in by the end of the device's first message. With `psk1`,
+a device that does not know the secret cannot produce a first message the node can decrypt, so the
+node refuses it before pinning anything. (`psk2` puts the secret in the node's reply, and the node
+would read the first message, and learn and pin the device's key, without proof that the device saw
+the code. The first implementation had exactly this bug, and a test caught it.)
+
+### Pairing (`0x01`)
+
+1. Device → node, handshake message 1. Payload: `{"name": "<device name>"}` (UTF-8 JSON, at most
+   1024 bytes).
+2. The node pins the device's static key under the name. Names are cleaned to letters, digits, `-`
+   and `_`, at most 40 characters. A name already in use by another key gets a number (`phone-2`). A
+   key that paired before keeps one entry, renamed.
+3. Node → device, handshake message 2. Payload: `{"node": "<node name>", "device": "<name pinned>"}`.
+4. The code is closed. The connection continues as a session (below).
+
+### Session (`0x02`)
+
+1. Device → node, handshake message 1, empty payload.
+2. If the device's static key is not pinned, the node closes the connection without replying.
+3. Node → device, handshake message 2, empty payload.
+
+### Transport
+
+After the handshake each frame holds one Noise transport message carrying at most 65519 bytes of
+plaintext. In each direction the plaintexts, concatenated, form a byte stream, and that stream is
+plain **HTTP/1.1** to the node's API. A device reaches `/v1/models` and `/v1/chat/completions`
+(the same endpoints, headers and behaviour as on loopback) with no token, because its key already
+authenticates it. A device cannot reach the admin endpoints.
 
 ## Revocation
 
-- Unpairing on either side deletes the pinned key; the other side's next handshake fails.
-- A panic wipe in Autobot deletes the node's key with everything else.
-- `invincible devices remove <name>` revokes a phone from the node.
+- `invincible devices --remove <name>` on the node unpins a device. Its next handshake fails, and an
+  open connection is dropped at the next frame it sends.
+- A panic wipe in Autobot deletes `device.key`, and with it every pairing.
 
 ## Open questions
 
-- Key rotation and re-pairing without a fresh QR code.
-- Whether the node API inside the Noise channel is HTTP/2 or a framed protocol.
-- How the node reaches the phone for results (recipes) when the phone is asleep: polling only, or
-  an optional push path that reveals nothing.
+- Key rotation, and re-pairing without a fresh code.
+- Reaching a phone that is asleep (recipes delivering results): polling only, or an optional push
+  path that reveals nothing.
+- Whether a node should cap sessions per device.

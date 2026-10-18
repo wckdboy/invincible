@@ -1,31 +1,28 @@
 //! The local API token. Even on loopback the API needs one: any process on the machine, and any
 //! web page through DNS rebinding, can reach a loopback port, but none of them can read this file.
 
-use std::io::Write;
 use std::path::Path;
+
+use crate::fsutil;
 
 /// Reads the token at [path], creating it (32 random bytes, hex, mode 0600) when absent.
 pub fn load_or_create(path: &Path) -> Result<String, String> {
-    match std::fs::read_to_string(path) {
-        Ok(token) if !token.trim().is_empty() => return Ok(token.trim().to_owned()),
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("{}: {e}", path.display())),
+    if let Some(token) = fsutil::read_optional(path)?.filter(|t| !t.trim().is_empty()) {
+        return Ok(token.trim().to_owned());
     }
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| format!("random token: {e}"))?;
-    let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    writeln!(file, "{token}").map_err(|e| format!("{}: {e}", path.display()))?;
+    let token = hex(&random::<32>()?);
+    fsutil::create_private(path, &format!("{token}\n"))?;
     Ok(token)
+}
+
+pub fn random<const N: usize>() -> Result<[u8; N], String> {
+    let mut bytes = [0u8; N];
+    getrandom::fill(&mut bytes).map_err(|e| format!("random bytes: {e}"))?;
+    Ok(bytes)
+}
+
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Compares in time independent of where the inputs first differ.

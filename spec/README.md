@@ -6,7 +6,7 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 | Document | Status | What it defines |
 |---|---|---|
 | [routing.md](routing.md) | **v0, normative** | Where one request runs: node model, cloud model, ask first, or refuse |
-| [pairing.md](pairing.md) | draft, needs security review | How a phone and a node pair and talk (Noise) |
+| [pairing.md](pairing.md) | **v0, implemented, unaudited** | How a device and a node pair and talk (Noise); pairing-code vectors |
 | [receipts.md](receipts.md) | draft | The signed per-request receipt a node returns |
 
 ## Conformance vectors
@@ -28,8 +28,8 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 - An implementation conforms when, for every case, its output equals `expect` exactly: the same
   fields, the same values, with absent fields absent.
 
-Invincible runs them in `cargo test` (`crates/invincible-policy/tests/vectors.rs`). Autobot runs the
-same files in its JVM tests.
+Invincible runs them in `cargo test` (`crates/invincible-policy/tests/vectors.rs` for routing,
+`crates/invincible/tests/vectors.rs` for the rest). Autobot runs the same files in its JVM tests.
 
 ## Changing a rule
 

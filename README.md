@@ -10,9 +10,10 @@ Frontier models are welcome here. Being dependent on them is not. Everything wor
 they make it faster when you choose to use them.
 
 > Status: **early build.** A node serves open models through llama.cpp behind an OpenAI-compatible
-> API on loopback, and every request goes through the routing rules
-> ([spec/routing.md](spec/routing.md), pinned by 51 conformance vectors). Not yet: frontier backends,
-> pairing, receipts, agents, evals, the installer. Work is tracked in Plane (project **INV** in the
+> API, every request goes through the routing rules ([spec/routing.md](spec/routing.md), pinned by 51
+> conformance vectors), and devices pair with it over Noise ([spec/pairing.md](spec/pairing.md),
+> implemented but not yet independently reviewed). Not yet: Autobot's side of pairing, frontier
+> backends, receipts, agents, evals, the installer. Work is tracked in Plane (project **INV** in the
 > WCKD workspace).
 
 ## Why
@@ -175,10 +176,8 @@ cargo run --release -- serve      # starts one llama-server per model and keeps 
 cargo run --release -- token      # the API token (created on first run, mode 0600)
 ```
 
-Any OpenAI-compatible client **on the same machine** works against `http://127.0.0.1:7777/v1` with
-that token as the API key. `model: "auto"` (or no model) lets the router choose. Phones cannot reach
-the node yet: it listens on loopback only, and Autobot allows plain HTTP only to its own loopback.
-Reaching it from Autobot comes with pairing (INV-13), over an encrypted, authenticated channel.
+Any OpenAI-compatible client on the same machine works against `http://127.0.0.1:7777/v1` with that
+token as the API key. `model: "auto"` (or no model) lets the router choose.
 
 - Every response carries the routing decision in an `invincible-decision` header.
 - `invincible-private: 1` marks a request that must never leave hardware you own;
@@ -187,13 +186,38 @@ Reaching it from Autobot comes with pairing (INV-13), over an encrypted, authent
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff, and stopping the node stops its engines.
 
+### Pairing other machines
+
+Other devices reach the node over an encrypted, mutually authenticated Noise channel, never over
+plain HTTP. Turn it on in the node's config:
+
+```toml
+[remote]
+name = "studio"
+listen = ["0.0.0.0:7778"]
+advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, …
+```
+
+```sh
+invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
+invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
+invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
+invincible devices                   # on the node: who is paired
+invincible devices --remove laptop   # unpair: refused at the next handshake or frame
+```
+
+Paired devices reach the inference API with no token (their key authenticates them) and never the
+admin endpoints. Autobot will pair by scanning the same QR code (INV-14). The protocol is in
+[spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
+independently reviewed yet**.
+
 ## Repository
 
 | Path | What |
 |---|---|
 | [`spec/`](spec/) | The rules Invincible and Autobot share, with conformance vectors |
 | `crates/invincible-policy` | The routing rules as a pure Rust library, tested against `spec/vectors/` |
-| `crates/invincible` | The node: config, engine supervisor, local API, and the `invincible` command |
+| `crates/invincible` | The node: config, engine supervisor, local API, pairing and remote access, and the `invincible` command |
 
 ```sh
 cargo test --workspace                                  # includes every conformance vector

@@ -7,10 +7,13 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use invincible::config::{self, Config};
+use invincible::devices::{Devices, StaticKey, fingerprint};
 use invincible::engine::{self, Engine, Launch};
+use invincible::remote::{self, Pairing, PairingCode};
 use invincible::server::{self, AppState};
-use invincible::token;
+use invincible::{fsutil, token};
 use invincible_policy::{RouteInput, decide};
+use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 #[command(version, about = "Intelligence that never relies solely on frontier labs, corporations or countries.")]
@@ -29,6 +32,34 @@ enum Command {
     },
     /// Print the local API token (created on first use).
     Token,
+    /// Show a one-time code (and QR code) that pairs a device with this node.
+    Pair {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// List the paired devices, or unpair one.
+    Devices {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Unpair the device with this name.
+        #[arg(long)]
+        remove: Option<String>,
+    },
+    /// Pair this machine, as a device, with a node, using the code the node showed.
+    Join {
+        code: String,
+        /// The name the node lists this device under.
+        #[arg(long, default_value = "device")]
+        name: String,
+    },
+    /// Reach a paired node through a local, plain-HTTP door (each connection is an encrypted session).
+    Tunnel {
+        /// Which node, by name [default: the only one].
+        #[arg(long)]
+        node: Option<String>,
+        #[arg(long, default_value = "127.0.0.1:7780")]
+        listen: std::net::SocketAddr,
+    },
     /// Print where a request would run, given a routing input (spec/routing.md) as JSON.
     Route {
         /// The input file; reads stdin when absent or `-`.
@@ -59,6 +90,102 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Token => {
             println!("{}", token::load_or_create(&config::home()?.join("token"))?);
             Ok(())
+        }
+        Command::Pair { config } => {
+            let reply = admin(config, reqwest::Method::POST, "/v1/admin/pairing")?;
+            let code = reply["code"].as_str().ok_or("the node sent no code")?;
+            let qr = qrcode::QrCode::new(code.as_bytes()).map_err(|e| e.to_string())?;
+            println!("{}", qr.render::<qrcode::render::unicode::Dense1x2>().quiet_zone(true).build());
+            println!("{code}\n");
+            println!(
+                "Node \"{}\", key {}. The code works once, for {} minutes.",
+                reply["node"].as_str().unwrap_or("?"),
+                reply["fingerprint"].as_str().unwrap_or("?"),
+                reply["expires_in"].as_u64().unwrap_or(0) / 60
+            );
+            Ok(())
+        }
+        Command::Devices { config, remove } => {
+            if let Some(name) = remove {
+                admin(config, reqwest::Method::DELETE, &format!("/v1/admin/devices/{name}"))?;
+                println!("unpaired {name}");
+                return Ok(());
+            }
+            let reply = admin(config, reqwest::Method::GET, "/v1/admin/devices")?;
+            let devices = reply["devices"].as_array().cloned().unwrap_or_default();
+            if devices.is_empty() {
+                println!("no paired devices");
+            }
+            for device in devices {
+                let key = device["key"].as_str().and_then(|k| {
+                    use base64::Engine as _;
+                    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(k).ok()
+                });
+                println!(
+                    "{}  {}",
+                    device["name"].as_str().unwrap_or("?"),
+                    key.map(|k| fingerprint(&k)).unwrap_or_default()
+                );
+            }
+            Ok(())
+        }
+        Command::Join { code, name } => {
+            let code = PairingCode::decode(&code)?;
+            let home = config::home()?;
+            let device = StaticKey::load_or_create(&home.join("device.key"))?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+            let paired = runtime.block_on(remote::pair(&code, &device, &name))?;
+            let mut nodes = KnownNodes::load(&home)?;
+            nodes.0.retain(|n| n.name != paired.node);
+            nodes.0.push(KnownNode {
+                name: paired.node.clone(),
+                key: {
+                    use base64::Engine as _;
+                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(code.node_key)
+                },
+                addrs: code.addrs.clone(),
+            });
+            nodes.save(&home)?;
+            println!(
+                "paired with node \"{}\" (key {}) as \"{}\"",
+                paired.node,
+                fingerprint(&code.node_key),
+                paired.device
+            );
+            Ok(())
+        }
+        Command::Tunnel { node, listen } => {
+            if !listen.ip().is_loopback() {
+                return Err("the tunnel's door must be on loopback".to_owned());
+            }
+            let home = config::home()?;
+            let nodes = KnownNodes::load(&home)?;
+            let known = match node {
+                Some(name) => {
+                    nodes.0.into_iter().find(|n| n.name == name).ok_or(format!("no paired node \"{name}\""))?
+                }
+                None => match nodes.0.len() {
+                    1 => nodes.0.into_iter().next().expect("one node"),
+                    0 => return Err("no paired node (see `invincible join`)".to_owned()),
+                    _ => return Err("more than one paired node: pick one with --node".to_owned()),
+                },
+            };
+            let key = {
+                use base64::Engine as _;
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&known.key).map_err(|e| e.to_string())?
+            };
+            let device = StaticKey::load_or_create(&home.join("device.key"))?;
+            tracing_subscriber::fmt().with_target(false).init();
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+            runtime.block_on(async {
+                let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("{listen}: {e}"))?;
+                tracing::info!("node \"{}\" reachable at http://{listen}", known.name);
+                tokio::select! {
+                    () = remote::tunnel(listener, known.addrs, key, device) => {}
+                    _ = tokio::signal::ctrl_c() => {}
+                }
+                Ok(())
+            })
         }
         Command::Route { file } => {
             let text = match file.filter(|f| f.as_os_str() != "-") {
@@ -92,7 +219,25 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         tracing::warn!("no models configured: every request will be blocked (add [[models]] to the config)");
     }
 
-    let state = Arc::new(AppState::new(engines, config.node.settings(), token));
+    let mut state = AppState::new(engines, config.node.settings(), token);
+    if config.remote.enabled() {
+        let pairing = Arc::new(Pairing::new(
+            StaticKey::load_or_create(&home.join("node.key"))?,
+            config.remote.name(),
+            config.remote.advertised(),
+            Devices::load(&home.join("devices.json"))?,
+        ));
+        state = state.with_pairing(pairing);
+    }
+    let state = Arc::new(state);
+    if let Some(pairing) = state.pairing.clone() {
+        for addr in &config.remote.listen {
+            let listener =
+                tokio::net::TcpListener::bind(addr).await.map_err(|e| format!("remote listen on {addr}: {e}"))?;
+            tracing::info!(key = %fingerprint(&pairing.key.public), "paired devices can connect on {addr}");
+            tokio::spawn(remote::serve(listener, pairing.clone(), server::device_app(state.clone())));
+        }
+    }
     let listener =
         tokio::net::TcpListener::bind(config.listen).await.map_err(|e| format!("listen on {}: {e}", config.listen))?;
     tracing::info!("serving on http://{}", config.listen);
@@ -106,4 +251,52 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         supervisor.abort();
     }
     Ok(())
+}
+
+/// Calls the running node's admin API on loopback, with the local token.
+fn admin(config: Option<PathBuf>, method: reqwest::Method, path: &str) -> Result<serde_json::Value, String> {
+    let home = config::home()?;
+    let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
+    let token = token::load_or_create(&home.join("token"))?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+    runtime.block_on(async {
+        let response = reqwest::Client::new()
+            .request(method, format!("http://{}{path}", config.listen))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(body["error"]["message"].as_str().map_or_else(|| status.to_string(), str::to_owned));
+        }
+        Ok(body)
+    })
+}
+
+/// Nodes this machine paired with as a device (`nodes.json`).
+#[derive(Default, Serialize, Deserialize)]
+struct KnownNodes(Vec<KnownNode>);
+
+#[derive(Serialize, Deserialize)]
+struct KnownNode {
+    name: String,
+    /// Static public key, base64url, pinned at pairing.
+    key: String,
+    addrs: Vec<String>,
+}
+
+impl KnownNodes {
+    fn load(home: &std::path::Path) -> Result<Self, String> {
+        let path = home.join("nodes.json");
+        match fsutil::read_optional(&path)? {
+            Some(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+            None => Ok(Self::default()),
+        }
+    }
+
+    fn save(&self, home: &std::path::Path) -> Result<(), String> {
+        fsutil::replace_private(&home.join("nodes.json"), &serde_json::to_string_pretty(self).expect("nodes serialise"))
+    }
 }

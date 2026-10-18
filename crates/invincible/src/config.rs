@@ -33,6 +33,46 @@ pub struct Config {
     /// In order of preference: routing takes the first that fits.
     #[serde(default)]
     pub models: Vec<ModelConfig>,
+    /// Remote access for paired devices, over Noise (spec/pairing.md). Off unless `listen` is set.
+    #[serde(default)]
+    pub remote: RemoteConfig,
+}
+
+/// ```toml
+/// [remote]
+/// name = "studio"
+/// listen = ["0.0.0.0:7778"]
+/// advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, …
+/// ```
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteConfig {
+    /// The name devices see. Default `invincible`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Where to accept paired devices. Empty: remote access is off.
+    #[serde(default)]
+    pub listen: Vec<SocketAddr>,
+    /// The addresses put in pairing codes. Default: the `listen` addresses that name one interface.
+    #[serde(default)]
+    pub advertise: Vec<String>,
+}
+
+impl RemoteConfig {
+    pub fn enabled(&self) -> bool {
+        !self.listen.is_empty()
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone().unwrap_or_else(|| "invincible".to_owned())
+    }
+
+    pub fn advertised(&self) -> Vec<String> {
+        if !self.advertise.is_empty() {
+            return self.advertise.clone();
+        }
+        self.listen.iter().filter(|a| !a.ip().is_unspecified()).map(ToString::to_string).collect()
+    }
 }
 
 fn default_listen() -> SocketAddr {
@@ -128,6 +168,11 @@ impl Config {
                 self.listen
             ));
         }
+        if self.remote.enabled() && self.remote.advertised().is_empty() {
+            return Err(
+                "[remote] listens on every interface: set `advertise` to the addresses devices should use".to_owned()
+            );
+        }
         let mut seen = std::collections::HashSet::new();
         for model in &self.models {
             if model.id.is_empty() || model.id == "auto" {
@@ -174,6 +219,17 @@ mod tests {
         let twice = "[[models]]\nid = \"a\"\npath = \"a.gguf\"\n[[models]]\nid = \"a\"\npath = \"b.gguf\"\n";
         assert!(Config::parse(twice).unwrap_err().contains("twice"));
         assert!(Config::parse("[[models]]\nid = \"auto\"\npath = \"a.gguf\"\n").unwrap_err().contains("reserved"));
+    }
+
+    #[test]
+    fn remote_is_off_by_default_and_needs_an_address_to_advertise() {
+        assert!(!Config::parse("").unwrap().remote.enabled());
+        let any = "[remote]\nlisten = [\"0.0.0.0:7778\"]\n";
+        assert!(Config::parse(any).unwrap_err().contains("advertise"));
+        let lan = Config::parse("[remote]\nlisten = [\"192.168.1.20:7778\"]\n").unwrap();
+        assert_eq!(lan.remote.advertised(), vec!["192.168.1.20:7778"]);
+        let both = format!("{any}advertise = [\"10.0.0.2:7778\"]\n");
+        assert_eq!(Config::parse(&both).unwrap().remote.advertised(), vec!["10.0.0.2:7778"]);
     }
 
     #[test]
