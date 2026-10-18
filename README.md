@@ -19,7 +19,8 @@ they make it faster when you choose to use them.
 > runs on the gateway on a VPS or desktop, with tools, approvals, a terminal chat and a Telegram
 > bot, and one script installs both. Autobot's protocol layer matches the node byte for byte and
 > pairs with a live node ([autobot#2](https://github.com/wckdboy/autobot/pull/2)), and the Android
-> app drives the agent through the paired gateway, approvals included
+> app drives the agent through the paired gateway, approvals and scheduled tasks included, and
+> shows the node's signed receipts in each turn's privacy receipt
 > ([autobot#3](https://github.com/wckdboy/autobot/pull/3)). Not yet: iOS, evals, signed release
 > binaries. Work is tracked in Plane (project
 > **INV** in the WCKD workspace).
