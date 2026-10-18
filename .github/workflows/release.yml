@@ -36,6 +36,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.91
         with:
           targets: ${{ matrix.target }}
+      - run: |
+          rustup target add ${{ matrix.target }}
+          rustup target list --installed
       - if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
       - name: build
