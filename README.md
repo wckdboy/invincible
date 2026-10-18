@@ -155,8 +155,24 @@ Done when, with the internet unplugged:
 
 ## Running a node (today)
 
-You need llama.cpp's `llama-server` (`brew install llama.cpp`, or a CUDA build on NVIDIA) and a GGUF
-model. Write `~/.invincible/config.toml`:
+You need llama.cpp's `llama-server` (`brew install llama.cpp`, or a CUDA build on NVIDIA). Then add a
+model; it is downloaded, checked against its SHA-256, checked to fit this machine, and added to
+`~/.invincible/config.toml`:
+
+```sh
+invincible model add qwen3-0.6b hf:Qwen/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf --context 4096 --network direct
+invincible model list
+```
+
+- Downloads follow the config's `[node] network` (offline refuses, Tor and SOCKS5 go through the
+  proxy); `--network` overrides it for one download.
+- For `hf:` sources the hash comes from Hugging Face's listing unless you pin it with `--sha256`; an
+  HTTPS URL always needs `--sha256`. A mismatch deletes the download.
+- Interrupted downloads resume. Models that look too big for the machine are refused unless you
+  pass `--force` (the estimate is rough: weights + 10% + 512 MiB, against 90% of NVIDIA VRAM, 70% of
+  Apple unified memory or 80% of RAM).
+
+Or write the config by hand:
 
 ```toml
 listen = "127.0.0.1:7777"   # loopback only until pairing exists

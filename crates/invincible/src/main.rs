@@ -11,7 +11,7 @@ use invincible::devices::{Devices, StaticKey, fingerprint};
 use invincible::engine::{self, Engine, Launch};
 use invincible::remote::{self, Pairing, PairingCode};
 use invincible::server::{self, AppState};
-use invincible::{fsutil, token};
+use invincible::{fsutil, models, token};
 use invincible_policy::{RouteInput, decide};
 use serde::{Deserialize, Serialize};
 
@@ -60,10 +60,47 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:7780")]
         listen: std::net::SocketAddr,
     },
+    /// Add or list the models this node serves.
+    Model {
+        #[command(subcommand)]
+        action: ModelAction,
+    },
     /// Print where a request would run, given a routing input (spec/routing.md) as JSON.
     Route {
         /// The input file; reads stdin when absent or `-`.
         file: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModelAction {
+    /// Download a model, verify its SHA-256, check it fits, and add it to the config.
+    Add {
+        /// The id requests use for it.
+        id: String,
+        /// `hf:<owner>/<repo>/<file>` or an HTTPS URL.
+        source: String,
+        /// The expected SHA-256. Required for a URL; for Hugging Face it pins the hash instead of
+        /// trusting the listing.
+        #[arg(long)]
+        sha256: Option<String>,
+        /// Context window to serve it with.
+        #[arg(long)]
+        context: Option<u64>,
+        /// Network for this download (offline, direct, tor:<host>:<port>, socks5:<host>:<port>)
+        /// [default: the config's [node] network].
+        #[arg(long)]
+        network: Option<String>,
+        /// Add it even when it looks too big for this machine.
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// List the configured models.
+    List {
+        #[arg(long)]
+        config: Option<PathBuf>,
     },
 }
 
@@ -184,6 +221,101 @@ fn run(cli: Cli) -> Result<(), String> {
                     () = remote::tunnel(listener, known.addrs, key, device) => {}
                     _ = tokio::signal::ctrl_c() => {}
                 }
+                Ok(())
+            })
+        }
+        Command::Model { action: ModelAction::List { config } } => {
+            let home = config::home()?;
+            let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
+            if config.models.is_empty() {
+                println!("no models (add one with `invincible model add`)");
+            }
+            for model in &config.models {
+                let size = std::fs::metadata(&model.path).map(|m| models::gib(m.len())).unwrap_or("missing".into());
+                let context = model.context.map(|c| format!("context {c}")).unwrap_or_default();
+                println!("{}  {}  {size}  {context}", model.id, model.path.display());
+            }
+            Ok(())
+        }
+        Command::Model { action: ModelAction::Add { id, source, sha256, context, network, force, config } } => {
+            let home = config::home()?;
+            let config_path = config.unwrap_or_else(|| home.join("config.toml"));
+            let current = match fsutil::read_optional(&config_path)? {
+                Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", config_path.display()))?,
+                None => Config::parse("")?,
+            };
+            if current.models.iter().any(|m| m.id == id) {
+                return Err(format!("a model with id {id:?} is already configured"));
+            }
+            let mode = invincible_policy::NetworkMode::decode(network.as_deref().unwrap_or(&current.node.network));
+            let client =
+                invincible::egress::client(&mode).map_err(|e| format!("{e}; pass --network to download anyway"))?;
+            let source = models::Source::parse(&source)?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+            runtime.block_on(async {
+                let (sha, size) = match (&source, sha256) {
+                    (models::Source::HuggingFace { repo, file }, pinned) => {
+                        let (listed, size) = models::hugging_face_listing(&client, repo, file).await?;
+                        match pinned {
+                            Some(p) if !p.eq_ignore_ascii_case(&listed) => {
+                                return Err(format!("Hugging Face lists SHA-256 {listed}, not the pinned {p}"));
+                            }
+                            Some(p) => (p.to_ascii_lowercase(), size),
+                            None => {
+                                eprintln!("SHA-256 {listed} (from Hugging Face's listing; pin it with --sha256)");
+                                (listed, size)
+                            }
+                        }
+                    }
+                    (models::Source::Url(_), Some(p)) => (p.to_ascii_lowercase(), None),
+                    (models::Source::Url(_), None) => return Err("a URL source needs --sha256".to_owned()),
+                };
+                if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Err(format!("{sha:?} is not a SHA-256"));
+                }
+                let fit = |size: u64| -> Result<(), String> {
+                    let Some(budget) = models::memory_budget() else { return Ok(()) };
+                    let need = models::needed(size);
+                    if need > budget.bytes && !force {
+                        return Err(format!(
+                            "needs about {}, more than this machine's budget ({}); pass --force to add it anyway",
+                            models::gib(need),
+                            budget.source
+                        ));
+                    }
+                    eprintln!("needs about {} of {}", models::gib(need), budget.source);
+                    Ok(())
+                };
+                if let Some(size) = size {
+                    fit(size)?;
+                }
+                let dest = home.join("models").join(source.file_name()?);
+                if dest.exists() {
+                    return Err(format!(
+                        "{} exists already; add it to the config by hand or remove it",
+                        dest.display()
+                    ));
+                }
+                let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+                models::download(&client, &source.url(), &dest, &sha, |have, total| {
+                    if last.elapsed().as_millis() >= 500 || total == Some(have) {
+                        last = std::time::Instant::now();
+                        match total {
+                            Some(t) if t > 0 => {
+                                eprint!("\r{} / {} ({}%)   ", models::gib(have), models::gib(t), have * 100 / t)
+                            }
+                            _ => eprint!("\r{}   ", models::gib(have)),
+                        }
+                    }
+                })
+                .await?;
+                eprintln!();
+                if size.is_none() {
+                    let size = std::fs::metadata(&dest).map_err(|e| e.to_string())?.len();
+                    fit(size)?;
+                }
+                models::add_to_config(&config_path, &id, &dest, context)?;
+                println!("added {id} ({}); restart the node to serve it", dest.display());
                 Ok(())
             })
         }

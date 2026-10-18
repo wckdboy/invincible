@@ -16,8 +16,8 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "signal", "sync", "time", "fs", "io-util"] }
 axum = "0.8"
-# Plain HTTP to engines on loopback; TLS arrives with the frontier backends (INV-11).
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+# rustls with the system's trust roots; SOCKS for Tor and SOCKS5 egress.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "socks"] }
 toml = "0.9"
 getrandom = "0.3"
 tracing = "0.1"
@@ -27,6 +27,8 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 qrcode = { version = "0.14", default-features = false }
 base64 = "0.23"
+sha2 = "0.11"
+toml_edit = "0.25"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

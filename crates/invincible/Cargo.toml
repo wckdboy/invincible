@@ -25,6 +25,8 @@ hyper.workspace = true
 hyper-util.workspace = true
 qrcode.workspace = true
 base64.workspace = true
+sha2.workspace = true
+toml_edit.workspace = true
 
 [lints]
 workspace = true
