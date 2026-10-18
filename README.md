@@ -9,9 +9,11 @@ models itself, reaches frontier models when you allow it, and keeps working when
 Frontier models are welcome here. Being dependent on them is not. Everything works without them;
 they make it faster when you choose to use them.
 
-> Status: **early build.** The routing rules are specified ([spec/routing.md](spec/routing.md)),
-> implemented in Rust and pinned by 51 conformance vectors; `invincible route` evaluates them. No
-> serving, pairing or engines yet. Work is tracked in Plane (project **INV** in the WCKD workspace).
+> Status: **early build.** A node serves open models through llama.cpp behind an OpenAI-compatible
+> API on loopback, and every request goes through the routing rules
+> ([spec/routing.md](spec/routing.md), pinned by 51 conformance vectors). Not yet: frontier backends,
+> pairing, receipts, agents, evals, the installer. Work is tracked in Plane (project **INV** in the
+> WCKD workspace).
 
 ## Why
 
@@ -150,18 +152,54 @@ Done when, with the internet unplugged:
 3. A recipe handed to the node runs past Autobot's 8-minute on-device limit and delivers its result.
 4. The eval harness scores node vs. frontier on 50 real tasks from Autobot, Omnie and Nightfall.
 
+## Running a node (today)
+
+You need llama.cpp's `llama-server` (`brew install llama.cpp`, or a CUDA build on NVIDIA) and a GGUF
+model. Write `~/.invincible/config.toml`:
+
+```toml
+listen = "127.0.0.1:7777"   # loopback only until pairing exists
+
+[node]
+network = "offline"          # offline, direct, tor:<host>:<port>, socks5:<host>:<port>
+egress = "never"             # never, ask, auto
+
+[[models]]                   # in order of preference
+id = "qwen3-0.6b"
+path = "/models/Qwen3-0.6B-Q8_0.gguf"
+context = 4096
+```
+
+```sh
+cargo run --release -- serve      # starts one llama-server per model and keeps it running
+cargo run --release -- token      # the API token (created on first run, mode 0600)
+```
+
+Any OpenAI-compatible client **on the same machine** works against `http://127.0.0.1:7777/v1` with
+that token as the API key. `model: "auto"` (or no model) lets the router choose. Phones cannot reach
+the node yet: it listens on loopback only, and Autobot allows plain HTTP only to its own loopback.
+Reaching it from Autobot comes with pairing (INV-13), over an encrypted, authenticated channel.
+
+- Every response carries the routing decision in an `invincible-decision` header.
+- `invincible-private: 1` marks a request that must never leave hardware you own;
+  `invincible-risk: health,personal` passes risk codes; `invincible-confirmed: 1` answers an `ask`.
+- Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
+- Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
+  restarted with backoff, and stopping the node stops its engines.
+
 ## Repository
 
 | Path | What |
 |---|---|
 | [`spec/`](spec/) | The rules Invincible and Autobot share, with conformance vectors |
 | `crates/invincible-policy` | The routing rules as a pure Rust library, tested against `spec/vectors/` |
-| `crates/invincible` | The `invincible` command |
+| `crates/invincible` | The node: config, engine supervisor, local API, and the `invincible` command |
 
 ```sh
 cargo test --workspace                                  # includes every conformance vector
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -- route input.json                           # where would this request run?
+cargo run -- serve --config path/to/config.toml         # run a node
 ```
 
 ## Principles
