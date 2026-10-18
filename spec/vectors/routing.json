@@ -1,0 +1,1942 @@
+{
+  "spec": "routing",
+  "version": 0,
+  "cases": [
+    {
+      "name": "auto runs the first node model that fits",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "local-first"
+      }
+    },
+    {
+      "name": "auto follows the order of models",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-4b",
+            "tier": "node",
+            "healthy": true,
+            "context": 8192,
+            "data_policy": "owned"
+          },
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-4b",
+        "tier": "node",
+        "reason": "local-first"
+      }
+    },
+    {
+      "name": "auto skips a node model too small for the request",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 20000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-4b",
+            "tier": "node",
+            "healthy": true,
+            "context": 8192,
+            "data_policy": "owned"
+          },
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "local-first"
+      }
+    },
+    {
+      "name": "a node model without a context size always fits",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "local-first"
+      }
+    },
+    {
+      "name": "a private request runs locally",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": true,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "local-first"
+      }
+    },
+    {
+      "name": "a request exactly at the context size fits",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 32768,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "local-first"
+      }
+    },
+    {
+      "name": "auto goes to the cloud when no node model is big enough",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "too-long",
+        "redact": true
+      }
+    },
+    {
+      "name": "auto goes to the cloud when no node model is healthy",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": false,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "no-local-model",
+        "redact": true
+      }
+    },
+    {
+      "name": "auto goes to the cloud when there is no node model",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "no-local-model",
+        "redact": true
+      }
+    },
+    {
+      "name": "auto never picks a model that trains on prompts",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "cheap-contributor",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 128000,
+            "data_policy": "trains"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "too-long",
+        "redact": true
+      }
+    },
+    {
+      "name": "auto skips a cloud model that is down",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": false,
+            "context": 200000,
+            "data_policy": "retention:30"
+          },
+          {
+            "id": "deepseek-v4",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 128000,
+            "data_policy": "no-retention"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "deepseek-v4",
+        "tier": "cloud",
+        "reason": "too-long",
+        "redact": true
+      }
+    },
+    {
+      "name": "an unknown tier is treated as cloud",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "coop-70b",
+            "tier": "region",
+            "healthy": true,
+            "context": 65536,
+            "data_policy": "unknown"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "coop-70b",
+        "tier": "cloud",
+        "reason": "too-long",
+        "redact": true
+      }
+    },
+    {
+      "name": "tor egress lets the cloud be used",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "tor:127.0.0.1:9050",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "too-long",
+        "redact": true
+      }
+    },
+    {
+      "name": "socks5 egress lets the cloud be used",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "socks5:10.0.0.2:1080",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "too-long",
+        "redact": true
+      }
+    },
+    {
+      "name": "auto blocks a private request no node model can take",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": true,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "private"
+      }
+    },
+    {
+      "name": "auto blocks when offline and no node model can take it",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "offline",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "auto blocks under egress never",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "never"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "egress-never"
+      }
+    },
+    {
+      "name": "private is reported before offline",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": true,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "offline",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "private"
+      }
+    },
+    {
+      "name": "offline is reported before egress never",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "offline",
+          "egress": "never"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "auto blocks when only a model that trains is left",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "cheap-contributor",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 128000,
+            "data_policy": "trains"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "no-model"
+      }
+    },
+    {
+      "name": "auto blocks when every cloud model is down",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": false,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": false,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "no-model"
+      }
+    },
+    {
+      "name": "auto blocks with no models",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": []
+      },
+      "expect": {
+        "action": "block",
+        "reason": "no-model"
+      }
+    },
+    {
+      "name": "confirming does not unblock a private request",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": true,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": true
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "private"
+      }
+    },
+    {
+      "name": "auto asks under egress ask",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "ask"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "ask",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "egress-ask"
+      }
+    },
+    {
+      "name": "auto asks before sending a sensitive request",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [
+            "health"
+          ],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "ask",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "sensitive"
+      }
+    },
+    {
+      "name": "an unknown risk code still counts as risk",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [
+            "something-new"
+          ],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "ask",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "sensitive"
+      }
+    },
+    {
+      "name": "egress ask is reported before sensitive",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [
+            "personal"
+          ],
+          "prompt_tokens": 50000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "ask"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "ask",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "egress-ask"
+      }
+    },
+    {
+      "name": "a confirmed sensitive request runs in the cloud",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [
+            "health"
+          ],
+          "prompt_tokens": 50000,
+          "confirmed": true
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "too-long",
+        "redact": true
+      }
+    },
+    {
+      "name": "a confirmed request under egress ask runs",
+      "input": {
+        "request": {
+          "model": "auto",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": true
+        },
+        "node": {
+          "network": "direct",
+          "egress": "ask"
+        },
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "no-local-model",
+        "redact": true
+      }
+    },
+    {
+      "name": "a named node model runs",
+      "input": {
+        "request": {
+          "model": "qwen3-32b",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-4b",
+            "tier": "node",
+            "healthy": true,
+            "context": 8192,
+            "data_policy": "owned"
+          },
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "requested"
+      }
+    },
+    {
+      "name": "a named node model that is down gives way to the local pick",
+      "input": {
+        "request": {
+          "model": "qwen3-32b",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": false,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "qwen3-4b",
+            "tier": "node",
+            "healthy": true,
+            "context": 8192,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-4b",
+        "tier": "node",
+        "reason": "model-unavailable"
+      }
+    },
+    {
+      "name": "a named node model too small with no other is blocked",
+      "input": {
+        "request": {
+          "model": "qwen3-4b",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 20000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-4b",
+            "tier": "node",
+            "healthy": true,
+            "context": 8192,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "model-unavailable"
+      }
+    },
+    {
+      "name": "an unknown model is blocked",
+      "input": {
+        "request": {
+          "model": "gpt-9",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "unknown-model"
+      }
+    },
+    {
+      "name": "a named cloud model runs with redaction",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "requested",
+        "redact": true
+      }
+    },
+    {
+      "name": "naming a cloud model is consent despite risk",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [
+            "personal"
+          ],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "requested",
+        "redact": true
+      }
+    },
+    {
+      "name": "a private request for a cloud model falls back to the node",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": true,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "private",
+        "fallback": true
+      }
+    },
+    {
+      "name": "offline, a cloud model falls back to the node",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "offline",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "offline",
+        "fallback": true
+      }
+    },
+    {
+      "name": "offline with no node model, a cloud model is blocked",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "offline",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "a cloud model that is down falls back to the node",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": false,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "cloud-down",
+        "fallback": true
+      }
+    },
+    {
+      "name": "under egress never, a cloud model falls back to the node",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "never"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "egress-never",
+        "fallback": true
+      }
+    },
+    {
+      "name": "a cloud fallback takes the first node model that fits",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": true,
+          "risk": [],
+          "prompt_tokens": 20000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-4b",
+            "tier": "node",
+            "healthy": true,
+            "context": 8192,
+            "data_policy": "owned"
+          },
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "private",
+        "fallback": true
+      }
+    },
+    {
+      "name": "a named model that trains asks first",
+      "input": {
+        "request": {
+          "model": "cheap-contributor",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "cheap-contributor",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 128000,
+            "data_policy": "trains"
+          }
+        ]
+      },
+      "expect": {
+        "action": "ask",
+        "model": "cheap-contributor",
+        "tier": "cloud",
+        "reason": "trains"
+      }
+    },
+    {
+      "name": "trains is reported before egress ask",
+      "input": {
+        "request": {
+          "model": "cheap-contributor",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "ask"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "cheap-contributor",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 128000,
+            "data_policy": "trains"
+          }
+        ]
+      },
+      "expect": {
+        "action": "ask",
+        "model": "cheap-contributor",
+        "tier": "cloud",
+        "reason": "trains"
+      }
+    },
+    {
+      "name": "a confirmed model that trains runs",
+      "input": {
+        "request": {
+          "model": "cheap-contributor",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": true
+        },
+        "node": {
+          "network": "direct",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "cheap-contributor",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 128000,
+            "data_policy": "trains"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "cheap-contributor",
+        "tier": "cloud",
+        "reason": "requested",
+        "redact": true
+      }
+    },
+    {
+      "name": "a named cloud model asks under egress ask",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "ask"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "ask",
+        "model": "claude-opus-5-5",
+        "tier": "cloud",
+        "reason": "egress-ask"
+      }
+    },
+    {
+      "name": "a named unknown tier model is a cloud model",
+      "input": {
+        "request": {
+          "model": "coop-70b",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "never"
+        },
+        "models": [
+          {
+            "id": "coop-70b",
+            "tier": "region",
+            "healthy": true,
+            "context": 65536,
+            "data_policy": "unknown"
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "reason": "egress-never"
+      }
+    },
+    {
+      "name": "an unknown network mode is offline",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "carrier-pigeon",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "offline",
+        "fallback": true
+      }
+    },
+    {
+      "name": "a tor mode without a port is offline",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "tor:127.0.0.1",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "offline",
+        "fallback": true
+      }
+    },
+    {
+      "name": "a socks5 mode with a bad port is offline",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "socks5:10.0.0.2:70000",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "offline",
+        "fallback": true
+      }
+    },
+    {
+      "name": "an empty network mode is offline",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "",
+          "egress": "auto"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "offline",
+        "fallback": true
+      }
+    },
+    {
+      "name": "an unknown egress policy is never",
+      "input": {
+        "request": {
+          "model": "claude-opus-5-5",
+          "private": false,
+          "risk": [],
+          "prompt_tokens": 1000,
+          "confirmed": false
+        },
+        "node": {
+          "network": "direct",
+          "egress": "yolo"
+        },
+        "models": [
+          {
+            "id": "qwen3-32b",
+            "tier": "node",
+            "healthy": true,
+            "context": 32768,
+            "data_policy": "owned"
+          },
+          {
+            "id": "claude-opus-5-5",
+            "tier": "cloud",
+            "healthy": true,
+            "context": 200000,
+            "data_policy": "retention:30"
+          }
+        ]
+      },
+      "expect": {
+        "action": "run",
+        "model": "qwen3-32b",
+        "tier": "node",
+        "reason": "egress-never",
+        "fallback": true
+      }
+    }
+  ]
+}

@@ -9,8 +9,9 @@ models itself, reaches frontier models when you allow it, and keeps working when
 Frontier models are welcome here. Being dependent on them is not. Everything works without them;
 they make it faster when you choose to use them.
 
-> Status: **design.** Nothing is built yet. This document is the plan; work is tracked in Plane
-> (project **INV** in the WCKD workspace).
+> Status: **early build.** The routing rules are specified ([spec/routing.md](spec/routing.md)),
+> implemented in Rust and pinned by 51 conformance vectors; `invincible route` evaluates them. No
+> serving, pairing or engines yet. Work is tracked in Plane (project **INV** in the WCKD workspace).
 
 ## Why
 
@@ -120,6 +121,9 @@ There are no accounts, no passwords and no third-party relay.
   against the same conformance vectors as Autobot.
 - **Engines:** separate processes that the control plane supervises, never linked in. A crashing
   engine cannot take the node down, and engines can be swapped freely.
+- **Hardware:** local-grade Apple silicon and NVIDIA machines. llama.cpp is the v0 engine on both
+  (Metal on Apple silicon, CUDA on NVIDIA), so one engine and one model format cover every node.
+  MLX (Apple) and vLLM (NVIDIA) follow as optional faster engines behind the same interface.
 - **Storage:** encrypted at rest; keys in the OS keychain or a TPM / Secure Enclave where present.
 - **Network:** listens on loopback and paired interfaces only; nothing is exposed to the open
   internet by default; optional Tor onion service for reaching home from anywhere.
@@ -146,6 +150,20 @@ Done when, with the internet unplugged:
 3. A recipe handed to the node runs past Autobot's 8-minute on-device limit and delivers its result.
 4. The eval harness scores node vs. frontier on 50 real tasks from Autobot, Omnie and Nightfall.
 
+## Repository
+
+| Path | What |
+|---|---|
+| [`spec/`](spec/) | The rules Invincible and Autobot share, with conformance vectors |
+| `crates/invincible-policy` | The routing rules as a pure Rust library, tested against `spec/vectors/` |
+| `crates/invincible` | The `invincible` command |
+
+```sh
+cargo test --workspace                                  # includes every conformance vector
+cargo clippy --workspace --all-targets -- -D warnings
+cargo run -- route input.json                           # where would this request run?
+```
+
 ## Principles
 
 - **Local is the default.** Leaving hardware you own is always a choice, visible and reversible.
@@ -157,7 +175,6 @@ Done when, with the internet unplugged:
 
 ## Open questions
 
-- Hardware targets for v0: Apple silicon (MLX), NVIDIA (vLLM), or both?
 - Region tier: trusted operators only, or a design that is safe with strangers' compute?
 - How Autobot consumes `spec/`: a git submodule, or vectors vendored by a sync script.
 - License: Autobot ships under Apache-2.0; Invincible likely the same.

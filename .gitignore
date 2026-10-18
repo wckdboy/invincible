@@ -1,0 +1,9 @@
+/target/
+
+# Model weights
+*.gguf
+*.safetensors
+
+# Local node state and keys: never commit
+/.invincible/
+*.key
