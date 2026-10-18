@@ -176,7 +176,10 @@ autobot cron add "@daily" "check disk space and warn me if a disk is over 90% fu
 
 Releases are built by [`release.yml`](.github/workflows/release.yml) on a `v*` tag; each archive
 carries a build-provenance attestation (`gh attestation verify <archive> --repo wckdboy/invincible`).
-Reproducible builds and a signature with a key you can pin are next (INV-18).
+The Linux builds are reproducible: before publishing, the workflow builds the x86_64 archive a
+second time on another machine and refuses to publish unless the bytes match. To check one
+yourself, build the tagged commit from `/tmp/invincible-src` with the flags in `release.yml`.
+A signature with a key you can pin is next (INV-18).
 
 ## The Autobot Agent
 
