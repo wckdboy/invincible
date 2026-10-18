@@ -57,7 +57,7 @@ jobs:
         run: |
           dir="invincible-${{ matrix.platform }}"
           mkdir -p "$dir"
-          cp out/invincible out/autobot README.md "$dir"/
+          cp out/invincible out/autobot README.md LICENSE "$dir"/
           # Fixed order, owner and times in the archive.
           if tar --version | grep -q GNU; then opts="--sort=name --owner=0 --group=0 --numeric-owner --mtime=@0"; else opts="--uid 0 --gid 0"; fi
           tar $opts -cf - "$dir" | gzip -n > "$dir.tar.gz"
@@ -95,7 +95,7 @@ jobs:
           cargo build --release --locked --target x86_64-unknown-linux-musl -p invincible -p autobot
           dir=invincible-linux-x64
           mkdir -p "$dir"
-          cp target/x86_64-unknown-linux-musl/release/invincible target/x86_64-unknown-linux-musl/release/autobot README.md "$dir"/
+          cp target/x86_64-unknown-linux-musl/release/invincible target/x86_64-unknown-linux-musl/release/autobot README.md LICENSE "$dir"/
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - "$dir" | gzip -n > "$GITHUB_WORKSPACE/rebuilt.tar.gz"
           mkdir -p "$GITHUB_WORKSPACE/rebuilt" && cp "$dir"/invincible "$dir"/autobot "$GITHUB_WORKSPACE/rebuilt/"
       - uses: actions/download-artifact@v4

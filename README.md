@@ -381,4 +381,8 @@ cargo run -p autobot -- doctor                          # check an agent install
 
 - Region tier: trusted operators only, or a design that is safe with strangers' compute?
 - How Autobot consumes `spec/`: a git submodule, or vectors vendored by a sync script.
-- License: Autobot ships under Apache-2.0; Invincible likely the same.
+
+## License
+
+[MIT](LICENSE). Every dependency is under a license compatible with it (MIT, Apache-2.0, BSD,
+ISC, Unicode), which `cargo deny` checks in CI.
