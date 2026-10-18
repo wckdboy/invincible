@@ -7,22 +7,32 @@ use invincible::engine::{Engine, Launch, free_port, supervise};
 use tokio::time::{Instant, sleep};
 
 const STAND_IN: &str = r#"
-import http.server, sys, threading, os
+import http.server, socketserver, sys, threading, os
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200 if self.path == "/health" else 404)
         self.end_headers()
     def log_message(self, *a): pass
-server = http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H)
-server.allow_reuse_address = True
+class S(http.server.HTTPServer):
+    allow_reuse_address = True
+    # HTTPServer.server_bind does a reverse DNS lookup, which can take seconds on CI runners.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+server = S(("127.0.0.1", int(sys.argv[1])), H)
+print("listening", flush=True)
 threading.Timer(float(sys.argv[2]), lambda: os._exit(1)).start()
 server.serve_forever()
 "#;
 
-async fn wait_until(what: &str, deadline: Duration, condition: impl Fn() -> bool) {
+/// Waits for [condition]; on timeout, fails with the stand-in's log (what it printed, how it died).
+async fn wait_until(what: &str, log: &std::path::Path, condition: impl Fn() -> bool) {
     let start = Instant::now();
     while !condition() {
-        assert!(start.elapsed() < deadline, "timed out waiting until {what}");
+        if start.elapsed() > Duration::from_secs(20) {
+            let log = std::fs::read_to_string(log).unwrap_or_else(|e| format!("(no log: {e})"));
+            panic!("timed out waiting until {what}; stand-in log:\n{log}");
+        }
         sleep(Duration::from_millis(50)).await;
     }
 }
@@ -31,17 +41,18 @@ async fn wait_until(what: &str, deadline: Duration, condition: impl Fn() -> bool
 async fn restarts_a_crashed_engine_and_tracks_its_health() {
     let port = free_port().unwrap();
     let dir = std::env::temp_dir().join(format!("invincible-supervisor-{}", std::process::id()));
+    let log = dir.join("stand-in.log");
     let launch = Launch {
         program: "python3".into(),
         args: vec!["-I".into(), "-c".into(), STAND_IN.into(), port.to_string(), "1.5".into()],
-        log: dir.join("stand-in.log"),
+        log: log.clone(),
     };
     let engine = Engine::attached("stand-in", &format!("http://127.0.0.1:{port}"), None, false);
     let task = supervise(engine.clone(), launch);
 
-    wait_until("the engine is healthy", Duration::from_secs(10), || engine.healthy()).await;
-    wait_until("the crash is noticed", Duration::from_secs(10), || !engine.healthy()).await;
-    wait_until("the restarted engine is healthy", Duration::from_secs(10), || engine.healthy()).await;
+    wait_until("the engine is healthy", &log, || engine.healthy()).await;
+    wait_until("the crash is noticed", &log, || !engine.healthy()).await;
+    wait_until("the restarted engine is healthy", &log, || engine.healthy()).await;
 
     task.abort();
     let _ = task.await;
