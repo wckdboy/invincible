@@ -118,7 +118,17 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Serve { config } => {
             let home = config::home()?;
-            let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
+            // A path given on the command line must exist; without one, a node that was never set up
+            // starts with the defaults (offline, no models) instead of failing in a restart loop.
+            let config = match config {
+                Some(path) => Config::load(&path)?,
+                None => match fsutil::read_optional(&home.join("config.toml"))? {
+                    Some(text) => {
+                        Config::parse(&text).map_err(|e| format!("{}: {e}", home.join("config.toml").display()))?
+                    }
+                    None => Config::parse("")?,
+                },
+            };
             let token = token::load_or_create(&home.join("token"))?;
             tracing_subscriber::fmt().with_target(false).init();
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
