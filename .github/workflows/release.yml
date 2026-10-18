@@ -7,7 +7,8 @@
 #
 # Every archive gets a build-provenance attestation (Sigstore, keyless: GitHub signs that this
 # workflow at this commit built these exact bytes), checkable with `gh attestation verify`.
-# SHA256SUMS lists every archive; install.sh checks against it.
+# SHA256SUMS lists every archive, signed with the release key (SHA256SUMS.sig, an SSH signature);
+# install.sh checks the signature with the public key it pins, then the archive against SHA256SUMS.
 name: release
 
 on:
@@ -124,15 +125,27 @@ jobs:
         with:
           merge-multiple: true
       - run: sha256sum invincible-*.tar.gz | tee SHA256SUMS
+      # The release key (a GitHub secret) signs SHA256SUMS; install.sh pins its public key.
+      - name: sign
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
+          ssh-keygen -Y sign -q -f "$RUNNER_TEMP/release.key" -n invincible-release SHA256SUMS
+          rm -f "$RUNNER_TEMP/release.key"
+          cat SHA256SUMS.sig
       - if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" --generate-notes \
-            invincible-*.tar.gz SHA256SUMS
+            invincible-*.tar.gz SHA256SUMS SHA256SUMS.sig
       - if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/upload-artifact@v4
         with:
           name: SHA256SUMS
-          path: SHA256SUMS
+          path: |
+            SHA256SUMS
+            SHA256SUMS.sig

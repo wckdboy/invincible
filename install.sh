@@ -5,9 +5,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/wckdboy/invincible/main/install.sh | sh
 #
 # What it does, all in your home directory (no root needed):
-#   1. puts `invincible` and `autobot` in ~/.local/bin: the latest release's binaries, checked
-#      against its SHA256SUMS (and its Sigstore build attestation if `gh` is installed), or, when
-#      there is no release, built from source with Rust from rustup if you have none;
+#   1. puts `invincible` and `autobot` in ~/.local/bin: the latest release's binaries, its
+#      SHA256SUMS signed with the release key pinned below and the archive checked against it (and
+#      its Sigstore build attestation if `gh` is installed), or, without a signed release, built
+#      from source with Rust from rustup if you have none;
 #   2. installs llama.cpp's server if it is missing: Homebrew on macOS, else a pinned upstream
 #      build checked against its SHA-256 (CUDA when an NVIDIA GPU is present);
 #   3. runs `autobot setup`: network, model, approvals, Telegram, background services.
@@ -22,6 +23,10 @@ REF="${INVINCIBLE_REF:-main}"
 BIN="${INVINCIBLE_BIN:-$HOME/.local/bin}"
 INV_HOME="${INVINCIBLE_HOME:-$HOME/.invincible}"
 SRC="$INV_HOME/src"
+
+# The release key: SHA256SUMS of every release is signed with it (an SSH signature, checked with
+# ssh-keygen, which comes with OpenSSH on every Mac and Linux machine).
+RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPGy6kHVQQ+W282VFPR/Qo"
 
 # llama.cpp, pinned: build tag and the SHA-256 of each archive (from GitHub's release digests).
 LLAMA_TAG="b11721"
@@ -86,6 +91,17 @@ install_release() {
         say "no release yet; building from source instead"
         return 1
     fi
+    if ! curl -fsL --proto "$PROTO" --tlsv1.2 --retry 2 -o "$work/SHA256SUMS.sig" "$base/SHA256SUMS.sig" 2>/dev/null; then
+        rm -rf "$work"
+        say "this release is not signed; building from source instead"
+        return 1
+    fi
+    have ssh-keygen || die "ssh-keygen (OpenSSH) is needed to check the release signature"
+    printf 'invincible-release %s\n' "$RELEASE_KEY" > "$work/allowed_signers"
+    ssh-keygen -Y verify -f "$work/allowed_signers" -I invincible-release -n invincible-release \
+        -s "$work/SHA256SUMS.sig" < "$work/SHA256SUMS" >/dev/null 2>&1 \
+        || die "the release's SHA256SUMS is not signed with the Invincible release key; not installing it"
+    say "release signature verified"
     expected=$(awk -v f="$archive" '$2 == f || $2 == "*"f {print $1}' "$work/SHA256SUMS")
     [ -n "$expected" ] || { rm -rf "$work"; say "the release has nothing for $PLATFORM; building from source"; return 1; }
     fetch "$base/$archive" "$work/$archive" "$expected"
