@@ -5,14 +5,16 @@
 #   curl -fsSL https://raw.githubusercontent.com/wckdboy/invincible/main/install.sh | sh
 #
 # What it does, all in your home directory (no root needed):
-#   1. builds `invincible` and `autobot` from source (signed release binaries come later), with
-#      Rust from rustup if you have none, and puts them in ~/.local/bin;
+#   1. puts `invincible` and `autobot` in ~/.local/bin: the latest release's binaries, checked
+#      against its SHA256SUMS (and its Sigstore build attestation if `gh` is installed), or, when
+#      there is no release, built from source with Rust from rustup if you have none;
 #   2. installs llama.cpp's server if it is missing: Homebrew on macOS, else a pinned upstream
 #      build checked against its SHA-256 (CUDA when an NVIDIA GPU is present);
 #   3. runs `autobot setup`: network, model, approvals, Telegram, background services.
 #
 # Options (environment): INVINCIBLE_YES=1 answers yes to every question; INVINCIBLE_NO_SETUP=1
-# skips step 3; INVINCIBLE_REF=<branch|tag> builds that ref; INVINCIBLE_BIN=<dir> installs there.
+# skips step 3; INVINCIBLE_FROM_SOURCE=1 builds even when there is a release; INVINCIBLE_REF=
+# <branch|tag> builds that ref; INVINCIBLE_BIN=<dir> installs there.
 set -eu
 
 REPO="https://github.com/wckdboy/invincible"
@@ -46,9 +48,13 @@ sha256() {
     if have sha256sum; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
+# HTTPS only; a test release on loopback (INVINCIBLE_RELEASE_URL=http://127.0.0.1:…) may be HTTP.
+PROTO='=https'
+case "${INVINCIBLE_RELEASE_URL:-}" in http://127.0.0.1:*|http://localhost:*) PROTO='=http,https' ;; esac
+
 fetch() { # fetch url file sha256
     say "downloading $(basename "$1")"
-    curl -fL --proto '=https' --tlsv1.2 --retry 3 -o "$2" "$1" || die "download failed: $1"
+    curl -fL --proto "$PROTO" --tlsv1.2 --retry 3 -o "$2" "$1" || die "download failed: $1"
     got=$(sha256 "$2")
     [ "$got" = "$3" ] || die "$(basename "$1"): SHA-256 $got, expected $3; not installing it"
 }
@@ -66,48 +72,82 @@ have git || die "git is needed (macOS: xcode-select --install; Debian/Ubuntu: su
 
 # --- 1. invincible and autobot -------------------------------------------------------------------
 
-if ! have cc; then
-    if [ "$OS" = Linux ] && have apt-get && ask "A C compiler is needed to build. Install build-essential with sudo?" y; then
-        sudo apt-get update -qq && sudo apt-get install -y -qq build-essential pkg-config
-    else
-        die "a C compiler is needed (macOS: xcode-select --install; Linux: your distribution's build-essential)"
+# A release archive for this platform, checked against the release's SHA256SUMS, and against its
+# Sigstore build attestation when the GitHub CLI is here to check it. Returns 1 when there is no
+# release to use (then we build from source).
+install_release() {
+    [ "${INVINCIBLE_FROM_SOURCE:-}" = 1 ] && return 1
+    base="${INVINCIBLE_RELEASE_URL:-$REPO/releases/latest/download}"
+    work=$(mktemp -d)
+    archive="invincible-$PLATFORM.tar.gz"
+    say "looking for a release for $PLATFORM"
+    if ! curl -fsL --proto "$PROTO" --tlsv1.2 --retry 2 -o "$work/SHA256SUMS" "$base/SHA256SUMS" 2>/dev/null; then
+        rm -rf "$work"
+        say "no release yet; building from source instead"
+        return 1
     fi
-fi
-
-if [ -x "$HOME/.cargo/bin/cargo" ]; then PATH="$HOME/.cargo/bin:$PATH"; fi
-if ! have cargo; then
-    ask "Rust is needed to build. Install it with rustup (into ~/.cargo, no root)?" y \
-        || die "install Rust from https://rustup.rs, then run this again"
-    curl -fsSL --proto '=https' --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path >&2
-    PATH="$HOME/.cargo/bin:$PATH"
-fi
-
-if [ -d "$SRC/.git" ]; then
-    say "updating the source in $SRC"
-    git -C "$SRC" fetch --quiet origin "$REF"
-    git -C "$SRC" checkout --quiet FETCH_HEAD
-else
-    say "getting the source into $SRC"
-    mkdir -p "$INV_HOME"
-    git clone --quiet "$REPO" "$SRC"
-    git -C "$SRC" checkout --quiet "$REF"
-fi
-say "building (a few minutes the first time)"
-# The workspace needs Rust 1.91 or newer.
-minor=$(rustc --version | sed -n 's/^rustc 1\.\([0-9][0-9]*\).*/\1/p')
-if [ "${minor:-0}" -lt 91 ]; then
-    if have rustup; then
-        say "updating Rust (1.91 or newer is needed)"
-        rustup update stable >&2 && rustup default stable >&2
-    else
-        die "Rust 1.91 or newer is needed; you have $(rustc --version)"
+    expected=$(awk -v f="$archive" '$2 == f || $2 == "*"f {print $1}' "$work/SHA256SUMS")
+    [ -n "$expected" ] || { rm -rf "$work"; say "the release has nothing for $PLATFORM; building from source"; return 1; }
+    fetch "$base/$archive" "$work/$archive" "$expected"
+    if have gh && gh auth status >/dev/null 2>&1; then
+        gh attestation verify "$work/$archive" --repo wckdboy/invincible >/dev/null \
+            || die "$archive: its build attestation does not verify; not installing it"
+        say "build attestation verified (built by wckdboy/invincible's release workflow)"
     fi
-fi
-(cd "$SRC" && cargo build --release --locked -p invincible -p autobot) >&2
-mkdir -p "$BIN"
-for program in invincible autobot; do
-    install -m 0755 "$SRC/target/release/$program" "$BIN/$program"
-done
+    tar -xzf "$work/$archive" -C "$work"
+    mkdir -p "$BIN"
+    for program in invincible autobot; do
+        install -m 0755 "$work/invincible-$PLATFORM/$program" "$BIN/$program"
+    done
+    rm -rf "$work"
+}
+
+build_from_source() {
+    if ! have cc; then
+        if [ "$OS" = Linux ] && have apt-get && ask "A C compiler is needed to build. Install build-essential with sudo?" y; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq build-essential pkg-config
+        else
+            die "a C compiler is needed (macOS: xcode-select --install; Linux: your distribution's build-essential)"
+        fi
+    fi
+
+    if [ -x "$HOME/.cargo/bin/cargo" ]; then PATH="$HOME/.cargo/bin:$PATH"; fi
+    if ! have cargo; then
+        ask "Rust is needed to build. Install it with rustup (into ~/.cargo, no root)?" y \
+            || die "install Rust from https://rustup.rs, then run this again"
+        curl -fsSL --proto '=https' --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path >&2
+        PATH="$HOME/.cargo/bin:$PATH"
+    fi
+
+    if [ -d "$SRC/.git" ]; then
+        say "updating the source in $SRC"
+        git -C "$SRC" fetch --quiet origin "$REF"
+        git -C "$SRC" checkout --quiet FETCH_HEAD
+    else
+        say "getting the source into $SRC"
+        mkdir -p "$INV_HOME"
+        git clone --quiet "$REPO" "$SRC"
+        git -C "$SRC" checkout --quiet "$REF"
+    fi
+    say "building (a few minutes the first time)"
+    # The workspace needs Rust 1.91 or newer.
+    minor=$(rustc --version | sed -n 's/^rustc 1\.\([0-9][0-9]*\).*/\1/p')
+    if [ "${minor:-0}" -lt 91 ]; then
+        if have rustup; then
+            say "updating Rust (1.91 or newer is needed)"
+            rustup update stable >&2 && rustup default stable >&2
+        else
+            die "Rust 1.91 or newer is needed; you have $(rustc --version)"
+        fi
+    fi
+    (cd "$SRC" && cargo build --release --locked -p invincible -p autobot) >&2
+    mkdir -p "$BIN"
+    for program in invincible autobot; do
+        install -m 0755 "$SRC/target/release/$program" "$BIN/$program"
+    done
+}
+
+install_release || build_from_source
 say "installed invincible and autobot in $BIN"
 
 case ":$PATH:" in

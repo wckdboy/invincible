@@ -1,0 +1,86 @@
+# Release binaries for install.sh: `invincible` and `autobot` for macOS (Apple silicon) and Linux
+# (x86_64, arm64; static musl builds, so they run on any distribution).
+#
+# - A tag `v*` builds, checksums and publishes a GitHub release.
+# - Run by hand (workflow_dispatch), it builds the same files as workflow artifacts only, to
+#   check a release before tagging one.
+#
+# Every archive gets a build-provenance attestation (Sigstore, keyless: GitHub signs that this
+# workflow at this commit built these exact bytes), checkable with `gh attestation verify`.
+# SHA256SUMS lists every archive; install.sh checks against it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { platform: macos-arm64, os: macos-latest, target: aarch64-apple-darwin }
+          - { platform: linux-x64, os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { platform: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: build
+        run: |
+          # Paths of this machine stay out of the binaries.
+          export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$HOME=/home"
+          export SOURCE_DATE_EPOCH=0
+          cargo build --release --locked --target ${{ matrix.target }} -p invincible -p autobot
+      - name: package
+        run: |
+          dir="invincible-${{ matrix.platform }}"
+          mkdir -p "$dir"
+          cp target/${{ matrix.target }}/release/invincible target/${{ matrix.target }}/release/autobot README.md "$dir"/
+          # Fixed order, owner and times in the archive.
+          if tar --version | grep -q GNU; then opts="--sort=name --owner=0 --group=0 --numeric-owner --mtime=@0"; else opts="--uid 0 --gid 0"; fi
+          tar $opts -cf - "$dir" | gzip -n > "$dir.tar.gz"
+          "$dir/invincible" --version
+          "$dir/autobot" --version
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: invincible-${{ matrix.platform }}.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: invincible-${{ matrix.platform }}
+          path: invincible-${{ matrix.platform }}.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - run: sha256sum invincible-*.tar.gz | tee SHA256SUMS
+      - if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" --generate-notes \
+            invincible-*.tar.gz SHA256SUMS
+      - if: "!startsWith(github.ref, 'refs/tags/v')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: SHA256SUMS

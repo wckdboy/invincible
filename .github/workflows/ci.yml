@@ -52,6 +52,8 @@ jobs:
         env:
           INVINCIBLE_YES: "1"
           INVINCIBLE_NO_SETUP: "1"
+          # This commit, not the latest release.
+          INVINCIBLE_FROM_SOURCE: "1"
           INVINCIBLE_REF: ${{ github.sha }}
       - run: |
           export PATH="$HOME/.local/bin:$PATH"
