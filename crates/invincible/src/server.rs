@@ -105,6 +105,7 @@ fn api() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/messages", post(messages))
         .route("/v1/receipts/{id}", get(receipt))
         .route("/v1/node", get(node_info))
 }
@@ -220,7 +221,34 @@ fn data_policy_code(policy: DataPolicy) -> String {
     }
 }
 
-async fn chat_completions(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
+/// The two inference APIs the node speaks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Api {
+    /// OpenAI chat completions: node engines and cloud backends.
+    Chat,
+    /// Anthropic Messages: node engines only (llama.cpp speaks it natively), so it never leaves
+    /// the node until cloud backends can be reached in that format.
+    Messages,
+}
+
+impl Api {
+    fn path(self) -> &'static str {
+        match self {
+            Self::Chat => "/v1/chat/completions",
+            Self::Messages => "/v1/messages",
+        }
+    }
+}
+
+async fn chat_completions(state: State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
+    infer(state, headers, body, Api::Chat).await
+}
+
+async fn messages(state: State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
+    infer(state, headers, body, Api::Messages).await
+}
+
+async fn infer(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Bytes, api: Api) -> Response {
     let Ok(parsed) = serde_json::from_slice::<Value>(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is not JSON");
     };
@@ -234,14 +262,18 @@ async fn chat_completions(State(state): State<Arc<AppState>>, headers: HeaderMap
     let mut rounds = 0;
     let (decision, mut response) = loop {
         rounds += 1;
-        let input = RouteInput { request: request.clone(), node: state.node.clone(), models: state.route_models() };
+        let models = match api {
+            Api::Chat => state.route_models(),
+            Api::Messages => state.route_models().into_iter().filter(|m| m.tier == Tier::Node).collect(),
+        };
+        let input = RouteInput { request: request.clone(), node: state.node.clone(), models };
         let decision = decide(&input);
         let response = match (&decision.action, decision.tier) {
             (Action::Run, Some(Tier::Node)) => {
                 let engine =
                     state.engines.iter().find(|e| Some(&e.id) == decision.model.as_ref()).expect("decided model");
                 draft.data_policy = Some("owned".to_owned());
-                forward(&state.client, engine, body.clone()).await
+                forward(&state.client, engine, api.path(), body.clone()).await
             }
             (Action::Run, _) => {
                 let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
@@ -331,13 +363,21 @@ fn estimate_tokens(body: &Value) -> u64 {
             _ => 0,
         })
         .sum();
+    // Anthropic Messages puts the system prompt beside the messages (a string or text blocks).
+    let system: usize = match body.get("system") {
+        Some(Value::String(s)) => s.chars().count(),
+        Some(Value::Array(parts)) => {
+            parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).map(|t| t.chars().count()).sum()
+        }
+        _ => 0,
+    };
     let answer = ["max_completion_tokens", "max_tokens"].iter().find_map(|k| body.get(*k).and_then(Value::as_u64));
-    (chars as u64).div_ceil(4) + answer.unwrap_or(0)
+    ((chars + system) as u64).div_ceil(4) + answer.unwrap_or(0)
 }
 
 /// Sends the request to the engine unchanged and streams its answer back unchanged (SSE included).
-async fn forward(client: &reqwest::Client, engine: &Engine, body: Bytes) -> Response {
-    let url = format!("{}/v1/chat/completions", engine.base_url);
+async fn forward(client: &reqwest::Client, engine: &Engine, path: &str, body: Bytes) -> Response {
+    let url = format!("{}{path}", engine.base_url);
     let upstream = match client.post(&url).header(header::CONTENT_TYPE, "application/json").body(body).send().await {
         Ok(upstream) => upstream,
         Err(e) => {

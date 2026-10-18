@@ -222,10 +222,12 @@ impl Draft {
     }
 }
 
+// OpenAI's names, or Anthropic's (`input_tokens` in message_start, the final `output_tokens` in
+// message_delta when streaming).
 static PROMPT_TOKENS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#""prompt_tokens"\s*:\s*([0-9]+)"#).expect("regex"));
+    LazyLock::new(|| Regex::new(r#""(?:prompt_tokens|input_tokens)"\s*:\s*([0-9]+)"#).expect("regex"));
 static COMPLETION_TOKENS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#""completion_tokens"\s*:\s*([0-9]+)"#).expect("regex"));
+    LazyLock::new(|| Regex::new(r#""(?:completion_tokens|output_tokens)"\s*:\s*([0-9]+)"#).expect("regex"));
 
 /// The last token usage an OpenAI-style answer reported (the whole body, or the last SSE chunk).
 fn usage(tail: &[u8]) -> Option<(u64, u64)> {
@@ -309,5 +311,7 @@ mod tests {
         let sse = b"data: {\"usage\":null}\n\ndata: {\"usage\":{\"completion_tokens\":3,\"prompt_tokens\":4}}\n\ndata: [DONE]\n\n";
         assert_eq!(usage(sse), Some((4, 3)));
         assert_eq!(usage(b"no usage"), None);
+        // Anthropic Messages, whole and streamed.
+        assert_eq!(usage(br#"{"usage":{"input_tokens":14,"output_tokens":20}}"#), Some((14, 20)));
     }
 }

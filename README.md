@@ -200,6 +200,8 @@ cargo run --release -- token      # the API token (created on first run, mode 06
 Any OpenAI-compatible client on the same machine works against `http://127.0.0.1:7777/v1` with that
 token as the API key. `model: "auto"` (or no model) lets the router choose.
 
+- Anthropic Messages clients can use `POST /v1/messages` the same way. It is served by the node's
+  engines only (llama.cpp speaks it natively), so a Messages request never goes to the cloud.
 - Every response carries the routing decision in an `invincible-decision` header.
 - `invincible-private: 1` marks a request that must never leave hardware you own;
   `invincible-risk: health,personal` passes risk codes; `invincible-confirmed: 1` answers an `ask`.
