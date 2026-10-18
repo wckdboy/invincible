@@ -233,3 +233,24 @@ fn a_remote_gateway_must_use_https() {
     assert!(Gateway::new("http://192.168.1.2:7777/v1", "t", "auto", true).is_err());
     assert!(Gateway::new("https://gateway.example/v1", "t", "auto", true).is_ok());
 }
+
+#[tokio::test]
+async fn a_scheduled_run_follows_allowlist_rules_with_nobody_to_ask() {
+    let (url, _) = gateway(vec![
+        call("terminal", json!({"command": "rm -rf /tmp/never"})),
+        call("write_file", json!({"path": "report.md", "content": "ok"})),
+        say("Report written."),
+    ])
+    .await;
+    let dir = temp("cron");
+    // The owner's mode is "ask", but there is nobody to ask.
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let mut schedules = autobot::cron::Schedules::default();
+    schedules.add("@daily", "write the report", false).unwrap();
+    let run = autobot::cron::run(&agent, &dir, &schedules.schedules[0]).await;
+    assert!(run.ok, "{}", run.result);
+    assert_eq!(run.result, "Report written.");
+    assert_eq!(std::fs::read_to_string(dir.join("work/report.md")).unwrap(), "ok");
+    let session = Session::open(&dir.join("sessions"), "cron-t1").unwrap();
+    assert!(session.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.starts_with("refused"))));
+}

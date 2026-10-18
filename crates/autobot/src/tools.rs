@@ -12,6 +12,7 @@ use crate::approval::Action;
 /// Most text one result hands back to the model.
 pub const RESULT_LIMIT: usize = 16 * 1024;
 
+#[derive(Clone)]
 pub struct Tools {
     workdir: PathBuf,
     timeout: Duration,

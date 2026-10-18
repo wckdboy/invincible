@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+#[derive(Clone)]
 pub struct Gateway {
     client: reqwest::Client,
     url: String,

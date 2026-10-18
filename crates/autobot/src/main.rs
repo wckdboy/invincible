@@ -58,6 +58,30 @@ enum Command {
     },
     /// List the saved conversations.
     Sessions,
+    /// Scheduled tasks, run by `autobot serve` without anyone to ask: allowlisted commands and
+    /// writes in the working directory only.
+    Cron {
+        #[command(subcommand)]
+        action: CronAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum CronAction {
+    /// Add a task: WHEN is a cron expression ("0 8 * * 1-5", local time), @daily, or "every 30m".
+    Add {
+        when: String,
+        task: String,
+        /// Send each answer to Telegram.
+        #[arg(long)]
+        telegram: bool,
+    },
+    /// List the scheduled tasks, when they run next, and how their last run went.
+    List,
+    /// Remove a scheduled task.
+    Remove { id: String },
+    /// Run a scheduled task now, here, the way the scheduler would.
+    Run { id: String },
 }
 
 #[derive(Subcommand)]
@@ -174,6 +198,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Cron { action } => cron(action, &config, &home),
         Command::Sessions => {
             for (name, modified) in autobot::session::list(&home.join("sessions")) {
                 let ago = modified.elapsed().map(|d| d.as_secs()).unwrap_or(0);
@@ -182,6 +207,74 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(), String> {
+    use autobot::cron::{Schedules, State, When, local};
+    let mut schedules = Schedules::load(home)?;
+    match action {
+        CronAction::Add { when, task, telegram } => {
+            if telegram && !config.telegram.enabled {
+                return Err("Telegram is not set up (`autobot setup`)".to_owned());
+            }
+            let id = schedules.add(&when, &task, telegram)?;
+            schedules.save(home)?;
+            let schedule = schedules.schedules.iter().find(|s| s.id == id).expect("just added");
+            let next = When::parse(&schedule.when)?.next(None, local(schedule.created), chrono::Local::now());
+            println!(
+                "added {id}; next run {}",
+                next.map_or("never (within a year)".to_owned(), |t| t.format("%a %Y-%m-%d %H:%M").to_string())
+            );
+            println!("it runs in `autobot serve` (the background service), with allowlisted commands only");
+        }
+        CronAction::List => {
+            let state = State::load(home)?;
+            if schedules.schedules.is_empty() {
+                println!("no scheduled tasks (add one with `autobot cron add`)");
+            }
+            let now = chrono::Local::now();
+            for s in &schedules.schedules {
+                let last = state.runs.get(&s.id);
+                let next =
+                    When::parse(&s.when).ok().and_then(|w| w.next(last.map(|r| local(r.at)), local(s.created), now));
+                println!(
+                    "{}  [{}]  {}{}\n    next: {}",
+                    s.id,
+                    s.when,
+                    s.task,
+                    if s.telegram { "  → Telegram" } else { "" },
+                    next.map_or("-".to_owned(), |t| t.format("%a %Y-%m-%d %H:%M").to_string())
+                );
+                if let Some(run) = last {
+                    let line = run.result.lines().next().unwrap_or_default();
+                    println!(
+                        "    last: {} {} {}",
+                        local(run.at).format("%Y-%m-%d %H:%M"),
+                        if run.ok { "✓" } else { "✗" },
+                        line
+                    );
+                }
+            }
+        }
+        CronAction::Remove { id } => {
+            if !schedules.remove(&id) {
+                return Err(format!("no scheduled task {id}"));
+            }
+            schedules.save(home)?;
+            println!("removed {id}");
+        }
+        CronAction::Run { id } => {
+            let schedule =
+                schedules.schedules.iter().find(|s| s.id == id).ok_or(format!("no scheduled task {id}"))?.clone();
+            runtime()?.block_on(async {
+                let agent = autobot::agent(config, home)?;
+                let run = autobot::cron::run(&agent, home, &schedule).await;
+                println!("{}{}", if run.ok { "" } else { "✗ " }, run.result);
+                Ok::<_, String>(())
+            })?;
+        }
+    }
+    Ok(())
 }
 
 fn human(secs: u64) -> String {
@@ -311,37 +404,45 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         }
     };
 
-    let telegram = async {
-        if !config.telegram.enabled {
-            return std::future::pending::<()>().await;
-        }
-        let bot = async {
-            let network = autobot::network()?;
-            let client = invincible::egress::client(&network)
-                .map_err(|e| format!("Telegram needs the network: {e}; set [node] network in the gateway's config"))?;
-            let bot = telegram::Bot::new(client, &config.telegram.api(), &config.telegram.token(&home)?)?;
-            let me = bot.me().await?;
-            tracing::info!(
-                "Telegram bot @{} answering (network: {})",
-                me["username"].as_str().unwrap_or("?"),
-                invincible::egress::route(&network)
-            );
-            Ok::<_, String>(bot)
-        };
-        match bot.await {
-            Ok(bot) => telegram::serve(bot, agent.clone(), home.clone()).await,
+    let bot = if config.telegram.enabled {
+        match telegram_bot(config, &home).await {
+            Ok(bot) => Some(bot),
             Err(e) => {
-                // The agent API keeps running; Telegram waits for a fix and a restart.
+                // The agent API and schedules keep running; Telegram waits for a fix and a restart.
                 tracing::error!("Telegram is off: {e}");
-                std::future::pending::<()>().await
+                None
             }
         }
+    } else {
+        None
     };
+    let telegram = async {
+        match bot.clone() {
+            Some(bot) => telegram::serve(bot, agent.clone(), home.clone()).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    let schedules = autobot::cron::scheduler(agent.clone(), home.clone(), bot.clone());
     tokio::select! {
         () = api => Ok(()),
         () = telegram => Ok(()),
+        () = schedules => Ok(()),
         () = shutdown() => Ok(()),
     }
+}
+
+async fn telegram_bot(config: &Config, home: &std::path::Path) -> Result<telegram::Bot, String> {
+    let network = autobot::network()?;
+    let client = invincible::egress::client(&network)
+        .map_err(|e| format!("Telegram needs the network: {e}; set [node] network in the gateway's config"))?;
+    let bot = telegram::Bot::new(client, &config.telegram.api(), &config.telegram.token(home)?)?;
+    let me = bot.me().await?;
+    tracing::info!(
+        "Telegram bot @{} answering (network: {})",
+        me["username"].as_str().unwrap_or("?"),
+        invincible::egress::route(&network)
+    );
+    Ok(bot)
 }
 
 async fn shutdown() {

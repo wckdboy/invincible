@@ -5,6 +5,7 @@ pub mod agent;
 pub mod api;
 pub mod approval;
 pub mod config;
+pub mod cron;
 pub mod doctor;
 pub mod gateway;
 pub mod service;

@@ -32,6 +32,8 @@ toml_edit = "0.25"
 regex = "1"
 futures-util = { version = "0.3", default-features = false }
 ed25519-dalek = "3"
+# Local time for scheduled agent tasks.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

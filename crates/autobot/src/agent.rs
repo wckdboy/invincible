@@ -11,6 +11,7 @@ use crate::gateway::{Gateway, GatewayError};
 use crate::session::Session;
 use crate::tools::Tools;
 
+#[derive(Clone)]
 pub struct Agent {
     pub gateway: Gateway,
     pub tools: Tools,

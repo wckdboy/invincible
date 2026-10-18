@@ -149,8 +149,10 @@ one product, on macOS (Apple silicon) or Linux (x86_64, arm64), without root:
 curl -fsSL https://raw.githubusercontent.com/wckdboy/invincible/main/install.sh | sh
 ```
 
-It builds both commands from source (installing Rust with rustup if needed) into `~/.local/bin`,
-installs llama.cpp if it is missing (Homebrew on macOS; otherwise a pinned upstream build checked
+It puts both commands in `~/.local/bin`: the latest release's static binaries (macOS arm64, Linux
+x86_64 and arm64), checked against the release's `SHA256SUMS` and, when the GitHub CLI is signed
+in, against their Sigstore build attestation; without a release it builds them from source
+(installing Rust with rustup if needed). It installs llama.cpp if it is missing (Homebrew on macOS; otherwise a pinned upstream build checked
 against its SHA-256, the CUDA build when an NVIDIA GPU is present), then runs `autobot setup`:
 
 1. **Network** for the whole machine: `offline`, `direct`, or Tor / SOCKS5. The gateway's cloud
@@ -168,9 +170,12 @@ Then:
 autobot              # chat in the terminal
 autobot run "task"   # one task, no questions: anything not allowlisted is refused
 autobot doctor       # check the gateway, the model, the tools, Telegram and the services
+autobot cron add "@daily" "check disk space and warn me if a disk is over 90% full" --telegram
 ```
 
-Signed, reproducible release binaries are next (INV-18), so you will not need to build anything.
+Releases are built by [`release.yml`](.github/workflows/release.yml) on a `v*` tag; each archive
+carries a build-provenance attestation (`gh attestation verify <archive> --repo wckdboy/invincible`).
+Reproducible builds and a signature with a key you can pin are next (INV-18).
 
 ## The Autobot Agent
 
@@ -192,6 +197,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   models; tool results carry your files and command output. With `[gateway] private = false` the
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
 - **Sessions:** one JSONL file per conversation in `~/.autobot/sessions`.
+- **Scheduled tasks:** `autobot cron add "0 8 * * 1-5" "summarize the overnight logs" --telegram`
+  (cron in local time, `@daily`, or `every 30m`); `autobot cron list` shows the next and last
+  runs. They run inside `autobot serve` with nobody to ask, so they follow `allowlist` rules
+  (allowlisted commands and writes in the working directory, nothing else) unless the mode is
+  `trust`. Each schedule has its own conversation (`cron-<id>`), and `--telegram` sends every
+  answer to the bot's allowed users.
 - **Receipts:** each model call shows its model, tier and receipt id.
 - **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
   no public address. Strangers get a one-time code, and nobody gets in until you run
