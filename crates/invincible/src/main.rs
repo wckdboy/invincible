@@ -220,7 +220,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 tracing::info!("node \"{}\" reachable at http://{listen}", known.name);
                 tokio::select! {
                     () = remote::tunnel(listener, known.addrs, key, device) => {}
-                    _ = tokio::signal::ctrl_c() => {}
+                    () = shutdown_signal() => {}
                 }
                 Ok(())
             })
@@ -398,9 +398,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         tokio::net::TcpListener::bind(config.listen).await.map_err(|e| format!("listen on {}: {e}", config.listen))?;
     tracing::info!("serving on http://{}", config.listen);
     axum::serve(listener, server::app(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(|e| e.to_string())?;
     for supervisor in supervisors {
@@ -457,5 +455,28 @@ impl KnownNodes {
 
     fn save(&self, home: &std::path::Path) -> Result<(), String> {
         fsutil::replace_private(&home.join("nodes.json"), &serde_json::to_string_pretty(self).expect("nodes serialise"))
+    }
+}
+
+/// Ctrl-C, or SIGTERM: what launchd, systemd and `kill` send to stop a service. Both shut down
+/// cleanly, so the engines the node started are stopped with it.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(term) => term,
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+                return;
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
