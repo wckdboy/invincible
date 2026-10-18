@@ -5,11 +5,14 @@ yanked = "deny"
 
 [licenses]
 version = 2
-allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib"]
+allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+# Only the licenses dependencies actually use; widen deliberately when a new one appears.
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace crates depend on each other by path; they are not published.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
