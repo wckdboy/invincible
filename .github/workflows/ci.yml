@@ -46,7 +46,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck -s sh install.sh
+      - if: runner.os == 'Linux'
+        run: shellcheck -s sh install.sh
       - run: sh install.sh
         env:
           INVINCIBLE_YES: "1"
