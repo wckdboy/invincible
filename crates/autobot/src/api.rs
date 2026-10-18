@@ -29,6 +29,7 @@ const APPROVAL_WAIT: Duration = Duration::from_secs(10 * 60);
 pub struct ApiState {
     agent: Arc<Agent>,
     token: String,
+    home: PathBuf,
     sessions_dir: PathBuf,
     info: Value,
     open: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Open>>>>,
@@ -42,8 +43,10 @@ struct Open {
 }
 
 impl ApiState {
-    pub fn new(agent: Arc<Agent>, token: String, sessions_dir: PathBuf, info: Value) -> Self {
-        Self { agent, token, sessions_dir, info, open: Mutex::default(), waiting: Arc::default() }
+    /// [home]: `$AUTOBOT_HOME` (conversations in `sessions/`, schedules beside them).
+    pub fn new(agent: Arc<Agent>, token: String, home: PathBuf, info: Value) -> Self {
+        let sessions_dir = home.join("sessions");
+        Self { agent, token, home, sessions_dir, info, open: Mutex::default(), waiting: Arc::default() }
     }
 }
 
@@ -55,6 +58,8 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/sessions/{id}/turns", post(turn))
         .route("/v1/agent/sessions/{id}/reset", post(reset))
         .route("/v1/agent/approvals/{id}", post(approve))
+        .route("/v1/agent/schedules", get(schedules).post(add_schedule))
+        .route("/v1/agent/schedules/{id}", axum::routing::delete(remove_schedule))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token))
         .with_state(state)
 }
@@ -223,6 +228,53 @@ async fn approve(State(state): State<Arc<ApiState>>, Path(id): Path<String>, bod
             Json(json!({ "ok": true })).into_response()
         }
         None => error(StatusCode::NOT_FOUND, "not_found", "no such question is waiting (answered or expired)"),
+    }
+}
+
+async fn schedules(State(state): State<Arc<ApiState>>) -> Response {
+    match crate::cron::listing(&state.home) {
+        Ok(list) => Json(list).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ScheduleBody {
+    when: String,
+    task: String,
+    #[serde(default)]
+    telegram: bool,
+}
+
+async fn add_schedule(State(state): State<Arc<ApiState>>, body: Bytes) -> Response {
+    let Ok(ScheduleBody { when, task, telegram }) = serde_json::from_slice(&body) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "the body must be {\"when\", \"task\", \"telegram\"}",
+        );
+    };
+    let added = crate::cron::Schedules::load(&state.home).and_then(|mut schedules| {
+        let id = schedules.add(&when, &task, telegram)?;
+        schedules.save(&state.home)?;
+        Ok(id)
+    });
+    match added {
+        Ok(id) => Json(json!({ "id": id })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+async fn remove_schedule(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+    let removed = crate::cron::Schedules::load(&state.home).and_then(|mut schedules| {
+        let removed = schedules.remove(&id);
+        schedules.save(&state.home)?;
+        Ok(removed)
+    });
+    match removed {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "no such scheduled task"),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     }
 }
 

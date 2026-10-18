@@ -22,6 +22,9 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}` | An event stream (below) |
 | `POST /v1/agent/sessions/{id}/reset` | | `{"id"}`: the conversation starts over; the old one is kept on disk |
 | `POST /v1/agent/approvals/{approval}` | `{"answer": "once"\|"always"\|"deny"}` | `{"ok": true}`, or `404` when no such question is waiting |
+| `GET /v1/agent/schedules` | | `{"schedules": [{"id", "when", "task", "telegram", "next", "last"}]}`; `next` in Unix seconds or null, `last` null or `{"at", "ok", "result"}` |
+| `POST /v1/agent/schedules` | `{"when": "...", "task": "...", "telegram": bool}` | `{"id"}`, or `400` when `when` does not parse |
+| `DELETE /v1/agent/schedules/{id}` | | `{"ok": true}`, or `404` |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
 already running one answers `409` with type `session_busy`.
@@ -52,3 +55,13 @@ has a `type`:
 A question nobody answers within 10 minutes counts as `deny`. The turn goes on if the client
 disconnects. It is saved in the session, and its approvals can still be answered by id until they
 expire.
+
+## Scheduled tasks
+
+`when` is a cron expression in the machine's local time (five fields: minute, hour, day of month,
+month, day of week, where 0 and 7 are Sunday; `*`, lists, ranges and `/steps`), one of `@hourly`,
+`@daily`, `@weekly` and `@monthly`, or `every <n>m|h|d`. Nobody is there to approve a scheduled
+run, so it follows `allowlist` rules: allowlisted commands and writes in the working directory,
+nothing else, unless the agent's approval mode is `trust`. Each schedule has its own conversation,
+`cron-<id>`, readable with `GET /v1/agent/sessions/cron-<id>`. With `telegram`, every answer also goes
+to the Telegram users allowed to use the bot.

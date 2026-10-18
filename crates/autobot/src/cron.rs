@@ -293,6 +293,30 @@ pub fn due(schedules: &Schedules, state: &State, now: DateTime<Local>) -> Vec<Sc
         .collect()
 }
 
+/// The schedules as spec/agent.md shows them: with their next run and how the last one went.
+pub fn listing(home: &Path) -> Result<serde_json::Value, String> {
+    let schedules = Schedules::load(home)?;
+    let state = State::load(home)?;
+    let now = Local::now();
+    let list: Vec<serde_json::Value> = schedules
+        .schedules
+        .iter()
+        .map(|s| {
+            let last = state.runs.get(&s.id);
+            let next = When::parse(&s.when).ok().and_then(|w| w.next(last.map(|r| local(r.at)), local(s.created), now));
+            serde_json::json!({
+                "id": s.id,
+                "when": s.when,
+                "task": s.task,
+                "telegram": s.telegram,
+                "next": next.map(|t| t.timestamp()),
+                "last": last.map(|r| serde_json::json!({ "at": r.at, "ok": r.ok, "result": r.result })),
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "schedules": list }))
+}
+
 /// Runs [schedule] once, unattended, and records how it went.
 pub async fn run(agent: &crate::agent::Agent, home: &Path, schedule: &Schedule) -> Run {
     let mut unattended = agent.clone();

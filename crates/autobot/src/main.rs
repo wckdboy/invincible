@@ -394,8 +394,7 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         "approvals": format!("{:?}", config.approvals.mode).to_lowercase(),
         "private": config.gateway.private,
     });
-    let state =
-        Arc::new(autobot::api::ApiState::new(agent.clone(), config.gateway.token()?, home.join("sessions"), info));
+    let state = Arc::new(autobot::api::ApiState::new(agent.clone(), config.gateway.token()?, home.clone(), info));
     let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("listen on {listen}: {e}"))?;
     tracing::info!("agent API on http://{listen} (paired apps reach it through the gateway)");
     let api = async move {

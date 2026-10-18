@@ -62,7 +62,7 @@ async fn stack(name: &str, answers: Vec<Value>, delay: Duration) -> (String, Str
         max_steps: 5,
     });
     let info = json!({ "name": "Autobot", "approvals": "ask" });
-    let agent_url = listen(app(Arc::new(ApiState::new(agent, TOKEN.into(), dir.join("sessions"), info)))).await;
+    let agent_url = listen(app(Arc::new(ApiState::new(agent, TOKEN.into(), dir.clone(), info)))).await;
     let settings = NodeSettings { network: NetworkMode::Offline, egress: Egress::Never };
     let gateway =
         invincible::server::app(Arc::new(AppState::new(Vec::new(), settings, TOKEN.into()).with_agent(&agent_url)));
@@ -206,4 +206,31 @@ async fn a_stopped_agent_is_reported_and_devices_reach_the_agent_too() {
     // The device app (what a paired device reaches over Noise) has the route as well.
     let device = listen(invincible::server::device_app(state)).await;
     assert_eq!(reqwest::Client::new().get(format!("{device}/v1/agent")).send().await.unwrap().status(), 503);
+}
+
+#[tokio::test]
+async fn schedules_are_managed_through_the_gateway() {
+    let (gateway, _, dir) = stack("schedules", Vec::new(), Duration::ZERO).await;
+    let client = reqwest::Client::new();
+    let url = format!("{gateway}/v1/agent/schedules");
+    let bad = client.post(&url).bearer_auth(TOKEN).json(&json!({ "when": "0 99 * * *", "task": "x" })).send().await.unwrap();
+    assert_eq!(bad.status(), 400);
+    let added: Value = client
+        .post(&url)
+        .bearer_auth(TOKEN)
+        .json(&json!({ "when": "@daily", "task": "check the backups" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(added["id"], "t1");
+    let list: Value = client.get(&url).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap();
+    let schedule = &list["schedules"][0];
+    assert_eq!((schedule["when"].as_str(), schedule["task"].as_str()), (Some("@daily"), Some("check the backups")));
+    assert!(schedule["next"].as_i64().unwrap() > 0 && schedule["last"].is_null());
+    assert!(dir.join("schedules.json").exists());
+    assert_eq!(client.delete(format!("{url}/t1")).bearer_auth(TOKEN).send().await.unwrap().status(), 200);
+    assert_eq!(client.delete(format!("{url}/t1")).bearer_auth(TOKEN).send().await.unwrap().status(), 404);
 }

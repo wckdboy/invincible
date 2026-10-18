@@ -202,7 +202,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   runs. They run inside `autobot serve` with nobody to ask, so they follow `allowlist` rules
   (allowlisted commands and writes in the working directory, nothing else) unless the mode is
   `trust`. Each schedule has its own conversation (`cron-<id>`), and `--telegram` sends every
-  answer to the bot's allowed users.
+  answer to the bot's allowed users. They can also be managed from Telegram (`/cron`,
+  `/cron add 0 8 * * 1-5 | summarize the overnight logs`, `/cron rm t1`) and from the Autobot app,
+  through the agent API.
 - **Receipts:** each model call shows its model, tier and receipt id.
 - **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
   no public address. Strangers get a one-time code, and nobody gets in until you run

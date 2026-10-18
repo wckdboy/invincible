@@ -388,7 +388,7 @@ async fn handle(
         "/start" | "/help" => {
             bot.send(
                 chat_id,
-                "Autobot here, running on your own machine. Send a task. /new starts a new conversation.",
+                "Autobot here, running on your own machine. Send a task. /new starts a new conversation; /cron lists scheduled tasks (/cron add <when> | <task>, /cron rm <id>).",
             )
             .await?;
             return Ok(());
@@ -397,6 +397,10 @@ async fn handle(
             chat.session.reset()?;
             chat.grants.clear();
             bot.send(chat_id, "New conversation.").await?;
+            return Ok(());
+        }
+        "/cron" => {
+            bot.send(chat_id, &cron_command(home, text.trim_start_matches("/cron").trim())).await?;
             return Ok(());
         }
         _ => {}
@@ -455,9 +459,67 @@ async fn handle(
     Ok(())
 }
 
+/// `/cron`, `/cron add <when> | <task>`, `/cron rm <id>`. Tasks added here report back here.
+pub fn cron_command(home: &Path, args: &str) -> String {
+    let result = (|| -> Result<String, String> {
+        if let Some(rest) = args.strip_prefix("add") {
+            let (when, task) = rest.split_once('|').ok_or(
+                "/cron add <when> | <task>, for example: /cron add 0 8 * * 1-5 | summarize the overnight logs",
+            )?;
+            let mut schedules = crate::cron::Schedules::load(home)?;
+            let id = schedules.add(when, task, true)?;
+            schedules.save(home)?;
+            return Ok(format!("Added {id}. Answers come here. It runs with allowlisted commands only."));
+        }
+        if let Some(id) = args.strip_prefix("rm").map(str::trim) {
+            let mut schedules = crate::cron::Schedules::load(home)?;
+            if !schedules.remove(id) {
+                return Err(format!("No scheduled task {id:?}."));
+            }
+            schedules.save(home)?;
+            return Ok(format!("Removed {id}."));
+        }
+        let listing = crate::cron::listing(home)?;
+        let lines: Vec<String> = listing["schedules"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|s| {
+                let next = s["next"]
+                    .as_i64()
+                    .map(|t| crate::cron::local(t).format("%a %H:%M").to_string())
+                    .unwrap_or("-".into());
+                format!(
+                    "{} [{}] {} (next {next})",
+                    s["id"].as_str().unwrap_or("?"),
+                    s["when"].as_str().unwrap_or("?"),
+                    s["task"].as_str().unwrap_or("")
+                )
+            })
+            .collect();
+        Ok(if lines.is_empty() { "No scheduled tasks. /cron add <when> | <task>".to_owned() } else { lines.join("\n") })
+    })();
+    result.unwrap_or_else(|e| format!("✗ {e}"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MESSAGE_LIMIT, User, Users, new_code, split};
+    use super::{MESSAGE_LIMIT, User, Users, cron_command, new_code, split};
+
+    #[test]
+    fn cron_from_the_chat() {
+        let home = std::env::temp_dir().join(format!("autobot-tg-cron-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(cron_command(&home, "").starts_with("No scheduled tasks"));
+        assert!(cron_command(&home, "add every 2h").starts_with("✗ /cron add"));
+        assert!(cron_command(&home, "add 0 99 * * * | x").starts_with("✗"));
+        assert!(cron_command(&home, "add every 2h | check the backups").starts_with("Added t1"));
+        assert!(cron_command(&home, "").starts_with("t1 [every 2h] check the backups"));
+        assert!(crate::cron::Schedules::load(&home).unwrap().schedules[0].telegram);
+        assert_eq!(cron_command(&home, "rm t1"), "Removed t1.");
+        assert!(cron_command(&home, "rm t1").starts_with("✗"));
+        std::fs::remove_dir_all(home).unwrap();
+    }
 
     #[test]
     fn codes_pair_once() {
