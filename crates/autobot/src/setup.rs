@@ -128,6 +128,8 @@ pub fn run<R: BufRead>(prompt: &mut Prompt<R>, home: &Path) -> Result<(), String
         eprintln!("   one of offline, direct, tor, tor:<host>:<port>, socks5:<host>:<port>");
     };
     set(&gateway_path, "node", "network", toml_edit::value(&network))?;
+    // The agent reads the gateway's API token; make it now rather than on the gateway's first start.
+    invincible::token::load_or_create(&gateway_path.with_file_name("token"))?;
 
     eprintln!("\n2. Model");
     if gateway.models.is_empty() {
