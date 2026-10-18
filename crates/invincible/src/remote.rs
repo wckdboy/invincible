@@ -19,8 +19,8 @@ use crate::devices::{Devices, StaticKey};
 /// `psk1`, not `psk2`: the secret must be mixed in by the end of the *first* message, so the node
 /// can tell a device that knows the code from one that does not before pinning anything. With
 /// `psk2` the node would read the first message, and pin the key, without any proof.
-pub const PAIR_PATTERN: &str = "Noise_IKpsk1_25519_ChaChaPoly_BLAKE2s";
-pub const SESSION_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+pub const PAIR_PATTERN: &str = "Noise_IKpsk1_25519_ChaChaPoly_SHA256";
+pub const SESSION_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_SHA256";
 const PAIR_PROLOGUE: &[u8] = b"invincible/0 pair";
 const SESSION_PROLOGUE: &[u8] = b"invincible/0 session";
 /// The first byte on a connection, in the clear (and bound into the handshake by the prologue).

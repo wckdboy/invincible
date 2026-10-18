@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "device_static_public": "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
+        "messages": [
+          {
+            "ciphertext": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f1306ce228fe393a102d34d9fb9625e9c6f9570b162a995ec769957749592fa2f2c874407648dd0a2cd87f5f86925fb48d51c7e199da94204cc739ac96bc8f8edb6d8725038ccf079bc910f48a434c70b2a",
+            "from": "device",
+            "payload": "7b226e616d65223a2270686f6e65227d"
+          },
+          {
+            "ciphertext": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f204ca20e47549854f4d6fe2dfe6f1ac3a8fbd2269e8d8d68cd284dd8b284bd301cfc35fe2222e184363263eb30a626828a020584be1cc6a6e132538de04b4f1e194a6012",
+            "from": "node",
+            "payload": "7b22646576696365223a2270686f6e65222c226e6f6465223a2273747564696f222c227265636569707473223a226b6579227d"
+          },
+          {
+            "ciphertext": "f8e04108e8ad88ccac4b2e87416804315904364023f54304b55cde0087ad6f5dde663cac1754468bf85bc7288a7d563b9f38dcc989f6a4",
+            "from": "device",
+            "payload": "474554202f76312f6d6f64656c7320485454502f312e310d0a686f73743a206e6f64650d0a0d0a"
+          },
+          {
+            "ciphertext": "e89a1121b6cb2da7875bf6f34b38a3cf3eaf1fea346957b29ba916ee6fce81f3cf703891fe5d3b77e0791c589561e5acd0fe43dce12b9c41",
+            "from": "node",
+            "payload": "485454502f312e3120323030204f4b0d0a636f6e74656e742d6c656e6774683a20320d0a0d0a7b7d"
+          }
+        ]
+      },
+      "input": {
+        "device_ephemeral": "1111111111111111111111111111111111111111111111111111111111111111",
+        "device_static": "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+        "node_ephemeral": "2222222222222222222222222222222222222222222222222222222222222222",
+        "node_static": "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb",
+        "node_static_public": "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
+        "prologue": "696e76696e6369626c652f302070616972",
+        "protocol": "Noise_IKpsk1_25519_ChaChaPoly_SHA256",
+        "psk": "0909090909090909090909090909090909090909090909090909090909090909"
+      },
+      "name": "pairing: IKpsk1 with the code's secret"
+    },
+    {
+      "expect": {
+        "device_static_public": "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
+        "messages": [
+          {
+            "ciphertext": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f137369df24dfa3ec3020620f43063cadda6338d1dcfc3418622762047b59cba6f6fb103449417cf69fcfcaf1a13982e52cc786fa007882600a0dab11963121f246",
+            "from": "device",
+            "payload": ""
+          },
+          {
+            "ciphertext": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f205c35345f012005b48bceceb49bf04275",
+            "from": "node",
+            "payload": ""
+          },
+          {
+            "ciphertext": "0c461daad4b716851e30f12c3b24b48e31b970116b2c8ca2f041c5ec8086b50024959c22060e82e529d817edc5fa0831a6eb88012590af",
+            "from": "device",
+            "payload": "474554202f76312f6d6f64656c7320485454502f312e310d0a686f73743a206e6f64650d0a0d0a"
+          },
+          {
+            "ciphertext": "b9d6ef9f3806b4167970203a4a7d53ce8b69d795954821f2e57a73e029b9900e39051d0ad390aaf8e22a57a0a3b3f9ca1392540b012e99d0",
+            "from": "node",
+            "payload": "485454502f312e3120323030204f4b0d0a636f6e74656e742d6c656e6774683a20320d0a0d0a7b7d"
+          }
+        ]
+      },
+      "input": {
+        "device_ephemeral": "1111111111111111111111111111111111111111111111111111111111111111",
+        "device_static": "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+        "node_ephemeral": "2222222222222222222222222222222222222222222222222222222222222222",
+        "node_static": "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb",
+        "node_static_public": "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
+        "prologue": "696e76696e6369626c652f302073657373696f6e",
+        "protocol": "Noise_IK_25519_ChaChaPoly_SHA256",
+        "psk": null
+      },
+      "name": "a session: IK with pinned keys"
+    }
+  ],
+  "spec": "noise",
+  "version": 0
+}

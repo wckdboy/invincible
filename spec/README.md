@@ -6,7 +6,7 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 | Document | Status | What it defines |
 |---|---|---|
 | [routing.md](routing.md) | **v0, normative** | Where one request runs: node model, cloud model, ask first, or refuse |
-| [pairing.md](pairing.md) | **v0, implemented, unaudited** | How a device and a node pair and talk (Noise); pairing-code vectors |
+| [pairing.md](pairing.md) | **v0, implemented, unaudited** | How a device and a node pair and talk (Noise); pairing-code vectors, and full handshake transcripts from snow (`noise.json`) |
 | [redaction.md](redaction.md) | **v0, normative** | What is replaced before a request leaves for the cloud, and how it is restored |
 | [receipts.md](receipts.md) | **v0, normative** | The signed receipt for every request: where it ran, what left the node; vectors from an independent Ed25519 |
 

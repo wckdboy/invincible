@@ -41,10 +41,14 @@ session. Every message after that is a **frame**: a big-endian `u16` length, the
 
 | Mode | Noise protocol | Prologue |
 |---|---|---|
-| `0x01` pair | `Noise_IKpsk1_25519_ChaChaPoly_BLAKE2s`, PSK = the code's secret | `invincible/0 pair` |
-| `0x02` session | `Noise_IK_25519_ChaChaPoly_BLAKE2s` | `invincible/0 session` |
+| `0x01` pair | `Noise_IKpsk1_25519_ChaChaPoly_SHA256`, PSK = the code's secret | `invincible/0 pair` |
+| `0x02` session | `Noise_IK_25519_ChaChaPoly_SHA256` | `invincible/0 session` |
 
 The prologue binds the mode byte into the handshake, so changing it in transit breaks the handshake.
+
+**Why SHA-256, not BLAKE2s.** Devices implement Noise on their platform's own, well-reviewed crypto
+(Java's `javax.crypto` on Android, CryptoKit on iOS). Both have X25519, ChaCha20-Poly1305, SHA-256
+and HMAC-SHA256; neither has BLAKE2s.
 
 Both are IK: the device already knows the node's static key (from the code, or pinned at pairing)
 and sends its own static key encrypted in the first message. The handshake fails unless the node
@@ -82,6 +86,14 @@ plain **HTTP/1.1** to the node's API. A device reaches `/v1/models`, `/v1/chat/c
 `/v1/receipts/<id>` and `/v1/node`
 (the same endpoints, headers and behaviour as on loopback) with no token, because its key already
 authenticates it. A device cannot reach the admin endpoints.
+
+## Vectors
+
+- `vectors/pairing-code.json`: parsing pairing codes.
+- `vectors/noise.json`: full transcripts (both handshake messages, then one transport message each
+  way) for pairing and for a session, produced by snow with the RFC 7748 X25519 test keys and fixed
+  ephemeral keys. A device's Noise implementation, run with the same keys, must produce the same
+  bytes. Invincible's CI re-checks them against snow.
 
 ## Revocation
 
