@@ -44,15 +44,20 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
       - name: build
         run: |
-          # Paths of this machine stay out of the binaries.
-          export RUSTFLAGS="--remap-path-prefix=$PWD=/build --remap-path-prefix=$HOME=/home"
+          # Always from the same path (Cargo hashes it into symbol names), with the machine's paths
+          # kept out of the binaries: a rebuild anywhere gives the same bytes.
+          src=/tmp/invincible-src
+          rm -rf "$src" && cp -R "$GITHUB_WORKSPACE" "$src" && cd "$src"
+          export RUSTFLAGS="--remap-path-prefix=$src=/build --remap-path-prefix=$HOME=/home"
           export SOURCE_DATE_EPOCH=0
           cargo build --release --locked --target ${{ matrix.target }} -p invincible -p autobot
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp target/${{ matrix.target }}/release/invincible target/${{ matrix.target }}/release/autobot "$GITHUB_WORKSPACE/out/"
       - name: package
         run: |
           dir="invincible-${{ matrix.platform }}"
           mkdir -p "$dir"
-          cp target/${{ matrix.target }}/release/invincible target/${{ matrix.target }}/release/autobot README.md "$dir"/
+          cp out/invincible out/autobot README.md "$dir"/
           # Fixed order, owner and times in the archive.
           if tar --version | grep -q GNU; then opts="--sort=name --owner=0 --group=0 --numeric-owner --mtime=@0"; else opts="--uid 0 --gid 0"; fi
           tar $opts -cf - "$dir" | gzip -n > "$dir.tar.gz"
@@ -83,19 +88,31 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
       - working-directory: elsewhere/invincible
         run: |
-          export RUSTFLAGS="--remap-path-prefix=$PWD=/build --remap-path-prefix=$HOME=/home"
+          src=/tmp/invincible-src
+          rm -rf "$src" && cp -R "$PWD" "$src" && cd "$src"
+          export RUSTFLAGS="--remap-path-prefix=$src=/build --remap-path-prefix=$HOME=/home"
           export SOURCE_DATE_EPOCH=0
           cargo build --release --locked --target x86_64-unknown-linux-musl -p invincible -p autobot
           dir=invincible-linux-x64
           mkdir -p "$dir"
           cp target/x86_64-unknown-linux-musl/release/invincible target/x86_64-unknown-linux-musl/release/autobot README.md "$dir"/
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - "$dir" | gzip -n > "$GITHUB_WORKSPACE/rebuilt.tar.gz"
+          mkdir -p "$GITHUB_WORKSPACE/rebuilt" && cp "$dir"/invincible "$dir"/autobot "$GITHUB_WORKSPACE/rebuilt/"
       - uses: actions/download-artifact@v4
         with:
           name: invincible-linux-x64
       - run: |
           sha256sum invincible-linux-x64.tar.gz rebuilt.tar.gz
-          [ "$(sha256sum < invincible-linux-x64.tar.gz)" = "$(sha256sum < rebuilt.tar.gz)" ] || { echo "not reproducible"; exit 1; }
+          if [ "$(sha256sum < invincible-linux-x64.tar.gz)" != "$(sha256sum < rebuilt.tar.gz)" ]; then
+            echo "not reproducible:"
+            tar xzf invincible-linux-x64.tar.gz
+            for f in invincible autobot; do
+              sha256sum "invincible-linux-x64/$f" "rebuilt/$f"
+              cmp -l "invincible-linux-x64/$f" "rebuilt/$f" | wc -l
+              diff <(strings -n 12 "invincible-linux-x64/$f") <(strings -n 12 "rebuilt/$f") | head -20 || true
+            done
+            exit 1
+          fi
 
   publish:
     needs: [build, reproduce]
