@@ -9,17 +9,18 @@ models itself, reaches frontier models when you allow it, and keeps working when
 Frontier models are welcome here. Being dependent on them is not. Everything works without them;
 they make it faster when you choose to use them.
 
-> Status: **early build.** A node serves open models through llama.cpp behind an OpenAI-compatible
-> API, every request goes through the routing rules ([spec/routing.md](spec/routing.md), pinned by 51
-> conformance vectors), and devices pair with it over Noise ([spec/pairing.md](spec/pairing.md),
-> implemented but not yet independently reviewed). Cloud backends are used only as the rules allow,
-> with personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)). Not
-> every request gets a signed receipt saying where it ran and what left the node
-> ([spec/receipts.md](spec/receipts.md)). Autobot's protocol layer (Noise pairing, sessions, receipt
-> checks) matches the node byte for byte and pairs with a live node
-> ([autobot#2](https://github.com/wckdboy/autobot/pull/2)); its "My node" screens are next. Not yet:
-> agents, evals, the installer. Work is tracked in Plane (project **INV** in the
-> WCKD workspace).
+> Status: **early build.** Invincible Gateway (the node) serves open models through llama.cpp
+> behind OpenAI- and Anthropic-compatible APIs, every request goes through the routing rules
+> ([spec/routing.md](spec/routing.md), pinned by 51 conformance vectors), and devices pair with it
+> over Noise ([spec/pairing.md](spec/pairing.md), implemented but not yet independently reviewed).
+> Cloud backends are used only as the rules allow, with personal data redacted before anything
+> leaves ([spec/redaction.md](spec/redaction.md)), and every request gets a signed receipt saying
+> where it ran and what left the node ([spec/receipts.md](spec/receipts.md)). The **Autobot Agent**
+> runs on the gateway on a VPS or desktop, with tools, approvals, a terminal chat and a Telegram
+> bot, and one script installs both. Autobot's protocol layer matches the node byte for byte and
+> pairs with a live node ([autobot#2](https://github.com/wckdboy/autobot/pull/2)). Not yet: the
+> Autobot app driving the agent, evals, signed release binaries. Work is tracked in Plane (project
+> **INV** in the WCKD workspace).
 
 ## Why
 
@@ -84,7 +85,7 @@ Invincible is built for Autobot first, and shares its rules instead of re-implem
 | Receipts per answer | The node signs a receipt per request (tier, model, engine, tokens, whether anything left the node); Autobot merges it into its own receipt |
 | Recipes: on-device only, 8-minute limit | Recipes can be **handed to the node**: always on, no time limit, results delivered to the phone |
 | Private vault (on-device RAG) | The vault can sync end-to-end encrypted to the node for larger indexes and faster embedding; the index still never leaves hardware you own |
-| `:agent:core` (Kotlin Multiplatform, JVM + iOS) | The node runs a Rust agent host with the same semantics (session log, ReAct loop, permission presets, fail-closed approvals), so a session can move between phone and node |
+| `:agent:core` (Kotlin Multiplatform, JVM + iOS) | The **Autobot Agent** (`autobot`, Rust) runs next to the gateway with the same semantics (session log, tool loop, fail-closed approvals); next, the app drives it through the paired gateway |
 
 ### One set of rules, two languages
 
@@ -115,11 +116,12 @@ There are no accounts, no passwords and no third-party relay.
 ## Architecture (proposed)
 
 ```
- Autobot (Android / iOS)          other tools (any OpenAI / Anthropic client)
-        │ Noise channel                     │ HTTPS + local token
-        └──────────────┬────────────────────┘
-               invincible node (control plane)
-   pairing · policy router · agent host · receipts · audit log · evals          (Rust)
+ Autobot (Android / iOS)     Autobot Agent (autobot)        other tools (any OpenAI / Anthropic client)
+        │ Noise channel        │ terminal · Telegram            │ HTTPS + local token
+        │                      │ tools, approvals, sessions     │
+        └───────────────┬──────┴────────────────────────────────┘
+               Invincible Gateway (invincible, the node)
+   pairing · policy router · receipts · audit log · evals                       (Rust)
         │                    │                         │
   engines (child processes)  frontier providers         other nodes (later: region tier)
   llama.cpp · MLX · vLLM     through redaction + route
@@ -136,18 +138,65 @@ There are no accounts, no passwords and no third-party relay.
 - **Network:** listens on loopback and paired interfaces only; nothing is exposed to the open
   internet by default; optional Tor onion service for reaching home from anywhere.
 
-## Install (target)
+## Install (VPS or desktop)
+
+One script installs **Invincible Gateway** (`invincible`) and the **Autobot Agent** (`autobot`) as
+one product, on macOS (Apple silicon) or Linux (x86_64, arm64), without root:
 
 ```sh
-curl -fsSL https://invincible.sh | sh     # or: download, verify signature, run
-invincible model add <open-model>         # pull, verify, serve
-invincible provider add anthropic         # optional frontier backend
-invincible route add private → local
-invincible pair                           # show the QR code for Autobot
+curl -fsSL https://raw.githubusercontent.com/wckdboy/invincible/main/install.sh | sh
 ```
 
-The installer and every release are signed, and builds are reproducible, so you can check what you
-run without trusting us.
+It builds both commands from source (installing Rust with rustup if needed) into `~/.local/bin`,
+installs llama.cpp if it is missing (Homebrew on macOS; otherwise a pinned upstream build checked
+against its SHA-256, the CUDA build when an NVIDIA GPU is present), then runs `autobot setup`:
+
+1. **Network** for the whole machine: `offline`, `direct`, or Tor / SOCKS5. The gateway's cloud
+   backends and the agent's Telegram bot both follow it.
+2. **Model**: a Qwen open-weights model sized to the machine's memory (Qwen3.5 4B, Qwen3.5 9B,
+   Qwen3.8 27B), downloaded and checked, or any `hf:` GGUF.
+3. **Agent**: its working directory, and whether its turns stay on local models (the default).
+4. **Telegram** (optional): a bot token from @BotFather.
+5. **Background**: launchd agents on macOS, systemd user units on Linux (with linger, so they run
+   after you log out of a VPS).
+
+Then:
+
+```sh
+autobot              # chat in the terminal
+autobot run "task"   # one task, no questions: anything not allowlisted is refused
+autobot doctor       # check the gateway, the model, the tools, Telegram and the services
+```
+
+Signed, reproducible release binaries are next (INV-18), so you will not need to build anything.
+
+## The Autobot Agent
+
+The same agent as on the phone, for a machine that is always on. It is written in Rust
+([`crates/autobot`](crates/autobot)) and uses the gateway on the same machine as its only model
+provider, so the gateway's rules hold for every agent turn: routing, redaction, receipts.
+
+- **Tools:** `terminal` (a shell command in the working directory, with a timeout), `read_file`,
+  `write_file`, `list_dir`. Results are cut to a size small local models can take.
+- **Approvals** (`[approvals]` in `~/.autobot/config.toml`):
+  - `ask` (default): commands, file writes and reads outside the working directory ask first:
+    yes, always for this session, or no.
+  - `allowlist`: for unattended use. Allowlisted commands and writes in the working directory run;
+    everything else is refused without asking. An allowlist entry matches the whole command or the
+    command plus arguments, never a chained one (`git status; rm -rf ~` does not match
+    `git status`).
+  - `trust`: everything runs. Only for a machine you can throw away.
+- **Private by default:** agent turns carry `invincible-private`, so the router keeps them on local
+  models; tool results carry your files and command output. With `[gateway] private = false` the
+  router may use cloud models, and when its rules want a confirmation, the agent asks you.
+- **Sessions:** one JSONL file per conversation in `~/.autobot/sessions`.
+- **Receipts:** each model call shows its model, tier and receipt id.
+- **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
+  no public address. Strangers get a one-time code, and nobody gets in until you run
+  `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
+  that was asked can answer. Telegram's servers see bot chats, which are not end-to-end
+  encrypted. The private channel is the Autobot app, paired with the gateway over Noise; using it
+  to drive the agent is next (INV-24).
 
 ## v0 milestone
 
@@ -284,13 +333,16 @@ independently reviewed yet**.
 |---|---|
 | [`spec/`](spec/) | The rules Invincible and Autobot share, with conformance vectors |
 | `crates/invincible-policy` | The routing rules as a pure Rust library, tested against `spec/vectors/` |
-| `crates/invincible` | The node: config, engine supervisor, local API, pairing and remote access, and the `invincible` command |
+| `crates/invincible` | Invincible Gateway (the node): config, engine supervisor, local API, pairing and remote access, and the `invincible` command |
+| `crates/autobot` | The Autobot Agent: agent loop, tools, approvals, sessions, Telegram, setup, doctor, services, and the `autobot` command |
+| [`install.sh`](install.sh) | The installer for both |
 
 ```sh
 cargo test --workspace                                  # includes every conformance vector
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run -- route input.json                           # where would this request run?
-cargo run -- serve --config path/to/config.toml         # run a node
+cargo run -p invincible -- route input.json             # where would this request run?
+cargo run -p invincible -- serve --config path/to/config.toml   # run a node
+cargo run -p autobot -- doctor                          # check an agent install
 ```
 
 ## Principles

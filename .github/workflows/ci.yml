@@ -36,3 +36,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # The one-line installer, as a fresh VPS or desktop runs it: builds this commit, installs
+  # llama.cpp (the pinned upstream build on Linux, Homebrew on macOS), then checks the commands.
+  install:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -s sh install.sh
+      - run: sh install.sh
+        env:
+          INVINCIBLE_YES: "1"
+          INVINCIBLE_NO_SETUP: "1"
+          INVINCIBLE_REF: ${{ github.sha }}
+      - run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          invincible --version
+          autobot --version
+          autobot doctor || true
+          test -x "$HOME/.invincible/llama.cpp/llama-server" || command -v llama-server
