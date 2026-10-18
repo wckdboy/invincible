@@ -9,7 +9,8 @@ models itself, reaches frontier models when you allow it, and keeps working when
 Frontier models are welcome here. Being dependent on them is not. Everything works without them;
 they make it faster when you choose to use them.
 
-> Status: **design.** Nothing is built yet. This document is the plan.
+> Status: **design.** Nothing is built yet. This document is the plan; work is tracked in Plane
+> (project **INV** in the WCKD workspace).
 
 ## Why
 
@@ -74,12 +75,24 @@ Invincible is built for Autobot first, and shares its rules instead of re-implem
 | Receipts per answer | The node signs a receipt per request (tier, model, engine, tokens, whether anything left the node); Autobot merges it into its own receipt |
 | Recipes: on-device only, 8-minute limit | Recipes can be **handed to the node**: always on, no time limit, results delivered to the phone |
 | Private vault (on-device RAG) | The vault can sync end-to-end encrypted to the node for larger indexes and faster embedding; the index still never leaves hardware you own |
-| `:agent:core` (Kotlin Multiplatform, JVM + iOS) | The same agent runtime runs **on the node** on the JVM: one agent loop, three hosts (Android, iOS, node) |
+| `:agent:core` (Kotlin Multiplatform, JVM + iOS) | The node runs a Rust agent host with the same semantics (session log, ReAct loop, permission presets, fail-closed approvals), so a session can move between phone and node |
 
-The last row is the key decision. Autobot's policy layer is already shared Kotlin Multiplatform
-code: wire formats, network policy, redaction, data policies, receipts, the agent loop. If the node's
-control plane is Kotlin/JVM and depends on that shared code, a privacy fix lands on the phone and the
-node at once, and the two can never disagree about a rule.
+### One set of rules, two languages
+
+The node is written in **Rust**: one static binary, no runtime to install, a small attack surface
+for the process that holds your keys and faces the network. Autobot stays Kotlin Multiplatform.
+
+Because the two cannot share code, they share a **spec** instead. `spec/` in this repo is the source of
+truth for everything both sides must agree on:
+
+- **Node protocol:** pairing handshake, the native API Autobot speaks, receipt format.
+- **Policy semantics:** routing and cascade decisions, data-policy labels, redaction rules, kill-switch
+  behaviour.
+- **Conformance vectors:** input → expected output cases in plain JSON. Invincible's Rust tests and
+  Autobot's Kotlin tests both run them, so a rule change that only lands on one side fails CI on the
+  other.
+
+A privacy fix starts as a spec change with a new vector, and neither side is done until both pass it.
 
 ### Pairing, in short
 
@@ -97,13 +110,14 @@ There are no accounts, no passwords and no third-party relay.
         │ Noise channel                     │ HTTPS + local token
         └──────────────┬────────────────────┘
                invincible node (control plane)
-   pairing · policy router · agent host (:agent:core on JVM) · receipts · audit log · evals
+   pairing · policy router · agent host · receipts · audit log · evals          (Rust)
         │                    │                         │
   engines (child processes)  frontier providers         other nodes (later: region tier)
   llama.cpp · MLX · vLLM     through redaction + route
 ```
 
-- **Control plane:** Kotlin/JVM, depending on Autobot's `:shared` and `:agent:core`.
+- **Control plane:** Rust, a single static binary (`invincible`). It follows `spec/` and is checked
+  against the same conformance vectors as Autobot.
 - **Engines:** separate processes that the control plane supervises, never linked in. A crashing
   engine cannot take the node down, and engines can be swapped freely.
 - **Storage:** encrypted at rest; keys in the OS keychain or a TPM / Secure Enclave where present.
@@ -145,5 +159,5 @@ Done when, with the internet unplugged:
 
 - Hardware targets for v0: Apple silicon (MLX), NVIDIA (vLLM), or both?
 - Region tier: trusted operators only, or a design that is safe with strangers' compute?
-- Whether Autobot's `:shared` is consumed as a Maven artifact or a git submodule.
+- How Autobot consumes `spec/`: a git submodule, or vectors vendored by a sync script.
 - License: Autobot ships under Apache-2.0; Invincible likely the same.
