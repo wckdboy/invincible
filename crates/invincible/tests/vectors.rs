@@ -46,7 +46,6 @@ fn redaction() {
         .filter_map(|case| {
             let input = case["input"].as_str().unwrap();
             let mut vault = Vault::default();
-            vault.reserve(input);
             let text = vault.redact(input);
             let got = json!({ "text": text, "found": vault.found() });
             (got != case["expect"])

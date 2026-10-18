@@ -225,10 +225,11 @@ data_policy = "retention:30"        # what the provider does with prompts
 - The cloud is used only as [spec/routing.md](spec/routing.md) allows: never for
   `invincible-private` requests, never while offline or under `egress = "never"`; `ask` (and models
   that train on prompts) answer 409 until the request is sent again with `invincible-confirmed: 1`.
-- Before a request leaves, emails, IBANs, card numbers and phone numbers become placeholders
-  (`[EMAIL_1]`); the answer gets the real values back, streams included. The
-  `invincible-redacted` header counts what was hidden. Names and addresses are not detected on the
-  node yet (Autobot does detect them on the phone).
+- Before a request leaves, names, emails, phone numbers, street addresses, card numbers, IBANs and
+  account numbers become placeholders (`[PERSON_1]`, `[EMAIL_1]`), with the same rules as Autobot
+  ([spec/redaction.md](spec/redaction.md)); later mentions of a known value are hidden too. The
+  answer gets the real values back, streams included, and the `invincible-redacted` header counts
+  what was hidden.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
 

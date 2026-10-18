@@ -1,6 +1,6 @@
 {
   "spec": "redaction",
-  "version": 0,
+  "version": 1,
   "cases": [
     {
       "name": "an email",
@@ -293,6 +293,254 @@
       "expect": {
         "text": "What is the capital of France?",
         "found": {}
+      }
+    },
+    {
+      "name": "a name after a relation",
+      "input": "My sister Hannah called",
+      "expect": {
+        "text": "My sister [PERSON_1] called",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a German relation",
+      "input": "Meine Schwester Lena kommt",
+      "expect": {
+        "text": "Meine Schwester [PERSON_1] kommt",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a name after an honorific",
+      "input": "Dr. Weber will see you",
+      "expect": {
+        "text": "Dr. [PERSON_1] will see you",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a name in a greeting",
+      "input": "Hi Lea Wolf,\nthanks",
+      "expect": {
+        "text": "Hi [PERSON_1],\nthanks",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a name in a sign-off",
+      "input": "See you soon.\nBest regards,\nXaver Huber",
+      "expect": {
+        "text": "See you soon.\nBest regards,\n[PERSON_1]",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a name after named",
+      "input": "a guy named Zork",
+      "expect": {
+        "text": "a guy named [PERSON_1]",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a name after I'm",
+      "input": "I'm Zork Blax, nice to meet you",
+      "expect": {
+        "text": "I'm [PERSON_1], nice to meet you",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "I'm Sorry is not a name",
+      "input": "I'm Sorry",
+      "expect": {
+        "text": "I'm Sorry",
+        "found": {}
+      }
+    },
+    {
+      "name": "a listed first name with its surname",
+      "input": "Mark Twain wrote it",
+      "expect": {
+        "text": "[PERSON_1] wrote it",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a surname with particles",
+      "input": "Meet Jan van der Berg tomorrow",
+      "expect": {
+        "text": "Meet [PERSON_1] tomorrow",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "a possessive stays outside the name",
+      "input": "Hannah's bike",
+      "expect": {
+        "text": "[PERSON_1]'s bike",
+        "found": {
+          "PERSON": 1
+        }
+      }
+    },
+    {
+      "name": "an ambiguous first name alone is not a name",
+      "input": "Will you join?",
+      "expect": {
+        "text": "Will you join?",
+        "found": {}
+      }
+    },
+    {
+      "name": "a first name before a blocked word is not a name",
+      "input": "Max tokens is 512",
+      "expect": {
+        "text": "Max tokens is 512",
+        "found": {}
+      }
+    },
+    {
+      "name": "Grace Period is not a name",
+      "input": "Grace Period applies",
+      "expect": {
+        "text": "Grace Period applies",
+        "found": {}
+      }
+    },
+    {
+      "name": "a surname alone later is the same person's part",
+      "input": "I talked to Hannah Weber. Later Weber called back.",
+      "expect": {
+        "text": "I talked to [PERSON_1]. Later [PERSON_2] called back.",
+        "found": {
+          "PERSON": 2
+        }
+      }
+    },
+    {
+      "name": "a name in inline code is kept",
+      "input": "run `Hannah` now",
+      "expect": {
+        "text": "run `Hannah` now",
+        "found": {}
+      }
+    },
+    {
+      "name": "an English street address",
+      "input": "Ship it to 221B Baker Street, London please",
+      "expect": {
+        "text": "Ship it to [ADDRESS_1] please",
+        "found": {
+          "ADDRESS": 1
+        }
+      }
+    },
+    {
+      "name": "a German street address",
+      "input": "Ich wohne in der Hauptstraße 12a, 10115 Berlin.",
+      "expect": {
+        "text": "Ich wohne in der [ADDRESS_1].",
+        "found": {
+          "ADDRESS": 1
+        }
+      }
+    },
+    {
+      "name": "a French street address",
+      "input": "12 rue de la Paix, 75002 Paris",
+      "expect": {
+        "text": "[ADDRESS_1]",
+        "found": {
+          "ADDRESS": 1
+        }
+      }
+    },
+    {
+      "name": "an Italian street address",
+      "input": "Via Roma 10",
+      "expect": {
+        "text": "[ADDRESS_1]",
+        "found": {
+          "ADDRESS": 1
+        }
+      }
+    },
+    {
+      "name": "a cued customer number",
+      "input": "My customer number is 4711-0815-22",
+      "expect": {
+        "text": "My customer number is [ACCOUNT_1]",
+        "found": {
+          "ACCOUNT": 1
+        }
+      }
+    },
+    {
+      "name": "a cued social security number",
+      "input": "SSN 123-45-6789",
+      "expect": {
+        "text": "SSN [ACCOUNT_1]",
+        "found": {
+          "ACCOUNT": 1
+        }
+      }
+    },
+    {
+      "name": "a social security number without a cue",
+      "input": "it is 123-45-6789.",
+      "expect": {
+        "text": "it is [ACCOUNT_1].",
+        "found": {
+          "ACCOUNT": 1
+        }
+      }
+    },
+    {
+      "name": "a year after a cue is not an account",
+      "input": "policy since 2019",
+      "expect": {
+        "text": "policy since 2019",
+        "found": {}
+      }
+    },
+    {
+      "name": "a cued phone number",
+      "input": "phone: 555 0199 22",
+      "expect": {
+        "text": "phone: [PHONE_1]",
+        "found": {
+          "PHONE": 1
+        }
+      }
+    },
+    {
+      "name": "numbering continues after the highest literal placeholder",
+      "input": "Template says [EMAIL_3]; mine is carol@posteo.de",
+      "expect": {
+        "text": "Template says [EMAIL_3]; mine is [EMAIL_4]",
+        "found": {
+          "EMAIL": 1
+        }
       }
     }
   ]
