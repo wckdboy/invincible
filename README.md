@@ -21,10 +21,12 @@ they make it faster when you choose to use them.
 > pairs with a live node ([autobot#2](https://github.com/wckdboy/autobot/pull/2)), and the Android
 > app drives the agent through the paired gateway, approvals and scheduled tasks included, and
 > shows the node's signed receipts in each turn's privacy receipt
-> ([autobot#3](https://github.com/wckdboy/autobot/pull/3)). First release:
+> ([autobot#3](https://github.com/wckdboy/autobot/pull/3), released in
+> [Autobot 1.9.0](https://github.com/wckdboy/autobot/releases/tag/v1.9.0); iOS in
+> [autobot#5](https://github.com/wckdboy/autobot/pull/5)). First release:
 > [v0.0.1](https://github.com/wckdboy/invincible/releases/tag/v0.0.1) (static Linux and macOS
 > binaries, reproducible, with build attestations; from v0.0.2 also signed with a pinned key). Not
-> yet: iOS, evals. Work is tracked in Plane (project **INV** in the WCKD workspace).
+> yet: evals, the agent screen on iOS. Work is tracked in Plane (project **INV** in the WCKD workspace).
 
 ## Why
 
