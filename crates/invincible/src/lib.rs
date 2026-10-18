@@ -7,6 +7,7 @@ pub mod egress;
 pub mod engine;
 pub mod fsutil;
 pub mod models;
+pub mod receipts;
 pub mod redact;
 pub mod remote;
 pub mod server;

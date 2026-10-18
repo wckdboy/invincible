@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 
 use crate::cloud::{CloudError, CloudModel};
 use crate::engine::Engine;
+use crate::receipts::{Attempt, Draft, ReceiptKey, ReceiptStore};
 use crate::remote::{CODE_LIFETIME, Pairing};
 
 pub const DECISION_HEADER: &str = "invincible-decision";
@@ -35,6 +36,9 @@ pub struct AppState {
     pub cloud: Vec<CloudModel>,
     /// For requests that leave the node; `None` when the node is offline.
     pub egress: Option<reqwest::Client>,
+    pub name: String,
+    pub receipt_key: Arc<ReceiptKey>,
+    pub receipts: Arc<ReceiptStore>,
 }
 
 impl AppState {
@@ -44,7 +48,26 @@ impl AppState {
         let client =
             reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(2)).build().expect("HTTP client");
         let egress = crate::egress::client(&node.network).ok();
-        Self { engines, node, token, client, pairing: None, cloud: Vec::new(), egress }
+        // An ephemeral receipt key until the node's own is set ([AppState::with_receipt_key]).
+        let receipt_key = Arc::new(ReceiptKey::from_seed(&crate::token::random::<32>().expect("random bytes")));
+        Self {
+            engines,
+            node,
+            token,
+            client,
+            pairing: None,
+            cloud: Vec::new(),
+            egress,
+            name: "invincible".to_owned(),
+            receipt_key,
+            receipts: Arc::default(),
+        }
+    }
+
+    pub fn with_receipt_key(mut self, name: &str, key: ReceiptKey) -> Self {
+        self.name = name.to_owned();
+        self.receipt_key = Arc::new(key);
+        self
     }
 
     pub fn with_cloud(mut self, cloud: Vec<CloudModel>) -> Self {
@@ -79,7 +102,22 @@ impl AppState {
 
 /// The inference API, the same for every caller.
 fn api() -> Router<Arc<AppState>> {
-    Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(chat_completions))
+    Router::new()
+        .route("/v1/models", get(models))
+        .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/receipts/{id}", get(receipt))
+        .route("/v1/node", get(node_info))
+}
+
+async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    match state.receipts.get(&id).await {
+        Some(envelope) => Json(envelope).into_response(),
+        None => error(StatusCode::NOT_FOUND, "not_found", "no such receipt"),
+    }
+}
+
+async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!({ "name": state.name, "receipt_key": state.receipt_key.public() }))
 }
 
 /// The loopback app: the API and the admin endpoints behind the token, plus `/health`.
@@ -187,6 +225,10 @@ async fn chat_completions(State(state): State<Arc<AppState>>, headers: HeaderMap
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is not JSON");
     };
     let request = route_request(&headers, &parsed);
+    let mut draft = match Draft::new() {
+        Ok(draft) => draft,
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
     // A cloud backend that fails is marked down and the request is routed again; each round
     // takes one backend out, so this ends.
     let mut rounds = 0;
@@ -198,16 +240,35 @@ async fn chat_completions(State(state): State<Arc<AppState>>, headers: HeaderMap
             (Action::Run, Some(Tier::Node)) => {
                 let engine =
                     state.engines.iter().find(|e| Some(&e.id) == decision.model.as_ref()).expect("decided model");
+                draft.data_policy = Some("owned".to_owned());
                 forward(&state.client, engine, body.clone()).await
             }
             (Action::Run, _) => {
                 let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
                 let client = state.egress.as_ref().expect("a healthy cloud model implies an egress client");
-                match crate::cloud::forward(client, cloud, parsed.clone()).await {
+                let (outgoing, vault) = crate::cloud::prepare(cloud, parsed.clone());
+                for (kind, n) in vault.found() {
+                    let seen = draft.redactions.entry(kind).or_insert(0);
+                    *seen = (*seen).max(n);
+                }
+                let received = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                draft.attempts.push(Attempt {
+                    host: cloud.host(),
+                    route: crate::egress::route(&state.node.network),
+                    sent: outgoing.len() as u64,
+                    received: received.clone(),
+                    ok: true,
+                });
+                draft.data_policy = Some(data_policy_code(cloud.data_policy));
+                match crate::cloud::forward(client, cloud, outgoing, vault, received).await {
                     Ok(response) => response,
                     Err(CloudError::Failover(why)) => {
                         tracing::warn!(model = %cloud.id, "cloud backend failed ({why}); routing again");
                         cloud.mark_down();
+                        if let Some(attempt) = draft.attempts.last_mut() {
+                            attempt.ok = false;
+                        }
+                        draft.data_policy = None;
                         if rounds <= state.cloud.len() {
                             continue;
                         }
@@ -228,7 +289,13 @@ async fn chat_completions(State(state): State<Arc<AppState>>, headers: HeaderMap
     if let Ok(value) = HeaderValue::from_str(&decision_json) {
         response.headers_mut().insert(DECISION_HEADER, value);
     }
-    response
+    draft.decision = Some(decision);
+    crate::receipts::attach(
+        response,
+        Arc::new(std::sync::Mutex::new(draft)),
+        state.receipt_key.clone(),
+        state.receipts.clone(),
+    )
 }
 
 /// The routing request for one chat completion.

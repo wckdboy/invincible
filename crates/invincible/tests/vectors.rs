@@ -60,3 +60,46 @@ fn redaction() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn receipts() {
+    use invincible::receipts::{ReceiptKey, canonical, verify};
+    let cases = cases("receipts");
+    assert!(!cases.is_empty());
+    let failures: Vec<String> = cases
+        .iter()
+        .filter_map(|case| {
+            let input = &case["input"];
+            let got = match input["kind"].as_str().unwrap() {
+                "sign" => {
+                    let seed: [u8; 32] =
+                        URL_SAFE_NO_PAD.decode(input["seed"].as_str().unwrap()).unwrap().try_into().unwrap();
+                    let key = ReceiptKey::from_seed(&seed);
+                    let envelope = key.sign(input["receipt"].clone()).unwrap();
+                    json!({
+                        "public_key": key.public(),
+                        "canonical": canonical(&input["receipt"]).unwrap(),
+                        "signature": envelope["signature"],
+                    })
+                }
+                "verify" => json!({
+                    "valid": verify(
+                        input["public_key"].as_str().unwrap(),
+                        &input["receipt"],
+                        input["signature"].as_str().unwrap(),
+                    )
+                }),
+                other => panic!("unknown case kind {other}"),
+            };
+            (got != case["expect"])
+                .then(|| format!("{}\n  expected {}\n  got      {got}", case["name"], case["expect"]))
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} of {} receipt cases failed:\n{}",
+        failures.len(),
+        cases.len(),
+        failures.join("\n")
+    );
+}

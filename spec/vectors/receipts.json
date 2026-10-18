@@ -1,0 +1,300 @@
+{
+  "spec": "receipts",
+  "version": 0,
+  "cases": [
+    {
+      "name": "a local run: nothing left the node",
+      "input": {
+        "kind": "sign",
+        "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "receipt": {
+          "version": 0,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "local-first"
+          },
+          "data_policy": "owned",
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "egress": []
+        }
+      },
+      "expect": {
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "canonical": "{\"data_policy\":\"owned\",\"decision\":{\"action\":\"run\",\"model\":\"qwen3-0.6b\",\"reason\":\"local-first\",\"tier\":\"node\"},\"egress\":[],\"node\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"request_id\":\"00000000000000000000000000000000\",\"tokens\":{\"input\":19,\"output\":8},\"version\":0}",
+        "signature": "O6bc295yZ4mTPDUBzB7uFI_b5yr13YtvIIy5ws9zHVV1XQpvSPV5FEW0j2fG2S_FBFLSX3NpG1bN6nHs9J3ZAg"
+      }
+    },
+    {
+      "name": "a cloud run with redactions, over Tor",
+      "input": {
+        "kind": "sign",
+        "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "receipt": {
+          "version": 0,
+          "request_id": "9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "claude",
+            "tier": "cloud",
+            "reason": "requested",
+            "redact": true
+          },
+          "data_policy": "retention:30",
+          "tokens": {
+            "input": 1200,
+            "output": 410
+          },
+          "redactions": {
+            "PERSON": 2,
+            "EMAIL": 1
+          },
+          "egress": [
+            {
+              "host": "api.anthropic.com",
+              "route": "tor",
+              "bytes_sent": 14200,
+              "bytes_received": 3900,
+              "ok": true
+            }
+          ]
+        }
+      },
+      "expect": {
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "canonical": "{\"data_policy\":\"retention:30\",\"decision\":{\"action\":\"run\",\"model\":\"claude\",\"reason\":\"requested\",\"redact\":true,\"tier\":\"cloud\"},\"egress\":[{\"bytes_received\":3900,\"bytes_sent\":14200,\"host\":\"api.anthropic.com\",\"ok\":true,\"route\":\"tor\"}],\"node\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"redactions\":{\"EMAIL\":1,\"PERSON\":2},\"request_id\":\"9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c\",\"tokens\":{\"input\":1200,\"output\":410},\"version\":0}",
+        "signature": "q3DbTxP71Mcc5WCdv3Smh1WDr-7H5R1mVawmbUNjZcN1NT4qdOk-IJdBgsXb3O3OEMSoCxljhpZwEfiFkf75AQ"
+      }
+    },
+    {
+      "name": "a failed cloud attempt is listed, then the node answered",
+      "input": {
+        "kind": "sign",
+        "seed": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI",
+        "receipt": {
+          "version": 0,
+          "request_id": "abababababababababababababababab",
+          "node": "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI",
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "cloud-down",
+            "fallback": true
+          },
+          "data_policy": "owned",
+          "redactions": {
+            "EMAIL": 1
+          },
+          "egress": [
+            {
+              "host": "api.example.net",
+              "route": "direct",
+              "bytes_sent": 512,
+              "bytes_received": 0,
+              "ok": false
+            }
+          ]
+        }
+      },
+      "expect": {
+        "public_key": "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI",
+        "canonical": "{\"data_policy\":\"owned\",\"decision\":{\"action\":\"run\",\"fallback\":true,\"model\":\"qwen3-0.6b\",\"reason\":\"cloud-down\",\"tier\":\"node\"},\"egress\":[{\"bytes_received\":0,\"bytes_sent\":512,\"host\":\"api.example.net\",\"ok\":false,\"route\":\"direct\"}],\"node\":\"IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI\",\"redactions\":{\"EMAIL\":1},\"request_id\":\"abababababababababababababababab\",\"version\":0}",
+        "signature": "mmRHnrIm-srQ15i9KBvC479OLaAC5e0TWt9iW4nlGMXJOOYDYKpnKXhBJ-PtDPr1Mdm-RPysQUUTiK7YcL8eCw"
+      }
+    },
+    {
+      "name": "a blocked request",
+      "input": {
+        "kind": "sign",
+        "seed": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI",
+        "receipt": {
+          "version": 0,
+          "request_id": "ffffffffffffffffffffffffffffffff",
+          "node": "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI",
+          "decision": {
+            "action": "block",
+            "reason": "private"
+          },
+          "egress": []
+        }
+      },
+      "expect": {
+        "public_key": "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI",
+        "canonical": "{\"decision\":{\"action\":\"block\",\"reason\":\"private\"},\"egress\":[],\"node\":\"IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI\",\"request_id\":\"ffffffffffffffffffffffffffffffff\",\"version\":0}",
+        "signature": "_3Ebw9vIYqfISN-7Xq1rIQ18WN4dvBw9aFkTafaOR-bA8NT94UKXI99Mtrcg4JF-fBn0aRS-q723g0DOMs1wDQ"
+      }
+    },
+    {
+      "name": "strings are escaped minimally, keys sorted",
+      "input": {
+        "kind": "sign",
+        "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "receipt": {
+          "version": 0,
+          "request_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "zoë \"quoted\"\\tab\t\u0001",
+            "tier": "node",
+            "reason": "requested"
+          },
+          "egress": []
+        }
+      },
+      "expect": {
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "canonical": "{\"decision\":{\"action\":\"run\",\"model\":\"zoë \\\"quoted\\\"\\\\tab\\t\\u0001\",\"reason\":\"requested\",\"tier\":\"node\"},\"egress\":[],\"node\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"request_id\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"version\":0}",
+        "signature": "DhmRQA6HRFgMXmEWUwAmJxZxR1b1XXk9hOilwnfWPaT5oNEb3HS2fKpaVvb3qe02yoHmpM19f7CNN2Ng7-PWBQ"
+      }
+    },
+    {
+      "name": "a genuine receipt verifies",
+      "input": {
+        "kind": "verify",
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "receipt": {
+          "version": 0,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "local-first"
+          },
+          "data_policy": "owned",
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "egress": []
+        },
+        "signature": "O6bc295yZ4mTPDUBzB7uFI_b5yr13YtvIIy5ws9zHVV1XQpvSPV5FEW0j2fG2S_FBFLSX3NpG1bN6nHs9J3ZAg"
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "name": "a changed field does not verify",
+      "input": {
+        "kind": "verify",
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "receipt": {
+          "version": 0,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "cloud",
+            "reason": "local-first"
+          },
+          "data_policy": "owned",
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "egress": []
+        },
+        "signature": "O6bc295yZ4mTPDUBzB7uFI_b5yr13YtvIIy5ws9zHVV1XQpvSPV5FEW0j2fG2S_FBFLSX3NpG1bN6nHs9J3ZAg"
+      },
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "a changed number does not verify",
+      "input": {
+        "kind": "verify",
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "receipt": {
+          "version": 0,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "local-first"
+          },
+          "data_policy": "owned",
+          "tokens": {
+            "input": 19,
+            "output": 9
+          },
+          "egress": []
+        },
+        "signature": "O6bc295yZ4mTPDUBzB7uFI_b5yr13YtvIIy5ws9zHVV1XQpvSPV5FEW0j2fG2S_FBFLSX3NpG1bN6nHs9J3ZAg"
+      },
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "another node's key does not verify",
+      "input": {
+        "kind": "verify",
+        "public_key": "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI",
+        "receipt": {
+          "version": 0,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "local-first"
+          },
+          "data_policy": "owned",
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "egress": []
+        },
+        "signature": "O6bc295yZ4mTPDUBzB7uFI_b5yr13YtvIIy5ws9zHVV1XQpvSPV5FEW0j2fG2S_FBFLSX3NpG1bN6nHs9J3ZAg"
+      },
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "name": "the same receipt with keys in another order verifies",
+      "input": {
+        "kind": "verify",
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "receipt": {
+          "egress": [],
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "data_policy": "owned",
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "local-first"
+          },
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "request_id": "00000000000000000000000000000000",
+          "version": 0
+        },
+        "signature": "O6bc295yZ4mTPDUBzB7uFI_b5yr13YtvIIy5ws9zHVV1XQpvSPV5FEW0j2fG2S_FBFLSX3NpG1bN6nHs9J3ZAg"
+      },
+      "expect": {
+        "valid": true
+      }
+    }
+  ]
+}

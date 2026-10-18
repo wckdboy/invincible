@@ -29,6 +29,7 @@ sha2.workspace = true
 toml_edit.workspace = true
 regex.workspace = true
 futures-util.workspace = true
+ed25519-dalek.workspace = true
 
 [lints]
 workspace = true

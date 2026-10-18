@@ -175,6 +175,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let mut nodes = KnownNodes::load(&home)?;
             nodes.0.retain(|n| n.name != paired.node);
             nodes.0.push(KnownNode {
+                receipt_key: paired.receipt_key.clone(),
                 name: paired.node.clone(),
                 key: {
                     use base64::Engine as _;
@@ -367,14 +368,21 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     if !config.cloud.is_empty() && config.node.settings().network.is_offline() {
         tracing::info!("the node is offline: cloud backends are configured but will not be used");
     }
-    let mut state = AppState::new(engines, config.node.settings(), token).with_cloud(cloud);
+    let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
+    let receipt_public = receipt_key.public();
+    let mut state = AppState::new(engines, config.node.settings(), token)
+        .with_cloud(cloud)
+        .with_receipt_key(&config.remote.name(), receipt_key);
     if config.remote.enabled() {
-        let pairing = Arc::new(Pairing::new(
-            StaticKey::load_or_create(&home.join("node.key"))?,
-            config.remote.name(),
-            config.remote.advertised(),
-            Devices::load(&home.join("devices.json"))?,
-        ));
+        let pairing = Arc::new(
+            Pairing::new(
+                StaticKey::load_or_create(&home.join("node.key"))?,
+                config.remote.name(),
+                config.remote.advertised(),
+                Devices::load(&home.join("devices.json"))?,
+            )
+            .with_receipt_key(receipt_public),
+        );
         state = state.with_pairing(pairing);
     }
     let state = Arc::new(state);
@@ -433,6 +441,9 @@ struct KnownNode {
     /// Static public key, base64url, pinned at pairing.
     key: String,
     addrs: Vec<String>,
+    /// The node's receipt key, pinned at pairing.
+    #[serde(default)]
+    receipt_key: Option<String>,
 }
 
 impl KnownNodes {

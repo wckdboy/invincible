@@ -63,7 +63,9 @@ the code. The first implementation had exactly this bug, and a test caught it.)
 2. The node pins the device's static key under the name. Names are cleaned to letters, digits, `-`
    and `_`, at most 40 characters. A name already in use by another key gets a number (`phone-2`). A
    key that paired before keeps one entry, renamed.
-3. Node → device, handshake message 2. Payload: `{"node": "<node name>", "device": "<name pinned>"}`.
+3. Node → device, handshake message 2. Payload:
+   `{"node": "<node name>", "device": "<name pinned>", "receipts": "<receipt public key>"}`. The device
+   pins the receipt key and uses it to verify the node's receipts ([receipts.md](receipts.md)).
 4. The code is closed. The connection continues as a session (below).
 
 ### Session (`0x02`)
@@ -76,7 +78,8 @@ the code. The first implementation had exactly this bug, and a test caught it.)
 
 After the handshake each frame holds one Noise transport message carrying at most 65519 bytes of
 plaintext. In each direction the plaintexts, concatenated, form a byte stream, and that stream is
-plain **HTTP/1.1** to the node's API. A device reaches `/v1/models` and `/v1/chat/completions`
+plain **HTTP/1.1** to the node's API. A device reaches `/v1/models`, `/v1/chat/completions`,
+`/v1/receipts/<id>` and `/v1/node`
 (the same endpoints, headers and behaviour as on loopback) with no token, because its key already
 authenticates it. A device cannot reach the admin endpoints.
 

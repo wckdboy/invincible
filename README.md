@@ -14,7 +14,9 @@ they make it faster when you choose to use them.
 > conformance vectors), and devices pair with it over Noise ([spec/pairing.md](spec/pairing.md),
 > implemented but not yet independently reviewed). Cloud backends are used only as the rules allow,
 > with personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)). Not
-> yet: Autobot's side of pairing, receipts, agents, evals, the installer. Work is tracked in Plane (project **INV** in the
+> every request gets a signed receipt saying where it ran and what left the node
+> ([spec/receipts.md](spec/receipts.md)). Not yet: Autobot's side of pairing, agents, evals, the
+> installer. Work is tracked in Plane (project **INV** in the
 > WCKD workspace).
 
 ## Why
@@ -232,6 +234,15 @@ data_policy = "retention:30"        # what the provider does with prompts
   what was hidden.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
+
+### Receipts
+
+Every chat completion answers with `invincible-request-id`. Once the answer is complete,
+`GET /v1/receipts/<id>` returns a receipt signed with the node's Ed25519 key (`GET /v1/node` has the
+public key; paired devices receive it when they pair). It records the routing decision, tokens, what
+was redacted, and every attempt to reach a host off the node, with bytes sent and received. An empty
+`egress` list is a signed statement that nothing left the node. Receipts never contain prompt or
+answer text.
 
 ### Pairing other machines
 

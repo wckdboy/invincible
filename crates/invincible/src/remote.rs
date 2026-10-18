@@ -219,6 +219,8 @@ where
 pub struct Pairing {
     pub key: StaticKey,
     pub name: String,
+    /// The receipt public key, sent to devices when they pair (spec/receipts.md).
+    pub receipt_key: String,
     pub advertise: Vec<String>,
     pub devices: Devices,
     pending: Mutex<Option<Pending>>,
@@ -232,7 +234,12 @@ struct Pending {
 
 impl Pairing {
     pub fn new(key: StaticKey, name: String, advertise: Vec<String>, devices: Devices) -> Self {
-        Self { key, name, advertise, devices, pending: Mutex::new(None) }
+        Self { key, name, advertise, devices, receipt_key: String::new(), pending: Mutex::new(None) }
+    }
+
+    pub fn with_receipt_key(mut self, public: String) -> Self {
+        self.receipt_key = public;
+        self
     }
 
     /// Opens a pairing code (replacing any open one), valid for [CODE_LIFETIME] and one pairing.
@@ -335,7 +342,7 @@ async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportSta
             let device_key = hs.get_remote_static().ok_or("no device key")?.to_vec();
             let name = pairing.devices.add(hello["name"].as_str().unwrap_or("device"), &device_key)?;
             pairing.close_code(&secret);
-            let reply = json!({ "node": pairing.name, "device": name }).to_string();
+            let reply = json!({ "node": pairing.name, "device": name, "receipts": pairing.receipt_key }).to_string();
             let m = hs.write_message(reply.as_bytes(), &mut out).map_err(|e| e.to_string())?;
             write_frame(tcp, &out[..m]).await.map_err(|e| e.to_string())?;
             tracing::info!(device = %name, key = %crate::devices::fingerprint(&device_key), "device paired");
@@ -365,6 +372,8 @@ async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportSta
 pub struct Paired {
     pub node: String,
     pub device: String,
+    /// The node's receipt key, received over the authenticated channel; pin it.
+    pub receipt_key: Option<String>,
 }
 
 async fn dial(addrs: &[String]) -> Result<TcpStream, String> {
@@ -399,6 +408,7 @@ pub async fn pair(code: &PairingCode, device: &StaticKey, name: &str) -> Result<
         Ok(Paired {
             node: reply["node"].as_str().unwrap_or("node").to_owned(),
             device: reply["device"].as_str().unwrap_or(name).to_owned(),
+            receipt_key: reply["receipts"].as_str().filter(|k| !k.is_empty()).map(str::to_owned),
         })
     };
     timeout(HANDSHAKE_TIMEOUT, work).await.map_err(|_| "pairing timed out".to_owned())?

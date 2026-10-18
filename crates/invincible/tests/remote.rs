@@ -57,14 +57,22 @@ async fn node() -> Node {
     let engine = Engine::attached("small", &stub_engine().await, None, true);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
-    let pairing = Arc::new(Pairing::new(
-        StaticKey::load_or_create(&dir.join("node.key")).unwrap(),
-        "studio".into(),
-        vec![addr.clone()],
-        Devices::load(&dir.join("devices.json")).unwrap(),
-    ));
+    let receipt_key = invincible::receipts::ReceiptKey::from_seed(&[5; 32]);
+    let pairing = Arc::new(
+        Pairing::new(
+            StaticKey::load_or_create(&dir.join("node.key")).unwrap(),
+            "studio".into(),
+            vec![addr.clone()],
+            Devices::load(&dir.join("devices.json")).unwrap(),
+        )
+        .with_receipt_key(receipt_key.public()),
+    );
     let settings = NodeSettings { network: NetworkMode::Offline, egress: Egress::Never };
-    let state = Arc::new(AppState::new(vec![engine], settings, "token".into()).with_pairing(pairing.clone()));
+    let state = Arc::new(
+        AppState::new(vec![engine], settings, "token".into())
+            .with_receipt_key("studio", receipt_key)
+            .with_pairing(pairing.clone()),
+    );
     tokio::spawn(remote::serve(listener, pairing.clone(), device_app(state)));
     Node { pairing, addr, dir }
 }
@@ -222,5 +230,29 @@ async fn an_unpaired_device_is_cut_off() {
     assert!(reqwest::Client::new().get(format!("{door}/v1/models")).send().await.is_err());
     // A connection opened before the unpairing dies at its next request.
     assert!(client.get(format!("{door}/v1/models")).send().await.is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_device_pins_the_receipt_key_and_checks_receipts_through_the_tunnel() {
+    let node = node().await;
+    let (phone, dir) = device("receipts");
+    let paired = remote::pair(&node.pairing.start().unwrap(), &phone, "phone").await.unwrap();
+    let pinned = paired.receipt_key.expect("the pairing reply carries the receipt key");
+    assert_eq!(pinned, node.pairing.receipt_key);
+
+    let door = tunnel(&node, &phone).await;
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{door}/v1/chat/completions"))
+        .json(&json!({ "messages": [{ "role": "user", "content": "hi" }] }))
+        .send()
+        .await
+        .unwrap();
+    let id = response.headers()[invincible::receipts::REQUEST_ID_HEADER].to_str().unwrap().to_owned();
+    let _ = response.bytes().await.unwrap();
+    let envelope: Value = client.get(format!("{door}/v1/receipts/{id}")).send().await.unwrap().json().await.unwrap();
+    assert!(invincible::receipts::verify(&pinned, &envelope["receipt"], envelope["signature"].as_str().unwrap()));
+    assert_eq!(envelope["receipt"]["egress"], json!([]));
     let _ = std::fs::remove_dir_all(dir);
 }

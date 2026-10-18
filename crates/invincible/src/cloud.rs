@@ -3,7 +3,8 @@
 //! (spec/redaction.md) and restored when it comes back. A backend that fails is marked down for a
 //! while, and the router sends its requests elsewhere (spec/routing.md, `cloud-down`).
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
@@ -13,7 +14,7 @@ use invincible_policy::DataPolicy;
 use serde_json::Value;
 use tokio::time::Instant;
 
-use crate::redact::{StreamRestorer, redact_request, restore_response};
+use crate::redact::{StreamRestorer, Vault, redact_request, restore_response};
 
 /// How long a failed backend is skipped.
 pub const DOWN_FOR: Duration = Duration::from_secs(30);
@@ -75,13 +76,36 @@ pub enum CloudError {
     Failover(String),
 }
 
-/// Sends [body] to [model], redacted, and returns the restored answer.
-pub async fn forward(client: &reqwest::Client, model: &CloudModel, mut body: Value) -> Result<Response, CloudError> {
+impl CloudModel {
+    /// The host requests go to (for receipts and logs).
+    pub fn host(&self) -> String {
+        reqwest::Url::parse(&self.base_url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default()
+    }
+}
+
+/// The request [forward] sends to [model]: redacted, with the provider's model name, serialised;
+/// and the vault that restores the answer.
+pub fn prepare(model: &CloudModel, mut body: Value) -> (Vec<u8>, Vault) {
     let vault = redact_request(&mut body);
     body["model"] = Value::String(model.upstream_model.clone());
-    let streaming = body.get("stream").and_then(Value::as_bool) == Some(true);
+    (serde_json::to_vec(&body).expect("JSON serialises"), vault)
+}
 
-    let mut request = client.post(format!("{}/chat/completions", model.base_url)).json(&body);
+/// Sends a [prepare]d request to [model] and returns the restored answer. Bytes received from the
+/// provider are added to [received].
+pub async fn forward(
+    client: &reqwest::Client,
+    model: &CloudModel,
+    body: Vec<u8>,
+    vault: Vault,
+    received: Arc<AtomicU64>,
+) -> Result<Response, CloudError> {
+    let streaming = serde_json::from_slice::<Value>(&body).ok().and_then(|b| b.get("stream").and_then(Value::as_bool))
+        == Some(true);
+    let mut request = client
+        .post(format!("{}/chat/completions", model.base_url))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body);
     if let Some(key) = &model.key {
         request = request.bearer_auth(key);
     }
@@ -95,26 +119,25 @@ pub async fn forward(client: &reqwest::Client, model: &CloudModel, mut body: Val
 
     let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
     let mut response = if streaming && status.is_success() {
-        let restorer = StreamRestorer::new(vault);
-        let stream = futures_util::stream::unfold(
-            (upstream, restorer, false),
-            |(mut upstream, mut restorer, done)| async move {
-                if done {
-                    return None;
+        let state = (upstream, StreamRestorer::new(vault), false, received);
+        let stream = futures_util::stream::unfold(state, |(mut upstream, mut restorer, done, received)| async move {
+            if done {
+                return None;
+            }
+            match upstream.chunk().await {
+                Ok(Some(bytes)) => {
+                    received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                    let out = Bytes::from(restorer.push(&bytes));
+                    Some((Ok::<_, std::io::Error>(out), (upstream, restorer, false, received)))
                 }
-                match upstream.chunk().await {
-                    Ok(Some(bytes)) => {
-                        let out = Bytes::from(restorer.push(&bytes));
-                        Some((Ok::<_, std::io::Error>(out), (upstream, restorer, false)))
-                    }
-                    Ok(None) => Some((Ok(Bytes::from(restorer.finish())), (upstream, restorer, true))),
-                    Err(e) => Some((Err(std::io::Error::other(e)), (upstream, restorer, true))),
-                }
-            },
-        );
+                Ok(None) => Some((Ok(Bytes::from(restorer.finish())), (upstream, restorer, true, received))),
+                Err(e) => Some((Err(std::io::Error::other(e)), (upstream, restorer, true, received))),
+            }
+        });
         Response::new(Body::from_stream(stream))
     } else {
         let bytes = upstream.bytes().await.map_err(|e| CloudError::Failover(format!("answer cut off: {e}")))?;
+        received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         let body = match serde_json::from_slice::<Value>(&bytes) {
             Ok(mut answer) => {
                 restore_response(&vault, &mut answer);
