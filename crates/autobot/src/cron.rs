@@ -72,8 +72,9 @@ impl When {
                 cron.matches(now) && last.is_none_or(|l| minute(l) != minute(now))
             }
             Self::Every(interval) => {
+                // In whole minutes, the scheduler's step: made at 10:00:40, `every 1m` runs at 10:01.
                 let since = last.unwrap_or(created);
-                now.signed_duration_since(since) >= TimeDelta::from_std(*interval).unwrap_or(TimeDelta::MAX)
+                (minute(now) - minute(since)) * 60 >= interval.as_secs() as i64
             }
         }
     }
@@ -458,6 +459,10 @@ mod tests {
         assert!(!every.due(None, created, at(2026, 10, 18, 10, 29)));
         assert!(every.due(None, created, at(2026, 10, 18, 10, 30)));
         assert!(!every.due(Some(at(2026, 10, 18, 10, 30)), created, at(2026, 10, 18, 10, 59)));
+        // Made a few seconds into a minute, a one-minute task still runs at the next minute.
+        let minutely = When::parse("every 1m").unwrap();
+        let made = at(2026, 10, 18, 10, 0) + chrono::TimeDelta::seconds(40);
+        assert!(minutely.due(None, made, at(2026, 10, 18, 10, 1) + chrono::TimeDelta::seconds(1)));
         assert_eq!(When::parse("every 2h").unwrap(), When::Every(Duration::from_secs(7200)));
         assert_eq!(When::parse("every 1d").unwrap(), When::Every(Duration::from_secs(86400)));
     }

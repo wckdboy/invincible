@@ -213,7 +213,8 @@ async fn schedules_are_managed_through_the_gateway() {
     let (gateway, _, dir) = stack("schedules", Vec::new(), Duration::ZERO).await;
     let client = reqwest::Client::new();
     let url = format!("{gateway}/v1/agent/schedules");
-    let bad = client.post(&url).bearer_auth(TOKEN).json(&json!({ "when": "0 99 * * *", "task": "x" })).send().await.unwrap();
+    let bad =
+        client.post(&url).bearer_auth(TOKEN).json(&json!({ "when": "0 99 * * *", "task": "x" })).send().await.unwrap();
     assert_eq!(bad.status(), 400);
     let added: Value = client
         .post(&url)
