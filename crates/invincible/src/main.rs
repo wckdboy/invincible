@@ -351,7 +351,23 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         tracing::warn!("no models configured: every request will be blocked (add [[models]] to the config)");
     }
 
-    let mut state = AppState::new(engines, config.node.settings(), token);
+    let mut cloud = Vec::new();
+    for c in &config.cloud {
+        let policy = invincible_policy::DataPolicy::parse(&c.data_policy);
+        let upstream = c.upstream_model.clone().unwrap_or_else(|| c.id.clone());
+        let model = match c.key(&home) {
+            Ok(key) => invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, key, c.context, policy),
+            Err(e) => {
+                tracing::warn!(model = %c.id, "cloud backend disabled: {e}");
+                invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, None, c.context, policy).disabled()
+            }
+        };
+        cloud.push(model);
+    }
+    if !config.cloud.is_empty() && config.node.settings().network.is_offline() {
+        tracing::info!("the node is offline: cloud backends are configured but will not be used");
+    }
+    let mut state = AppState::new(engines, config.node.settings(), token).with_cloud(cloud);
     if config.remote.enabled() {
         let pairing = Arc::new(Pairing::new(
             StaticKey::load_or_create(&home.join("node.key"))?,

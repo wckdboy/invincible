@@ -12,8 +12,9 @@ they make it faster when you choose to use them.
 > Status: **early build.** A node serves open models through llama.cpp behind an OpenAI-compatible
 > API, every request goes through the routing rules ([spec/routing.md](spec/routing.md), pinned by 51
 > conformance vectors), and devices pair with it over Noise ([spec/pairing.md](spec/pairing.md),
-> implemented but not yet independently reviewed). Not yet: Autobot's side of pairing, frontier
-> backends, receipts, agents, evals, the installer. Work is tracked in Plane (project **INV** in the
+> implemented but not yet independently reviewed). Cloud backends are used only as the rules allow,
+> with personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)). Not
+> yet: Autobot's side of pairing, receipts, agents, evals, the installer. Work is tracked in Plane (project **INV** in the
 > WCKD workspace).
 
 ## Why
@@ -201,6 +202,35 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
 - Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff, and stopping the node stops its engines.
+
+### Cloud backends (optional)
+
+Any OpenAI-compatible endpoint works: OpenAI, Anthropic's compatibility endpoint, DeepSeek,
+OpenRouter, a friend's node. Keys live in files or environment variables, never in the config.
+
+```toml
+[node]
+network = "direct"   # or tor:127.0.0.1:9050: cloud requests then go through Tor
+egress = "auto"      # never (default), ask, auto: see spec/routing.md
+
+[[cloud]]
+id = "claude"
+upstream_model = "claude-sonnet-5-5"
+base_url = "https://api.anthropic.com/v1"
+api_key_file = "keys/anthropic"     # relative to ~/.invincible; or api_key_env = "ANTHROPIC_API_KEY"
+context = 200000
+data_policy = "retention:30"        # what the provider does with prompts
+```
+
+- The cloud is used only as [spec/routing.md](spec/routing.md) allows: never for
+  `invincible-private` requests, never while offline or under `egress = "never"`; `ask` (and models
+  that train on prompts) answer 409 until the request is sent again with `invincible-confirmed: 1`.
+- Before a request leaves, emails, IBANs, card numbers and phone numbers become placeholders
+  (`[EMAIL_1]`); the answer gets the real values back, streams included. The
+  `invincible-redacted` header counts what was hidden. Names and addresses are not detected on the
+  node yet (Autobot does detect them on the phone).
+- A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
+  routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
 
 ### Pairing other machines
 

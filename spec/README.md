@@ -7,6 +7,7 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 |---|---|---|
 | [routing.md](routing.md) | **v0, normative** | Where one request runs: node model, cloud model, ask first, or refuse |
 | [pairing.md](pairing.md) | **v0, implemented, unaudited** | How a device and a node pair and talk (Noise); pairing-code vectors |
+| [redaction.md](redaction.md) | **v0, normative** | What is replaced before a request leaves for the cloud, and how it is restored |
 | [receipts.md](receipts.md) | draft | The signed per-request receipt a node returns |
 
 ## Conformance vectors

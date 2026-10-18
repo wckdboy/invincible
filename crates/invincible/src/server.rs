@@ -19,6 +19,7 @@ use axum::{Json, Router};
 use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reason, Request, RouteInput, Tier, decide};
 use serde_json::{Value, json};
 
+use crate::cloud::{CloudError, CloudModel};
 use crate::engine::Engine;
 use crate::remote::{CODE_LIFETIME, Pairing};
 
@@ -31,6 +32,9 @@ pub struct AppState {
     pub client: reqwest::Client,
     /// Remote access; `None` when the config does not enable it.
     pub pairing: Option<Arc<Pairing>>,
+    pub cloud: Vec<CloudModel>,
+    /// For requests that leave the node; `None` when the node is offline.
+    pub egress: Option<reqwest::Client>,
 }
 
 impl AppState {
@@ -39,7 +43,32 @@ impl AppState {
         // engine is instant or it is down.
         let client =
             reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(2)).build().expect("HTTP client");
-        Self { engines, node, token, client, pairing: None }
+        let egress = crate::egress::client(&node.network).ok();
+        Self { engines, node, token, client, pairing: None, cloud: Vec::new(), egress }
+    }
+
+    pub fn with_cloud(mut self, cloud: Vec<CloudModel>) -> Self {
+        self.cloud = cloud;
+        self
+    }
+
+    /// Every model the router can choose from: the node's engines, then the cloud backends.
+    fn route_models(&self) -> Vec<Model> {
+        let node = self.engines.iter().map(|e| Model {
+            id: e.id.clone(),
+            tier: Tier::Node,
+            healthy: e.healthy(),
+            context: e.context,
+            data_policy: DataPolicy::Owned,
+        });
+        let cloud = self.cloud.iter().map(|c| Model {
+            id: c.id.clone(),
+            tier: Tier::Cloud,
+            healthy: c.healthy() && self.egress.is_some(),
+            context: c.context,
+            data_policy: c.data_policy,
+        });
+        node.chain(cloud).collect()
     }
 
     pub fn with_pairing(mut self, pairing: Arc<Pairing>) -> Self {
@@ -124,59 +153,82 @@ async fn require_token(State(state): State<Arc<AppState>>, request: HttpRequest,
 
 async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
     let data: Vec<Value> = state
-        .engines
+        .route_models()
         .iter()
-        .map(|e| {
+        .map(|m| {
             json!({
-                "id": e.id,
+                "id": m.id,
                 "object": "model",
                 "owned_by": "invincible",
-                "invincible": { "tier": "node", "healthy": e.healthy(), "context": e.context },
+                "invincible": {
+                    "tier": m.tier,
+                    "healthy": m.healthy,
+                    "context": m.context,
+                    "data_policy": data_policy_code(m.data_policy),
+                },
             })
         })
         .collect();
     Json(json!({ "object": "list", "data": data }))
 }
 
+fn data_policy_code(policy: DataPolicy) -> String {
+    match policy {
+        DataPolicy::Owned => "owned".into(),
+        DataPolicy::NoRetention => "no-retention".into(),
+        DataPolicy::Retention { days } => format!("retention:{days}"),
+        DataPolicy::Trains => "trains".into(),
+        DataPolicy::Unknown => "unknown".into(),
+    }
+}
+
 async fn chat_completions(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
     let Ok(parsed) = serde_json::from_slice::<Value>(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is not JSON");
     };
-    let input = RouteInput {
-        request: route_request(&headers, &parsed),
-        node: state.node.clone(),
-        models: state.engines.iter().map(policy_model).collect(),
+    let request = route_request(&headers, &parsed);
+    // A cloud backend that fails is marked down and the request is routed again; each round
+    // takes one backend out, so this ends.
+    let mut rounds = 0;
+    let (decision, mut response) = loop {
+        rounds += 1;
+        let input = RouteInput { request: request.clone(), node: state.node.clone(), models: state.route_models() };
+        let decision = decide(&input);
+        let response = match (&decision.action, decision.tier) {
+            (Action::Run, Some(Tier::Node)) => {
+                let engine =
+                    state.engines.iter().find(|e| Some(&e.id) == decision.model.as_ref()).expect("decided model");
+                forward(&state.client, engine, body.clone()).await
+            }
+            (Action::Run, _) => {
+                let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
+                let client = state.egress.as_ref().expect("a healthy cloud model implies an egress client");
+                match crate::cloud::forward(client, cloud, parsed.clone()).await {
+                    Ok(response) => response,
+                    Err(CloudError::Failover(why)) => {
+                        tracing::warn!(model = %cloud.id, "cloud backend failed ({why}); routing again");
+                        cloud.mark_down();
+                        if rounds <= state.cloud.len() {
+                            continue;
+                        }
+                        error(StatusCode::BAD_GATEWAY, "cloud_unavailable", "the cloud backend failed")
+                    }
+                }
+            }
+            (Action::Ask, _) => error(StatusCode::CONFLICT, "confirmation_required", ask_message(&decision)),
+            (Action::Block, _) => error(
+                block_status(decision.reason),
+                "request_blocked",
+                &format!("blocked: {}", reason_code(decision.reason)),
+            ),
+        };
+        break (decision, response);
     };
-    let decision = decide(&input);
     let decision_json = serde_json::to_string(&decision).expect("decision serialises");
-
-    let mut response = match (&decision.action, decision.tier) {
-        (Action::Run, Some(Tier::Node)) => {
-            let engine = state.engines.iter().find(|e| Some(&e.id) == decision.model.as_ref()).expect("decided model");
-            forward(&state.client, engine, body).await
-        }
-        (Action::Run, _) => error(StatusCode::NOT_IMPLEMENTED, "not_implemented", "cloud backends are not built yet"),
-        (Action::Ask, _) => error(StatusCode::CONFLICT, "confirmation_required", ask_message(&decision)),
-        (Action::Block, _) => error(
-            block_status(decision.reason),
-            "request_blocked",
-            &format!("blocked: {}", reason_code(decision.reason)),
-        ),
-    };
     if let Ok(value) = HeaderValue::from_str(&decision_json) {
         response.headers_mut().insert(DECISION_HEADER, value);
     }
     response
-}
-
-fn policy_model(engine: &Engine) -> Model {
-    Model {
-        id: engine.id.clone(),
-        tier: Tier::Node,
-        healthy: engine.healthy(),
-        context: engine.context,
-        data_policy: DataPolicy::Owned,
-    }
 }
 
 /// The routing request for one chat completion.

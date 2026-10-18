@@ -1,0 +1,299 @@
+{
+  "spec": "redaction",
+  "version": 0,
+  "cases": [
+    {
+      "name": "an email",
+      "input": "write to alice@proton.me today",
+      "expect": {
+        "text": "write to [EMAIL_1] today",
+        "found": {
+          "EMAIL": 1
+        }
+      }
+    },
+    {
+      "name": "the same email twice, any case, is one placeholder",
+      "input": "mail ALICE@proton.me or alice@proton.me",
+      "expect": {
+        "text": "mail [EMAIL_1] or [EMAIL_1]",
+        "found": {
+          "EMAIL": 1
+        }
+      }
+    },
+    {
+      "name": "two emails are numbered in order",
+      "input": "bob@posteo.de and carol@riseup.net",
+      "expect": {
+        "text": "[EMAIL_1] and [EMAIL_2]",
+        "found": {
+          "EMAIL": 2
+        }
+      }
+    },
+    {
+      "name": "an email after mailto: is found",
+      "input": "mailto:bob@proton.me",
+      "expect": {
+        "text": "mailto:[EMAIL_1]",
+        "found": {
+          "EMAIL": 1
+        }
+      }
+    },
+    {
+      "name": "a Unicode email",
+      "input": "écris à zoë@exemple.fr",
+      "expect": {
+        "text": "écris à [EMAIL_1]",
+        "found": {
+          "EMAIL": 1
+        }
+      }
+    },
+    {
+      "name": "git@ is not an email",
+      "input": "clone git@github.com:me/repo",
+      "expect": {
+        "text": "clone git@github.com:me/repo",
+        "found": {}
+      }
+    },
+    {
+      "name": "an image name is not an email",
+      "input": "see logo@2x.png",
+      "expect": {
+        "text": "see logo@2x.png",
+        "found": {}
+      }
+    },
+    {
+      "name": "example domains are not emails",
+      "input": "alice@example.com, bob@mail.example.org, x@host.test",
+      "expect": {
+        "text": "alice@example.com, bob@mail.example.org, x@host.test",
+        "found": {}
+      }
+    },
+    {
+      "name": "a spaced IBAN",
+      "input": "IBAN DE89 3704 0044 0532 0130 00 please",
+      "expect": {
+        "text": "IBAN [IBAN_1] please",
+        "found": {
+          "IBAN": 1
+        }
+      }
+    },
+    {
+      "name": "an IBAN is cut at its country's length",
+      "input": "GB82 WEST 1234 5698 7654 32 OK",
+      "expect": {
+        "text": "[IBAN_1] OK",
+        "found": {
+          "IBAN": 1
+        }
+      }
+    },
+    {
+      "name": "an IBAN with a wrong checksum is kept",
+      "input": "DE88 3704 0044 0532 0130 00",
+      "expect": {
+        "text": "DE88 3704 0044 0532 0130 00",
+        "found": {}
+      }
+    },
+    {
+      "name": "a spaced and a compact IBAN are one value",
+      "input": "DE89 3704 0044 0532 0130 00 = DE89370400440532013000",
+      "expect": {
+        "text": "[IBAN_1] = [IBAN_1]",
+        "found": {
+          "IBAN": 1
+        }
+      }
+    },
+    {
+      "name": "a card number",
+      "input": "card 4111 1111 1111 1111, thanks",
+      "expect": {
+        "text": "card [CARD_1], thanks",
+        "found": {
+          "CARD": 1
+        }
+      }
+    },
+    {
+      "name": "a card number with dashes",
+      "input": "5555-5555-5555-4444",
+      "expect": {
+        "text": "[CARD_1]",
+        "found": {
+          "CARD": 1
+        }
+      }
+    },
+    {
+      "name": "a card number failing Luhn is kept",
+      "input": "4111 1111 1111 1112",
+      "expect": {
+        "text": "4111 1111 1111 1112",
+        "found": {}
+      }
+    },
+    {
+      "name": "one digit repeated is not a card",
+      "input": "4444 4444 4444 4444",
+      "expect": {
+        "text": "4444 4444 4444 4444",
+        "found": {}
+      }
+    },
+    {
+      "name": "digits inside a longer number are not a card",
+      "input": "order 41111111111111110000",
+      "expect": {
+        "text": "order 41111111111111110000",
+        "found": {}
+      }
+    },
+    {
+      "name": "a card number in inline code is kept",
+      "input": "test with `4111 1111 1111 1111`",
+      "expect": {
+        "text": "test with `4111 1111 1111 1111`",
+        "found": {}
+      }
+    },
+    {
+      "name": "a card number in a fenced block is kept",
+      "input": "```\n4111 1111 1111 1111\n```",
+      "expect": {
+        "text": "```\n4111 1111 1111 1111\n```",
+        "found": {}
+      }
+    },
+    {
+      "name": "an international phone",
+      "input": "call +44 20 7946 0958",
+      "expect": {
+        "text": "call [PHONE_1]",
+        "found": {
+          "PHONE": 1
+        }
+      }
+    },
+    {
+      "name": "one phone written two ways is one value",
+      "input": "+49 30 1234567 or +49-30-1234567",
+      "expect": {
+        "text": "[PHONE_1] or [PHONE_1]",
+        "found": {
+          "PHONE": 1
+        }
+      }
+    },
+    {
+      "name": "North American phones",
+      "input": "Call (415) 555-0132 or 415.555.0199",
+      "expect": {
+        "text": "Call [PHONE_1] or [PHONE_2]",
+        "found": {
+          "PHONE": 2
+        }
+      }
+    },
+    {
+      "name": "a national phone before a full stop",
+      "input": "Ruf an: 030 1234567.",
+      "expect": {
+        "text": "Ruf an: [PHONE_1].",
+        "found": {
+          "PHONE": 1
+        }
+      }
+    },
+    {
+      "name": "a national phone without spaces",
+      "input": "Handy 01701234567",
+      "expect": {
+        "text": "Handy [PHONE_1]",
+        "found": {
+          "PHONE": 1
+        }
+      }
+    },
+    {
+      "name": "a phone in a link is kept",
+      "input": "https://x.org/call/+4930123456",
+      "expect": {
+        "text": "https://x.org/call/+4930123456",
+        "found": {}
+      }
+    },
+    {
+      "name": "a plus after a letter is not a phone",
+      "input": "x+4930123456",
+      "expect": {
+        "text": "x+4930123456",
+        "found": {}
+      }
+    },
+    {
+      "name": "a date is not a phone",
+      "input": "due 2026-10-18",
+      "expect": {
+        "text": "due 2026-10-18",
+        "found": {}
+      }
+    },
+    {
+      "name": "an IP address is not a phone",
+      "input": "server 10.0.0.1 is up",
+      "expect": {
+        "text": "server 10.0.0.1 is up",
+        "found": {}
+      }
+    },
+    {
+      "name": "a date after a country code is not a phone",
+      "input": "+49 2026.10.18",
+      "expect": {
+        "text": "+49 2026.10.18",
+        "found": {}
+      }
+    },
+    {
+      "name": "placeholder-shaped text keeps its number",
+      "input": "I wrote [EMAIL_1] literally; mine is carol@posteo.de",
+      "expect": {
+        "text": "I wrote [EMAIL_1] literally; mine is [EMAIL_2]",
+        "found": {
+          "EMAIL": 1
+        }
+      }
+    },
+    {
+      "name": "every kind in one text",
+      "input": "Pay DE89 3704 0044 0532 0130 00 from card 4111 1111 1111 1111, call +44 20 7946 0958 or mail dan@tuta.io",
+      "expect": {
+        "text": "Pay [IBAN_1] from card [CARD_1], call [PHONE_1] or mail [EMAIL_1]",
+        "found": {
+          "EMAIL": 1,
+          "IBAN": 1,
+          "CARD": 1,
+          "PHONE": 1
+        }
+      }
+    },
+    {
+      "name": "nothing to find",
+      "input": "What is the capital of France?",
+      "expect": {
+        "text": "What is the capital of France?",
+        "found": {}
+      }
+    }
+  ]
+}

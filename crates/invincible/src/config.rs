@@ -36,6 +36,54 @@ pub struct Config {
     /// Remote access for paired devices, over Noise (spec/pairing.md). Off unless `listen` is set.
     #[serde(default)]
     pub remote: RemoteConfig,
+    /// Cloud backends, used only as the routing rules allow (spec/routing.md).
+    #[serde(default)]
+    pub cloud: Vec<CloudConfig>,
+}
+
+/// ```toml
+/// [[cloud]]
+/// id = "claude"                              # what requests name
+/// upstream_model = "claude-sonnet-5-5"       # what the provider calls it (default: id)
+/// base_url = "https://api.anthropic.com/v1"  # an OpenAI-compatible endpoint
+/// api_key_file = "keys/anthropic"            # relative to $INVINCIBLE_HOME; or api_key_env
+/// context = 200000
+/// data_policy = "retention:30"               # owned, no-retention, retention:<days>, trains, unknown
+/// ```
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloudConfig {
+    pub id: String,
+    #[serde(default)]
+    pub upstream_model: Option<String>,
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub context: Option<u64>,
+    #[serde(default = "unknown_policy")]
+    pub data_policy: String,
+}
+
+fn unknown_policy() -> String {
+    "unknown".to_owned()
+}
+
+impl CloudConfig {
+    /// The API key, from the file (relative to [home]) or the environment variable.
+    pub fn key(&self, home: &Path) -> Result<Option<String>, String> {
+        if let Some(file) = &self.api_key_file {
+            let path = if file.is_absolute() { file.clone() } else { home.join(file) };
+            let key = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            return Ok(Some(key.trim().to_owned()).filter(|k| !k.is_empty()));
+        }
+        if let Some(var) = &self.api_key_env {
+            return std::env::var(var).map(Some).map_err(|_| format!("{var} is not set"));
+        }
+        Ok(None)
+    }
 }
 
 /// ```toml
@@ -174,12 +222,18 @@ impl Config {
             );
         }
         let mut seen = std::collections::HashSet::new();
-        for model in &self.models {
-            if model.id.is_empty() || model.id == "auto" {
-                return Err(format!("model id {:?} is reserved", model.id));
+        for id in self.models.iter().map(|m| &m.id).chain(self.cloud.iter().map(|c| &c.id)) {
+            if id.is_empty() || id == "auto" {
+                return Err(format!("model id {id:?} is reserved"));
             }
-            if !seen.insert(&model.id) {
-                return Err(format!("model id {:?} appears twice", model.id));
+            if !seen.insert(id) {
+                return Err(format!("model id {id:?} appears twice"));
+            }
+        }
+        for cloud in &self.cloud {
+            crate::egress::check(&cloud.base_url).map_err(|e| format!("[[cloud]] {}: {e}", cloud.id))?;
+            if cloud.api_key_file.is_some() && cloud.api_key_env.is_some() {
+                return Err(format!("[[cloud]] {}: set api_key_file or api_key_env, not both", cloud.id));
             }
         }
         Ok(())
@@ -230,6 +284,21 @@ mod tests {
         assert_eq!(lan.remote.advertised(), vec!["192.168.1.20:7778"]);
         let both = format!("{any}advertise = [\"10.0.0.2:7778\"]\n");
         assert_eq!(Config::parse(&both).unwrap().remote.advertised(), vec!["10.0.0.2:7778"]);
+    }
+
+    #[test]
+    fn cloud_entries_are_checked() {
+        let ok = "[[cloud]]\nid = \"claude\"\nbase_url = \"https://api.anthropic.com/v1\"\napi_key_env = \"K\"\n";
+        let config = Config::parse(ok).unwrap();
+        assert_eq!(config.cloud[0].data_policy, "unknown");
+        let http = "[[cloud]]\nid = \"c\"\nbase_url = \"http://api.example.org/v1\"\n";
+        assert!(Config::parse(http).unwrap_err().contains("HTTPS"));
+        let clash =
+            "[[models]]\nid = \"c\"\npath = \"m.gguf\"\n[[cloud]]\nid = \"c\"\nbase_url = \"https://x.org/v1\"\n";
+        assert!(Config::parse(clash).unwrap_err().contains("twice"));
+        let both =
+            "[[cloud]]\nid = \"c\"\nbase_url = \"https://x.org/v1\"\napi_key_env = \"K\"\napi_key_file = \"k\"\n";
+        assert!(Config::parse(both).unwrap_err().contains("not both"));
     }
 
     #[test]

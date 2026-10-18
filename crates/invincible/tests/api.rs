@@ -82,7 +82,10 @@ async fn models_lists_the_engines() {
         .await
         .unwrap();
     assert_eq!(body["data"][0]["id"], "small");
-    assert_eq!(body["data"][0]["invincible"], json!({ "tier": "node", "healthy": true, "context": 8192 }));
+    assert_eq!(
+        body["data"][0]["invincible"],
+        json!({ "tier": "node", "healthy": true, "context": 8192, "data_policy": "owned" })
+    );
 }
 
 #[tokio::test]
