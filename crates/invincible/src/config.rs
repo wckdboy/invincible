@@ -39,6 +39,30 @@ pub struct Config {
     /// Cloud backends, used only as the routing rules allow (spec/routing.md).
     #[serde(default)]
     pub cloud: Vec<CloudConfig>,
+    /// The Autobot Agent on this machine, which `/v1/agent` passes through to (spec/agent.md).
+    #[serde(default)]
+    pub agent: AgentLink,
+}
+
+/// ```toml
+/// [agent]
+/// url = "http://127.0.0.1:7792"   # where `autobot serve` listens
+/// ```
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentLink {
+    #[serde(default = "agent_url")]
+    pub url: String,
+}
+
+fn agent_url() -> String {
+    "http://127.0.0.1:7792".to_owned()
+}
+
+impl Default for AgentLink {
+    fn default() -> Self {
+        Self { url: agent_url() }
+    }
 }
 
 /// ```toml

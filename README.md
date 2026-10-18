@@ -157,8 +157,8 @@ against its SHA-256, the CUDA build when an NVIDIA GPU is present), then runs `a
    Qwen3.8 27B), downloaded and checked, or any `hf:` GGUF.
 3. **Agent**: its working directory, and whether its turns stay on local models (the default).
 4. **Telegram** (optional): a bot token from @BotFather.
-5. **Background**: launchd agents on macOS, systemd user units on Linux (with linger, so they run
-   after you log out of a VPS).
+5. **Background**: the gateway and the agent as launchd agents on macOS or systemd user units on
+   Linux (with linger, so they run after you log out of a VPS).
 
 Then:
 
@@ -195,8 +195,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   no public address. Strangers get a one-time code, and nobody gets in until you run
   `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
   that was asked can answer. Telegram's servers see bot chats, which are not end-to-end
-  encrypted. The private channel is the Autobot app, paired with the gateway over Noise; using it
-  to drive the agent is next (INV-24).
+  encrypted. The private channel is the Autobot app, paired with the gateway over Noise.
+- **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
+  (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
+  device can therefore start turns, watch their events (tool runs, receipts, approval questions,
+  the answer) and answer approvals, all inside its Noise session. Nothing new is exposed: the
+  agent is reachable only from this machine and from devices you paired.
 
 ## v0 milestone
 

@@ -368,11 +368,24 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     if !config.cloud.is_empty() && config.node.settings().network.is_offline() {
         tracing::info!("the node is offline: cloud backends are configured but will not be used");
     }
+    // The node's token goes to the agent with every request: only to this machine.
+    let agent = reqwest::Url::parse(&config.agent.url).map_err(|e| format!("[agent] url: {e}"))?;
+    if agent.scheme() != "http"
+        || !agent.host_str().is_some_and(|h| {
+            h == "localhost" || h.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        })
+    {
+        return Err(format!(
+            "[agent] url = {:?}: must be http on loopback (the agent runs on this machine)",
+            config.agent.url
+        ));
+    }
     let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
     let receipt_public = receipt_key.public();
     let mut state = AppState::new(engines, config.node.settings(), token)
         .with_cloud(cloud)
-        .with_receipt_key(&config.remote.name(), receipt_key);
+        .with_receipt_key(&config.remote.name(), receipt_key)
+        .with_agent(&config.agent.url);
     if config.remote.enabled() {
         let pairing = Arc::new(
             Pairing::new(

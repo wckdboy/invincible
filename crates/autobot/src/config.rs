@@ -20,6 +20,9 @@ use serde::Deserialize;
 ///
 /// [telegram]
 /// enabled = true                     # token in $AUTOBOT_HOME/telegram.token
+///
+/// [serve]
+/// listen = "127.0.0.1:7792"          # the agent API (spec/agent.md); loopback only
 /// ```
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +35,26 @@ pub struct Config {
     pub approvals: ApprovalConfig,
     #[serde(default)]
     pub telegram: TelegramConfig,
+    #[serde(default)]
+    pub serve: ServeConfig,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServeConfig {
+    /// Where the agent API listens; the gateway passes `/v1/agent` through to it.
+    #[serde(default = "agent_listen")]
+    pub listen: std::net::SocketAddr,
+}
+
+fn agent_listen() -> std::net::SocketAddr {
+    std::net::SocketAddr::from(([127, 0, 0, 1], 7792))
+}
+
+impl Default for ServeConfig {
+    fn default() -> Self {
+        Self { listen: agent_listen() }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

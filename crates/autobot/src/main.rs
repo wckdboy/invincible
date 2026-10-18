@@ -42,7 +42,7 @@ enum Command {
         #[arg(long, default_value = "run")]
         session: String,
     },
-    /// Answer on the enabled channels (Telegram) until stopped.
+    /// Serve the agent API (for paired apps, through the gateway) and Telegram if enabled.
     Serve,
     /// Check the install, the gateway, the model and the channels.
     Doctor,
@@ -149,19 +149,10 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Service { action } => {
             let platform = service::Platform::current()?;
             let user_home = setup::user_home()?;
-            let services = setup::services(&config, &home)?;
+            let services = setup::services(&home)?;
             let lines = match action {
                 ServiceAction::Install => service::install(platform, &user_home, &services)?,
-                ServiceAction::Uninstall => {
-                    // Both, even if Telegram was turned off since.
-                    let mut all = services.clone();
-                    if !all.iter().any(|s| s.name == service::AGENT) {
-                        let mut enabled = config.clone();
-                        enabled.telegram.enabled = true;
-                        all = setup::services(&enabled, &home)?;
-                    }
-                    service::uninstall(platform, &user_home, &all)?
-                }
+                ServiceAction::Uninstall => service::uninstall(platform, &user_home, &services)?,
                 ServiceAction::Status => service::status(platform, &user_home, &services)
                     .into_iter()
                     .map(|(name, installed, running)| {
@@ -296,22 +287,59 @@ async fn chat(config: &Config, home: PathBuf, name: &str, new: bool) -> Result<(
 }
 
 async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
-    if !config.telegram.enabled {
-        return Err("no channel is enabled (turn on Telegram with `autobot setup`)".to_owned());
+    let listen = config.serve.listen;
+    if !listen.ip().is_loopback() {
+        return Err(format!(
+            "[serve] listen = {listen}: the agent API must be on loopback (devices reach it through the gateway)"
+        ));
     }
-    let network = autobot::network()?;
-    let client = invincible::egress::client(&network)
-        .map_err(|e| format!("Telegram needs the network: {e}; set [node] network in the gateway's config"))?;
-    let bot = telegram::Bot::new(client, &config.telegram.api(), &config.telegram.token(&home)?)?;
-    let me = bot.me().await?;
     let agent = Arc::new(autobot::agent(config, &home)?);
-    tracing::info!(
-        "Telegram bot @{} answering (network: {})",
-        me["username"].as_str().unwrap_or("?"),
-        invincible::egress::route(&network)
-    );
+    let info = serde_json::json!({
+        "name": "Autobot",
+        "model": config.gateway.model,
+        "workdir": agent.tools.workdir().display().to_string(),
+        "approvals": format!("{:?}", config.approvals.mode).to_lowercase(),
+        "private": config.gateway.private,
+    });
+    let state =
+        Arc::new(autobot::api::ApiState::new(agent.clone(), config.gateway.token()?, home.join("sessions"), info));
+    let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("listen on {listen}: {e}"))?;
+    tracing::info!("agent API on http://{listen} (paired apps reach it through the gateway)");
+    let api = async move {
+        if let Err(e) = axum::serve(listener, autobot::api::app(state)).await {
+            tracing::error!("agent API: {e}");
+        }
+    };
+
+    let telegram = async {
+        if !config.telegram.enabled {
+            return std::future::pending::<()>().await;
+        }
+        let bot = async {
+            let network = autobot::network()?;
+            let client = invincible::egress::client(&network)
+                .map_err(|e| format!("Telegram needs the network: {e}; set [node] network in the gateway's config"))?;
+            let bot = telegram::Bot::new(client, &config.telegram.api(), &config.telegram.token(&home)?)?;
+            let me = bot.me().await?;
+            tracing::info!(
+                "Telegram bot @{} answering (network: {})",
+                me["username"].as_str().unwrap_or("?"),
+                invincible::egress::route(&network)
+            );
+            Ok::<_, String>(bot)
+        };
+        match bot.await {
+            Ok(bot) => telegram::serve(bot, agent.clone(), home.clone()).await,
+            Err(e) => {
+                // The agent API keeps running; Telegram waits for a fix and a restart.
+                tracing::error!("Telegram is off: {e}");
+                std::future::pending::<()>().await
+            }
+        }
+    };
     tokio::select! {
-        () = telegram::serve(bot, agent, home) => Ok(()),
+        () = api => Ok(()),
+        () = telegram => Ok(()),
         () = shutdown() => Ok(()),
     }
 }

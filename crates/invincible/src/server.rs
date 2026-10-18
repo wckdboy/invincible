@@ -14,7 +14,7 @@ use axum::extract::{Path, Request as HttpRequest, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reason, Request, RouteInput, Tier, decide};
 use serde_json::{Value, json};
@@ -39,6 +39,8 @@ pub struct AppState {
     pub name: String,
     pub receipt_key: Arc<ReceiptKey>,
     pub receipts: Arc<ReceiptStore>,
+    /// The Autobot Agent's API on this machine (spec/agent.md).
+    pub agent_url: String,
 }
 
 impl AppState {
@@ -61,7 +63,13 @@ impl AppState {
             name: "invincible".to_owned(),
             receipt_key,
             receipts: Arc::default(),
+            agent_url: "http://127.0.0.1:7792".to_owned(),
         }
+    }
+
+    pub fn with_agent(mut self, url: &str) -> Self {
+        self.agent_url = url.trim_end_matches('/').to_owned();
+        self
     }
 
     pub fn with_receipt_key(mut self, name: &str, key: ReceiptKey) -> Self {
@@ -108,6 +116,45 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/messages", post(messages))
         .route("/v1/receipts/{id}", get(receipt))
         .route("/v1/node", get(node_info))
+        .route("/v1/agent", any(agent))
+        .route("/v1/agent/{*rest}", any(agent))
+}
+
+/// Passes `/v1/agent` through to the Autobot Agent on this machine, with the node's token, and
+/// streams its answer back (turns are event streams). Callers here are already trusted: the
+/// local app checked the token, a device was checked by its pinned key.
+async fn agent(State(state): State<Arc<AppState>>, request: HttpRequest) -> Response {
+    let path = request.uri().path_and_query().map_or("/v1/agent", |p| p.as_str()).to_owned();
+    let method = request.method().clone();
+    let content_type = request.headers().get(header::CONTENT_TYPE).cloned();
+    let body = match axum::body::to_bytes(request.into_body(), 1 << 20).await {
+        Ok(body) => body,
+        Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error", "the body is too large"),
+    };
+    let mut forward =
+        state.client.request(method, format!("{}{path}", state.agent_url)).bearer_auth(&state.token).body(body);
+    if let Some(content_type) = content_type {
+        forward = forward.header(header::CONTENT_TYPE, content_type);
+    }
+    let upstream = match forward.send().await {
+        Ok(upstream) => upstream,
+        Err(e) => {
+            tracing::debug!("agent unreachable: {e}");
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "agent_unavailable",
+                "the Autobot Agent is not running on this machine (`autobot serve`)",
+            );
+        }
+    };
+    let status = StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
+    let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
+    *response.status_mut() = status;
+    if let Some(content_type) = content_type.and_then(|v| HeaderValue::from_bytes(v.as_bytes()).ok()) {
+        response.headers_mut().insert(header::CONTENT_TYPE, content_type);
+    }
+    response
 }
 
 async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {

@@ -212,15 +212,12 @@ pub fn run<R: BufRead>(prompt: &mut Prompt<R>, home: &Path) -> Result<(), String
     set(&agent_path, "telegram", "enabled", toml_edit::value(telegram))?;
 
     eprintln!("\n5. Background");
-    if prompt.yes("   run the gateway (and the Telegram bot) in the background, also after reboots?", true)? {
-        let config = config::Config::load(&agent_path)?;
-        for line in
-            crate::service::install(crate::service::Platform::current()?, &user_home()?, &services(&config, home)?)?
-        {
+    if prompt.yes("   run the gateway and the agent in the background, also after reboots?", true)? {
+        for line in crate::service::install(crate::service::Platform::current()?, &user_home()?, &services(home)?)? {
             eprintln!("   {line}");
         }
     } else {
-        eprintln!("   start by hand: `invincible serve`, then `autobot` to chat");
+        eprintln!("   start by hand: `invincible serve` and `autobot serve`; `autobot` chats in the terminal");
     }
     eprintln!("\nDone. `autobot doctor` checks everything; `autobot` starts a chat.");
     Ok(())
@@ -230,8 +227,8 @@ pub fn user_home() -> Result<std::path::PathBuf, String> {
     std::env::var_os("HOME").map(std::path::PathBuf::from).ok_or("HOME is not set".to_owned())
 }
 
-/// The services this configuration runs.
-pub fn services(config: &config::Config, home: &Path) -> Result<Vec<crate::service::Service>, String> {
+/// The services that run the gateway and the agent.
+pub fn services(home: &Path) -> Result<Vec<crate::service::Service>, String> {
     use crate::service::{AGENT, GATEWAY, Service};
     let gateway_bin = crate::find_program("invincible").ok_or("the `invincible` command is not installed")?;
     let gateway_home = invincible::config::home()?;
@@ -243,16 +240,15 @@ pub fn services(config: &config::Config, home: &Path) -> Result<Vec<crate::servi
         log: gateway_home.join("logs/gateway.log"),
         after: None,
     }];
-    if config.telegram.enabled {
-        services.push(Service {
-            name: AGENT,
-            description: "Autobot Agent",
-            program: absolute(&std::env::current_exe().map_err(|e| e.to_string())?)?,
-            args: vec!["serve".into()],
-            log: home.join("logs/agent.log"),
-            after: Some(GATEWAY),
-        });
-    }
+    // The agent too: its API is how paired apps reach it, and Telegram runs in it when on.
+    services.push(Service {
+        name: AGENT,
+        description: "Autobot Agent",
+        program: absolute(&std::env::current_exe().map_err(|e| e.to_string())?)?,
+        args: vec!["serve".into()],
+        log: home.join("logs/agent.log"),
+        after: Some(GATEWAY),
+    });
     Ok(services)
 }
 

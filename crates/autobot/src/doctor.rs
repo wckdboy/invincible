@@ -105,7 +105,7 @@ async fn finish(mut checks: Vec<Check>, config: &Config, home: &Path) -> Vec<Che
         }
     }
     if let (Ok(platform), Ok(user_home)) = (crate::service::Platform::current(), crate::setup::user_home())
-        && let Ok(services) = crate::setup::services(config, home)
+        && let Ok(services) = crate::setup::services(home)
     {
         for (name, installed, running) in crate::service::status(platform, &user_home, &services) {
             checks.push(match (installed, running) {

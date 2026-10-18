@@ -108,6 +108,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "clap",
+ "futures-util",
  "invincible",
  "invincible-policy",
  "reqwest",

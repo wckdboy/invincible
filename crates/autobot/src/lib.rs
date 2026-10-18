@@ -2,6 +2,7 @@
 //! machine as its model provider. Installed, configured and run together with the gateway.
 
 pub mod agent;
+pub mod api;
 pub mod approval;
 pub mod config;
 pub mod doctor;
