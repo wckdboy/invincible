@@ -15,8 +15,10 @@ they make it faster when you choose to use them.
 > implemented but not yet independently reviewed). Cloud backends are used only as the rules allow,
 > with personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)). Not
 > every request gets a signed receipt saying where it ran and what left the node
-> ([spec/receipts.md](spec/receipts.md)). Not yet: Autobot's side of pairing, agents, evals, the
-> installer. Work is tracked in Plane (project **INV** in the
+> ([spec/receipts.md](spec/receipts.md)). Autobot's protocol layer (Noise pairing, sessions, receipt
+> checks) matches the node byte for byte and pairs with a live node
+> ([autobot#2](https://github.com/wckdboy/autobot/pull/2)); its "My node" screens are next. Not yet:
+> agents, evals, the installer. Work is tracked in Plane (project **INV** in the
 > WCKD workspace).
 
 ## Why
@@ -265,7 +267,8 @@ invincible devices --remove laptop   # unpair: refused at the next handshake or 
 ```
 
 Paired devices reach the inference API with no token (their key authenticates them) and never the
-admin endpoints. Autobot will pair by scanning the same QR code (INV-14). The protocol is in
+admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer is in
+[autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.
 
