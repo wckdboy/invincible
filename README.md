@@ -268,6 +268,10 @@ invincible devices                   # on the node: who is paired
 invincible devices --remove laptop   # unpair: refused at the next handshake or frame
 ```
 
+On macOS with the application firewall on, the first remote connection can wait for the "accept
+incoming connections?" prompt for `invincible` (or `System Settings › Network › Firewall`): allow it,
+or pairing hangs until it times out.
+
 Paired devices reach the inference API with no token (their key authenticates them) and never the
 admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
