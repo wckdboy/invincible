@@ -23,8 +23,8 @@ they make it faster when you choose to use them.
 > shows the node's signed receipts in each turn's privacy receipt
 > ([autobot#3](https://github.com/wckdboy/autobot/pull/3)). First release:
 > [v0.0.1](https://github.com/wckdboy/invincible/releases/tag/v0.0.1) (static Linux and macOS
-> binaries, reproducible, with build attestations). Not yet: iOS, evals, a release signature with
-> a key you pin. Work is tracked in Plane (project **INV** in the WCKD workspace).
+> binaries, reproducible, with build attestations; from v0.0.2 also signed with a pinned key). Not
+> yet: iOS, evals. Work is tracked in Plane (project **INV** in the WCKD workspace).
 
 ## Why
 
@@ -152,9 +152,10 @@ curl -fsSL https://raw.githubusercontent.com/wckdboy/invincible/main/install.sh 
 ```
 
 It puts both commands in `~/.local/bin`: the latest release's static binaries (macOS arm64, Linux
-x86_64 and arm64), checked against the release's `SHA256SUMS` and, when the GitHub CLI is signed
-in, against their Sigstore build attestation; without a release it builds them from source
-(installing Rust with rustup if needed). It installs llama.cpp if it is missing (Homebrew on macOS; otherwise a pinned upstream build checked
+x86_64 and arm64). The release's `SHA256SUMS` must carry a valid signature from the release key
+pinned in the script (an SSH signature, checked with `ssh-keygen`), and the archive must match
+it; when the GitHub CLI is signed in, the archive's Sigstore build attestation is checked too.
+Without a signed release it builds them from source (installing Rust with rustup if needed). It installs llama.cpp if it is missing (Homebrew on macOS; otherwise a pinned upstream build checked
 against its SHA-256, the CUDA build when an NVIDIA GPU is present), then runs `autobot setup`:
 
 1. **Network** for the whole machine: `offline`, `direct`, or Tor / SOCKS5. The gateway's cloud
@@ -180,7 +181,14 @@ carries a build-provenance attestation (`gh attestation verify <archive> --repo 
 The Linux builds are reproducible: before publishing, the workflow builds the x86_64 archive a
 second time on another machine and refuses to publish unless the bytes match. To check one
 yourself, build the tagged commit from `/tmp/invincible-src` with the flags in `release.yml`.
-A signature with a key you can pin is next (INV-18).
+`SHA256SUMS` is signed with the release key, which lives only as a GitHub secret. To check a
+download by hand:
+
+```sh
+echo 'invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPGy6kHVQQ+W282VFPR/Qo' > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I invincible-release -n invincible-release -s SHA256SUMS.sig < SHA256SUMS
+shasum -a 256 -c SHA256SUMS
+```
 
 ## The Autobot Agent
 
