@@ -26,7 +26,8 @@ they make it faster when you choose to use them.
 > [autobot#5](https://github.com/wckdboy/autobot/pull/5)). First release:
 > [v0.0.1](https://github.com/wckdboy/invincible/releases/tag/v0.0.1) (static Linux and macOS
 > binaries, reproducible, with build attestations; from v0.0.2 also signed with a pinned key). Not
-> yet: evals, the agent screen on iOS. Work is tracked in Plane (project **INV** in the WCKD workspace).
+> yet: real-task eval suites from Autobot, Omnie and Nightfall. Work is tracked in Plane (project
+> **INV** in the WCKD workspace).
 
 ## Why
 
@@ -361,6 +362,36 @@ admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer 
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.
 
+## Evals: local against frontier, on your own work
+
+`invincible eval` runs a task file against models the gateway serves and checks every answer by
+rule ([spec/evals.md](spec/evals.md)): contains, equals, regex, a JSON field, a word limit. No
+model grades another, so a result is the same however often it runs.
+
+```sh
+invincible eval evals/seed.jsonl --model qwen3.5-4b --model qwen3-0.6b          # local models
+invincible eval evals/seed.jsonl --model qwen3.5-4b --model claude --confirm     # and a cloud one
+invincible eval evals/seed.jsonl --model qwen3.5-4b --thinking --tag reasoning   # let it think
+```
+
+It prints the pass rate and median time per model and per tag, and the tasks where the models
+differ; `--out results.json` keeps every answer, check and receipt id. Thinking models are asked
+to answer directly unless you pass `--thinking` (then they get an 8192-token budget), and an
+answer that runs out of tokens says so instead of counting as wrong. Cloud models go through the
+gateway like any request: redacted, receipted, and only with `--confirm`.
+
+[`evals/seed.jsonl`](evals/seed.jsonl) has 40 tasks with one right answer each (extraction to
+JSON, arithmetic and units, CAD and engineering, Swift / Kotlin / Rust / shell, following
+instructions, not making things up). On a MacBook (M-series, Metal), October 2026:
+
+| model | pass | median |
+|---|---|---|
+| Qwen3.5 4B (Q4_K_M) | 34/40 | 0.2 s |
+| Qwen3 0.6B (Q8_0) | 13/40 | 0.2 s |
+| Qwen3.5 4B, thinking, reasoning tasks only | 4/4 (2/4 without) | 8.3 s |
+
+Real tasks from Autobot, Omnie and Nightfall go in task files of their own next to it.
+
 ## Repository
 
 | Path | What |
@@ -370,6 +401,7 @@ independently reviewed yet**.
 | `crates/invincible` | Invincible Gateway (the node): config, engine supervisor, local API, pairing and remote access, and the `invincible` command |
 | `crates/autobot` | The Autobot Agent: agent loop, tools, approvals, sessions, Telegram, setup, doctor, services, and the `autobot` command |
 | [`install.sh`](install.sh) | The installer for both |
+| [`evals/`](evals/) | Task files for `invincible eval` |
 
 ```sh
 cargo test --workspace                                  # includes every conformance vector

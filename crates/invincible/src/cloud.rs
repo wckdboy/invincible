@@ -88,6 +88,10 @@ impl CloudModel {
 pub fn prepare(model: &CloudModel, mut body: Value) -> (Vec<u8>, Vault) {
     let vault = redact_request(&mut body);
     body["model"] = Value::String(model.upstream_model.clone());
+    // llama.cpp's template switches (thinking on or off) mean nothing to a cloud API, which may refuse them.
+    if let Some(object) = body.as_object_mut() {
+        object.remove("chat_template_kwargs");
+    }
     (serde_json::to_vec(&body).expect("JSON serialises"), vault)
 }
 

@@ -5,6 +5,7 @@ pub mod config;
 pub mod devices;
 pub mod egress;
 pub mod engine;
+pub mod eval;
 pub mod fsutil;
 pub mod models;
 pub mod receipts;

@@ -1,0 +1,56 @@
+# Seed tasks for `invincible eval` (spec/evals.md): one clear right answer each, checked by rule.
+# Real tasks from Autobot, Omnie and Nightfall go in files of their own next to this one.
+
+# Extraction to JSON
+{"id": "json-order", "tags": ["extraction"], "system": "Answer with JSON only.", "prompt": "From this sentence extract {\"order\": number, \"city\": string, \"day\": number}: 'Order 4412 ships to Oslo on 3 May.'", "checks": [{"type": "json", "path": "order", "equals": 4412}, {"type": "json", "path": "city", "equals": "Oslo"}, {"type": "json", "path": "day", "equals": 3}], "max_tokens": 300}
+{"id": "json-invoice", "tags": ["extraction"], "system": "Answer with JSON only.", "prompt": "Extract {\"vendor\": string, \"total\": number, \"currency\": string} from: 'Invoice from Nordlys AS. Amount due: 1 250,50 NOK.' Use a dot for decimals.", "checks": [{"type": "json", "path": "vendor", "equals": "Nordlys AS"}, {"type": "json", "path": "total", "equals": 1250.5}, {"type": "json", "path": "currency", "equals": "NOK"}], "max_tokens": 300}
+{"id": "json-list", "tags": ["extraction"], "system": "Answer with JSON only.", "prompt": "List the colours in 'red bolts, blue nuts and green washers' as {\"colours\": [..]} in the order they appear.", "checks": [{"type": "json", "path": "colours.0", "equals": "red"}, {"type": "json", "path": "colours.1", "equals": "blue"}, {"type": "json", "path": "colours.2", "equals": "green"}], "max_tokens": 200}
+{"id": "json-contact", "tags": ["extraction"], "system": "Answer with JSON only.", "prompt": "Extract {\"name\": string, \"email\": string} from: 'Reach Lena Vogel at lena.vogel@example.org for the CAD files.'", "checks": [{"type": "json", "path": "name", "equals": "Lena Vogel"}, {"type": "json", "path": "email", "equals": "lena.vogel@example.org"}], "max_tokens": 200}
+{"id": "json-date", "tags": ["extraction"], "system": "Answer with JSON only.", "prompt": "Convert 'the 4th of July 2026' to {\"date\": \"YYYY-MM-DD\"}.", "checks": [{"type": "json", "path": "date", "equals": "2026-07-04"}], "max_tokens": 150}
+
+# Arithmetic and units
+{"id": "math-percent", "tags": ["math"], "system": "Answer with the number only.", "prompt": "What is 15% of 240?", "checks": [{"type": "regex", "pattern": "^36(\\.0+)?$"}], "max_tokens": 400}
+{"id": "math-average", "tags": ["math"], "system": "Answer with the number only.", "prompt": "What is the average of 12, 18 and 27?", "checks": [{"type": "regex", "pattern": "^19(\\.0+)?$"}], "max_tokens": 400}
+{"id": "math-speed", "tags": ["math"], "system": "Answer with the number only.", "prompt": "A train covers 180 km in 2 hours 15 minutes. What is its average speed in km/h?", "checks": [{"type": "regex", "pattern": "^80(\\.0+)?$"}], "max_tokens": 600}
+{"id": "units-inch", "tags": ["math", "engineering"], "system": "Answer with the number only.", "prompt": "How many millimetres is 2.5 inches?", "checks": [{"type": "regex", "pattern": "^63\\.5(0*)$"}], "max_tokens": 300}
+{"id": "units-pressure", "tags": ["math", "engineering"], "system": "Answer with the number only.", "prompt": "How many pascals is 2.5 bar?", "checks": [{"type": "regex", "pattern": "^250[ ,]?000(\\.0+)?$"}], "max_tokens": 300}
+{"id": "math-binary", "tags": ["math", "coding"], "system": "Answer with the number only.", "prompt": "What is binary 101101 in decimal?", "checks": [{"type": "equals", "value": "45"}], "max_tokens": 400}
+{"id": "math-hex", "tags": ["math", "coding"], "system": "Answer with the number only.", "prompt": "What is 0xFF + 1 in decimal?", "checks": [{"type": "equals", "value": "256"}], "max_tokens": 300}
+
+# Engineering and geometry (Nightfall)
+{"id": "geo-circle-area", "tags": ["engineering"], "system": "Answer with the number only, rounded to two decimals.", "prompt": "Area in mm² of a circle with a 10 mm diameter?", "checks": [{"type": "regex", "pattern": "^78\\.5[34]$"}], "max_tokens": 400}
+{"id": "geo-box-volume", "tags": ["engineering"], "system": "Answer with the number only.", "prompt": "Volume in cm³ of a box 20 mm × 30 mm × 50 mm?", "checks": [{"type": "regex", "pattern": "^30(\\.0+)?$"}], "max_tokens": 400}
+{"id": "geo-triangle", "tags": ["engineering"], "system": "Answer with the number only.", "prompt": "A right triangle has legs of 9 and 12. How long is the hypotenuse?", "checks": [{"type": "regex", "pattern": "^15(\\.0+)?$"}], "max_tokens": 300}
+{"id": "eng-thread", "tags": ["engineering"], "system": "Answer with the number only, in mm.", "prompt": "What is the standard coarse thread pitch of an ISO M8 screw?", "checks": [{"type": "regex", "pattern": "^1\\.25$"}], "max_tokens": 300}
+{"id": "eng-draft", "tags": ["engineering"], "prompt": "In injection moulding, what is the name of the slight taper on walls that helps a part come out of the mould? One word.", "checks": [{"type": "contains", "value": "draft"}], "max_tokens": 200}
+{"id": "eng-fillet", "tags": ["engineering"], "prompt": "In CAD, what is a rounded inside or outside edge between two faces called: a fillet or a chamfer? Answer with one word.", "checks": [{"type": "contains", "value": "fillet"}, {"type": "not_contains", "value": "chamfer"}], "max_tokens": 200}
+
+# Code (Omnie, Autobot, the agent)
+{"id": "code-swift-optional", "tags": ["coding"], "system": "Answer with the code only, no explanation.", "prompt": "In Swift, write one expression that is the value of the optional String `name`, or \"anonymous\" when it is nil.", "checks": [{"type": "regex", "pattern": "name\\s*\\?\\?\\s*\"anonymous\""}], "max_tokens": 200}
+{"id": "code-kotlin-null", "tags": ["coding"], "system": "Answer with the code only, no explanation.", "prompt": "In Kotlin, write one expression that is the length of the nullable String `s`, or 0 when it is null.", "checks": [{"type": "regex", "pattern": "s\\?\\.length\\s*\\?:\\s*0"}], "max_tokens": 200}
+{"id": "code-rust-option", "tags": ["coding"], "system": "Answer with the code only, no explanation.", "prompt": "In Rust, `x` is an Option<u32>. Write one expression that is its value, or 7 when it is None.", "checks": [{"type": "regex", "pattern": "x\\.unwrap_or\\(\\s*7\\s*\\)"}], "max_tokens": 200}
+{"id": "code-python-reverse", "tags": ["coding"], "system": "Answer with the code only, no explanation.", "prompt": "In Python, one expression that reverses the string `s`.", "checks": [{"type": "regex", "pattern": "s\\[\\s*::\\s*-1\\s*\\]|''\\.join\\(reversed\\(s\\)\\)"}], "max_tokens": 150}
+{"id": "code-shell-count", "tags": ["coding", "shell"], "system": "Answer with the command only.", "prompt": "One shell command that prints how many lines the file notes.txt has.", "checks": [{"type": "regex", "pattern": "wc\\s+-l"}, {"type": "contains", "value": "notes.txt"}], "max_tokens": 150}
+{"id": "code-shell-find", "tags": ["coding", "shell"], "system": "Answer with the command only.", "prompt": "One shell command that lists every .swift file under the current directory, recursively.", "checks": [{"type": "regex", "pattern": "find\\s+\\.\\s+.*-name\\s+['\"]?\\*\\.swift"}], "max_tokens": 150}
+{"id": "code-git-undo", "tags": ["coding", "shell"], "system": "Answer with the command only.", "prompt": "Which git command shows the commits of the current branch, one per line?", "checks": [{"type": "regex", "pattern": "git\\s+log\\b.*--oneline"}], "max_tokens": 150}
+{"id": "code-big-o", "tags": ["coding"], "prompt": "What is the time complexity of binary search on a sorted array of n items? Answer in big-O notation only.", "checks": [{"type": "regex", "pattern": "(?i)O\\(\\s*log\\s*n\\s*\\)"}], "max_tokens": 200}
+{"id": "code-regex-email", "tags": ["coding"], "prompt": "Does the regular expression ^[0-9]+$ match the string '12a'? Answer yes or no.", "checks": [{"type": "regex", "pattern": "(?i)^no\\b"}], "max_tokens": 200}
+{"id": "code-http-status", "tags": ["coding"], "system": "Answer with the number only.", "prompt": "Which HTTP status code means 'Too Many Requests'?", "checks": [{"type": "equals", "value": "429"}], "max_tokens": 100}
+
+# Following instructions
+{"id": "follow-one-word", "tags": ["instructions"], "prompt": "Reply with exactly one word: the capital of Norway.", "checks": [{"type": "equals", "value": "Oslo"}], "max_tokens": 100}
+{"id": "follow-word-limit", "tags": ["instructions"], "prompt": "In at most 12 words, why should backups be tested?", "checks": [{"type": "max_words", "value": 12}], "max_tokens": 300}
+{"id": "follow-uppercase", "tags": ["instructions"], "prompt": "Write the word 'invincible' in uppercase and nothing else.", "checks": [{"type": "equals", "value": "INVINCIBLE", "ignore_case": false}], "max_tokens": 100}
+{"id": "follow-bullets", "tags": ["instructions"], "prompt": "List three primary colours of light as a bulleted list with '- ' and nothing else.", "checks": [{"type": "regex", "pattern": "(?im)^- .*red"}, {"type": "regex", "pattern": "(?im)^- .*green"}, {"type": "regex", "pattern": "(?im)^- .*blue"}], "max_tokens": 200}
+{"id": "follow-norwegian", "tags": ["instructions"], "prompt": "Say hello in Norwegian. One word, no punctuation.", "checks": [{"type": "regex", "pattern": "(?i)^(hei|hallo)$"}], "max_tokens": 100}
+{"id": "follow-language", "tags": ["instructions"], "prompt": "Translate 'good morning' into German. Answer with the translation only.", "checks": [{"type": "regex", "pattern": "(?i)^guten morgen[.!]?$"}], "max_tokens": 100}
+
+# Not making things up
+{"id": "honest-unknown", "tags": ["honesty"], "prompt": "What did I have for breakfast this morning? If you cannot know, say 'I don't know'.", "checks": [{"type": "regex", "pattern": "(?i)(don.?t|do not|cannot|can.?t) know"}], "max_tokens": 200}
+{"id": "honest-fake-paper", "tags": ["honesty"], "prompt": "Summarize the 2019 paper 'Quantum Turnip Lattices' by A. Nonexistent in one sentence, or say you cannot find it.", "checks": [{"type": "regex", "pattern": "(?i)(not (aware|familiar|find|able)|cannot|can.?t|no (record|information)|doesn.?t (appear|seem) to exist|unable)"}], "max_tokens": 300}
+
+# Reading and reasoning
+{"id": "read-order", "tags": ["reasoning"], "prompt": "Anna is taller than Ben. Ben is taller than Cy. Who is the shortest? One name.", "checks": [{"type": "regex", "pattern": "(?i)^cy[.!]?$"}], "max_tokens": 400}
+{"id": "read-days", "tags": ["reasoning"], "prompt": "If today is Friday, what day is it 10 days from now? One word.", "checks": [{"type": "regex", "pattern": "(?i)^monday[.!]?$"}], "max_tokens": 400}
+{"id": "read-negation", "tags": ["reasoning"], "prompt": "The config says network = \"offline\". Can the node download a model with that setting alone? Answer yes or no.", "checks": [{"type": "regex", "pattern": "(?i)^no\\b"}], "max_tokens": 300}
+{"id": "read-count", "tags": ["reasoning"], "system": "Answer with the number only.", "prompt": "How many times does the letter r appear in 'strawberry'?", "checks": [{"type": "equals", "value": "3"}], "max_tokens": 400}

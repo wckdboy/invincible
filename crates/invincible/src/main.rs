@@ -65,6 +65,29 @@ enum Command {
         #[command(subcommand)]
         action: ModelAction,
     },
+    /// Run a task file against models the node serves, checking every answer by rule (spec/evals.md).
+    Eval {
+        /// The tasks (JSON Lines).
+        tasks: PathBuf,
+        /// A model to run them on, by id or `auto`; repeat to compare.
+        #[arg(long = "model", required = true)]
+        models: Vec<String>,
+        /// Answer the router's "ask" for cloud models (they are refused otherwise).
+        #[arg(long)]
+        confirm: bool,
+        /// Let thinking models think first (with an 8192-token budget); by default they are asked
+        /// to answer directly.
+        #[arg(long)]
+        thinking: bool,
+        /// Write every answer and check here (JSON).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Only tasks with this tag.
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Print where a request would run, given a routing input (spec/routing.md) as JSON.
     Route {
         /// The input file; reads stdin when absent or `-`.
@@ -329,6 +352,54 @@ fn run(cli: Cli) -> Result<(), String> {
                 println!("added {id} ({}); restart the node to serve it", dest.display());
                 Ok(())
             })
+        }
+        Command::Eval { tasks, models, confirm, thinking, out, tag, config } => {
+            let home = config::home()?;
+            let path = config.unwrap_or_else(|| home.join("config.toml"));
+            let config = match fsutil::read_optional(&path)? {
+                Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+                None => Config::parse("")?,
+            };
+            let text = std::fs::read_to_string(&tasks).map_err(|e| format!("{}: {e}", tasks.display()))?;
+            let mut list = invincible::eval::parse_tasks(&text).map_err(|e| format!("{}: {e}", tasks.display()))?;
+            if let Some(tag) = &tag {
+                list.retain(|t| t.tags.contains(tag));
+            }
+            let token = token::load_or_create(&home.join("token"))?;
+            let base = format!("http://{}/v1", config.listen);
+            let client = reqwest::Client::builder().no_proxy().build().map_err(|e| e.to_string())?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+            let results = runtime.block_on(async {
+                let mut results = Vec::new();
+                for model in &models {
+                    eprintln!("{model}: {} tasks", list.len());
+                    let options = invincible::eval::RunOptions { confirmed: confirm, thinking };
+                    let outcomes = invincible::eval::run_model(&client, &base, &token, model, &list, options, |o| {
+                        let mark = if o.pass { "✓" } else { "✗" };
+                        let why = o.error.clone().unwrap_or_else(|| o.failed.join("; "));
+                        eprintln!(
+                            "  {mark} {} ({:.1} s){}",
+                            o.task,
+                            o.latency_ms as f64 / 1000.0,
+                            if why.is_empty() { String::new() } else { format!(": {why}") }
+                        );
+                    })
+                    .await;
+                    results.push((model.clone(), outcomes));
+                }
+                results
+            });
+            println!("{}", invincible::eval::report(&list, &results));
+            if let Some(out) = out {
+                let json: serde_json::Value = results
+                    .iter()
+                    .map(|(m, o)| (m.clone(), serde_json::to_value(o).unwrap_or_default()))
+                    .collect::<serde_json::Map<_, _>>()
+                    .into();
+                std::fs::write(&out, serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?)
+                    .map_err(|e| format!("{}: {e}", out.display()))?;
+            }
+            Ok(())
         }
         Command::Route { file } => {
             let text = match file.filter(|f| f.as_os_str() != "-") {
