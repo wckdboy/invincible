@@ -61,3 +61,26 @@ jobs:
           autobot --version
           autobot doctor || true
           test -x "$HOME/.invincible/llama.cpp/llama-server" || command -v llama-server
+      # The background services, for real: systemd user units on Linux, launchd agents on macOS.
+      - name: services
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo loginctl enable-linger "$USER"
+            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            for i in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
+          fi
+          autobot service install
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:7777/health && break; sleep 2; done
+          curl -sf http://127.0.0.1:7777/health
+          # The agent API answers through the gateway once both run.
+          token=$(cat "$HOME/.invincible/token")
+          for i in $(seq 1 30); do curl -sf -H "authorization: Bearer $token" http://127.0.0.1:7777/v1/agent && break; sleep 2; done
+          curl -sf -H "authorization: Bearer $token" http://127.0.0.1:7777/v1/agent
+          autobot service status
+          autobot service uninstall
+      - if: failure()
+        run: |
+          cat "$HOME/.invincible/logs/gateway.log" "$HOME/.autobot/logs/agent.log" 2>/dev/null | tail -40 || true
+          ls -la "$HOME/.config/systemd/user" "$HOME/Library/LaunchAgents" 2>/dev/null || true
+          XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user status invincible.service autobot.service 2>/dev/null | tail -30 || true
