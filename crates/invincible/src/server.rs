@@ -239,6 +239,7 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
 /// The loopback app: the API and the admin endpoints behind the token, plus `/health`.
 pub fn app(state: Arc<AppState>) -> Router {
     let admin = Router::new()
+        .route("/v1/fetch", post(fetch))
         .route("/v1/admin/pairing", post(start_pairing))
         .route("/v1/admin/devices", get(list_devices))
         .route("/v1/admin/devices/{name}", delete(remove_device));
@@ -250,6 +251,54 @@ pub fn app(state: Arc<AppState>) -> Router {
 /// authenticated by their pinned key, so no token, and they cannot administer the node.
 pub fn device_app(state: Arc<AppState>) -> Router {
     api().with_state(state)
+}
+
+/// `POST /v1/fetch {"url"}`: a web page through the node's network policy, receipted
+/// (crate::fetch). Loopback API only.
+async fn fetch(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    let Some(url) = body["url"].as_str() else {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is {\"url\": \"https://…\"}");
+    };
+    let Some(client) = state.egress.clone() else {
+        return error(StatusCode::FORBIDDEN, "offline", "the node is offline ([node] network = \"offline\")");
+    };
+    let host = match crate::egress::check(url) {
+        Ok(parsed) if parsed.scheme() == "https" => parsed.host_str().unwrap_or_default().to_owned(),
+        _ => return error(StatusCode::BAD_REQUEST, "invalid_request_error", "only https:// URLs"),
+    };
+    let mut draft = match Draft::new() {
+        Ok(draft) => draft,
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    draft.api = "fetch";
+    draft.client = headers.get(CLIENT_HEADER).and_then(|v| v.to_str().ok()).map(|v| v.chars().take(64).collect());
+    let received = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let result = crate::fetch::get(&client, url, received.clone()).await;
+    draft.attempts.push(Attempt {
+        host,
+        route: crate::egress::route(&state.node.network),
+        sent: url.len() as u64,
+        received,
+        ok: result.is_ok(),
+    });
+    let response = match result {
+        Ok(page) => Json(json!({
+            "url": url,
+            "status": page.status,
+            "content_type": page.content_type,
+            "text": page.text,
+            "truncated": page.truncated,
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::BAD_GATEWAY, "fetch_failed", &e),
+    };
+    crate::receipts::attach(
+        response,
+        Arc::new(std::sync::Mutex::new(draft)),
+        state.receipt_key.clone(),
+        state.receipts.clone(),
+        state.audit.clone(),
+    )
 }
 
 async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {

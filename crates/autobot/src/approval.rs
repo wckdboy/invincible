@@ -23,6 +23,8 @@ pub enum Action {
     Read(PathBuf),
     /// The gateway's router asks before using a cloud model; the text says why.
     Cloud(String),
+    /// Fetch a web page (through the gateway, under the node's network policy).
+    Fetch(String),
 }
 
 impl Action {
@@ -33,6 +35,7 @@ impl Action {
             Self::Write { .. } => "write",
             Self::Read(_) => "read",
             Self::Cloud(_) => "cloud",
+            Self::Fetch(_) => "fetch",
         }
     }
 
@@ -43,6 +46,7 @@ impl Action {
             Self::Write { path, bytes, .. } => format!("write {bytes} bytes to {}", path.display()),
             Self::Read(path) => format!("read {} (outside the working directory)", path.display()),
             Self::Cloud(why) => format!("send this turn to a cloud model: {why}"),
+            Self::Fetch(url) => format!("fetch {url}"),
         }
     }
 }
@@ -97,6 +101,17 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
     }
     if let Action::Command(command) = action
         && allowlisted(&config.allow, command)
+    {
+        return Verdict::Run;
+    }
+    // A URL allowlist entry (`https://docs.rs`) covers that site: the URL is it, or under it.
+    if let Action::Fetch(url) = action
+        && config
+            .allow
+            .iter()
+            .map(|a| a.trim().trim_end_matches('/'))
+            .filter(|a| a.starts_with("https://"))
+            .any(|a| url == a || url.strip_prefix(a).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('?')))
     {
         return Verdict::Run;
     }

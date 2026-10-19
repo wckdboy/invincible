@@ -73,3 +73,12 @@ A receipt never contains prompt or answer text, values that were redacted, or ti
 the `canonical` JSON and the `signature`. A `verify` case gives a `public_key`, a `receipt` and a
 `signature` and expects `valid`. The expected values were computed with an independent Ed25519
 implementation (Python `cryptography`, OpenSSL), not with Invincible.
+
+## Fetches
+
+`POST /v1/fetch {"url": "https://…"}` (loopback API only, not the device API) reads a web page for
+the agent under the node's network mode (refused while offline; through Tor or SOCKS5 when set;
+HTTPS only, redirects held to the same rule) and answers `{"url", "status", "content_type",
+"text", "truncated"}`, the text readable (tags, scripts and styles gone; at most 32 KiB). It gets a
+receipt like a chat completion, with `decision` null and one `egress` entry for the page's host,
+and is in the audit log with `api` `fetch`.

@@ -440,9 +440,8 @@ impl Schedules {
             return Err("the task is empty".to_owned());
         }
         if let Some(groups) = &spec.tools
-            && let Some(unknown) = groups
-                .iter()
-                .find(|g| !["web", "vault"].contains(&g.as_str()) && !crate::tools::GROUPS.iter().any(|(n, _)| n == g))
+            && let Some(unknown) =
+                groups.iter().find(|g| g.as_str() != "vault" && !crate::tools::GROUPS.iter().any(|(n, _)| n == g))
         {
             return Err(format!("unknown tool group {unknown:?}"));
         }

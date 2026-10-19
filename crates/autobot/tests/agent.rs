@@ -124,7 +124,7 @@ async fn an_approved_command_runs_and_its_output_goes_back() {
     let (headers, first) = &script.seen[0];
     assert_eq!(headers["authorization"], "Bearer secret");
     assert_eq!(headers["invincible-private"], "1", "agent turns are private by default");
-    assert_eq!(first["tools"].as_array().unwrap().len(), 5, "terminal, read, write, edit, list");
+    assert_eq!(first["tools"].as_array().unwrap().len(), 6, "terminal, read, write, edit, fetch, list");
     assert_eq!(first["messages"][0]["role"], "system");
     // The second call carries the tool call and its result, without the reasoning.
     let messages = script.seen[1].1["messages"].as_array().unwrap();
@@ -287,7 +287,8 @@ async fn a_recipe_gets_only_its_tool_groups() {
     let seen = script.lock().unwrap().seen.clone();
     let offered: Vec<&str> =
         seen[0].1["tools"].as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
-    assert_eq!(offered, ["read_file", "list_dir"]);
+    // The recipe's `web` group: web_fetch, on the node too.
+    assert_eq!(offered, ["read_file", "web_fetch", "list_dir"]);
     assert!(!dir.join("work/notes.md").exists());
     let session = Session::open(&dir.join("sessions"), "cron-r-morning").unwrap();
     assert!(
@@ -371,6 +372,7 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
             "read_file",
             "write_file",
             "edit_file",
+            "web_fetch",
             "list_dir",
             "remember",
             "schedule_task",
@@ -648,11 +650,68 @@ fn a_team_config_is_checked() {
         autobot::team::Team::from_config(&roles, &Default::default()).is_err()
     };
     assert!(bad("has space", &[]));
-    assert!(bad("coder", &["web"]));
+    assert!(bad("coder", &["vault"]));
     assert!(!bad("coder", &["files-read", "terminal"]));
     let config: autobot::config::Config =
         toml::from_str("[agents.r]\ndescription = \"reads\"\ntools = [\"files-read\"]\n[team]\nmax_parallel = 3\n")
             .unwrap();
     assert_eq!(config.team.max_parallel, 3);
     assert_eq!(config.agents["r"].tools, ["files-read"]);
+}
+
+#[tokio::test]
+async fn a_web_page_comes_through_the_gateway_after_asking() {
+    // A stand-in gateway that serves /v1/fetch as well as completions.
+    let script: Shared = Arc::new(Mutex::new(Script {
+        answers: VecDeque::from([
+            call("web_fetch", json!({"url": "https://example.com/notes"})),
+            say("It says hello."),
+        ]),
+        seen: Vec::new(),
+    }));
+    let fetched: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let seen_fetch = fetched.clone();
+    let app = axum::Router::new()
+        .route("/v1/chat/completions", axum::routing::post(completions))
+        .with_state(script.clone())
+        .route(
+            "/v1/fetch",
+            axum::routing::post(move |Json(body): Json<Value>| {
+                let seen = seen_fetch.clone();
+                async move {
+                    seen.lock().unwrap().push(body);
+                    (
+                        [("invincible-request-id", "f00d")],
+                        Json(json!({ "status": 200, "content_type": "text/html", "text": "Hello from the page", "truncated": false })),
+                    )
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let dir = temp("fetch");
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let owner = owner(Answer::Once);
+    let mut session = Session::open(&dir.join("sessions"), "f").unwrap();
+    let outcome =
+        agent.turn(&mut session, "what does the page say?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "It says hello.");
+    assert_eq!(*owner.asked.lock().unwrap(), vec![Action::Fetch("https://example.com/notes".into())]);
+    assert_eq!(fetched.lock().unwrap()[0]["url"], "https://example.com/notes");
+    let tool = session.messages.iter().find(|m| m["role"] == "tool").unwrap();
+    assert!(tool["content"].as_str().unwrap().contains("200 · text/html\n\nHello from the page"));
+}
+
+#[test]
+fn unattended_fetches_need_the_site_allowlisted() {
+    use autobot::approval::{Verdict, check};
+    let config = ApprovalConfig { mode: ApprovalMode::Allowlist, allow: vec!["https://docs.rs".into(), "ls".into()] };
+    assert_eq!(check(&config, &Action::Fetch("https://docs.rs/serde".into())), Verdict::Run);
+    assert_eq!(check(&config, &Action::Fetch("https://docs.rs".into())), Verdict::Run);
+    for url in ["https://docs.rs.evil.example/x", "https://evil.example/https://docs.rs", "http://docs.rs/x"] {
+        assert!(matches!(check(&config, &Action::Fetch(url.into())), Verdict::Refuse(_)), "{url}");
+    }
+    let ask = ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() };
+    assert_eq!(check(&ask, &Action::Fetch("https://example.com".into())), Verdict::Ask);
 }

@@ -205,7 +205,10 @@ The same agent as on the phone, for a machine that is always on. It is written i
 provider, so the gateway's rules hold for every agent turn: routing, redaction, receipts.
 
 - **Tools:** `terminal` (a shell command in the working directory, with a timeout), `read_file`,
-  `write_file`, `edit_file` (replace an exact piece of a file), `list_dir`. Results are cut to a size small local models can take.
+  `write_file`, `edit_file` (replace an exact piece of a file), `list_dir`, `web_fetch` (a page as
+  text, through the gateway: under the node's network mode, so offline means no fetch and Tor
+  carries it; HTTPS only; receipted and in the audit log; it asks first, and unattended runs may
+  fetch only sites in the allowlist, written `https://docs.rs`). Results are cut to a size small local models can take.
 - **Approvals** (`[approvals]` in `~/.autobot/config.toml`):
   - `ask` (default): commands, file writes and reads outside the working directory ask first:
     yes, always for this session, or no.

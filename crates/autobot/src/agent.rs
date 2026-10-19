@@ -246,6 +246,17 @@ impl Agent {
         } else {
             events(Event::Tool(&format!("{name} {arguments}")));
         }
+        if let crate::tools::Call::Fetch { url } = &call {
+            return match self.gateway.fetch(url).await {
+                Ok((text, receipt)) => {
+                    if let Some(id) = &receipt {
+                        events(Event::Receipt { id, model: Some("fetch"), tier: Some("web") });
+                    }
+                    crate::tools::cut(text)
+                }
+                Err(e) => format!("error: {e}"),
+            };
+        }
         self.tools.run(&call).await
     }
 

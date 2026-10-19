@@ -108,6 +108,38 @@ impl Gateway {
         Ok(Reply { message, request_id, decision })
     }
 
+    /// A web page through the gateway (its `/v1/fetch`: the node's network policy, receipted):
+    /// the page's text, and the receipt id.
+    pub async fn fetch(&self, url: &str) -> Result<(String, Option<String>), String> {
+        let response = self
+            .client
+            .post(format!("{}/fetch", self.url))
+            .bearer_auth(&self.token)
+            .header(invincible::server::CLIENT_HEADER, "autobot-agent")
+            .json(&json!({ "url": url }))
+            .send()
+            .await
+            .map_err(|e| self.unreachable(e))?;
+        let request_id = response
+            .headers()
+            .get(invincible::receipts::REQUEST_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let status = response.status();
+        let body: Value = response.json().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            return Err(body["error"]["message"].as_str().unwrap_or("the gateway could not fetch it").to_owned());
+        }
+        let text = format!(
+            "{} · {}{}\n\n{}",
+            body["status"],
+            body["content_type"].as_str().unwrap_or("?"),
+            if body["truncated"] == true { " · cut short" } else { "" },
+            body["text"].as_str().unwrap_or_default()
+        );
+        Ok((text, request_id))
+    }
+
     /// The models the gateway serves.
     pub async fn models(&self) -> Result<Vec<String>, String> {
         let reply = self.get("/models").await?;

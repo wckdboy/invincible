@@ -99,10 +99,11 @@ to the model and run, whatever the approval mode, and still under the unattended
 | Group | Tools here |
 |---|---|
 | `files-read` | `read_file`, `list_dir`, `read_skill` |
-| `files-write` | `write_file` (in the working directory) |
-| `memory` | `remember` |
+| `web` | `web_fetch` (asks first; unattended, only allowlisted `https://` sites) |
+| `files-write` | `write_file`, `edit_file` (in the working directory) |
+| `memory` | `remember`, `search_sessions`, `propose_skill` |
 | `terminal` | `terminal` (allowlisted commands only) |
-| `web`, `vault` | none: this machine has no such tools |
+| `vault` | none: this machine has no such tool |
 
 No `tools` means every tool, as for schedules made here; a schedule from a device must name its
 `tools`, and a device can replace only schedules it made itself (`400` otherwise). An interval is

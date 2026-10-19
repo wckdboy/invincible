@@ -26,6 +26,7 @@ pub struct Tools {
 /// no tools for (`web`, `vault`) allow nothing.
 pub const GROUPS: &[(&str, &[&str])] = &[
     ("files-read", &["read_file", "list_dir", "read_skill"]),
+    ("web", &["web_fetch"]),
     ("files-write", &["write_file", "edit_file"]),
     ("memory", &["remember", "search_sessions", "propose_skill"]),
     ("terminal", &["terminal"]),
@@ -57,18 +58,52 @@ tokio::task_local! {
 /// One tool call, parsed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Call {
-    Terminal { command: String },
-    ReadFile { path: PathBuf },
-    WriteFile { path: PathBuf, content: String },
-    EditFile { path: PathBuf, old: String, new: String, all: bool },
-    ListDir { path: PathBuf },
-    Remember { text: String },
-    ReadSkill { name: String },
-    Schedule { when: String, task: String, name: Option<String> },
-    ProposeSkill { name: String, description: String, steps: String },
-    SearchSessions { query: String },
+    Terminal {
+        command: String,
+    },
+    ReadFile {
+        path: PathBuf,
+    },
+    WriteFile {
+        path: PathBuf,
+        content: String,
+    },
+    EditFile {
+        path: PathBuf,
+        old: String,
+        new: String,
+        all: bool,
+    },
+    ListDir {
+        path: PathBuf,
+    },
+    Remember {
+        text: String,
+    },
+    ReadSkill {
+        name: String,
+    },
+    Schedule {
+        when: String,
+        task: String,
+        name: Option<String>,
+    },
+    ProposeSkill {
+        name: String,
+        description: String,
+        steps: String,
+    },
+    /// Run by the agent itself (it has the gateway).
+    Fetch {
+        url: String,
+    },
+    SearchSessions {
+        query: String,
+    },
     ListSchedules,
-    CancelSchedule { id: String },
+    CancelSchedule {
+        id: String,
+    },
 }
 
 impl Tools {
@@ -199,6 +234,12 @@ impl Tools {
                 &["path", "old_text", "new_text"],
             ),
             function(
+                "web_fetch",
+                "Read a web page (https), as text. Goes through the owner's network rules; asks first.",
+                json!({ "url": { "type": "string" } }),
+                &["url"],
+            ),
+            function(
                 "list_dir",
                 "List a directory's entries. Relative paths are in the working directory.",
                 json!({ "path": { "type": "string", "description": "Default: the working directory." } }),
@@ -230,6 +271,7 @@ impl Tools {
                 new: text("new_text")?,
                 all: args.get("replace_all").and_then(Value::as_bool).unwrap_or(false),
             },
+            "web_fetch" => Call::Fetch { url: text("url")?.trim().to_owned() },
             "list_dir" => Call::ListDir { path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())) },
             "remember" if self.home.is_some() => Call::Remember { text: text("text")? },
             "read_skill" if self.home.is_some() => Call::ReadSkill { name: text("name")? },
@@ -252,6 +294,7 @@ impl Tools {
     pub fn action(&self, call: &Call) -> Option<Action> {
         match call {
             Call::Terminal { command } => Some(Action::Command(command.clone())),
+            Call::Fetch { url } => Some(Action::Fetch(url.clone())),
             Call::WriteFile { path, content } => Some(Action::Write {
                 path: path.clone(),
                 bytes: content.len(),
@@ -300,6 +343,7 @@ impl Tools {
                 Some(home) => schedule(home, when, task, name.as_deref()),
                 None => Err("no scheduler here".to_owned()),
             },
+            Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
             Call::ProposeSkill { name, description, steps } => match &self.home {
                 Some(home) => crate::skills::propose(home, name, description, steps),
                 None => Err("no skills here".to_owned()),
@@ -557,7 +601,7 @@ async fn list(path: &Path) -> Result<String, String> {
 }
 
 /// Keeps the start and the end of a long result: errors tend to be at the end.
-fn cut(text: String) -> String {
+pub fn cut(text: String) -> String {
     if text.len() <= RESULT_LIMIT {
         return text;
     }
