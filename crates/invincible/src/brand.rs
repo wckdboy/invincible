@@ -40,8 +40,13 @@ pub const ERROR: Color = color(0xFF, 0x6A, 0x47, 209);
 pub const ADDED: Color = color(0x8F, 0xB5, 0x73, 107);
 pub const REMOVED: Color = color(0xE0, 0x6C, 0x5C, 167);
 
-/// The mark, before a product's name.
+/// The mark in running text, before a product's name.
 pub const MARK: &str = "■";
+
+/// The products' symbols: a lowercase a and a lowercase i, in pixels (`#` on, `.` off). The
+/// same grids are the app icons and the wordmarks' marks (assets/brand).
+pub const GLYPH_A: [&str; 6] = [".####.", "....##", ".#####", "##..##", "##..##", ".#####"];
+pub const GLYPH_I: [&str; 6] = ["##", "..", "##", "##", "##", "##"];
 
 /// The products, each with its signal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +68,39 @@ impl Product {
             Self::Autobot => "autobot",
             Self::Invincible => "invincible",
         }
+    }
+
+    /// The symbol's pixels.
+    pub fn glyph(self) -> &'static [&'static str; 6] {
+        match self {
+            Self::Autobot => &GLYPH_A,
+            Self::Invincible => &GLYPH_I,
+        }
+    }
+
+    /// The symbol in half blocks (`▀ ▄ █`), two pixels to a cell: three lines, in the signal.
+    /// Nothing without color, so a pipe or NO_COLOR gets plain text only.
+    pub fn symbol(self) -> Vec<String> {
+        if !colored() {
+            return Vec::new();
+        }
+        let g = self.glyph();
+        (0..3)
+            .map(|row| {
+                let (top, bottom) = (g[row * 2].as_bytes(), g[row * 2 + 1].as_bytes());
+                let cells: String = top
+                    .iter()
+                    .zip(bottom)
+                    .map(|(t, b)| match (*t == b'#', *b == b'#') {
+                        (true, true) => '█',
+                        (true, false) => '▀',
+                        (false, true) => '▄',
+                        (false, false) => ' ',
+                    })
+                    .collect();
+                paint(self.signal(), &cells)
+            })
+            .collect()
     }
 
     /// `■ name version`, the first line a command prints.
@@ -228,5 +266,9 @@ mod tests {
         assert_eq!(t, "  a    long one  x\n  bbb  c         y\n");
         assert_eq!(error_line(Product::Invincible, "no"), "invincible: no");
         assert_eq!(visible("\x1b[1mab\x1b[0m"), 2);
+        assert!(Product::Autobot.symbol().is_empty(), "no symbol without color");
+        for g in [GLYPH_A, GLYPH_I] {
+            assert!(g.iter().all(|r| r.len() == g[0].len()));
+        }
     }
 }

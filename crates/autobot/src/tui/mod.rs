@@ -3,6 +3,5 @@
 pub mod chat;
 pub mod keys;
 pub mod markdown;
-pub mod mascot;
 pub mod style;
 pub mod ui;

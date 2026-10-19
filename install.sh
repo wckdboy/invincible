@@ -44,7 +44,13 @@ fi
 say() { printf '%b▪%b %s\n' "$C_SIGNAL" "$C_OFF" "$*" >&2; }
 warn() { printf '%b!%b %s\n' "$C_AMBER" "$C_OFF" "$*" >&2; }
 die() { printf '%b✗%b %s\n' "$C_ERROR" "$C_OFF" "$*" >&2; exit 1; }
-printf '%b■%b %binvincible%b %binstaller · invincible and autobot%b\n\n' "$C_SIGNAL" "$C_OFF" "$C_BOLD" "$C_OFF" "$C_ASH" "$C_OFF" >&2
+# The header: Invincible's pixel i (half blocks) beside the name, on a terminal that has color.
+if [ -n "$C_SIGNAL" ]; then
+    printf '%b▀▀%b  %binvincible%b\n%b██%b  %binstaller · invincible and autobot%b\n%b██%b\n\n' \
+        "$C_SIGNAL" "$C_OFF" "$C_BOLD" "$C_OFF" "$C_SIGNAL" "$C_OFF" "$C_ASH" "$C_OFF" "$C_SIGNAL" "$C_OFF" >&2
+else
+    printf 'invincible installer · invincible and autobot\n\n' >&2
+fi
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Questions go to the terminal even when this script arrives through a pipe.

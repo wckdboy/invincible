@@ -15,8 +15,8 @@ This file is the reference. The Autobot app keeps the same rules in
 | What it is | The node you own: a gateway that routes, redacts, receipts and audits every model call | The agent: on your phone, and on your machine through the node |
 | Signal | **Orange** `#9E4C0C` (text on paper) · `#C2651A` (marks on paper) · `#F0882E` (on ink) | **Lilac** `#5444BA` (on paper) · `#A99BF5` (on ink) |
 | Character | Calm infrastructure: tables, receipts, states | A capable colleague: conversation, work in progress, questions |
-| Wordmark | `■ invincible` | `■ autobot` |
-| Mascot | none: only the mark | Pip (below) |
+| Symbol | a pixel lowercase **i** | a pixel lowercase **a** |
+| Wordmark | the i, then `invincible` | the a, then `autobot` |
 
 Orange and lilac are a pair on purpose: complements, opposite each other on the wheel, the same
 weight, both on the same warm paper. Invincible is the warm one (the node, steady, always on),
@@ -27,11 +27,14 @@ product's color ever means "something is wrong". Code in a terminal is sand, a w
 
 - **Neutrals.** Ink `#121211`, paper `#EFEAE2`, ash `#8E8A84` for what is secondary, and a fainter
   ash `#6E6A64` for structure (gutters, rules, hints). Almost everything is in these.
-- **Type.** JetBrains Mono for anything a machine says (commands, paths, ids, numbers, labels);
-  the platform's sans for prose. Antonio, the condensed display face, only for the wordmark and
-  a page's single headline.
-- **The mark.** A small solid square, `■`, in the product's signal, before the lowercase name.
-  In running text the name is plain: Invincible, Autobot.
+- **Type.** JetBrains Mono for anything a machine says (commands, paths, ids, numbers, labels,
+  the wordmarks); the platform's sans for prose and headings.
+- **The symbols.** A lowercase letter drawn in pixels, in the product's signal: an **a** for
+  Autobot (6 × 6), an **i** for Invincible (2 × 6). Two-pixel strokes, square corners, nothing
+  else: the one pixel touch in a functional system. They are the app icons (the symbol on ink),
+  the wordmarks' marks, and in a terminal three rows of half blocks beside the header.
+  In running text a small square `■` in the signal stands for them, and the names are plain:
+  Invincible, Autobot.
 - **States.** Words first, then a plain glyph: `✓` in ash when fine, `!` in yellow `#E2C044` when
   it needs a look, `✗` in the error color `#FF6A47` when it failed. Color never carries meaning
   alone, so a screen reader, a log file and `NO_COLOR` lose nothing.
@@ -47,10 +50,10 @@ product's color ever means "something is wrong". Code in a terminal is sand, a w
 Both CLIs and the installer speak one grammar:
 
 ```
-■ autobot 0.0.9 · via invincible
-  model      claude-sonnet (cloud)
-  approvals  edits
-  project    ~/src/app  main  AGENTS.md
+ ▀▀▀█▄  autobot 0.0.9 · via invincible
+▄█▀▀██    model      claude-sonnet (cloud)
+▀█▄▄██    approvals  edits
+          project    ~/src/app  main  AGENTS.md
 
 › fix the failing test
 
@@ -67,9 +70,10 @@ Both CLIs and the installer speak one grammar:
   ─ claude-sonnet (cloud) · 3 tool calls · 18.2k in · 412 out · 9.4s
 ```
 
-- First line: `■ name version`, then quiet `label  value` rows.
+- First lines: the symbol in half blocks (with color) beside `name version`, then quiet
+  `label  value` rows; without color, `■ name version`.
 - `▪` (a smaller square) starts each step; `│` and `└` hang what it gave back, in faint ash.
-- The prompt `›` and the mark are the only signal-colored characters at rest.
+- The prompt `›` and the symbol are the only signal-colored characters at rest.
 - Truecolor when the terminal says so (`COLORTERM`), the nearest 256-color otherwise, nothing
   when output is not a terminal or `NO_COLOR` is set. Errors print as `✗ message` on a terminal
   and `invincible: message` in logs and scripts.
@@ -79,50 +83,12 @@ Both CLIs and the installer speak one grammar:
 - Dark is ink, light is paper; the signal is the only saturated color on either.
 - Surfaces are flat. Hairline rules (`#2F2F2E` on ink, `#CFC8BC` on paper) instead of shadows;
   corners small (4–8 px) or none.
-- One accent element per view. Halftones and registration marks are print references: at most one
-  per page, never behind text.
-- Autobot's screens about the node ("My node", receipts from it) use Invincible's orange for
-  the node's mark, so the user sees which product is speaking.
-
-## The mascot
-
-> In design: Pip is being replaced by **Buddy and its drone**, a lilac-plated robot on a charcoal
-> frame with one white eye, and a small orange drone beside it (the node). Pip stays here until
-> Buddy's sprites land.
-
-Autobot's mascot is **Pip**: a small capsule robot, drawn on a 14×14 grid so it works as pixel
-art and in a terminal (half blocks, two pixels to a cell; the 7×6 mini sits beside `autobot`'s
-header). Its face and its antenna carry the feeling; the body never changes.
-
-```
-..............
-........RR....   R  antenna light: lilac; orange when it works on your node;
-........S.....      dark (O) when something failed
-.......S......   S  stem, ash; bent, never straight
-...BBBBBBBB...   B  body: #C9C3BA on ink, #3A3632 on paper
-..BBBBBBBBBB..   K  visor: ink
-.BBKKKKKKKKBB.   E  eyes: bone, one pixel wide, two tall, close together
-.BBKKEKKEKKBB.   C  cheeks: the light's color, half into the visor; only when content
-.BBKKEKKEKKBB.
-.BBKCKKKKCKBB.
-..BBBBBBBBBB..
-...BBBBBBBB...
-....BB..BB....
-..............
-```
-
-- `idle`, `blink`: eyes open and shut, cheeks on.
-- `happy` (done): `^ ^` eyes, cheeks on, the light sparks.
-- `think`: eyes up and to the side, the antenna tilts, no cheeks.
-- `work`: eyes down (reading), no cheeks.
-- `oops` (failed): small eyes under slanted brows, the antenna droops, the light is off.
-- `mini`: for the terminal header.
-
-The light and the cheeks are the only signal pixels. SVGs for ink (`-dark`) and paper (`-light`)
-are in [`assets/brand/mascot/`](assets/brand/mascot) (`pip-*`); `pip-on-node-*` has the orange light. Use Pip small: an empty
-state, a welcome, the terminal header. Never behind text, never animated for its own sake (a
-blink every few seconds at most), and never on Invincible's own surfaces: the node has no
-mascot, only its mark.
+- One accent element per view. No halftones, no textures, no illustration: the pixel symbols
+  are the only ornament.
+- Autobot's screens about the node ("My node", receipts from it) carry Invincible's orange i,
+  so the user sees which product is speaking.
+- Files: SVG wordmarks for paper (`-light`) and ink (`-dark`), the symbols alone
+  (`*-symbol-*`), and 1024 px app icons (`*-icon.svg`) in `assets/brand/`.
 
 ## Writing the names
 

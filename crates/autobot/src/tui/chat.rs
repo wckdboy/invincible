@@ -486,11 +486,14 @@ impl Chat {
         };
         let messages = self.session.messages.len();
         // `■ autobot 0.0.9 · via invincible`, then what this session is, as quiet rows.
-        let header = format!(
-            "{} {}",
-            invincible::brand::Product::Autobot.header(env!("CARGO_PKG_VERSION")),
-            style::faint("· via invincible")
-        );
+        // Beside the symbol the name stands alone; without it (no color) the mark leads.
+        let symbol = invincible::brand::Product::Autobot.symbol();
+        let name = if symbol.is_empty() {
+            invincible::brand::Product::Autobot.header(env!("CARGO_PKG_VERSION"))
+        } else {
+            format!("{} {}", style::bold("autobot"), style::gray(env!("CARGO_PKG_VERSION")))
+        };
+        let header = format!("{name} {}", style::faint("· via invincible"));
         let private = if self.agent.gateway.private() { style::faint("  private") } else { String::new() };
         let rows = [
             ("model", format!("{}{private}", self.model_label())),
@@ -505,15 +508,14 @@ impl Chat {
                 ),
             ),
         ];
-        // The mascot beside the first three lines (only with color; half blocks need it).
+        // The symbol beside the first three lines (only with color; half blocks need it).
         let lines: Vec<String> =
             std::iter::once(header).chain(invincible::brand::rows(&rows).lines().map(str::to_owned)).collect();
-        let mascot = super::mascot::render(&super::mascot::MINI, invincible::brand::LILAC);
         for (i, line) in lines.iter().enumerate() {
-            match (mascot.is_empty(), mascot.get(i)) {
+            match (symbol.is_empty(), symbol.get(i)) {
                 (true, _) => println!("{line}"),
                 (false, Some(art)) => println!("{art}  {line}"),
-                (false, None) => println!("         {line}"),
+                (false, None) => println!("        {line}"),
             }
         }
         let hint = if code {
