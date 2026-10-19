@@ -65,6 +65,11 @@ enum Command {
         #[command(subcommand)]
         action: ModelAction,
     },
+    /// Cloud models (OpenAI-compatible APIs): add one with its key, list, remove.
+    Cloud {
+        #[command(subcommand)]
+        action: CloudAction,
+    },
     /// Run a task file against models the node serves, checking every answer by rule (spec/evals.md).
     Eval {
         /// The tasks (JSON Lines).
@@ -114,6 +119,83 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum CloudAction {
+    /// Add a cloud model: PROVIDER is deepseek, anthropic, openai, openrouter, or custom (with
+    /// --base-url). The API key is read from --key-file, or asked for (not shown as you type),
+    /// and kept in $INVINCIBLE_HOME/keys (0600). Requests to it are redacted and receipted, and
+    /// the router asks before using it unless [node] egress = "auto".
+    Add {
+        provider: String,
+        /// The id requests and `autobot code --model` use [default: the provider's name].
+        #[arg(long)]
+        id: Option<String>,
+        /// The provider's model name [default: the provider's usual one, where there is one].
+        #[arg(long)]
+        model: Option<String>,
+        /// The OpenAI-compatible API base (for custom).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Its context, in tokens.
+        #[arg(long)]
+        context: Option<u64>,
+        /// What it does with requests: no-retention, retention:<days>, trains, unknown.
+        #[arg(long)]
+        policy: Option<String>,
+        /// Read the key from this file (it is copied into the gateway's keys).
+        #[arg(long)]
+        key_file: Option<PathBuf>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Without the next steps (for `autobot setup`, which goes on to them).
+        #[arg(long, hide = true)]
+        quiet: bool,
+    },
+    /// List the cloud models.
+    List {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Remove a cloud model, and its key.
+    Remove {
+        id: String,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+}
+
+/// Reads a secret from the terminal without showing it (a line from stdin when it is not one).
+fn read_secret(prompt: &str) -> Result<String, String> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let tty = std::io::stdin().is_terminal();
+    if tty {
+        eprint!("{prompt}");
+        let _ = std::io::stderr().flush();
+        let _ = std::process::Command::new("stty").arg("-echo").stdin(std::process::Stdio::inherit()).status();
+    }
+    let mut line = String::new();
+    let read = std::io::stdin().lock().read_line(&mut line);
+    if tty {
+        let _ = std::process::Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
+        eprintln!();
+    }
+    read.map_err(|e| e.to_string())?;
+    let secret = line.trim().to_owned();
+    if secret.is_empty() {
+        return Err("no key given".to_owned());
+    }
+    Ok(secret)
+}
+
+/// How to restart the gateway so it reads its config again.
+fn restart_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "restart the gateway to use it: launchctl kickstart -k gui/$(id -u)/sh.invincible.gateway (or stop and start `invincible serve`)"
+    } else {
+        "restart the gateway to use it: systemctl --user restart invincible.service (or stop and start `invincible serve`)"
+    }
+}
+
+#[derive(Subcommand)]
 enum ModelAction {
     /// Download a model, verify its SHA-256, check it fits, and add it to the config.
     Add {
@@ -143,6 +225,123 @@ enum ModelAction {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+}
+
+fn cloud_command(action: CloudAction) -> Result<(), String> {
+    use invincible::cloud;
+    let home = config::home()?;
+    match action {
+        CloudAction::Add { provider, id, model, base_url, context, policy, key_file, config, quiet } => {
+            let config_path = config.unwrap_or_else(|| home.join("config.toml"));
+            let preset = cloud::preset(&provider);
+            if preset.is_none() && provider != "custom" {
+                let names: Vec<&str> = cloud::PRESETS.iter().map(|p| p.name).collect();
+                return Err(format!("{provider:?}: one of {}, or custom with --base-url", names.join(", ")));
+            }
+            let base_url = base_url
+                .or(preset.map(|p| p.base_url.to_owned()))
+                .ok_or("custom needs --base-url (an OpenAI-compatible API, e.g. https://host/v1)")?;
+            let model = model
+                .or(preset.and_then(|p| p.model.map(str::to_owned)))
+                .ok_or(format!("{provider} needs --model (the provider's model name)"))?;
+            invincible::egress::check(&base_url).map_err(|e| format!("--base-url: {e}"))?;
+            let id = id.unwrap_or_else(|| provider.clone());
+            if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+                return Err(format!("{id:?}: an id is letters, digits, -, _ and ."));
+            }
+            let policy = policy.or(preset.map(|p| p.data_policy.to_owned())).unwrap_or_else(|| "unknown".to_owned());
+            let context = context.or(preset.and_then(|p| p.context));
+            let current = match fsutil::read_optional(&config_path)? {
+                Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", config_path.display()))?,
+                None => Config::parse("")?,
+            };
+            if current.cloud.iter().any(|c| c.id == id) || current.models.iter().any(|m| m.id == id) {
+                return Err(format!("there is a model {id:?} already (--id to name this one differently)"));
+            }
+            let key = match key_file {
+                Some(file) => {
+                    let key = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+                    key.trim().to_owned()
+                }
+                None => read_secret(&format!("API key for {id} ({base_url}): "))?,
+            };
+            let dir = config_path.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| home.clone());
+            let keys = dir.join("keys");
+            std::fs::create_dir_all(&keys).map_err(|e| format!("{}: {e}", keys.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&keys, std::fs::Permissions::from_mode(0o700));
+            }
+            let key_rel = format!("keys/{id}");
+            fsutil::replace_private(&dir.join(&key_rel), &key)?;
+            let entry = cloud::Entry {
+                id: &id,
+                upstream_model: &model,
+                base_url: &base_url,
+                api_key_file: Some(&key_rel),
+                context,
+                data_policy: &policy,
+            };
+            if let Err(e) = cloud::add_to_config(&config_path, &entry) {
+                let _ = std::fs::remove_file(dir.join(&key_rel));
+                return Err(e);
+            }
+            println!(
+                "added {id}: {model} at {base_url} (data policy: {policy}; key in {})",
+                dir.join(&key_rel).display()
+            );
+            if current.node.egress == "never" {
+                cloud::set_egress(&config_path, "ask")?;
+                println!(
+                    "[node] egress was \"never\"; now \"ask\": the router asks before a turn goes to a cloud model"
+                );
+            }
+            if current.node.network == "offline" {
+                println!(
+                    "note: [node] network is \"offline\", so nothing reaches it until you set network = \"direct\" (or tor/socks5)"
+                );
+            }
+            if !quiet {
+                println!("{}", restart_hint());
+                println!("then: autobot code --model {id}");
+            }
+            Ok(())
+        }
+        CloudAction::List { config } => {
+            let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
+            if config.cloud.is_empty() {
+                println!("no cloud models (add one with `invincible cloud add deepseek`)");
+            }
+            for c in &config.cloud {
+                let key = match c.key(&home) {
+                    Ok(Some(_)) => "key set",
+                    Ok(None) => "no key",
+                    Err(_) => "key missing",
+                };
+                println!(
+                    "{}  {} at {}  {}  {key}",
+                    c.id,
+                    c.upstream_model.as_deref().unwrap_or(&c.id),
+                    c.base_url,
+                    c.data_policy
+                );
+            }
+            println!("egress: {} · network: {}", config.node.egress, config.node.network);
+            Ok(())
+        }
+        CloudAction::Remove { id, config } => {
+            let config_path = config.unwrap_or_else(|| home.join("config.toml"));
+            if !cloud::remove_from_config(&config_path, &id)? {
+                return Err(format!("no cloud model {id:?}"));
+            }
+            let dir = config_path.parent().map(std::path::Path::to_path_buf).unwrap_or(home);
+            let _ = std::fs::remove_file(dir.join("keys").join(&id));
+            println!("removed {id}");
+            println!("{}", restart_hint());
+            Ok(())
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -280,6 +479,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 Ok(())
             })
         }
+        Command::Cloud { action } => cloud_command(action),
         Command::Model { action: ModelAction::List { config } } => {
             let home = config::home()?;
             let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
@@ -518,8 +718,12 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         supervisors.push(engine::supervise(engine.clone(), Launch::llama_server(&config.engine, model, port, &logs)));
         engines.push(engine);
     }
-    if engines.is_empty() {
-        tracing::warn!("no models configured: every request will be blocked (add [[models]] to the config)");
+    if engines.is_empty() && config.cloud.is_empty() {
+        tracing::warn!(
+            "no models configured: every request will be blocked (`invincible model add` or `invincible cloud add`)"
+        );
+    } else if engines.is_empty() {
+        tracing::info!("no local models: requests go to cloud models only, so private ones are refused");
     }
 
     let mut cloud = Vec::new();

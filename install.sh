@@ -13,6 +13,8 @@
 #      build checked against its SHA-256 (CUDA when an NVIDIA GPU is present);
 #   3. runs `autobot setup`: network, model, approvals, Telegram, background services.
 #
+# An upgrade restarts the running services and keeps the setup (INVINCIBLE_SETUP=1 runs it again).
+#
 # Options (environment): INVINCIBLE_YES=1 answers yes to every question; INVINCIBLE_NO_SETUP=1
 # skips step 3; INVINCIBLE_FROM_SOURCE=1 builds even when there is a release; INVINCIBLE_REF=
 # <branch|tag> builds that ref; INVINCIBLE_BIN=<dir> installs there.
@@ -163,8 +165,17 @@ build_from_source() {
     done
 }
 
+# What was here before: an upgrade restarts the services and keeps the setup.
+before=""
+if [ -x "$BIN/autobot" ]; then before=$("$BIN/autobot" --version 2>/dev/null | cut -d' ' -f2 || true); fi
+
 install_release || build_from_source
-say "installed invincible and autobot in $BIN"
+now=$("$BIN/autobot" --version 2>/dev/null | cut -d' ' -f2 || true)
+if [ -n "$before" ] && [ "$before" != "$now" ]; then
+    say "upgraded invincible and autobot in $BIN: $before -> $now"
+else
+    say "installed invincible and autobot $now in $BIN"
+fi
 
 case ":$PATH:" in
     *":$BIN:"*) ;;
@@ -264,9 +275,31 @@ if [ -n "${LLAMA_SERVER:-}" ]; then
     fi
 fi
 
+# --- Running services pick up the new binaries ----------------------------------------------
+
+restarted=""
+if [ "$OS" = Darwin ]; then
+    for label in sh.invincible.gateway sh.invincible.autobot; do
+        if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+            launchctl kickstart -k "gui/$(id -u)/$label" >/dev/null 2>&1 && restarted="$restarted $label"
+        fi
+    done
+elif have systemctl; then
+    for unit in invincible.service autobot.service; do
+        if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+            systemctl --user restart "$unit" && restarted="$restarted $unit"
+        fi
+    done
+fi
+[ -n "$restarted" ] && say "restarted the running services:$restarted"
+
 # --- 3. setup ----------------------------------------------------------------------------------
 
-if [ "${INVINCIBLE_NO_SETUP:-}" = 1 ]; then
+# Set up already (an upgrade): kept as it is, unless asked for again.
+AUTOBOT_DIR="${AUTOBOT_HOME:-$HOME/.autobot}"
+if [ -f "$AUTOBOT_DIR/config.toml" ] && grep -qs '^\[\[models\]\]' "$INV_HOME/config.toml" && [ "${INVINCIBLE_SETUP:-}" != 1 ]; then
+    say "done; your setup is kept (\`autobot setup\` changes it, \`autobot doctor\` checks it)"
+elif [ "${INVINCIBLE_NO_SETUP:-}" = 1 ]; then
     say "done; run \`autobot setup\` when you are ready"
 elif [ -n "$TTY" ]; then
     "$BIN/autobot" setup <"$TTY"

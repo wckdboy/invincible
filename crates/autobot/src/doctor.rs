@@ -39,8 +39,25 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
     match &gateway {
         Ok(g) => {
             checks.push(ok(format!("gateway network: {} (egress: {})", g.node.network, g.node.egress)));
-            if g.models.is_empty() {
-                checks.push(bad("the gateway has no models (`autobot setup` or `invincible model add`)"));
+            if g.models.is_empty() && g.cloud.is_empty() {
+                checks.push(bad(
+                    "the gateway has no models (`autobot setup`, `invincible model add` or `invincible cloud add`)",
+                ));
+            }
+            for c in &g.cloud {
+                match c.key(&gateway_path.parent().map(Path::to_path_buf).unwrap_or_default()) {
+                    Ok(Some(_)) => checks.push(ok(format!(
+                        "cloud model {} ({} at {}, data policy {})",
+                        c.id,
+                        c.upstream_model.as_deref().unwrap_or(&c.id),
+                        c.base_url,
+                        c.data_policy
+                    ))),
+                    Ok(None) => {
+                        checks.push(bad(format!("cloud model {}: no API key (`invincible cloud add` again)", c.id)))
+                    }
+                    Err(e) => checks.push(bad(format!("cloud model {}: {e}", c.id))),
+                }
             }
             for m in &g.models {
                 if m.path.is_file() {
@@ -71,8 +88,33 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
                 }
             }
             let messages = [json!({ "role": "user", "content": "Reply with just the word ok." })];
-            let started = std::time::Instant::now();
-            match agent.gateway.chat(&messages, &json!([]), false).await {
+            let infos = agent.gateway.model_info().await.unwrap_or_default();
+            // Cloud models are not sent a test (that would be the owner's call); the answer is
+            // from a local one, or, when the agent's model is a cloud model, not tried.
+            if let Some(cloud) = infos.iter().find(|m| m.id == agent.gateway.model() && m.is_cloud()) {
+                checks.push(ok(format!(
+                    "the agent's model is {} ({}): not sent a test from here; `autobot run --cloud \"say ok\"` tries it",
+                    cloud.id, cloud.tier
+                )));
+                return finish(checks, config, home).await;
+            }
+            let loading = infos.iter().any(|m| !m.is_cloud() && !m.healthy);
+            let mut started = std::time::Instant::now();
+            let mut answer = agent.gateway.chat(&messages, &json!([]), false).await;
+            // Just started (a reboot, an upgrade): the model is still loading. Wait for it a while.
+            let waiting = std::time::Instant::now();
+            while loading
+                && matches!(&answer, Err(e) if e.to_string().contains("no-model"))
+                && waiting.elapsed() < std::time::Duration::from_secs(90)
+            {
+                if waiting.elapsed() < std::time::Duration::from_millis(100) {
+                    eprintln!("… the model is not ready yet (loading?); waiting up to 90 s");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                started = std::time::Instant::now();
+                answer = agent.gateway.chat(&messages, &json!([]), false).await;
+            }
+            match answer {
                 Ok(reply) => {
                     let model = reply.decision.as_ref().and_then(|d| d["model"].as_str().map(str::to_owned));
                     checks.push(ok(format!(
@@ -80,6 +122,17 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
                         model.unwrap_or_else(|| "?".into()),
                         started.elapsed().as_secs_f64(),
                         if config.gateway.private { " (agent turns are private: local models only)" } else { "" }
+                    )));
+                }
+                Err(e)
+                    if e.to_string().contains("no-model") && infos.iter().all(crate::gateway::ModelInfo::is_cloud) =>
+                {
+                    let ids: Vec<&str> = infos.iter().map(|m| m.id.as_str()).collect();
+                    checks.push(bad(format!(
+                        "no local model, and the gateway's automatic choice never uses a cloud model that trains on prompts: name one for the agent ([gateway] model = \"{}\" in {}), or `autobot code --model {}`",
+                        ids.first().copied().unwrap_or("…"),
+                        home.join("config.toml").display(),
+                        ids.first().copied().unwrap_or("…")
                     )));
                 }
                 Err(e) => checks.push(bad(format!("a test answer failed: {e}"))),

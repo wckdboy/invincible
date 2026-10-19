@@ -163,3 +163,160 @@ pub async fn forward(
     }
     Ok(response)
 }
+
+/// A provider `invincible cloud add` knows: where its OpenAI-compatible API is, a model to start
+/// with, its context, and what it does with what it is sent (from its API terms).
+pub struct Preset {
+    pub name: &'static str,
+    pub base_url: &'static str,
+    /// None: the model has to be named (`--model`).
+    pub model: Option<&'static str>,
+    pub context: Option<u64>,
+    pub data_policy: &'static str,
+}
+
+pub const PRESETS: &[Preset] = &[
+    Preset {
+        name: "deepseek",
+        base_url: "https://api.deepseek.com/v1",
+        model: Some("deepseek-chat"),
+        context: Some(64_000),
+        data_policy: "trains",
+    },
+    Preset {
+        name: "anthropic",
+        base_url: "https://api.anthropic.com/v1",
+        model: Some("claude-sonnet-5-5"),
+        context: Some(200_000),
+        data_policy: "retention:30",
+    },
+    Preset {
+        name: "openai",
+        base_url: "https://api.openai.com/v1",
+        model: None,
+        context: Some(128_000),
+        data_policy: "retention:30",
+    },
+    Preset {
+        name: "openrouter",
+        base_url: "https://openrouter.ai/api/v1",
+        model: None,
+        context: None,
+        data_policy: "unknown",
+    },
+];
+
+pub fn preset(name: &str) -> Option<&'static Preset> {
+    PRESETS.iter().find(|p| p.name == name)
+}
+
+/// A `[[cloud]]` entry to add to the config.
+pub struct Entry<'a> {
+    pub id: &'a str,
+    pub upstream_model: &'a str,
+    pub base_url: &'a str,
+    /// Relative to the config's directory.
+    pub api_key_file: Option<&'a str>,
+    pub context: Option<u64>,
+    pub data_policy: &'a str,
+}
+
+fn edit(
+    config: &std::path::Path,
+    change: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<(), String>,
+) -> Result<(), String> {
+    let text = std::fs::read_to_string(config).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("{}: {e}", config.display()))?;
+    change(&mut doc)?;
+    // The result must still be a config the gateway reads.
+    crate::config::Config::parse(&doc.to_string()).map_err(|e| format!("the changed config would not load: {e}"))?;
+    let tmp = config.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string()).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, config).map_err(|e| format!("{}: {e}", config.display()))
+}
+
+/// Appends [entry] as a `[[cloud]]` table, keeping the config's comments and layout.
+pub fn add_to_config(config: &std::path::Path, entry: &Entry) -> Result<(), String> {
+    edit(config, |doc| {
+        let clouds = doc
+            .entry("cloud")
+            .or_insert_with(|| toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()))
+            .as_array_of_tables_mut()
+            .ok_or("`cloud` is not a list of [[cloud]] tables")?;
+        if clouds.iter().any(|t| t.get("id").and_then(|v| v.as_str()) == Some(entry.id)) {
+            return Err(format!("a cloud model with id {:?} is already configured", entry.id));
+        }
+        let mut table = toml_edit::Table::new();
+        table.insert("id", toml_edit::value(entry.id));
+        table.insert("upstream_model", toml_edit::value(entry.upstream_model));
+        table.insert("base_url", toml_edit::value(entry.base_url));
+        if let Some(file) = entry.api_key_file {
+            table.insert("api_key_file", toml_edit::value(file));
+        }
+        if let Some(context) = entry.context {
+            table.insert("context", toml_edit::value(i64::try_from(context).map_err(|e| e.to_string())?));
+        }
+        table.insert("data_policy", toml_edit::value(entry.data_policy));
+        clouds.push(table);
+        Ok(())
+    })
+}
+
+/// Removes the `[[cloud]]` entry [id]; false when there is none.
+pub fn remove_from_config(config: &std::path::Path, id: &str) -> Result<bool, String> {
+    let mut found = false;
+    edit(config, |doc| {
+        if let Some(clouds) = doc.get_mut("cloud").and_then(|c| c.as_array_of_tables_mut()) {
+            let before = clouds.len();
+            clouds.retain(|t| t.get("id").and_then(|v| v.as_str()) != Some(id));
+            found = clouds.len() < before;
+        }
+        Ok(())
+    })?;
+    Ok(found)
+}
+
+/// Sets `[node] egress` (never, ask, auto).
+pub fn set_egress(config: &std::path::Path, egress: &str) -> Result<(), String> {
+    edit(config, |doc| {
+        let node = doc.entry("node").or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
+        node.as_table_mut().ok_or("`node` is not a table")?.insert("egress", toml_edit::value(egress));
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::{Entry, add_to_config, preset, remove_from_config, set_egress};
+
+    #[test]
+    fn cloud_models_are_added_and_removed_keeping_the_rest() {
+        let dir = std::env::temp_dir().join(format!("invincible-cloudcfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.toml");
+        std::fs::write(&config, "# mine\n[node]\nnetwork = \"direct\"\negress = \"never\"\n").unwrap();
+        let p = preset("anthropic").unwrap();
+        let entry = Entry {
+            id: "claude",
+            upstream_model: p.model.unwrap(),
+            base_url: p.base_url,
+            api_key_file: Some("keys/claude"),
+            context: p.context,
+            data_policy: p.data_policy,
+        };
+        add_to_config(&config, &entry).unwrap();
+        assert!(add_to_config(&config, &entry).is_err(), "ids are unique");
+        set_egress(&config, "ask").unwrap();
+        let text = std::fs::read_to_string(&config).unwrap();
+        assert!(text.starts_with("# mine\n"), "{text}");
+        let loaded = crate::config::Config::parse(&text).unwrap();
+        assert_eq!(loaded.node.egress, "ask");
+        assert_eq!(loaded.cloud[0].upstream_model.as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(loaded.cloud[0].data_policy, "retention:30");
+        assert!(remove_from_config(&config, "claude").unwrap());
+        assert!(!remove_from_config(&config, "claude").unwrap());
+        assert!(crate::config::Config::parse(&std::fs::read_to_string(&config).unwrap()).unwrap().cloud.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

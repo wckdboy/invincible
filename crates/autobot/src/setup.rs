@@ -60,13 +60,18 @@ impl<R: BufRead> Prompt<R> {
             eprint!("{question} [{default}]: ");
         }
         std::io::stderr().flush().ok();
+        let line = self.line()?;
+        Ok(if line.is_empty() { default.to_owned() } else { line })
+    }
+
+    /// The next line, trimmed, with no question printed.
+    pub fn line(&mut self) -> Result<String, String> {
         let mut line = String::new();
         let n = self.input.read_line(&mut line).map_err(|e| e.to_string())?;
         if n == 0 {
             return Err("setup needs answers, but input ended (run `autobot setup` in a terminal)".to_owned());
         }
-        let line = line.trim();
-        Ok(if line.is_empty() { default.to_owned() } else { line.to_owned() })
+        Ok(line.trim().to_owned())
     }
 
     pub fn yes(&mut self, question: &str, default: bool) -> Result<bool, String> {
@@ -142,7 +147,9 @@ pub fn run<R: BufRead>(prompt: &mut Prompt<R>, home: &Path) -> Result<(), String
             eprintln!("   {}) {} ({}) {}", i + 1, c.id, invincible::models::gib(c.bytes), c.note);
         }
         eprintln!("   or hf:<owner>/<repo>/<file.gguf>, or skip");
-        let answer = prompt.ask("   model", &(suggested + 1).to_string())?;
+        // Cloud models already: a download is something to choose, not the default.
+        let default = if gateway.cloud.is_empty() { (suggested + 1).to_string() } else { "skip".to_owned() };
+        let answer = prompt.ask("   model", &default)?;
         let (id, source) = match answer.parse::<usize>() {
             Ok(n) if (1..=CHOICES.len()).contains(&n) => {
                 (CHOICES[n - 1].id.to_owned(), CHOICES[n - 1].source.to_owned())
@@ -179,15 +186,88 @@ pub fn run<R: BufRead>(prompt: &mut Prompt<R>, home: &Path) -> Result<(), String
         );
     }
 
-    eprintln!("\n3. Agent");
+    eprintln!("\n3. Cloud models (optional)");
+    let gateway =
+        invincible::config::Config::parse(&invincible::fsutil::read_optional(&gateway_path)?.unwrap_or_default())
+            .map_err(|e| format!("{}: {e}", gateway_path.display()))?;
+    let mut cloud: Option<String> = gateway.cloud.first().map(|c| c.id.clone());
+    if !gateway.cloud.is_empty() {
+        let ids: Vec<_> = gateway.cloud.iter().map(|c| c.id.as_str()).collect();
+        eprintln!("   configured: {} (more with `invincible cloud add`)", ids.join(", "));
+    } else if network == "offline" {
+        eprintln!("   the network is offline: none (add one later with `invincible cloud add`)");
+    } else {
+        eprintln!("   Frontier models through the gateway: every request redacted, receipted and in the audit");
+        eprintln!("   log, and the router asks before a conversation goes to one.");
+        let names: Vec<&str> = invincible::cloud::PRESETS.iter().map(|p| p.name).collect();
+        let answer = prompt.ask(&format!("   provider ({}, or skip)", names.join(", ")), "skip")?;
+        if let Some(preset) = invincible::cloud::preset(&answer) {
+            let model = match preset.model {
+                Some(model) => prompt.ask("   model", model)?,
+                None => prompt.ask("   model (the provider's name for it)", "")?,
+            };
+            eprint!("   API key (not shown as you type; paste and press enter): ");
+            let _ = std::io::stderr().flush();
+            let tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+            if tty {
+                let _ = Command::new("stty").arg("-echo").stdin(std::process::Stdio::inherit()).status();
+            }
+            let key = prompt.line();
+            if tty {
+                let _ = Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
+            }
+            eprintln!();
+            let key = key?;
+            if key.is_empty() {
+                return Err("no API key given; run `autobot setup` again, or `invincible cloud add` later".to_owned());
+            }
+            let key_file = gateway_path.with_file_name(format!(".key-{}", std::process::id()));
+            let _ = std::fs::remove_file(&key_file);
+            invincible::fsutil::create_private(&key_file, &key)?;
+            let status = Command::new(&invincible_bin)
+                .args([
+                    "cloud",
+                    "add",
+                    preset.name,
+                    "--model",
+                    &model,
+                    "--key-file",
+                    &key_file.display().to_string(),
+                    "--quiet",
+                ])
+                .status();
+            let _ = std::fs::remove_file(&key_file);
+            match status {
+                Ok(s) if s.success() => cloud = Some(preset.name.to_owned()),
+                _ => eprintln!("   ! not added; try again with `invincible cloud add {}`", preset.name),
+            }
+        }
+    }
+
+    eprintln!("\n4. Agent");
+    let first_time = !agent_path.exists();
     let current = config::Config::load(&agent_path)?;
     let workdir = prompt.ask("   working directory for tools", &current.agent.workdir(home).display().to_string())?;
     set(&agent_path, "agent", "workdir", toml_edit::value(&workdir))?;
     eprintln!("   Commands and file writes ask you first (change with [approvals] in {}).", agent_path.display());
-    let private = prompt.yes("   keep agent work on this machine only (no cloud models)?", current.gateway.private)?;
+    // With a cloud model, agent work may use it (asked first); without one, local is all there is.
+    let default_private = if cloud.is_some() && first_time { false } else { current.gateway.private };
+    let private = prompt.yes("   keep agent work on this machine only (no cloud models)?", default_private)?;
     set(&agent_path, "gateway", "private", toml_edit::value(private))?;
+    if let Some(id) = cloud.as_ref().filter(|_| !private) {
+        // Only cloud models: the agent names one (the automatic choice skips models that train
+        // on prompts).
+        let gateway =
+            invincible::config::Config::parse(&invincible::fsutil::read_optional(&gateway_path)?.unwrap_or_default())
+                .map_err(|e| format!("{}: {e}", gateway_path.display()))?;
+        if gateway.models.is_empty() && current.gateway.model == "auto" {
+            set(&agent_path, "gateway", "model", toml_edit::value(id.as_str()))?;
+            eprintln!("   the agent uses {id} (no local model)");
+        }
+        eprintln!("   code with it: `autobot code --model {id}` in a project");
+    }
 
-    eprintln!("\n4. Telegram (optional)");
+    eprintln!("\n5. Telegram (optional)");
     eprintln!("   Talk to the agent from your phone through a Telegram bot. Telegram's servers see these");
     eprintln!("   chats (bots are not end-to-end encrypted); the Autobot app, paired with the gateway, is private.");
     let telegram = prompt.yes("   connect a Telegram bot?", current.telegram.enabled)?;
@@ -211,7 +291,7 @@ pub fn run<R: BufRead>(prompt: &mut Prompt<R>, home: &Path) -> Result<(), String
     }
     set(&agent_path, "telegram", "enabled", toml_edit::value(telegram))?;
 
-    eprintln!("\n5. Background");
+    eprintln!("\n6. Background");
     if prompt.yes("   run the gateway and the agent in the background, also after reboots?", true)? {
         for line in crate::service::install(crate::service::Platform::current()?, &user_home()?, &services(home)?)? {
             eprintln!("   {line}");

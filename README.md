@@ -184,6 +184,9 @@ autobot doctor       # check the gateway, the model, the tools, Telegram and the
 autobot cron add "@daily" "check disk space and warn me if a disk is over 90% full" --telegram
 ```
 
+Running the installer again upgrades: the binaries are replaced, the running services are
+restarted on them, and the setup is kept (`INVINCIBLE_SETUP=1` runs it again).
+
 Releases are built by [`release.yml`](.github/workflows/release.yml) on a `v*` tag; each archive
 carries a build-provenance attestation (`gh attestation verify <archive> --repo wckdboy/invincible`).
 The Linux builds are reproducible: before publishing, the workflow builds the x86_64 archive a
@@ -445,6 +448,24 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
 
 Any OpenAI-compatible endpoint works: OpenAI, Anthropic's compatibility endpoint, DeepSeek,
 OpenRouter, a friend's node. Keys live in files or environment variables, never in the config.
+`autobot setup` offers one; `invincible cloud` adds more:
+
+```sh
+invincible cloud add anthropic                 # asks for the key (not shown), keeps it in ~/.invincible/keys
+invincible cloud add deepseek --id ds
+invincible cloud add openai --model <model> --key-file ~/openai.key
+invincible cloud add custom --id mine --model m --base-url https://llm.example.com/v1 --policy no-retention
+invincible cloud list
+invincible cloud remove ds
+```
+
+Presets know each provider's API, a model to start with, its context and its data policy;
+`egress = "never"` becomes `"ask"` with the first cloud model. Restart the gateway to use a new
+one. Automatic routing never picks a model that trains on prompts (DeepSeek's API does), so with
+no local model, name one: `autobot code --model deepseek`, or `[gateway] model` in the agent's
+config (setup does this for a gateway with only cloud models).
+
+Or by hand:
 
 ```toml
 [node]

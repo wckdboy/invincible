@@ -162,6 +162,14 @@ impl Gateway {
         let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         if !status.is_success() {
             let message = parsed["error"]["message"].as_str().map(str::to_owned).unwrap_or(text);
+            if message.contains("no-model") {
+                let hint = if self.private {
+                    "no local model is ready, and this turn is private (local only): wait for the model to load, or allow cloud models (`/private off`, `--model <cloud model>`, or [gateway] private = false)"
+                } else {
+                    "no model is ready: wait for a local one to load, or add a cloud model (`invincible cloud add`)"
+                };
+                return Err(GatewayError::Failed(format!("the gateway refused ({status}): {message}: {hint}")));
+            }
             return Err(if status == reqwest::StatusCode::CONFLICT {
                 GatewayError::Confirm(message)
             } else {
