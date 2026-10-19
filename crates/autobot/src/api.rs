@@ -66,6 +66,8 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/memory", get(memory))
         .route("/v1/agent/memory/{id}", axum::routing::delete(forget))
         .route("/v1/agent/skills", get(skills))
+        .route("/v1/agent/skills/{name}/accept", post(accept_skill))
+        .route("/v1/agent/skills/{name}/reject", post(reject_skill))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token))
         .with_state(state)
 }
@@ -311,7 +313,29 @@ async fn skills(State(state): State<Arc<ApiState>>) -> Json<Value> {
         .into_iter()
         .map(|s| json!({ "name": s.name, "description": s.description }))
         .collect();
-    Json(json!({ "skills": skills }))
+    let proposed: Vec<Value> = crate::skills::proposals(&state.home)
+        .into_iter()
+        .map(|s| {
+            let text = std::fs::read_to_string(&s.path).unwrap_or_default();
+            json!({ "name": s.name, "description": s.description, "text": text })
+        })
+        .collect();
+    Json(json!({ "skills": skills, "proposed": proposed }))
+}
+
+async fn accept_skill(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {
+    match crate::skills::accept(&state.home, &name) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => error(StatusCode::NOT_FOUND, "not_found", &e),
+    }
+}
+
+async fn reject_skill(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {
+    match crate::skills::reject(&state.home, &name) {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "no such proposed skill"),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 #[derive(Deserialize)]

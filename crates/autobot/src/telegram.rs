@@ -446,13 +446,7 @@ async fn handle(
             return Ok(());
         }
         "/skills" => {
-            let skills = crate::skills::list(home);
-            let text = if skills.is_empty() {
-                "No skills yet: put Markdown how-to notes in ~/.autobot/skills on the machine.".to_owned()
-            } else {
-                skills.iter().map(|s| format!("{}: {}", s.name, s.description)).collect::<Vec<_>>().join("\n")
-            };
-            bot.send(chat_id, &text).await?;
+            bot.send(chat_id, &skills_command(home, text.trim_start_matches("/skills").trim())).await?;
             return Ok(());
         }
         _ => {}
@@ -559,6 +553,42 @@ pub fn actions_command(home: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// `/skills`, `/skills show <name>`, `/skills accept <name>`, `/skills reject <name>`.
+pub fn skills_command(home: &Path, args: &str) -> String {
+    let (verb, name) = args.split_once(' ').map_or((args, ""), |(v, n)| (v, n.trim()));
+    match verb {
+        "accept" => match crate::skills::accept(home, name) {
+            Ok(()) => format!("Kept {name}: I use it from now on."),
+            Err(e) => format!("✗ {e}"),
+        },
+        "reject" => match crate::skills::reject(home, name) {
+            Ok(true) => format!("Threw {name} away."),
+            Ok(false) => format!("There is no proposed skill {name:?}."),
+            Err(e) => format!("✗ {e}"),
+        },
+        "show" => {
+            let path = home.join("skills/proposed").join(format!("{name}.md"));
+            match (crate::skills::valid(name), std::fs::read_to_string(&path)) {
+                (true, Ok(text)) => cut_line(&text),
+                _ => crate::skills::read(home, name).unwrap_or_else(|e| format!("✗ {e}")),
+            }
+        }
+        _ => {
+            let mut lines: Vec<String> =
+                crate::skills::list(home).iter().map(|s| format!("{}: {}", s.name, s.description)).collect();
+            if lines.is_empty() {
+                lines.push("No skills yet: put Markdown how-to notes in ~/.autobot/skills on the machine.".to_owned());
+            }
+            let proposed = crate::skills::proposals(home);
+            if !proposed.is_empty() {
+                lines.push("\nProposed by me (/skills show <name>, then /skills accept <name> or reject):".to_owned());
+                lines.extend(proposed.iter().map(|s| format!("{}: {}", s.name, s.description)));
+            }
+            lines.join("\n")
+        }
+    }
 }
 
 /// `/memory`, `/memory forget <id>`.

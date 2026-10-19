@@ -71,13 +71,24 @@ enum Command {
         limit: usize,
     },
     /// The owner's skills: how-to notes for the agent, one Markdown file each in $AUTOBOT_HOME/skills.
-    Skills,
+    Skills {
+        #[command(subcommand)]
+        action: Option<SkillsAction>,
+    },
     /// Scheduled tasks, run by `autobot serve` without anyone to ask: allowlisted commands and
     /// writes in the working directory only.
     Cron {
         #[command(subcommand)]
         action: CronAction,
     },
+}
+
+#[derive(Subcommand)]
+enum SkillsAction {
+    /// Keep a skill the agent proposed: it uses it from now on.
+    Accept { name: String },
+    /// Throw a proposed skill away.
+    Reject { name: String },
 }
 
 #[derive(Subcommand)]
@@ -252,13 +263,35 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Skills => {
+        Command::Skills { action } => {
+            match action {
+                Some(SkillsAction::Accept { name }) => {
+                    autobot::skills::accept(&home, &name)?;
+                    println!("kept {name}: the agent uses it from now on");
+                    return Ok(());
+                }
+                Some(SkillsAction::Reject { name }) => {
+                    if !autobot::skills::reject(&home, &name)? {
+                        return Err(format!("there is no proposed skill {name:?}"));
+                    }
+                    println!("threw {name} away");
+                    return Ok(());
+                }
+                None => {}
+            }
             let skills = autobot::skills::list(&home);
             if skills.is_empty() {
                 println!("no skills yet: put Markdown files in {}", home.join("skills").display());
             }
             for skill in skills {
                 println!("{}  {}", skill.name, skill.description);
+            }
+            let proposals = autobot::skills::proposals(&home);
+            if !proposals.is_empty() {
+                println!("\nproposed by the agent (`autobot skills accept <name>`, or reject):");
+                for skill in proposals {
+                    println!("{}  {}  ({})", skill.name, skill.description, skill.path.display());
+                }
             }
             Ok(())
         }

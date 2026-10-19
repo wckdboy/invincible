@@ -230,7 +230,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Skills:** how-to notes you give it, one Markdown file each in `~/.autobot/skills/` (a
   `description:` line in front matter, or the first line, says what it is for). The agent sees
   their names and descriptions, and reads one with `read_skill` when it fits the task.
-  `autobot skills` lists them.
+  `autobot skills` lists them. The agent can also **propose** one (`propose_skill`) after a
+  multi-step task that worked and will come up again; a proposal is never used until you keep it
+  (`autobot skills accept <name>`, `/skills accept <name>` in Telegram, or the app), since a skill
+  is instructions the agent will follow.
+- **Search over past conversations:** `search_sessions` finds what was said or decided before
+  (words in your messages, its answers and conversation summaries).
 - **A team of agents:** define members in `config.toml`, and the agent hands them work with its
   `delegate` tool. Each member has its own instructions, only the tool groups you give it, and
   optionally its own model; it starts every task fresh, with just the goal and context it was

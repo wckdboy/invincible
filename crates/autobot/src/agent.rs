@@ -347,7 +347,9 @@ impl Agent {
              writes and reads outside the working directory need the owner's approval; if one is refused, \
              do not retry it, say what you would need instead.\n\
              To do something later or regularly (a reminder, a check), use schedule_task, never the \
-             system crontab, at or launchd. \
+             system crontab, at or launchd. When the owner refers to something from before, \
+             search_sessions finds it. After a multi-step task that worked and will come up again, \
+             propose_skill writes down how. \
              Work step by step, check results, and answer briefly in plain text.",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),

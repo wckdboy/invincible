@@ -37,7 +37,9 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by"}]}`: the action log ([audit.md](audit.md)), newest `limit` (default 100, at most 500), oldest first |
 | `GET /v1/agent/memory` | | `{"facts": [{"id", "at", "text"}]}`: what the agent remembered (`remember`) |
 | `DELETE /v1/agent/memory/{id}` | | `{"ok": true}`, or `404` |
-| `GET /v1/agent/skills` | | `{"skills": [{"name", "description"}]}`: the owner's skills in `$AUTOBOT_HOME/skills` |
+| `GET /v1/agent/skills` | | `{"skills": [{"name", "description"}], "proposed": [{"name", "description", "text"}]}`: the owner's skills in `$AUTOBOT_HOME/skills`, and those the agent proposed (`propose_skill`), which it does not use until accepted |
+| `POST /v1/agent/skills/{name}/accept` | | `{"ok": true}`: the proposal becomes a skill; `404` when there is none, or a skill has that name |
+| `POST /v1/agent/skills/{name}/reject` | | `{"ok": true}`, or `404` |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
 already running one answers `409` with type `session_busy`.

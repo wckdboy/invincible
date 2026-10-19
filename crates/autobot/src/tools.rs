@@ -27,7 +27,7 @@ pub struct Tools {
 pub const GROUPS: &[(&str, &[&str])] = &[
     ("files-read", &["read_file", "list_dir", "read_skill"]),
     ("files-write", &["write_file", "edit_file"]),
-    ("memory", &["remember"]),
+    ("memory", &["remember", "search_sessions", "propose_skill"]),
     ("terminal", &["terminal"]),
 ];
 
@@ -65,6 +65,8 @@ pub enum Call {
     Remember { text: String },
     ReadSkill { name: String },
     Schedule { when: String, task: String, name: Option<String> },
+    ProposeSkill { name: String, description: String, steps: String },
+    SearchSessions { query: String },
     ListSchedules,
     CancelSchedule { id: String },
 }
@@ -117,6 +119,20 @@ impl Tools {
                     "task": { "type": "string", "description": "What to do then, as an instruction to yourself" },
                     "name": { "type": "string", "description": "A short name for the list" },
                 }, "required": ["when", "task"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "propose_skill",
+                "description": "After a multi-step task that worked and will come up again, write down how to do it as a skill. The owner reviews it before you can use it.",
+                "parameters": { "type": "object", "properties": {
+                    "name": { "type": "string", "description": "short-name-with-dashes" },
+                    "description": { "type": "string", "description": "One line: what it is for" },
+                    "steps": { "type": "string", "description": "The steps, commands and paths, in Markdown" },
+                }, "required": ["name", "description", "steps"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "search_sessions",
+                "description": "Search earlier conversations for what was said or decided (keywords).",
+                "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] },
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "list_schedules",
@@ -223,6 +239,10 @@ impl Tools {
                 name: args.get("name").and_then(Value::as_str).map(str::to_owned).filter(|n| !n.trim().is_empty()),
             },
             "list_schedules" if self.home.is_some() => Call::ListSchedules,
+            "propose_skill" if self.home.is_some() => {
+                Call::ProposeSkill { name: text("name")?, description: text("description")?, steps: text("steps")? }
+            }
+            "search_sessions" if self.home.is_some() => Call::SearchSessions { query: text("query")? },
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
             other => return Err(format!("there is no tool named {other:?}")),
         })
@@ -254,6 +274,8 @@ impl Tools {
             Call::Remember { .. }
             | Call::ReadSkill { .. }
             | Call::Schedule { .. }
+            | Call::ProposeSkill { .. }
+            | Call::SearchSessions { .. }
             | Call::ListSchedules
             | Call::CancelSchedule { .. } => None,
         }
@@ -277,6 +299,21 @@ impl Tools {
             Call::Schedule { when, task, name } => match &self.home {
                 Some(home) => schedule(home, when, task, name.as_deref()),
                 None => Err("no scheduler here".to_owned()),
+            },
+            Call::ProposeSkill { name, description, steps } => match &self.home {
+                Some(home) => crate::skills::propose(home, name, description, steps),
+                None => Err("no skills here".to_owned()),
+            },
+            Call::SearchSessions { query } => match &self.home {
+                Some(home) => {
+                    let found = crate::session::search(&home.join("sessions"), query, 8, &turn_context().session);
+                    Ok(if found.is_empty() {
+                        "nothing found".to_owned()
+                    } else {
+                        found.iter().map(|(s, snippet)| format!("[{s}] {snippet}")).collect::<Vec<_>>().join("\n")
+                    })
+                }
+                None => Err("no conversations here".to_owned()),
             },
             Call::ListSchedules => match &self.home {
                 Some(home) => list_schedules(home),

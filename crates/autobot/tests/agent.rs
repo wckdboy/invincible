@@ -374,6 +374,8 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
             "list_dir",
             "remember",
             "schedule_task",
+            "propose_skill",
+            "search_sessions",
             "list_schedules",
             "cancel_schedule",
             "read_skill"
