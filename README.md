@@ -227,7 +227,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `trust`. Each schedule has its own conversation (`cron-<id>`), and `--telegram` sends every
   answer to the bot's allowed users. They can also be managed from Telegram (`/cron`,
   `/cron add 0 8 * * 1-5 | summarize the overnight logs`, `/cron rm t1`) and from the Autobot app,
-  through the agent API.
+  through the agent API. Every run is kept with its whole answer and receipt ids
+  (`~/.autobot/runs/`).
+- **Recipes from the phone:** an Autobot recipe can run here instead of on the phone: always on,
+  no 8-minute limit. It arrives as a schedule with the recipe's tool groups, and only those tools
+  are offered (`files-read`, `files-write`, `memory`, `terminal`; the phone's `web` and `vault`
+  have nothing here). The phone collects each run's answer and checks its signed receipts.
 - **Receipts:** each model call shows its model, tier and receipt id.
 - **Action log:** every command, file write, outside read and cloud send the agent asked for, whether
   it ran, and who decided (the rules, an "always" earlier in the session, or you on the CLI, the

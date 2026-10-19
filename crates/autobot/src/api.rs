@@ -60,6 +60,8 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
         .route("/v1/agent/schedules/{id}", axum::routing::delete(remove_schedule))
+        .route("/v1/agent/schedules/{id}/runs", get(schedule_runs))
+        .route("/v1/agent/schedules/{id}/run", post(run_schedule))
         .route("/v1/agent/actions", get(actions))
         .route("/v1/agent/memory", get(memory))
         .route("/v1/agent/memory/{id}", axum::routing::delete(forget))
@@ -242,24 +244,22 @@ async fn schedules(State(state): State<Arc<ApiState>>) -> Response {
     }
 }
 
-#[derive(Deserialize)]
-struct ScheduleBody {
-    when: String,
-    task: String,
-    #[serde(default)]
-    telegram: bool,
-}
-
-async fn add_schedule(State(state): State<Arc<ApiState>>, body: Bytes) -> Response {
-    let Ok(ScheduleBody { when, task, telegram }) = serde_json::from_slice(&body) else {
+async fn add_schedule(State(state): State<Arc<ApiState>>, headers: axum::http::HeaderMap, body: Bytes) -> Response {
+    let Ok(spec) = serde_json::from_slice::<crate::cron::ScheduleSpec>(&body) else {
         return error(
             StatusCode::BAD_REQUEST,
             "invalid_request_error",
-            "the body must be {\"when\", \"task\", \"telegram\"}",
+            "the body must be {\"when\", \"task\"} with optional \"telegram\", \"id\", \"name\", \"tools\", \"enabled\"",
         );
     };
+    // The gateway says which device handed it over.
+    let origin = headers
+        .get(invincible::server::CALLER_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.starts_with("device:"))
+        .map(str::to_owned);
     let added = crate::cron::Schedules::load(&state.home).and_then(|mut schedules| {
-        let id = schedules.add(&when, &task, telegram)?;
+        let id = schedules.put(spec, origin)?;
         schedules.save(&state.home)?;
         Ok(id)
     });
@@ -299,6 +299,39 @@ async fn skills(State(state): State<Arc<ApiState>>) -> Json<Value> {
         .map(|s| json!({ "name": s.name, "description": s.description }))
         .collect();
     Json(json!({ "skills": skills }))
+}
+
+#[derive(Deserialize)]
+struct RunsQuery {
+    #[serde(default)]
+    after: i64,
+}
+
+/// A schedule's finished runs after `after` (unix seconds), oldest first: the whole answers and
+/// their receipt ids, for a phone collecting a recipe's results.
+async fn schedule_runs(
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<String>,
+    Query(q): Query<RunsQuery>,
+) -> Response {
+    if !crate::cron::valid_id(&id) {
+        return error(StatusCode::NOT_FOUND, "not_found", "no such scheduled task");
+    }
+    Json(json!({ "runs": crate::cron::runs(&state.home, &id, q.after) })).into_response()
+}
+
+/// Runs a schedule now, in the background; its run shows up in `/runs` when it is done.
+async fn run_schedule(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+    let schedule = match crate::cron::Schedules::load(&state.home) {
+        Ok(schedules) => schedules.schedules.into_iter().find(|s| s.id == id),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    let Some(schedule) = schedule else { return error(StatusCode::NOT_FOUND, "not_found", "no such scheduled task") };
+    if crate::cron::start(state.agent.clone(), state.home.clone(), schedule, "manual", None) {
+        (StatusCode::ACCEPTED, Json(json!({ "started": true }))).into_response()
+    } else {
+        error(StatusCode::CONFLICT, "schedule_running", "it is running already")
+    }
 }
 
 async fn remove_schedule(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {

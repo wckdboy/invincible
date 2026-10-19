@@ -11,7 +11,8 @@ receipt (`Receipt` in Autobot's `shared/session/Receipts.kt`). The point is a cl
    lowercase hex digits, random).
 2. When the answer has been fully sent (or the client went away), the node finishes the receipt.
 3. `GET /v1/receipts/<id>` returns it. A request that is still running is waited for (up to 10
-   seconds); an unknown id answers 404. A node keeps the most recent 4096 receipts in memory only.
+   seconds); an unknown id answers 404. A node keeps the most recent 4096 receipts in memory, and
+   finds older ones (and ones from before a restart) in its audit log ([audit.md](audit.md)).
 4. `GET /v1/node` returns `{"name": "…", "receipt_key": "<public key>"}`. A paired device also gets
    the receipt key in the pairing reply ([pairing.md](pairing.md)), over the authenticated channel,
    and pins it.

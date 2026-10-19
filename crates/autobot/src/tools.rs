@@ -18,6 +18,26 @@ pub struct Tools {
     timeout: Duration,
     /// `$AUTOBOT_HOME`: with it, the agent remembers (memory) and reads skills.
     home: Option<PathBuf>,
+    /// Only these tools (by name), when set: a recipe's tool groups ([groups]).
+    only: Option<Vec<String>>,
+}
+
+/// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
+/// no tools for (`web`, `vault`) allow nothing.
+pub const GROUPS: &[(&str, &[&str])] = &[
+    ("files-read", &["read_file", "list_dir", "read_skill"]),
+    ("files-write", &["write_file"]),
+    ("memory", &["remember"]),
+    ("terminal", &["terminal"]),
+];
+
+/// The tool names [groups] allow.
+pub fn tools_for(groups: &[String]) -> Vec<String> {
+    GROUPS
+        .iter()
+        .filter(|(g, _)| groups.iter().any(|x| x == g))
+        .flat_map(|(_, tools)| tools.iter().map(|t| (*t).to_owned()))
+        .collect()
 }
 
 /// One tool call, parsed.
@@ -33,13 +53,23 @@ pub enum Call {
 
 impl Tools {
     pub fn new(workdir: PathBuf, timeout: Duration) -> Self {
-        Self { workdir, timeout, home: None }
+        Self { workdir, timeout, home: None, only: None }
     }
 
     /// With memory and skills from [home] (`$AUTOBOT_HOME`).
     pub fn with_home(mut self, home: PathBuf) -> Self {
         self.home = Some(home);
         self
+    }
+
+    /// Offers and runs only [tools] (by name).
+    pub fn only(mut self, tools: Vec<String>) -> Self {
+        self.only = Some(tools);
+        self
+    }
+
+    fn offered(&self, name: &str) -> bool {
+        self.only.as_ref().is_none_or(|only| only.iter().any(|t| t == name))
     }
 
     pub fn workdir(&self) -> &Path {
@@ -66,6 +96,9 @@ impl Tools {
                 "description": "Read one of the owner's skills (how-to notes listed in your instructions) by name.",
                 "parameters": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] },
             }}));
+        }
+        if let Some(list) = tools.as_array_mut() {
+            list.retain(|t| self.offered(t["function"]["name"].as_str().unwrap_or_default()));
         }
         tools
     }
@@ -117,6 +150,9 @@ impl Tools {
         } else {
             serde_json::from_str(arguments).map_err(|e| format!("the arguments are not JSON: {e}"))?
         };
+        if !self.offered(name) {
+            return Err(format!("the tool {name:?} is not allowed in this task"));
+        }
         let text = |key: &str| -> Result<String, String> {
             args.get(key).and_then(Value::as_str).map(str::to_owned).ok_or(format!("`{key}` is missing"))
         };

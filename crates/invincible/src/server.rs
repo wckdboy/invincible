@@ -26,6 +26,8 @@ use crate::receipts::{Attempt, Draft, ReceiptKey, ReceiptStore};
 use crate::remote::{CODE_LIFETIME, Pairing};
 
 pub const DECISION_HEADER: &str = "invincible-decision";
+/// Set by the gateway on requests it passes to the agent: `local` or `device:<name>`.
+pub const CALLER_HEADER: &str = "invincible-caller";
 /// Names the program sending a request (`autobot-agent`), for the audit log.
 pub const CLIENT_HEADER: &str = "invincible-client";
 
@@ -135,7 +137,11 @@ fn api() -> Router<Arc<AppState>> {
 /// Passes `/v1/agent` through to the Autobot Agent on this machine, with the node's token, and
 /// streams its answer back (turns are event streams). Callers here are already trusted: the
 /// local app checked the token, a device was checked by its pinned key.
-async fn agent(State(state): State<Arc<AppState>>, request: HttpRequest) -> Response {
+async fn agent(
+    State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
+    request: HttpRequest,
+) -> Response {
     let path = request.uri().path_and_query().map_or("/v1/agent", |p| p.as_str()).to_owned();
     let method = request.method().clone();
     let content_type = request.headers().get(header::CONTENT_TYPE).cloned();
@@ -148,6 +154,8 @@ async fn agent(State(state): State<Arc<AppState>>, request: HttpRequest) -> Resp
     if let Some(content_type) = content_type {
         forward = forward.header(header::CONTENT_TYPE, content_type);
     }
+    // Who is asking, for the agent's records (a recipe's origin); only the gateway can say.
+    forward = forward.header(CALLER_HEADER, caller.map_or(Caller::Local, |Extension(c)| c).code());
     let upstream = match forward.send().await {
         Ok(upstream) => upstream,
         Err(e) => {
@@ -170,7 +178,17 @@ async fn agent(State(state): State<Arc<AppState>>, request: HttpRequest) -> Resp
 }
 
 async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    match state.receipts.get(&id).await {
+    if let Some(envelope) = state.receipts.get(&id).await {
+        return Json(envelope).into_response();
+    }
+    // Older than the ones kept in memory (or from before a restart): the audit log has it.
+    let found = match state.audit.clone() {
+        Some(log) if id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            tokio::task::spawn_blocking(move || log.find(&id)).await.ok().flatten()
+        }
+        _ => None,
+    };
+    match found {
         Some(envelope) => Json(envelope).into_response(),
         None => error(StatusCode::NOT_FOUND, "not_found", "no such receipt"),
     }

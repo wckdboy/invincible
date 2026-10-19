@@ -262,3 +262,77 @@ async fn schedules_are_managed_through_the_gateway() {
     assert_eq!(client.delete(format!("{url}/t1")).bearer_auth(TOKEN).send().await.unwrap().status(), 200);
     assert_eq!(client.delete(format!("{url}/t1")).bearer_auth(TOKEN).send().await.unwrap().status(), 404);
 }
+
+#[tokio::test]
+async fn a_recipe_is_handed_over_run_now_and_its_runs_collected() {
+    let (gateway, _, dir) =
+        stack("recipe", vec![json!({ "role": "assistant", "content": "Disk is 41% full." })], Duration::ZERO).await;
+    let client = reqwest::Client::new();
+    let recipe = json!({
+        "id": "r-disk", "name": "Disk check", "when": "0 7 * * *", "task": "check the disk",
+        "tools": ["files-read"], "enabled": true,
+    });
+    let put: Value = client
+        .post(format!("{gateway}/v1/agent/schedules"))
+        .bearer_auth(TOKEN)
+        .json(&recipe)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(put["id"], "r-disk");
+    let list: Value = client
+        .get(format!("{gateway}/v1/agent/schedules"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let item = &list["schedules"][0];
+    assert_eq!((item["name"].clone(), item["tools"].clone()), (json!("Disk check"), json!(["files-read"])));
+    // From the loopback API: no device origin.
+    assert!(item.get("origin").is_none());
+
+    let started =
+        client.post(format!("{gateway}/v1/agent/schedules/r-disk/run")).bearer_auth(TOKEN).send().await.unwrap();
+    assert_eq!(started.status(), 202);
+    let mut runs = Value::Null;
+    for _ in 0..100 {
+        runs = client
+            .get(format!("{gateway}/v1/agent/schedules/r-disk/runs?after=0"))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if !runs["runs"].as_array().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let run = &runs["runs"][0];
+    assert_eq!(run["result"], "Disk is 41% full.");
+    assert_eq!(run["trigger"], "manual");
+    assert_eq!(run["receipts"], json!(["r1"]));
+    let at = run["at"].as_i64().unwrap();
+    let later: Value = client
+        .get(format!("{gateway}/v1/agent/schedules/r-disk/runs?after={at}"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(later["runs"], json!([]));
+    let missing =
+        client.post(format!("{gateway}/v1/agent/schedules/nope/run")).bearer_auth(TOKEN).send().await.unwrap();
+    assert_eq!(missing.status(), 404);
+    assert!(dir.join("runs/r-disk.jsonl").exists());
+}

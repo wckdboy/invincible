@@ -331,8 +331,17 @@ fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(
                 schedules.schedules.iter().find(|s| s.id == id).ok_or(format!("no scheduled task {id}"))?.clone();
             runtime()?.block_on(async {
                 let agent = autobot::agent(config, home)?;
-                let run = autobot::cron::run(&agent, home, &schedule).await;
+                let (run, receipts) = autobot::cron::run(&agent, home, &schedule).await;
                 println!("{}{}", if run.ok { "" } else { "✗ " }, run.result);
+                let kept = autobot::cron::RunRecord {
+                    at: run.at,
+                    finished: chrono::Local::now().timestamp(),
+                    ok: run.ok,
+                    result: run.result,
+                    receipts,
+                    trigger: "manual".to_owned(),
+                };
+                autobot::cron::record(home, &schedule.id, &kept)?;
                 Ok::<_, String>(())
             })?;
         }

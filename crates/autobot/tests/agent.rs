@@ -247,12 +247,77 @@ async fn a_scheduled_run_follows_allowlist_rules_with_nobody_to_ask() {
     let agent = agent(&url, &dir, ApprovalMode::Ask, true);
     let mut schedules = autobot::cron::Schedules::default();
     schedules.add("@daily", "write the report", false).unwrap();
-    let run = autobot::cron::run(&agent, &dir, &schedules.schedules[0]).await;
+    let (run, receipts) = autobot::cron::run(&agent, &dir, &schedules.schedules[0]).await;
     assert!(run.ok, "{}", run.result);
     assert_eq!(run.result, "Report written.");
+    assert_eq!(receipts, ["req1", "req2", "req3"]);
     assert_eq!(std::fs::read_to_string(dir.join("work/report.md")).unwrap(), "ok");
     let session = Session::open(&dir.join("sessions"), "cron-t1").unwrap();
     assert!(session.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.starts_with("refused"))));
+}
+
+#[tokio::test]
+async fn a_recipe_gets_only_its_tool_groups() {
+    let (url, script) = gateway(vec![
+        call("write_file", json!({"path": "notes.md", "content": "x"})),
+        call("list_dir", json!({})),
+        say("Listed."),
+    ])
+    .await;
+    let dir = temp("recipe");
+    let agent = agent(&url, &dir, ApprovalMode::Trust, true);
+    let mut schedules = autobot::cron::Schedules::default();
+    let spec = autobot::cron::ScheduleSpec {
+        id: Some("r-morning".into()),
+        when: "0 7 * * *".into(),
+        task: "list my files".into(),
+        name: Some("Morning files".into()),
+        tools: Some(vec!["files-read".into(), "web".into()]),
+        enabled: true,
+        ..Default::default()
+    };
+    assert_eq!(schedules.put(spec.clone(), Some("device:phone".into())).unwrap(), "r-morning");
+    // Put again: replaced, not added.
+    assert_eq!(schedules.put(spec, None).unwrap(), "r-morning");
+    assert_eq!(schedules.schedules.len(), 1);
+    let (run, _) = autobot::cron::run(&agent, &dir, &schedules.schedules[0]).await;
+    assert_eq!(run.result, "Listed.");
+    // Even in trust mode, a tool outside the recipe's groups is neither offered nor run.
+    let seen = script.lock().unwrap().seen.clone();
+    let offered: Vec<&str> =
+        seen[0].1["tools"].as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
+    assert_eq!(offered, ["read_file", "list_dir"]);
+    assert!(!dir.join("work/notes.md").exists());
+    let session = Session::open(&dir.join("sessions"), "cron-r-morning").unwrap();
+    assert!(
+        session.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.contains("not allowed in this task")))
+    );
+    assert!(
+        schedules
+            .put(
+                autobot::cron::ScheduleSpec {
+                    tools: Some(vec!["teleport".into()]),
+                    when: "@daily".into(),
+                    task: "x".into(),
+                    ..Default::default()
+                },
+                None
+            )
+            .is_err()
+    );
+    assert!(
+        schedules
+            .put(
+                autobot::cron::ScheduleSpec {
+                    id: Some("../x".into()),
+                    when: "@daily".into(),
+                    task: "x".into(),
+                    ..Default::default()
+                },
+                None
+            )
+            .is_err()
+    );
 }
 
 #[tokio::test]

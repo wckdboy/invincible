@@ -121,6 +121,18 @@ impl AuditLog {
         entries.into_iter().skip(skip).collect()
     }
 
+    /// The signed receipt of request [id], newest entries first.
+    pub fn find(&self, id: &str) -> Option<Value> {
+        let needle = format!("\"request_id\":\"{id}\"");
+        self.lines()
+            .iter()
+            .rev()
+            .filter(|l| l.contains(&needle))
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|e| e["receipt"]["receipt"]["request_id"] == id)
+            .map(|e| e["receipt"].clone())
+    }
+
     /// Checks the chain and every receipt's signature against [receipt_key]: the number of entries,
     /// or the first one that fails and why. A log that starts mid-chain (its oldest part rotated
     /// away) is checked from its first entry on.
@@ -224,6 +236,8 @@ mod tests {
         assert_eq!(entries[0]["caller"], "device:phone");
         assert_eq!(entries[1]["receipt"]["receipt"]["request_id"], "a3");
         assert_eq!(log.read(0, 10)[0]["client"], "autobot-agent");
+        assert_eq!(log.find("a2").unwrap()["receipt"]["request_id"], "a2");
+        assert!(log.find("zz").is_none());
         let totals = summary(&log.read(0, 10));
         assert_eq!(totals["ran"], 3);
         assert_eq!(totals["models"][1], json!({ "model": "qwen", "requests": 2, "tokens_in": 20, "tokens_out": 10 }));

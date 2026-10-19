@@ -5,7 +5,11 @@
 //!
 //! `$AUTOBOT_HOME/schedules.json` holds the schedules (written by `autobot cron`), and
 //! `cron-state.json` holds when each last ran (written by the scheduler). `autobot cron add` works
-//! while the scheduler runs.
+//! while the scheduler runs. Every run is also kept in `runs/<id>.jsonl` with its full answer and
+//! receipt ids, so a phone that handed a recipe to this machine can collect the results.
+//!
+//! A schedule can come from Autobot as a recipe: it then has a name, the phone's id for it, and
+//! the tool groups the recipe allows (only those tools are offered).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -190,6 +194,85 @@ pub struct Schedule {
     pub telegram: bool,
     /// Unix seconds.
     pub created: i64,
+    /// A recipe's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Only the tools in these groups ([crate::tools::GROUPS]); every tool when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+    /// Who handed it over: `device:<name>` for a paired phone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A schedule as a client sends it (spec/agent.md); [id] set means "create or replace this one".
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ScheduleSpec {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub when: String,
+    pub task: String,
+    #[serde(default)]
+    pub telegram: bool,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+/// One finished run, as `runs/<id>.jsonl` keeps it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunRecord {
+    /// Unix seconds.
+    pub at: i64,
+    pub finished: i64,
+    pub ok: bool,
+    /// The whole answer, or the error.
+    pub result: String,
+    /// The gateway receipts of the run's model calls.
+    #[serde(default)]
+    pub receipts: Vec<String>,
+    /// `schedule` or `manual`.
+    pub trigger: String,
+}
+
+/// Runs kept per schedule.
+const KEEP_RUNS: usize = 100;
+
+fn runs_path(home: &Path, id: &str) -> PathBuf {
+    home.join("runs").join(format!("{id}.jsonl"))
+}
+
+/// Keeps [record] in [id]'s history, the newest [KEEP_RUNS].
+pub fn record(home: &Path, id: &str, record: &RunRecord) -> Result<(), String> {
+    let mut runs = runs(home, id, i64::MIN);
+    runs.push(record.clone());
+    let skip = runs.len().saturating_sub(KEEP_RUNS);
+    let text: String = runs.iter().skip(skip).filter_map(|r| serde_json::to_string(r).ok()).map(|l| l + "\n").collect();
+    invincible::fsutil::replace_private(&runs_path(home, id), &text)
+}
+
+/// [id]'s finished runs that started after [after] (unix seconds), oldest first.
+pub fn runs(home: &Path, id: &str, after: i64) -> Vec<RunRecord> {
+    std::fs::read_to_string(runs_path(home, id))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<RunRecord>(l).ok())
+        .filter(|r| r.at > after)
+        .collect()
+}
+
+/// A schedule id: letters, digits, `-` and `_`, 1 to 64 of them.
+pub fn valid_id(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -252,6 +335,49 @@ impl Schedules {
             task: task.trim().to_owned(),
             telegram,
             created: Local::now().timestamp(),
+            name: None,
+            tools: None,
+            origin: None,
+            enabled: true,
+        });
+        Ok(id)
+    }
+
+    /// Adds [spec], or replaces the schedule with its id (keeping when it was created, so an
+    /// interval does not start over). Returns the id.
+    pub fn put(&mut self, spec: ScheduleSpec, origin: Option<String>) -> Result<String, String> {
+        When::parse(&spec.when)?;
+        if spec.task.trim().is_empty() {
+            return Err("the task is empty".to_owned());
+        }
+        if let Some(groups) = &spec.tools
+            && let Some(unknown) = groups
+                .iter()
+                .find(|g| !["web", "vault"].contains(&g.as_str()) && !crate::tools::GROUPS.iter().any(|(n, _)| n == g))
+        {
+            return Err(format!("unknown tool group {unknown:?}"));
+        }
+        let id = match spec.id {
+            Some(id) if valid_id(&id) => id,
+            Some(id) => return Err(format!("{id:?} is not a schedule id (letters, digits, - and _)")),
+            None => (1..)
+                .map(|n| format!("t{n}"))
+                .find(|id| !self.schedules.iter().any(|s| &s.id == id))
+                .expect("a free id"),
+        };
+        let created =
+            self.schedules.iter().find(|s| s.id == id).map_or_else(|| Local::now().timestamp(), |s| s.created);
+        self.schedules.retain(|s| s.id != id);
+        self.schedules.push(Schedule {
+            id: id.clone(),
+            when: spec.when.trim().to_owned(),
+            task: spec.task.trim().to_owned(),
+            telegram: spec.telegram,
+            created,
+            name: spec.name.map(|n| n.trim().chars().take(120).collect()).filter(|n: &String| !n.is_empty()),
+            tools: spec.tools,
+            origin,
+            enabled: spec.enabled,
         });
         Ok(id)
     }
@@ -287,6 +413,9 @@ pub fn due(schedules: &Schedules, state: &State, now: DateTime<Local>) -> Vec<Sc
         .schedules
         .iter()
         .filter(|s| {
+            if !s.enabled {
+                return false;
+            }
             let Ok(when) = When::parse(&s.when) else { return false };
             when.due(state.runs.get(&s.id).map(|r| local(r.at)), local(s.created), now)
         })
@@ -304,25 +433,47 @@ pub fn listing(home: &Path) -> Result<serde_json::Value, String> {
         .iter()
         .map(|s| {
             let last = state.runs.get(&s.id);
-            let next = When::parse(&s.when).ok().and_then(|w| w.next(last.map(|r| local(r.at)), local(s.created), now));
-            serde_json::json!({
+            let next = When::parse(&s.when)
+                .ok()
+                .filter(|_| s.enabled)
+                .and_then(|w| w.next(last.map(|r| local(r.at)), local(s.created), now));
+            let mut item = serde_json::json!({
                 "id": s.id,
                 "when": s.when,
                 "task": s.task,
                 "telegram": s.telegram,
+                "enabled": s.enabled,
+                "running": RUNNING.lock().expect("running").contains(&s.id),
                 "next": next.map(|t| t.timestamp()),
                 "last": last.map(|r| serde_json::json!({ "at": r.at, "ok": r.ok, "result": r.result })),
-            })
+            });
+            for (key, value) in [
+                ("name", s.name.clone().map(serde_json::Value::from)),
+                ("origin", s.origin.clone().map(serde_json::Value::from)),
+                ("tools", s.tools.clone().map(serde_json::Value::from)),
+            ] {
+                if let Some(value) = value {
+                    item[key] = value;
+                }
+            }
+            item
         })
         .collect();
     Ok(serde_json::json!({ "schedules": list }))
 }
 
-/// Runs [schedule] once, unattended, and records how it went.
-pub async fn run(agent: &crate::agent::Agent, home: &Path, schedule: &Schedule) -> Run {
+/// Schedules running now, here (the scheduler's and "run now"'s together).
+static RUNNING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Runs [schedule] once, unattended: its answer and the receipts of its model calls.
+pub async fn run(agent: &crate::agent::Agent, home: &Path, schedule: &Schedule) -> (Run, Vec<String>) {
     let mut unattended = agent.clone();
     if unattended.approvals.mode != crate::config::ApprovalMode::Trust {
         unattended.approvals.mode = crate::config::ApprovalMode::Allowlist;
+    }
+    if let Some(groups) = &schedule.tools {
+        unattended.tools = unattended.tools.clone().only(crate::tools::tools_for(groups));
     }
     let started = Local::now().timestamp();
     let outcome = async {
@@ -332,9 +483,68 @@ pub async fn run(agent: &crate::agent::Agent, home: &Path, schedule: &Schedule) 
     }
     .await;
     match outcome {
-        Ok(outcome) => Run { at: started, ok: true, result: outcome.text },
-        Err(e) => Run { at: started, ok: false, result: e },
+        Ok(outcome) => (Run { at: started, ok: true, result: outcome.text }, outcome.receipts),
+        Err(e) => (Run { at: started, ok: false, result: e }, Vec::new()),
     }
+}
+
+/// Starts [schedule] in the background unless it is already running (false then): marks it in
+/// the state, runs it, records the run, and sends the answer to Telegram when the schedule asks.
+pub fn start(
+    agent: std::sync::Arc<crate::agent::Agent>,
+    home: PathBuf,
+    schedule: Schedule,
+    trigger: &'static str,
+    telegram: Option<crate::telegram::Bot>,
+) -> bool {
+    if !RUNNING.lock().expect("running").insert(schedule.id.clone()) {
+        return false;
+    }
+    let now = Local::now().timestamp();
+    // Mark it now, so a long run is not started again next round.
+    let mut state = State::load(&home).unwrap_or_default();
+    state.runs.insert(schedule.id.clone(), Run { at: now, ok: true, result: "running".into() });
+    if let Err(e) = state.save(&home) {
+        tracing::warn!("cron: {e}");
+    }
+    tokio::spawn(async move {
+        tracing::info!(id = %schedule.id, trigger, "cron: running {:?}", schedule.task);
+        let (result, receipts) = run(&agent, &home, &schedule).await;
+        tracing::info!(id = %schedule.id, ok = result.ok, "cron: done");
+        let mut state = State::load(&home).unwrap_or_default();
+        state.runs.insert(schedule.id.clone(), Run { result: cut(&result.result), ..result.clone() });
+        if let Err(e) = state.save(&home) {
+            tracing::warn!("cron: {e}");
+        }
+        let kept = RunRecord {
+            at: result.at,
+            finished: Local::now().timestamp(),
+            ok: result.ok,
+            result: result.result.chars().take(64 * 1024).collect(),
+            receipts,
+            trigger: trigger.to_owned(),
+        };
+        if let Err(e) = record(&home, &schedule.id, &kept) {
+            tracing::warn!("cron: {e}");
+        }
+        if schedule.telegram
+            && let Some(bot) = telegram
+        {
+            let text = format!(
+                "⏰ {}\n\n{}{}",
+                schedule.name.as_deref().unwrap_or(&schedule.task),
+                if result.ok { "" } else { "✗ " },
+                result.result
+            );
+            for user in crate::telegram::Users::load(&home).map(|u| u.allowed).unwrap_or_default() {
+                if let Err(e) = bot.send(user.id, &text).await {
+                    tracing::warn!("cron: Telegram: {e}");
+                }
+            }
+        }
+        RUNNING.lock().expect("running").remove(&schedule.id);
+    });
+    true
 }
 
 /// Runs schedules as they come due until the process stops. Re-reads `schedules.json` each round,
@@ -344,50 +554,12 @@ pub async fn scheduler(
     home: PathBuf,
     telegram: Option<crate::telegram::Bot>,
 ) {
-    let running = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::<String>::new()));
     loop {
         let now = Local::now();
         match (Schedules::load(&home), State::load(&home)) {
-            (Ok(schedules), Ok(mut state)) => {
+            (Ok(schedules), Ok(state)) => {
                 for schedule in due(&schedules, &state, now) {
-                    if !running.lock().expect("running").insert(schedule.id.clone()) {
-                        continue;
-                    }
-                    // Mark it now, so a long run is not started again next round.
-                    state
-                        .runs
-                        .insert(schedule.id.clone(), Run { at: now.timestamp(), ok: true, result: "running".into() });
-                    if let Err(e) = state.save(&home) {
-                        tracing::warn!("cron: {e}");
-                    }
-                    let (agent, home, telegram, running) =
-                        (agent.clone(), home.clone(), telegram.clone(), running.clone());
-                    tokio::spawn(async move {
-                        tracing::info!(id = %schedule.id, "cron: running {:?}", schedule.task);
-                        let result = run(&agent, &home, &schedule).await;
-                        tracing::info!(id = %schedule.id, ok = result.ok, "cron: done");
-                        let mut state = State::load(&home).unwrap_or_default();
-                        state.runs.insert(schedule.id.clone(), Run { result: cut(&result.result), ..result.clone() });
-                        if let Err(e) = state.save(&home) {
-                            tracing::warn!("cron: {e}");
-                        }
-                        if schedule.telegram
-                            && let Some(bot) = telegram
-                        {
-                            let text = format!(
-                                "⏰ {}\n\n{}{}",
-                                schedule.task,
-                                if result.ok { "" } else { "✗ " },
-                                result.result
-                            );
-                            for user in crate::telegram::Users::load(&home).map(|u| u.allowed).unwrap_or_default() {
-                                if let Err(e) = bot.send(user.id, &text).await {
-                                    tracing::warn!("cron: Telegram: {e}");
-                                }
-                            }
-                        }
-                        running.lock().expect("running").remove(&schedule.id);
-                    });
+                    start(agent.clone(), home.clone(), schedule, "schedule", telegram.clone());
                 }
             }
             (Err(e), _) | (_, Err(e)) => tracing::warn!("cron: {e}"),

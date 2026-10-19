@@ -7,7 +7,9 @@ turns on the owner's machine, watch them and answer approvals, with nothing expo
 pairing already exposes.
 
 The agent accepts only requests that carry the gateway's token (`Authorization: Bearer <token>`,
-the file `$INVINCIBLE_HOME/token`). The gateway adds it when it passes a device's request through.
+the file `$INVINCIBLE_HOME/token`). The gateway adds it when it passes a device's request through,
+with `invincible-caller: device:<name>` (or `local`) saying who is asking; only the gateway can set
+it, since only it has the token.
 If the agent is not running, the gateway answers `503` with error type `agent_unavailable`.
 
 Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "code": "..."}}`.
@@ -22,9 +24,11 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}` | An event stream (below) |
 | `POST /v1/agent/sessions/{id}/reset` | | `{"id"}`: the conversation starts over; the old one is kept on disk |
 | `POST /v1/agent/approvals/{approval}` | `{"answer": "once"\|"always"\|"deny"}` | `{"ok": true}`, or `404` when no such question is waiting |
-| `GET /v1/agent/schedules` | | `{"schedules": [{"id", "when", "task", "telegram", "next", "last"}]}`; `next` in Unix seconds or null, `last` null or `{"at", "ok", "result"}` |
-| `POST /v1/agent/schedules` | `{"when": "...", "task": "...", "telegram": bool}` | `{"id"}`, or `400` when `when` does not parse |
+| `GET /v1/agent/schedules` | | `{"schedules": [{"id", "when", "task", "telegram", "enabled", "running", "next", "last"}]}`, plus `name`, `tools` and `origin` when set; `next` in Unix seconds or null, `last` null or `{"at", "ok", "result"}` |
+| `POST /v1/agent/schedules` | `{"when", "task"}`, optional `"telegram"`, `"id"`, `"name"`, `"tools"`, `"enabled"` | `{"id"}`, or `400` when `when` does not parse. With `id`, creates or replaces that schedule (a recipe, below) |
 | `DELETE /v1/agent/schedules/{id}` | | `{"ok": true}`, or `404` |
+| `POST /v1/agent/schedules/{id}/run` | | `202 {"started": true}`: runs it now, in the background; `409` (`schedule_running`) if it is running |
+| `GET /v1/agent/schedules/{id}/runs?after=` | | `{"runs": [{"at", "finished", "ok", "result", "receipts", "trigger"}]}`: finished runs that started after `after` (Unix seconds), oldest first; the newest 100 are kept |
 | `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by"}]}`: the action log ([audit.md](audit.md)), newest `limit` (default 100, at most 500), oldest first |
 | `GET /v1/agent/memory` | | `{"facts": [{"id", "at", "text"}]}`: what the agent remembered (`remember`) |
 | `DELETE /v1/agent/memory/{id}` | | `{"ok": true}`, or `404` |
@@ -69,3 +73,26 @@ run, so it follows `allowlist` rules: allowlisted commands and writes in the wor
 nothing else, unless the agent's approval mode is `trust`. Each schedule has its own conversation,
 `cron-<id>`, readable with `GET /v1/agent/sessions/cron-<id>`. With `telegram`, every answer also goes
 to the Telegram users allowed to use the bot.
+
+Every run is kept with its whole answer (up to 64 KiB), the receipt ids of its model calls, and its
+`trigger` (`schedule` or `manual`). A receipt is `GET /v1/receipts/{id}` on the gateway, which
+finds older ones in its audit log ([audit.md](audit.md)).
+
+## Recipes from Autobot
+
+Autobot hands a recipe to the machine as a schedule with its own `id` (`r-<recipe id>`), a
+`name`, and `tools`: the tool groups the recipe allows. Only the tools in those groups are offered
+to the model and run, whatever the approval mode, and still under the unattended rules:
+
+| Group | Tools here |
+|---|---|
+| `files-read` | `read_file`, `list_dir`, `read_skill` |
+| `files-write` | `write_file` (in the working directory) |
+| `memory` | `remember` |
+| `terminal` | `terminal` (allowlisted commands only) |
+| `web`, `vault` | none: this machine has no such tools |
+
+No `tools` means every tool, as for schedules made here. The schedule records its `origin`
+(`device:<name>`, from `invincible-caller`). Posting it again with the same `id` replaces it and
+keeps its creation time; `enabled: false` keeps it without running it. The phone collects results
+with `GET …/runs?after=<last run it has>`, so nothing is lost while it is away.
