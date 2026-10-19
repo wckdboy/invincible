@@ -46,6 +46,8 @@ pub fn tools_for(groups: &[String]) -> Vec<String> {
 pub struct TurnContext {
     pub session: String,
     pub telegram_chat: Option<i64>,
+    /// The team member doing this turn; None for the main agent.
+    pub agent: Option<String>,
 }
 
 tokio::task_local! {
@@ -468,9 +470,11 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
     #[cfg(unix)]
     options.custom_flags(libc::O_NOFOLLOW);
     let mut file = options.open(path).await.map_err(|e| format!("{}: {e}", path.display()))?;
-    tokio::io::AsyncWriteExt::write_all(&mut file, content.as_bytes())
-        .await
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    // Flushed before it is dropped: a tokio file writes in the background, and an unflushed
+    // write can be lost (the file stays empty).
+    use tokio::io::AsyncWriteExt as _;
+    file.write_all(content.as_bytes()).await.map_err(|e| format!("{}: {e}", path.display()))?;
+    file.flush().await.map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(format!("wrote {} bytes to {}", content.len(), path.display()))
 }
 
