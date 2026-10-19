@@ -27,7 +27,7 @@ they make it faster when you choose to use them.
 > ([spec/audit.md](spec/audit.md)) the phone can read, and a phone recipe can be handed to the node
 > to run there with its results collected back
 > ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0), Android and iOS). Latest release:
-> [v0.0.4](https://github.com/wckdboy/invincible/releases/tag/v0.0.4) (static Linux and macOS
+> [v0.0.5](https://github.com/wckdboy/invincible/releases/tag/v0.0.5) (static Linux and macOS
 > binaries, reproducible, with build attestations, signed with a pinned key; it includes fixes
 > from an internal security review, while the independent one is still to come). An eval suite of
 > 50 tasks built from Autobot, Omnie and Nightfall code runs on local models; the comparison with
