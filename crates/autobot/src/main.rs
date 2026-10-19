@@ -297,15 +297,18 @@ fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(
             }
             let now = chrono::Local::now();
             for s in &schedules.schedules {
-                let last = state.runs.get(&s.id);
+                let last = state.last(s);
                 let next =
                     When::parse(&s.when).ok().and_then(|w| w.next(last.map(|r| local(r.at)), local(s.created), now));
                 let recipe = s.name.as_ref().map(|n| {
-                    format!(
-                        "recipe \"{n}\" from {} · tools: {} · ",
-                        s.origin.as_deref().unwrap_or("the app").trim_start_matches("device:"),
-                        s.tools.as_ref().map_or("all".to_owned(), |t| t.join(", "))
-                    )
+                    let from = match s.origin.as_deref() {
+                        Some(o) if o.starts_with("device:") => format!("recipe from {}", &o[7..]),
+                        Some(o) if o.starts_with("agent:") => format!("asked in {}", &o[6..]),
+                        Some(o) => o.to_owned(),
+                        None => "made here".to_owned(),
+                    };
+                    let tools = s.tools.as_ref().map_or("all tools".to_owned(), |t| format!("tools: {}", t.join(", ")));
+                    format!("\"{n}\" ({from} · {tools}) · ")
                 });
                 println!(
                     "{}  [{}]  {}{}{}{}\n    next: {}",

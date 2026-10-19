@@ -361,10 +361,75 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
 
     let script = script.lock().unwrap();
     let first = &script.seen[0].1;
-    assert_eq!(first["tools"].as_array().unwrap().len(), 6);
+    let names: Vec<&str> =
+        first["tools"].as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
+    assert_eq!(
+        names,
+        [
+            "terminal",
+            "read_file",
+            "write_file",
+            "list_dir",
+            "remember",
+            "schedule_task",
+            "list_schedules",
+            "cancel_schedule",
+            "read_skill"
+        ]
+    );
     assert!(first["messages"][0]["content"].as_str().unwrap().contains("- deploy: Deploy the site"));
     assert!(script.seen[1].1.to_string().contains("remembered (#1)"));
     assert!(script.seen[2].1.to_string().contains("git pull"));
     // A new conversation starts with what was remembered.
     assert!(script.seen[3].1["messages"][0]["content"].as_str().unwrap().contains("- The owner deploys on Fridays."));
+}
+
+#[tokio::test]
+async fn the_agent_schedules_its_own_tasks_for_the_chat_that_asked() {
+    let (url, _) = gateway(vec![
+        call(
+            "schedule_task",
+            json!({"when": "in 2m", "task": "Tell the owner: hi, it has been 2 minutes", "name": "Hi"}),
+        ),
+        call("list_schedules", json!({})),
+        say("Done: in 2 minutes."),
+    ])
+    .await;
+    let dir = temp("schedule-tool");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.with_home(dir.clone());
+    let mut session = Session::open(&dir.join("sessions"), "telegram-42").unwrap();
+    let owner = owner(Answer::Deny);
+    let context = autobot::tools::TurnContext { session: String::new(), telegram_chat: Some(42) };
+    let before = chrono::Local::now();
+    autobot::tools::TURN
+        .scope(context, agent.turn(&mut session, "remind me in 2 minutes", &owner, &mut HashSet::new(), &quiet))
+        .await
+        .unwrap();
+    assert!(owner.asked.lock().unwrap().is_empty(), "scheduling asks nothing");
+    let schedules = autobot::cron::Schedules::load(&dir).unwrap();
+    let s = &schedules.schedules[0];
+    assert_eq!(s.notify, Some(42));
+    assert_eq!(s.origin.as_deref(), Some("agent:telegram-42"));
+    assert_eq!(s.name.as_deref(), Some("Hi"));
+    // Made absolute: once, about two minutes after it was asked.
+    let autobot::cron::When::Once(at) = autobot::cron::When::parse(&s.when).unwrap() else { panic!("{}", s.when) };
+    let minutes = (at - before).num_seconds();
+    assert!((60..=121).contains(&minutes), "{} ({minutes}s)", s.when);
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m["content"].as_str().is_some_and(|c| c.contains("its answer comes to this chat")))
+    );
+    assert!(session.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.contains("(once "))));
+
+    // A scheduled run cannot schedule more.
+    let mut cron = Session::open(&dir.join("sessions"), "cron-t1").unwrap();
+    let (url, _) = gateway(vec![call("schedule_task", json!({"when": "every 1m", "task": "again"})), say("ok")]).await;
+    let mut again = agent.clone();
+    again.gateway = Gateway::new(&url, "secret", "auto", true).unwrap();
+    again.turn(&mut cron, "x", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    assert!(cron.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.contains("cannot schedule more"))));
+    assert_eq!(autobot::cron::Schedules::load(&dir).unwrap().schedules.len(), 1);
 }

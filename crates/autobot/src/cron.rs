@@ -24,6 +24,46 @@ use serde::{Deserialize, Serialize};
 pub enum When {
     Cron(Cron),
     Every(Duration),
+    /// Once, at this moment (`once 2026-10-19T14:35:00+02:00`); the schedule is removed after it runs.
+    Once(DateTime<Local>),
+}
+
+/// [text] with a one-off time made absolute: `in 2m`, `in 3 hours`, `at 18:30` (today, or
+/// tomorrow when that has passed) become `once <RFC 3339>`, counted from [now]. Anything else is
+/// returned as it is.
+pub fn resolve(text: &str, now: DateTime<Local>) -> Result<String, String> {
+    let text = text.trim();
+    if let Some(rest) = text.strip_prefix("in ") {
+        let rest = rest.trim();
+        let (number, unit) = rest.split_at(rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len()));
+        let n: i64 = number.parse().map_err(|_| format!("{text:?}: in <number>m, h or d"))?;
+        let minutes = match unit.trim() {
+            "m" | "min" | "mins" | "minute" | "minutes" => n,
+            "h" | "hour" | "hours" => n.saturating_mul(60),
+            "d" | "day" | "days" => n.saturating_mul(1440),
+            _ => return Err(format!("{text:?}: in <number>m, h or d")),
+        };
+        if !(1..=366 * 1440).contains(&minutes) {
+            return Err(format!("{text:?}: between a minute and a year from now"));
+        }
+        // Whole minutes, as the scheduler runs: "in 2m" at 14:30:40 runs at 14:32.
+        let at = now.with_second(0).and_then(|t| t.with_nanosecond(0)).unwrap_or(now) + TimeDelta::minutes(minutes);
+        return Ok(format!("once {}", at.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)));
+    }
+    if let Some(rest) = text.strip_prefix("at ") {
+        let time = chrono::NaiveTime::parse_from_str(rest.trim(), "%H:%M")
+            .map_err(|_| format!("{text:?}: at HH:MM (24-hour, local time)"))?;
+        let today = now.date_naive().and_time(time);
+        let mut at = today.and_local_timezone(Local).earliest().ok_or(format!("{text:?}: not a time today"))?;
+        if at <= now {
+            at = (today + TimeDelta::days(1))
+                .and_local_timezone(Local)
+                .earliest()
+                .ok_or(format!("{text:?}: not a time"))?;
+        }
+        return Ok(format!("once {}", at.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)));
+    }
+    Ok(text.to_owned())
 }
 
 /// Five fields: minute, hour, day of month, month, day of week (0 or 7 = Sunday).
@@ -46,8 +86,13 @@ impl When {
         if let Some(rest) = text.strip_prefix("CRON_TZ=UTC ").or_else(|| text.strip_prefix("TZ=UTC ")) {
             return match Self::parse(rest)? {
                 Self::Cron(cron) => Ok(Self::Cron(Cron { utc: true, ..cron })),
-                Self::Every(_) => Err(format!("{text:?}: CRON_TZ goes with a cron expression")),
+                Self::Every(_) | Self::Once(_) => Err(format!("{text:?}: CRON_TZ goes with a cron expression")),
             };
+        }
+        if let Some(at) = text.strip_prefix("once ") {
+            let at =
+                DateTime::parse_from_rfc3339(at.trim()).map_err(|e| format!("{text:?}: once <RFC 3339 time>: {e}"))?;
+            return Ok(Self::Once(at.with_timezone(&Local)));
         }
         if text.starts_with("CRON_TZ=") || text.starts_with("TZ=") {
             return Err(format!("{text:?}: only CRON_TZ=UTC is understood"));
@@ -95,6 +140,7 @@ impl When {
                 let since = last.unwrap_or(created);
                 (minute(now) - minute(since)) * 60 >= interval.as_secs() as i64
             }
+            Self::Once(at) => last.is_none() && now >= *at,
         }
     }
 
@@ -119,6 +165,7 @@ impl When {
             Self::Every(interval) => {
                 Some(last.unwrap_or(created).checked_add_signed(TimeDelta::from_std(*interval).ok()?)?.max(now))
             }
+            Self::Once(at) => last.is_none().then_some((*at).max(now)),
         }
     }
 }
@@ -227,6 +274,9 @@ pub struct Schedule {
     pub origin: Option<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// The Telegram chat that asked for it: its answers go there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify: Option<i64>,
 }
 
 fn yes() -> bool {
@@ -345,6 +395,20 @@ impl Schedules {
 
     /// Adds a schedule; checks [when] first. Returns its id.
     pub fn add(&mut self, when: &str, task: &str, telegram: bool) -> Result<String, String> {
+        self.add_for(when, task, telegram, None, None)
+    }
+
+    /// [Schedules::add] for the agent's own `schedule_task` tool or a chat: [origin] says who
+    /// asked, [notify] where answers go. One-off times (`in 2m`, `at 18:30`) are made absolute.
+    pub fn add_for(
+        &mut self,
+        when: &str,
+        task: &str,
+        telegram: bool,
+        origin: Option<String>,
+        notify: Option<i64>,
+    ) -> Result<String, String> {
+        let when = &resolve(when, Local::now())?;
         When::parse(when)?;
         if task.trim().is_empty() {
             return Err("the task is empty".to_owned());
@@ -359,8 +423,9 @@ impl Schedules {
             created: Local::now().timestamp(),
             name: None,
             tools: None,
-            origin: None,
+            origin,
             enabled: true,
+            notify,
         });
         Ok(id)
     }
@@ -368,6 +433,8 @@ impl Schedules {
     /// Adds [spec], or replaces the schedule with its id (keeping when it was created, so an
     /// interval does not start over). Returns the id.
     pub fn put(&mut self, spec: ScheduleSpec, origin: Option<String>) -> Result<String, String> {
+        let resolved = resolve(&spec.when, Local::now())?;
+        let spec = ScheduleSpec { when: resolved, ..spec };
         When::parse(&spec.when)?;
         if spec.task.trim().is_empty() {
             return Err("the task is empty".to_owned());
@@ -409,6 +476,7 @@ impl Schedules {
             tools: spec.tools,
             origin,
             enabled: spec.enabled,
+            notify: None,
         });
         Ok(id)
     }
@@ -421,6 +489,12 @@ impl Schedules {
 }
 
 impl State {
+    /// [schedule]'s last run: one that started after it was made (an id can be used again by a
+    /// new schedule, which must not inherit an old one's runs).
+    pub fn last(&self, schedule: &Schedule) -> Option<&Run> {
+        self.runs.get(&schedule.id).filter(|r| r.at >= schedule.created)
+    }
+
     pub fn path(home: &Path) -> PathBuf {
         home.join("cron-state.json")
     }
@@ -448,7 +522,7 @@ pub fn due(schedules: &Schedules, state: &State, now: DateTime<Local>) -> Vec<Sc
                 return false;
             }
             let Ok(when) = When::parse(&s.when) else { return false };
-            when.due(state.runs.get(&s.id).map(|r| local(r.at)), local(s.created), now)
+            when.due(state.last(s).map(|r| local(r.at)), local(s.created), now)
         })
         .cloned()
         .collect()
@@ -463,7 +537,7 @@ pub fn listing(home: &Path) -> Result<serde_json::Value, String> {
         .schedules
         .iter()
         .map(|s| {
-            let last = state.runs.get(&s.id);
+            let last = state.last(s);
             let next = When::parse(&s.when)
                 .ok()
                 .filter(|_| s.enabled)
@@ -558,17 +632,32 @@ pub fn start(
         if let Err(e) = record(&home, &schedule.id, &kept) {
             tracing::warn!("cron: {e}");
         }
-        if schedule.telegram
-            && let Some(bot) = telegram
+        // A one-off is done once it ran.
+        if matches!(When::parse(&schedule.when), Ok(When::Once(_)))
+            && let Err(e) = Schedules::load(&home).and_then(|mut all| {
+                all.remove(&schedule.id);
+                all.save(&home)
+            })
         {
+            tracing::warn!("cron: {e}");
+        }
+        if let Some(bot) = telegram {
             let text = format!(
                 "⏰ {}\n\n{}{}",
                 schedule.name.as_deref().unwrap_or(&schedule.task),
                 if result.ok { "" } else { "✗ " },
                 result.result
             );
-            for user in crate::telegram::Users::load(&home).map(|u| u.allowed).unwrap_or_default() {
-                if let Err(e) = bot.send(user.id, &text).await {
+            // The chat that asked for it, else (with `telegram`) every allowed user.
+            let allowed = crate::telegram::Users::load(&home).map(|u| u.allowed).unwrap_or_default();
+            let chats: Vec<i64> = match schedule.notify {
+                Some(chat) if allowed.iter().any(|u| u.id == chat) => vec![chat],
+                Some(_) => Vec::new(),
+                None if schedule.telegram => allowed.iter().map(|u| u.id).collect(),
+                None => Vec::new(),
+            };
+            for chat in chats {
+                if let Err(e) = bot.send(chat, &text).await {
                     tracing::warn!("cron: Telegram: {e}");
                 }
             }
@@ -652,6 +741,28 @@ mod tests {
         ] {
             assert!(When::parse(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn one_off_times() {
+        let now = Local.with_ymd_and_hms(2026, 10, 19, 14, 30, 40).unwrap();
+        let in2 = super::resolve("in 2m", now).unwrap();
+        let When::Once(at) = When::parse(&in2).unwrap() else { panic!("{in2}") };
+        assert_eq!(at, Local.with_ymd_and_hms(2026, 10, 19, 14, 32, 0).unwrap());
+        assert!(!When::Once(at).due(None, now, now));
+        assert!(When::Once(at).due(None, now, at));
+        assert!(!When::Once(at).due(Some(at), now, at + chrono::TimeDelta::minutes(5)), "once only");
+        // At a time today that has passed: tomorrow.
+        let When::Once(t) = When::parse(&super::resolve("at 09:00", now).unwrap()).unwrap() else { panic!() };
+        assert_eq!(t, Local.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap());
+        let When::Once(t) = When::parse(&super::resolve("at 18:30", now).unwrap()).unwrap() else { panic!() };
+        assert_eq!(t, Local.with_ymd_and_hms(2026, 10, 19, 18, 30, 0).unwrap());
+        assert_eq!(super::resolve("in 3 hours", now).unwrap(), super::resolve("in 180m", now).unwrap());
+        for bad in ["in 0m", "in 2 fortnights", "at 25:00", "in 999999d"] {
+            assert!(super::resolve(bad, now).is_err(), "{bad}");
+        }
+        // Everything else passes through.
+        assert_eq!(super::resolve("every 2h", now).unwrap(), "every 2h");
     }
 
     #[test]

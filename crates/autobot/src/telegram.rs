@@ -392,7 +392,7 @@ async fn handle(
         "/start" | "/help" => {
             bot.send(
                 chat_id,
-                "Autobot here, running on your own machine. Send a task. /new starts a new conversation; /cron lists scheduled tasks (/cron add <when> | <task>, /cron rm <id>).",
+                "Autobot here, running on your own machine. Send a task, or ask for one later (\"remind me in 10 minutes to …\").\n\n/new: a new conversation\n/cron: scheduled tasks (/cron add <when> | <task>, /cron rm <id>)\n/actions: what I ran lately, and who allowed it\n/memory: what I remember (/memory forget <id>)\n/skills: your how-to notes",
             )
             .await?;
             return Ok(());
@@ -404,7 +404,25 @@ async fn handle(
             return Ok(());
         }
         "/cron" => {
-            bot.send(chat_id, &cron_command(home, text.trim_start_matches("/cron").trim())).await?;
+            bot.send(chat_id, &cron_command(home, text.trim_start_matches("/cron").trim(), chat_id)).await?;
+            return Ok(());
+        }
+        "/actions" => {
+            bot.send(chat_id, &actions_command(home)).await?;
+            return Ok(());
+        }
+        "/memory" => {
+            bot.send(chat_id, &memory_command(home, text.trim_start_matches("/memory").trim())).await?;
+            return Ok(());
+        }
+        "/skills" => {
+            let skills = crate::skills::list(home);
+            let text = if skills.is_empty() {
+                "No skills yet: put Markdown how-to notes in ~/.autobot/skills on the machine.".to_owned()
+            } else {
+                skills.iter().map(|s| format!("{}: {}", s.name, s.description)).collect::<Vec<_>>().join("\n")
+            };
+            bot.send(chat_id, &text).await?;
             return Ok(());
         }
         _ => {}
@@ -448,7 +466,8 @@ async fn handle(
     };
     let approver = ChatApprover { bot: bot.clone(), chat: chat_id, waiting: waiting.clone() };
     let Chat { session, grants } = &mut *chat;
-    let result = agent.turn(session, text, &approver, grants, &events).await;
+    let context = crate::tools::TurnContext { session: session.id.clone(), telegram_chat: Some(chat_id) };
+    let result = crate::tools::TURN.scope(context, agent.turn(session, text, &approver, grants, &events)).await;
     typing.abort();
     drop(progress);
     let _ = sender.await;
@@ -463,15 +482,58 @@ async fn handle(
     Ok(())
 }
 
+/// `/actions`: the newest entries of the action log.
+pub fn actions_command(home: &Path) -> String {
+    let entries = crate::actions::ActionLog::new(home).read(0, 12);
+    if entries.is_empty() {
+        return "Nothing run yet.".to_owned();
+    }
+    entries
+        .iter()
+        .map(|e| {
+            let at = crate::cron::local(e.at as i64).format("%d %b %H:%M");
+            let verdict = match (e.ran, e.by.as_str()) {
+                (true, "policy") => "✓ rules".to_owned(),
+                (true, "grant") => "✓ always".to_owned(),
+                (true, by) => format!("✓ {by}"),
+                (false, "unattended") => "✗ no one to ask".to_owned(),
+                (false, by) => format!("✗ {by}"),
+            };
+            format!("{at}  {verdict}  {}", cut_line(&e.action))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `/memory`, `/memory forget <id>`.
+pub fn memory_command(home: &Path, args: &str) -> String {
+    let memory = crate::memory::Memory::new(home);
+    if let Some(id) = args.strip_prefix("forget") {
+        return match id.trim().trim_start_matches('#').parse::<u64>() {
+            Ok(id) => match memory.forget(id) {
+                Ok(true) => format!("Forgot #{id}."),
+                Ok(false) => format!("There is no #{id}."),
+                Err(e) => format!("✗ {e}"),
+            },
+            Err(_) => "/memory forget <id>, for example /memory forget 3".to_owned(),
+        };
+    }
+    let facts = memory.list();
+    if facts.is_empty() {
+        return "Nothing remembered yet.".to_owned();
+    }
+    facts.iter().map(|f| format!("#{} {}", f.id, f.text)).collect::<Vec<_>>().join("\n")
+}
+
 /// `/cron`, `/cron add <when> | <task>`, `/cron rm <id>`. Tasks added here report back here.
-pub fn cron_command(home: &Path, args: &str) -> String {
+pub fn cron_command(home: &Path, args: &str, chat_id: i64) -> String {
     let result = (|| -> Result<String, String> {
         if let Some(rest) = args.strip_prefix("add") {
             let (when, task) = rest.split_once('|').ok_or(
                 "/cron add <when> | <task>, for example: /cron add 0 8 * * 1-5 | summarize the overnight logs",
             )?;
             let mut schedules = crate::cron::Schedules::load(home)?;
-            let id = schedules.add(when, task, true)?;
+            let id = schedules.add_for(when, task, false, Some(format!("telegram:{chat_id}")), Some(chat_id))?;
             schedules.save(home)?;
             return Ok(format!("Added {id}. Answers come here. It runs with allowlisted commands only."));
         }
@@ -524,14 +586,14 @@ mod tests {
     fn cron_from_the_chat() {
         let home = std::env::temp_dir().join(format!("autobot-tg-cron-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        assert!(cron_command(&home, "").starts_with("No scheduled tasks"));
-        assert!(cron_command(&home, "add every 2h").starts_with("✗ /cron add"));
-        assert!(cron_command(&home, "add 0 99 * * * | x").starts_with("✗"));
-        assert!(cron_command(&home, "add every 2h | check the backups").starts_with("Added t1"));
-        assert!(cron_command(&home, "").starts_with("t1 [every 2h] check the backups"));
-        assert!(crate::cron::Schedules::load(&home).unwrap().schedules[0].telegram);
-        assert_eq!(cron_command(&home, "rm t1"), "Removed t1.");
-        assert!(cron_command(&home, "rm t1").starts_with("✗"));
+        assert!(cron_command(&home, "", 7).starts_with("No scheduled tasks"));
+        assert!(cron_command(&home, "add every 2h", 7).starts_with("✗ /cron add"));
+        assert!(cron_command(&home, "add 0 99 * * * | x", 7).starts_with("✗"));
+        assert!(cron_command(&home, "add every 2h | check the backups", 7).starts_with("Added t1"));
+        assert!(cron_command(&home, "", 7).starts_with("t1 [every 2h] check the backups"));
+        assert!(crate::cron::Schedules::load(&home).unwrap().schedules[0].notify == Some(7));
+        assert_eq!(cron_command(&home, "rm t1", 7), "Removed t1.");
+        assert!(cron_command(&home, "rm t1", 7).starts_with("✗"));
         std::fs::remove_dir_all(home).unwrap();
     }
 

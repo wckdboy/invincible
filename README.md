@@ -228,13 +228,18 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `description:` line in front matter, or the first line, says what it is for). The agent sees
   their names and descriptions, and reads one with `read_skill` when it fits the task.
   `autobot skills` lists them.
+- **The agent schedules its own work:** "remind me in 10 minutes to stretch" or "check the disk
+  every morning" becomes a schedule through its `schedule_task` tool (also `list_schedules`,
+  `cancel_schedule`), never the system crontab. One-off times (`in 10m`, `at 18:30`) run once and
+  are gone; the answer comes back to the chat that asked.
 - **Scheduled tasks:** `autobot cron add "0 8 * * 1-5" "summarize the overnight logs" --telegram`
   (cron in local time, `@daily`, or `every 30m`); `autobot cron list` shows the next and last
   runs. They run inside `autobot serve` with nobody to ask, so they follow `allowlist` rules
   (allowlisted commands and writes in the working directory, nothing else) unless the mode is
   `trust`. Each schedule has its own conversation (`cron-<id>`), and `--telegram` sends every
   answer to the bot's allowed users. They can also be managed from Telegram (`/cron`,
-  `/cron add 0 8 * * 1-5 | summarize the overnight logs`, `/cron rm t1`) and from the Autobot app,
+  `/cron add 0 8 * * 1-5 | summarize the overnight logs`, `/cron rm t1`; answers come to that
+  chat; also `/actions`, `/memory`, `/skills`) and from the Autobot app,
   through the agent API. Every run is kept with its whole answer and receipt ids
   (`~/.autobot/runs/`).
 - **Recipes from the phone:** an Autobot recipe can run here instead of on the phone: always on,

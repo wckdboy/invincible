@@ -40,6 +40,18 @@ pub fn tools_for(groups: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Who a turn is for, for tools that act later (`schedule_task`): its conversation, and the
+/// Telegram chat it came from (answers to a scheduled task go back there).
+#[derive(Clone, Debug, Default)]
+pub struct TurnContext {
+    pub session: String,
+    pub telegram_chat: Option<i64>,
+}
+
+tokio::task_local! {
+    pub static TURN: TurnContext;
+}
+
 /// One tool call, parsed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Call {
@@ -49,6 +61,9 @@ pub enum Call {
     ListDir { path: PathBuf },
     Remember { text: String },
     ReadSkill { name: String },
+    Schedule { when: String, task: String, name: Option<String> },
+    ListSchedules,
+    CancelSchedule { id: String },
 }
 
 impl Tools {
@@ -90,6 +105,25 @@ impl Tools {
                 "name": "remember",
                 "description": "Keep a short fact for later conversations (the owner's preferences, where things are, decisions). Not for secrets.",
                 "parameters": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "schedule_task",
+                "description": "Do something later or regularly, with this agent's own scheduler (never the system crontab, at or launchd). The task runs as a new turn with nobody to ask (allowlisted commands and writes in the working directory only), and its answer goes to the owner where they asked. For a reminder, make the task the message, e.g. \"Tell the owner: time to stretch\".",
+                "parameters": { "type": "object", "properties": {
+                    "when": { "type": "string", "description": "in 10m, in 2h, at 18:30 (once, local time); every 30m, every 1d; or a cron expression like 0 8 * * 1-5 (local time)" },
+                    "task": { "type": "string", "description": "What to do then, as an instruction to yourself" },
+                    "name": { "type": "string", "description": "A short name for the list" },
+                }, "required": ["when", "task"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "list_schedules",
+                "description": "List the scheduled tasks: id, when, next run, name.",
+                "parameters": { "type": "object", "properties": {} },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "cancel_schedule",
+                "description": "Cancel a scheduled task by id (from list_schedules).",
+                "parameters": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "read_skill",
@@ -163,6 +197,13 @@ impl Tools {
             "list_dir" => Call::ListDir { path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())) },
             "remember" if self.home.is_some() => Call::Remember { text: text("text")? },
             "read_skill" if self.home.is_some() => Call::ReadSkill { name: text("name")? },
+            "schedule_task" if self.home.is_some() => Call::Schedule {
+                when: text("when")?,
+                task: text("task")?,
+                name: args.get("name").and_then(Value::as_str).map(str::to_owned).filter(|n| !n.trim().is_empty()),
+            },
+            "list_schedules" if self.home.is_some() => Call::ListSchedules,
+            "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
             other => return Err(format!("there is no tool named {other:?}")),
         })
     }
@@ -181,7 +222,13 @@ impl Tools {
                 (!self.inside(path)).then(|| Action::Read(path.clone()))
             }
             // Its own notes and the owner's skills, in its home: nothing to approve.
-            Call::Remember { .. } | Call::ReadSkill { .. } => None,
+            // Its own notes, the owner's skills, its own scheduler (whose runs follow the
+            // unattended rules): nothing to approve.
+            Call::Remember { .. }
+            | Call::ReadSkill { .. }
+            | Call::Schedule { .. }
+            | Call::ListSchedules
+            | Call::CancelSchedule { .. } => None,
         }
     }
 
@@ -198,6 +245,18 @@ impl Tools {
             Call::ReadSkill { name } => match &self.home {
                 Some(home) => crate::skills::read(home, name),
                 None => Err("no skills here".to_owned()),
+            },
+            Call::Schedule { when, task, name } => match &self.home {
+                Some(home) => schedule(home, when, task, name.as_deref()),
+                None => Err("no scheduler here".to_owned()),
+            },
+            Call::ListSchedules => match &self.home {
+                Some(home) => list_schedules(home),
+                None => Err("no scheduler here".to_owned()),
+            },
+            Call::CancelSchedule { id } => match &self.home {
+                Some(home) => cancel_schedule(home, id),
+                None => Err("no scheduler here".to_owned()),
             },
         };
         cut(result.unwrap_or_else(|e| format!("error: {e}")))
@@ -293,6 +352,69 @@ impl Tools {
     }
 }
 
+fn turn_context() -> TurnContext {
+    TURN.try_with(Clone::clone).unwrap_or_default()
+}
+
+/// `schedule_task`: a schedule made by the agent, answering to the chat it was asked in.
+fn schedule(home: &Path, when: &str, task: &str, name: Option<&str>) -> Result<String, String> {
+    let turn = turn_context();
+    // A scheduled run does not schedule more: no task spawns itself forever.
+    if turn.session.starts_with("cron-") {
+        return Err("a scheduled task cannot schedule more tasks".to_owned());
+    }
+    let mut schedules = crate::cron::Schedules::load(home)?;
+    let origin = Some(format!("agent:{}", turn.session));
+    let id = schedules.add_for(when, task, false, origin, turn.telegram_chat)?;
+    if let Some(name) = name
+        && let Some(s) = schedules.schedules.iter_mut().find(|s| s.id == id)
+    {
+        s.name = Some(name.trim().chars().take(120).collect());
+    }
+    schedules.save(home)?;
+    let s = schedules.schedules.iter().find(|s| s.id == id).ok_or("lost the schedule")?;
+    let next = crate::cron::When::parse(&s.when)
+        .ok()
+        .and_then(|w| w.next(None, crate::cron::local(s.created), chrono::Local::now()))
+        .map_or("-".to_owned(), |t| t.format("%a %Y-%m-%d %H:%M").to_string());
+    let reply = if turn.telegram_chat.is_some() { "; its answer comes to this chat" } else { "" };
+    Ok(format!("scheduled {id} ({}), next run {next}{reply}", s.when))
+}
+
+fn list_schedules(home: &Path) -> Result<String, String> {
+    let listing = crate::cron::listing(home)?;
+    let lines: Vec<String> = listing["schedules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| {
+            let next =
+                s["next"].as_i64().map_or("-".to_owned(), |t| crate::cron::local(t).format("%a %H:%M").to_string());
+            format!(
+                "{} [{}] next {next}: {}",
+                s["id"].as_str().unwrap_or("?"),
+                s["when"].as_str().unwrap_or("?"),
+                s["name"].as_str().or(s["task"].as_str()).unwrap_or("")
+            )
+        })
+        .collect();
+    Ok(if lines.is_empty() { "no scheduled tasks".to_owned() } else { lines.join("\n") })
+}
+
+fn cancel_schedule(home: &Path, id: &str) -> Result<String, String> {
+    let mut schedules = crate::cron::Schedules::load(home)?;
+    let Some(s) = schedules.schedules.iter().find(|s| s.id == id) else {
+        return Err(format!("there is no scheduled task {id:?}"));
+    };
+    // A phone's recipe is changed on the phone (it would send it again anyway).
+    if let Some(device) = s.origin.as_deref().and_then(|o| o.strip_prefix("device:")) {
+        return Err(format!("{id} is a recipe from {device}; change it there"));
+    }
+    schedules.remove(id);
+    schedules.save(home)?;
+    Ok(format!("cancelled {id}"))
+}
+
 async fn read(path: &Path) -> Result<String, String> {
     let bytes = tokio::fs::read(path).await.map_err(|e| format!("{}: {e}", path.display()))?;
     if bytes.iter().take(8192).any(|b| *b == 0) {
@@ -375,8 +497,11 @@ mod tests {
         (Tools::new(dir.clone(), Duration::from_secs(5)), dir)
     }
 
+    /// Unique per call: tests run in parallel and must not share a directory.
     fn rand() -> u64 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos() as u64
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos() as u64) << 16 | n
     }
 
     #[test]

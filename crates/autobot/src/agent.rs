@@ -46,6 +46,20 @@ impl Agent {
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> Result<Outcome, String> {
+        // Tools that act later know which conversation (and Telegram chat) this turn is for.
+        let telegram_chat = crate::tools::TURN.try_with(|t| t.telegram_chat).ok().flatten();
+        let context = crate::tools::TurnContext { session: session.id.clone(), telegram_chat };
+        crate::tools::TURN.scope(context, self.turn_inner(session, text, approver, grants, events)).await
+    }
+
+    async fn turn_inner(
+        &self,
+        session: &mut Session,
+        text: &str,
+        approver: &dyn Approver,
+        grants: &mut HashSet<Action>,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> Result<Outcome, String> {
         session.push(json!({ "role": "user", "content": text }))?;
         let definitions = self.tools.definitions();
         let mut receipts = Vec::new();
@@ -177,6 +191,8 @@ impl Agent {
              You can run shell commands and read, write and list files with your tools. Commands, file \
              writes and reads outside the working directory need the owner's approval; if one is refused, \
              do not retry it, say what you would need instead.\n\
+             To do something later or regularly (a reminder, a check), use schedule_task, never the \
+             system crontab, at or launchd. \
              Work step by step, check results, and answer briefly in plain text.",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),

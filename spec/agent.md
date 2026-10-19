@@ -73,7 +73,8 @@ expire.
 
 `when` is a cron expression in the machine's local time (or in UTC, prefixed `CRON_TZ=UTC `) (five fields: minute, hour, day of month,
 month, day of week, where 0 and 7 are Sunday; `*`, lists, ranges and `/steps`), one of `@hourly`,
-`@daily`, `@weekly` and `@monthly`, or `every <n>m|h|d`. Nobody is there to approve a scheduled
+`@daily`, `@weekly` and `@monthly`, `every <n>m|h|d`, or once: `in <n>m|h|d` or `at HH:MM` (made
+absolute when the schedule is saved, as `once <RFC 3339 time>`, and removed after it runs). Nobody is there to approve a scheduled
 run, so it follows `allowlist` rules: allowlisted commands and writes in the working directory,
 nothing else, unless the agent's approval mode is `trust`. Each schedule has its own conversation,
 `cron-<id>`, readable with `GET /v1/agent/sessions/cron-<id>`. With `telegram`, every answer also goes
