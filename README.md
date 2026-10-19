@@ -242,6 +242,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   last night's backup run?") and every 30 minutes (`[agent] heartbeat`, or `off`) the agent works
   through it, unattended and sandboxed, and messages you on Telegram only when something needs
   you; a quiet check stays quiet.
+- **Trajectories:** with `[agent] trajectories = true`, every finished turn is kept as the model
+  saw it (system prompt, tool list, calls, results, answer) in `~/.autobot/trajectories`, as
+  fine-tuning data for a local model; `autobot trajectories` counts them and exports them
+  (`--clean`, `--model`, `--since`, `--agent`; `--format openai` or `sharegpt`).
 - **Fork a conversation:** `POST …/sessions/{id}/fork` starts a new one as the old one was, up to
   a point, to try another direction without losing the first.
 - **Steer while it works:** a message you send while a turn runs (Telegram, or the app with
@@ -558,6 +562,20 @@ errors in a log, convert INI to JSON, join two CSVs, implement a function to a s
 `.tmp` files, count files by extension, fix a failing shell script, collect TODOs with line
 numbers. The 4B model's two misses are real: a nested `.tmp` file left behind, and line numbers
 off by one.
+
+### From a frontier model's work to a local model's training data
+
+`--trajectories FILE` keeps an eval's passing runs, in the shape `autobot trajectories` exports:
+let a frontier model do the tasks once, keep what passed, and fine-tune the local model on it.
+
+```sh
+autobot eval evals/agent-hard.jsonl --model deepseek --cloud --trajectories runs.jsonl
+autobot trajectories --from runs.jsonl --clean --format sharegpt --out train.jsonl
+```
+
+DeepSeek's runs of both suites gave 26 clean trajectories (26 of 26 passed), 5 to 13 messages
+each, ready for a trainer that reads OpenAI's chat format or ShareGPT's with Hermes-style
+`<tool_call>` tags.
 
 ## Repository
 

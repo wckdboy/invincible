@@ -62,6 +62,7 @@ async fn stack(name: &str, answers: Vec<Value>, delay: Duration) -> (String, Str
         max_steps: 5,
         team: Default::default(),
         mcp: Default::default(),
+        trajectories: None,
     });
     let info = json!({ "name": "Autobot", "approvals": "ask" });
     let agent_url = listen(app(Arc::new(ApiState::new(agent, TOKEN.into(), dir.clone(), info)))).await;

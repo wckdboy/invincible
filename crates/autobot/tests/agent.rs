@@ -102,6 +102,7 @@ fn agent(url: &str, dir: &std::path::Path, mode: ApprovalMode, private: bool) ->
         max_steps: 6,
         team: Default::default(),
         mcp: Default::default(),
+        trajectories: None,
     }
 }
 
@@ -971,4 +972,46 @@ async fn a_member_keeps_its_own_memory_and_sees_the_shared_one() {
     // It saw what the agent knows about the owner.
     let member = script.lock().unwrap().seen[1].1["messages"][0]["content"].as_str().unwrap().to_owned();
     assert!(member.contains("What the agent knows about the owner:\n- The owner prefers short answers."), "{member}");
+}
+
+#[tokio::test]
+async fn a_finished_turn_is_kept_as_a_trajectory_with_what_the_model_saw() {
+    let (url, _script) = gateway(vec![
+        call("terminal", json!({"command": "rm -rf /tmp/x"})),
+        call("terminal", json!({"command": "echo ok"})),
+        say("It is ok."),
+        call("terminal", json!({"command": "echo again"})),
+        call("terminal", json!({"command": "echo again"})),
+    ])
+    .await;
+    let dir = temp("trajectory");
+    let mut agent = agent(&url, &dir, ApprovalMode::Allowlist, true);
+    let recorder = Arc::new(autobot::trajectory::Recorder::memory());
+    agent.trajectories = Some(recorder.clone());
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let owner = owner(Answer::Deny);
+    agent.turn(&mut session, "check it", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    let kept = recorder.take();
+    assert_eq!(kept.len(), 1);
+    let t = &kept[0];
+    let roles: Vec<&str> = t["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
+    assert_eq!(roles, ["system", "user", "assistant", "tool", "assistant", "tool", "assistant"]);
+    assert_eq!(t["messages"][6]["content"], "It is ok.");
+    assert_eq!(t["tools"].as_array().unwrap().len(), 6);
+    assert_eq!(t["meta"]["outcome"], "answer");
+    assert_eq!(t["meta"]["refused"], 1, "rm was not allowlisted");
+    assert_eq!(t["meta"]["models"], json!(["qwen"]));
+    assert_eq!(t["meta"]["receipts"], json!(["req1", "req2", "req3"]));
+    assert_eq!(t["meta"]["session"], "t");
+    assert!(!autobot::trajectory::Filter { clean: true, ..Default::default() }.keeps(t));
+
+    // A turn that runs out of steps is kept as stopped, with its last calls and results.
+    agent.max_steps = 2;
+    agent.turn(&mut session, "again", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    let t = &recorder.take()[0];
+    assert_eq!(t["meta"]["outcome"], "stopped");
+    let messages = t["messages"].as_array().unwrap();
+    assert!(messages.last().unwrap()["content"].as_str().unwrap().starts_with("Stopped after 2 steps"));
+    assert_eq!(messages[messages.len() - 2]["role"], "tool");
+    assert_eq!(messages.iter().filter(|m| m["role"] == "system").count(), 1);
 }

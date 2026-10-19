@@ -133,6 +133,10 @@ pub struct AgentConfig {
     /// How often the heartbeat works through `HEARTBEAT.md` (`30m`, `2h`; `off`).
     #[serde(default = "heartbeat")]
     pub heartbeat: String,
+    /// Keep every finished turn in `$AUTOBOT_HOME/trajectories`, for fine-tuning a local model
+    /// on the agent's own work ([crate::trajectory]).
+    #[serde(default)]
+    pub trajectories: bool,
 }
 
 fn heartbeat() -> String {
@@ -170,6 +174,7 @@ impl Default for AgentConfig {
             sandbox: Default::default(),
             tools: None,
             heartbeat: heartbeat(),
+            trajectories: false,
         }
     }
 }

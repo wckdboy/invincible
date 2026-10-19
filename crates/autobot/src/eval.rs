@@ -2,7 +2,9 @@
 //! directory with its files, the agent works it with its tools (commands sandboxed, approvals
 //! answered yes: the directory is a throwaway), and checks look at the files it left and its
 //! answer. The same tasks run on any model the gateway serves, so a local model's agent work is
-//! compared with a frontier model's, on this machine.
+//! compared with a frontier model's, on this machine. `--trajectories FILE` keeps the passing
+//! runs as fine-tuning data ([crate::trajectory]): a frontier model's good work, to teach a
+//! local one.
 //!
 //! A task file is JSON Lines (`#` comments allowed):
 //!
@@ -85,6 +87,10 @@ pub struct Outcome {
     pub tools: Vec<String>,
     pub steps: usize,
     pub seconds: f64,
+    /// The run's turn as a trajectory ([crate::trajectory]), marked with the task and whether it
+    /// passed.
+    #[serde(skip)]
+    pub trajectories: Vec<serde_json::Value>,
 }
 
 /// Reads a task file.
@@ -153,6 +159,8 @@ pub async fn run(
     worker.approvals = crate::config::ApprovalConfig { mode: crate::config::ApprovalMode::Ask, allow: Vec::new() };
     worker.max_steps = task.max_steps.unwrap_or(12);
     worker.team = Default::default();
+    let recorder = std::sync::Arc::new(crate::trajectory::Recorder::memory());
+    worker.trajectories = Some(recorder.clone());
     let tools = std::sync::Mutex::new(Vec::<String>::new());
     let events = |event: crate::agent::Event| {
         if let crate::agent::Event::Tool(what) = event {
@@ -186,15 +194,23 @@ pub async fn run(
             failures.push(e);
         }
     }
+    let pass = failures.is_empty();
+    let mut trajectories = recorder.take();
+    for t in &mut trajectories {
+        t["meta"]["source"] = "eval".into();
+        t["meta"]["task"] = task.id.clone().into();
+        t["meta"]["pass"] = pass.into();
+    }
     Outcome {
         id: task.id.clone(),
         model: model.to_owned(),
-        pass: failures.is_empty(),
+        pass,
         failures,
         answer,
         tools: if called.is_empty() { tools } else { called },
         steps,
         seconds: started.elapsed().as_secs_f64(),
+        trajectories,
     }
 }
 
@@ -209,6 +225,7 @@ impl Outcome {
             tools: Vec::new(),
             steps: 0,
             seconds: 0.0,
+            trajectories: Vec::new(),
         }
     }
 }

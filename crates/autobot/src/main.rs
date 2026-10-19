@@ -84,6 +84,34 @@ enum Command {
         /// Write every outcome here (JSON).
         #[arg(long)]
         out: Option<std::path::PathBuf>,
+        /// Append the passing runs here as trajectories (fine-tuning data; see `autobot trajectories`).
+        #[arg(long)]
+        trajectories: Option<std::path::PathBuf>,
+    },
+    /// Finished turns kept as fine-tuning data ([agent] trajectories = true, or `eval
+    /// --trajectories`): count them, or export them for training a local model.
+    Trajectories {
+        /// Read this file instead of $AUTOBOT_HOME/trajectories.
+        #[arg(long)]
+        from: Option<std::path::PathBuf>,
+        /// Write them here (JSON Lines); without it, just count.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// openai ({"messages", "tools"}) or sharegpt (Hermes' <tool_call> format).
+        #[arg(long, default_value = "openai")]
+        format: autobot::trajectory::Format,
+        /// Only turns that ended in an answer with nothing refused (and passed, from an eval).
+        #[arg(long)]
+        clean: bool,
+        /// Only turns this model answered in.
+        #[arg(long)]
+        model: Option<String>,
+        /// Only turns since this date (2026-10-01, or RFC 3339).
+        #[arg(long)]
+        since: Option<String>,
+        /// Only the lead's turns (`lead`) or one team member's.
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// What the agent asked to do and who allowed it (the action log).
     Actions {
@@ -263,7 +291,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Eval { tasks, models, cloud, tools, tag, out } => {
+        Command::Eval { tasks, models, cloud, tools, tag, out, trajectories } => {
             let text = std::fs::read_to_string(&tasks).map_err(|e| format!("{}: {e}", tasks.display()))?;
             let mut list = autobot::eval::parse(&text).map_err(|e| format!("{}: {e}", tasks.display()))?;
             if let Some(tag) = &tag {
@@ -289,12 +317,23 @@ fn run(cli: Cli) -> Result<(), String> {
                             outcome.steps,
                             if outcome.pass { String::new() } else { format!(": {}", outcome.failures.join("; ")) }
                         );
+                        if let Some(file) = &trajectories
+                            && outcome.pass
+                        {
+                            for t in &outcome.trajectories {
+                                autobot::trajectory::append(file, t)?;
+                            }
+                        }
                         outcomes.push(outcome);
                     }
                 }
-                outcomes
-            });
+                Ok::<_, String>(outcomes)
+            })?;
             print!("{}", autobot::eval::report(&outcomes, &models));
+            if let Some(file) = &trajectories {
+                let kept: usize = outcomes.iter().filter(|o| o.pass).map(|o| o.trajectories.len()).sum();
+                println!("{kept} passing runs appended to {}", file.display());
+            }
             if let Some(out) = out {
                 let json = serde_json::to_string_pretty(&outcomes).map_err(|e| e.to_string())?;
                 std::fs::write(&out, json).map_err(|e| format!("{}: {e}", out.display()))?;
@@ -351,6 +390,37 @@ fn run(cli: Cli) -> Result<(), String> {
                 println!("\nproposed by the agent (`autobot skills accept <name>`, or reject):");
                 for skill in proposals {
                     println!("{}  {}  ({})", skill.name, skill.description, skill.path.display());
+                }
+            }
+            Ok(())
+        }
+        Command::Trajectories { from, out, format, clean, model, since, agent } => {
+            use autobot::trajectory;
+            let all = match &from {
+                Some(file) => trajectory::read(file),
+                None => trajectory::load(&home.join("trajectories")),
+            };
+            if all.is_empty() && from.is_none() && !config.agent.trajectories {
+                println!(
+                    "no trajectories: turn them on with `trajectories = true` under [agent], or keep an eval's with `autobot eval --trajectories FILE`"
+                );
+                return Ok(());
+            }
+            let filter = trajectory::Filter { clean, model, since, agent };
+            let kept: Vec<&serde_json::Value> = all.iter().filter(|t| filter.keeps(t)).collect();
+            match out {
+                None => {
+                    print!("{}", trajectory::stats(&all));
+                    println!("{} match the filter (export them with --out FILE)", kept.len());
+                }
+                Some(out) => {
+                    let mut text = String::new();
+                    for t in &kept {
+                        text.push_str(&trajectory::export(t, format).to_string());
+                        text.push('\n');
+                    }
+                    invincible::fsutil::replace_private(&out, &text)?;
+                    println!("{} trajectories written to {}", kept.len(), out.display());
                 }
             }
             Ok(())

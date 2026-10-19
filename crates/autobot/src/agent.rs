@@ -21,6 +21,8 @@ pub struct Agent {
     pub team: std::sync::Arc<crate::team::Team>,
     /// MCP servers whose tools it has.
     pub mcp: std::sync::Arc<crate::mcp::Hub>,
+    /// Where finished turns are kept for fine-tuning ([crate::trajectory]); None: not kept.
+    pub trajectories: Option<std::sync::Arc<crate::trajectory::Recorder>>,
 }
 
 /// What happens during a turn, for whoever is watching (a terminal, a chat).
@@ -66,6 +68,51 @@ impl Agent {
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> Result<Outcome, String> {
+        // What the trajectory notes: the models that answered and what was refused.
+        let refused = std::sync::atomic::AtomicU64::new(0);
+        let models = std::sync::Mutex::new(Vec::<String>::new());
+        let outer_events = events;
+        let counted = |event: Event| {
+            match &event {
+                Event::Refused(_) => {
+                    refused.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Event::Receipt { model: Some(model), .. } => {
+                    let mut models = models.lock().expect("models");
+                    if !models.iter().any(|m| m == model) {
+                        models.push((*model).to_owned());
+                    }
+                }
+                _ => {}
+            }
+            outer_events(event)
+        };
+        let events: &(dyn Fn(Event) + Send + Sync) = &counted;
+        let started = std::time::Instant::now();
+        let session_name = session.id.clone();
+        let record =
+            |sent: &[Value], definitions: &Value, last: Value, outcome: &str, steps: usize, receipts: &[String]| {
+                let Some(recorder) = &self.trajectories else { return };
+                let mut messages = sent.to_vec();
+                messages.push(last);
+                let agent = crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten();
+                recorder.record(json!({
+                    "messages": messages,
+                    "tools": definitions,
+                    "meta": {
+                        "at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                        "session": session_name,
+                        "agent": agent,
+                        "models": *models.lock().expect("models"),
+                        "receipts": receipts,
+                        "steps": steps,
+                        "refused": refused.load(std::sync::atomic::Ordering::Relaxed),
+                        "seconds": started.elapsed().as_secs(),
+                        "outcome": outcome,
+                        "source": "turn",
+                    },
+                }));
+            };
         session.push(json!({ "role": "user", "content": text }))?;
         let mut definitions = self.tools.definitions();
         if self.leads_team()
@@ -98,11 +145,21 @@ impl Agent {
         let mut receipts = Vec::new();
         let mut confirmed = false;
         let mut steps = 0;
+        let mut sent: Vec<Value> = Vec::new();
         loop {
             steps += 1;
             if steps > self.max_steps {
                 let note = format!("Stopped after {} steps ([agent] max_steps).", self.max_steps);
-                session.push(json!({ "role": "assistant", "content": note }))?;
+                let last = json!({ "role": "assistant", "content": note });
+                session.push(last.clone())?;
+                // What was sent last, its tool results, and the stop.
+                let mut tail = sent.clone();
+                if let Some(at) =
+                    session.messages.iter().rposition(|m| m["role"] == "assistant" && m["tool_calls"].is_array())
+                {
+                    tail.extend(session.messages[at..session.messages.len() - 1].iter().cloned());
+                }
+                record(&tail, &definitions, last, "stopped", steps - 1, &receipts);
                 return Ok(Outcome { text: note, receipts });
             }
             // What the owner added while it works (the lead only: members get their brief).
@@ -129,6 +186,7 @@ impl Agent {
             }
             messages[0] = json!({ "role": "system", "content": system });
             messages.extend(session.window());
+            sent.clone_from(&messages);
             let reply = match self.gateway.chat(&messages, &definitions, confirmed).await {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
@@ -159,6 +217,7 @@ impl Agent {
             let calls = tool_calls(&mut message);
             session.push(message.clone())?;
             if calls.is_empty() {
+                record(&sent, &definitions, message.clone(), "answer", steps, &receipts);
                 let text = message["content"].as_str().unwrap_or_default().trim().to_owned();
                 return Ok(Outcome { text: if text.is_empty() { "(no answer)".to_owned() } else { text }, receipts });
             }

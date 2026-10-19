@@ -22,6 +22,7 @@ pub mod skills;
 pub mod team;
 pub mod telegram;
 pub mod tools;
+pub mod trajectory;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -50,6 +51,7 @@ pub fn agent(config: &Config, home: &Path) -> Result<agent::Agent, String> {
         max_steps: config.agent.max_steps,
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),
         mcp: std::sync::Arc::new(mcp::Hub::new(config.mcp.clone())?),
+        trajectories: config.agent.trajectories.then(|| std::sync::Arc::new(trajectory::Recorder::dir(home))),
     })
 }
 
