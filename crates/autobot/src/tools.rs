@@ -26,7 +26,7 @@ pub struct Tools {
 /// no tools for (`web`, `vault`) allow nothing.
 pub const GROUPS: &[(&str, &[&str])] = &[
     ("files-read", &["read_file", "list_dir", "read_skill"]),
-    ("files-write", &["write_file"]),
+    ("files-write", &["write_file", "edit_file"]),
     ("memory", &["remember"]),
     ("terminal", &["terminal"]),
 ];
@@ -58,6 +58,7 @@ pub enum Call {
     Terminal { command: String },
     ReadFile { path: PathBuf },
     WriteFile { path: PathBuf, content: String },
+    EditFile { path: PathBuf, old: String, new: String, all: bool },
     ListDir { path: PathBuf },
     Remember { text: String },
     ReadSkill { name: String },
@@ -169,6 +170,17 @@ impl Tools {
                 &["path", "content"],
             ),
             function(
+                "edit_file",
+                "Change part of a text file: replace old_text (copied exactly from the file, with enough lines around it to be unique) with new_text. Prefer this to rewriting a whole file.",
+                json!({
+                    "path": { "type": "string" },
+                    "old_text": { "type": "string", "description": "Exactly as in the file, once." },
+                    "new_text": { "type": "string" },
+                    "replace_all": { "type": "boolean", "description": "Replace every occurrence instead (default false)." },
+                }),
+                &["path", "old_text", "new_text"],
+            ),
+            function(
                 "list_dir",
                 "List a directory's entries. Relative paths are in the working directory.",
                 json!({ "path": { "type": "string", "description": "Default: the working directory." } }),
@@ -194,6 +206,12 @@ impl Tools {
             "terminal" => Call::Terminal { command: text("command")? },
             "read_file" => Call::ReadFile { path: self.resolve(&text("path")?) },
             "write_file" => Call::WriteFile { path: self.resolve(&text("path")?), content: text("content")? },
+            "edit_file" => Call::EditFile {
+                path: self.resolve(&text("path")?),
+                old: text("old_text")?,
+                new: text("new_text")?,
+                all: args.get("replace_all").and_then(Value::as_bool).unwrap_or(false),
+            },
             "list_dir" => Call::ListDir { path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())) },
             "remember" if self.home.is_some() => Call::Remember { text: text("text")? },
             "read_skill" if self.home.is_some() => Call::ReadSkill { name: text("name")? },
@@ -218,6 +236,13 @@ impl Tools {
                 inside: self.inside(path),
                 hidden: self.hidden(path),
             }),
+            // Asked for like a write of the replacement (what changes in the file).
+            Call::EditFile { path, new, .. } => Some(Action::Write {
+                path: path.clone(),
+                bytes: new.len(),
+                inside: self.inside(path),
+                hidden: self.hidden(path),
+            }),
             Call::ReadFile { path } | Call::ListDir { path } => {
                 (!self.inside(path)).then(|| Action::Read(path.clone()))
             }
@@ -237,6 +262,7 @@ impl Tools {
             Call::Terminal { command } => self.terminal(command).await,
             Call::ReadFile { path } => read(path).await,
             Call::WriteFile { path, content } => write(path, content).await,
+            Call::EditFile { path, old, new, all } => edit(path, old, new, *all).await,
             Call::ListDir { path } => list(path).await,
             Call::Remember { text } => match &self.home {
                 Some(home) => crate::memory::Memory::new(home).add(text).map(|id| format!("remembered (#{id})")),
@@ -448,6 +474,36 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
     Ok(format!("wrote {} bytes to {}", content.len(), path.display()))
 }
 
+/// Replaces [old] with [new] in the file at [path]: exactly once unless [all].
+async fn edit(path: &Path, old: &str, new: &str, all: bool) -> Result<String, String> {
+    if old.is_empty() {
+        return Err("old_text is empty".to_owned());
+    }
+    let text = read(path).await?;
+    let found = text.matches(old).count();
+    let changed = match (found, all) {
+        (0, _) => {
+            return Err(format!(
+                "old_text is not in {} (copy it exactly, spaces and line breaks included; read_file shows the file)",
+                path.display()
+            ));
+        }
+        (1, _) | (_, true) => text.replace(old, new),
+        (n, false) => {
+            return Err(format!(
+                "old_text is in {} {n} times; include more lines around it so it is unique, or set replace_all",
+                path.display()
+            ));
+        }
+    };
+    write(path, &changed).await?;
+    Ok(format!(
+        "replaced {} in {}",
+        if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") },
+        path.display()
+    ))
+}
+
 async fn list(path: &Path) -> Result<String, String> {
     let mut entries = tokio::fs::read_dir(path).await.map_err(|e| format!("{}: {e}", path.display()))?;
     let mut names = Vec::new();
@@ -527,6 +583,31 @@ mod tests {
         assert!(matches!(tools.action(&write), Some(Action::Write { bytes: 2, inside: true, .. })));
         assert!(tools.parse("rm", "{}").is_err());
         assert!(tools.parse("terminal", "{}").is_err());
+    }
+
+    #[tokio::test]
+    async fn edits_replace_exactly_once_or_say_why_not() {
+        let (tools, dir) = tools();
+        std::fs::write(dir.join("a.rs"), "fn a() {}\nfn b() {}\nfn b() {}\n").unwrap();
+        let run = |args: &str| {
+            let call = tools.parse("edit_file", args).unwrap();
+            let tools = tools.clone();
+            async move { tools.run(&call).await }
+        };
+        assert!(
+            run(r#"{"path":"a.rs","old_text":"fn a() {}","new_text":"fn a() { 1 }"}"#).await.starts_with("replaced 1")
+        );
+        assert!(run(r#"{"path":"a.rs","old_text":"fn b() {}","new_text":"x"}"#).await.contains("2 times"));
+        assert!(run(r#"{"path":"a.rs","old_text":"nope","new_text":"x"}"#).await.contains("is not in"));
+        assert!(
+            run(r#"{"path":"a.rs","old_text":"fn b() {}","new_text":"fn c() {}","replace_all":true}"#)
+                .await
+                .contains("2 occurrences")
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("a.rs")).unwrap(), "fn a() { 1 }\nfn c() {}\nfn c() {}\n");
+        // Asked for like a write.
+        let call = tools.parse("edit_file", r#"{"path":"a.rs","old_text":"a","new_text":"bb"}"#).unwrap();
+        assert!(matches!(tools.action(&call), Some(Action::Write { bytes: 2, inside: true, .. })));
     }
 
     #[tokio::test]

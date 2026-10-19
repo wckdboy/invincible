@@ -123,7 +123,7 @@ async fn an_approved_command_runs_and_its_output_goes_back() {
     let (headers, first) = &script.seen[0];
     assert_eq!(headers["authorization"], "Bearer secret");
     assert_eq!(headers["invincible-private"], "1", "agent turns are private by default");
-    assert_eq!(first["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(first["tools"].as_array().unwrap().len(), 5, "terminal, read, write, edit, list");
     assert_eq!(first["messages"][0]["role"], "system");
     // The second call carries the tool call and its result, without the reasoning.
     let messages = script.seen[1].1["messages"].as_array().unwrap();
@@ -369,6 +369,7 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
             "terminal",
             "read_file",
             "write_file",
+            "edit_file",
             "list_dir",
             "remember",
             "schedule_task",
