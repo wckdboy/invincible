@@ -297,7 +297,7 @@ fi
 
 # Set up already (an upgrade): kept as it is, unless asked for again.
 AUTOBOT_DIR="${AUTOBOT_HOME:-$HOME/.autobot}"
-if [ -f "$AUTOBOT_DIR/config.toml" ] && grep -qs '^\[\[models\]\]' "$INV_HOME/config.toml" && [ "${INVINCIBLE_SETUP:-}" != 1 ]; then
+if [ -f "$AUTOBOT_DIR/config.toml" ] && grep -qsE '^\[\[(models|cloud)\]\]' "$INV_HOME/config.toml" && [ "${INVINCIBLE_SETUP:-}" != 1 ]; then
     say "done; your setup is kept (\`autobot setup\` changes it, \`autobot doctor\` checks it)"
 elif [ "${INVINCIBLE_NO_SETUP:-}" = 1 ]; then
     say "done; run \`autobot setup\` when you are ready"

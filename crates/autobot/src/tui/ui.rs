@@ -80,12 +80,13 @@ impl Ui {
             style::accent(&label),
             style::gray(&format!("{:.0}s", since.elapsed().as_secs_f64()))
         );
+        let hint = "  ctrl+c to stop";
         if !s.thought.is_empty() {
-            let room = style::columns().saturating_sub(label.len() + 12);
-            let thought: String = s.thought.chars().rev().take(room).collect::<Vec<_>>().into_iter().rev().collect();
-            line.push_str(&format!(" {}", style::gray(&style::italic(&thought))));
+            // One row, always: a wrapped spinner leaves its upper rows behind on every redraw.
+            let room = style::columns().saturating_sub(style::width(&line) + hint.len() + 2);
+            line.push_str(&format!(" {}", style::gray(&style::italic(&style::last_columns(&s.thought, room)))));
         }
-        line.push_str(&style::gray("  ctrl+c to stop"));
+        line.push_str(&style::gray(hint));
         Self::out(&format!("\r\x1b[2K{line}"));
         s.shown = true;
     }
@@ -320,10 +321,10 @@ impl Ui {
                 let range = match (args["offset"].as_u64(), args["limit"].as_u64()) {
                     (None, None) => String::new(),
                     (from, n) => {
-                        let from = from.unwrap_or(1);
-                        style::gray(
-                            &n.map_or(format!(" from line {from}"), |n| format!(" lines {from}-{}", from + n - 1)),
-                        )
+                        let from = from.unwrap_or(1).max(1);
+                        style::gray(&n.map_or(format!(" from line {from}"), |n| {
+                            format!(" lines {from}-{}", from.saturating_add(n.max(1) - 1))
+                        }))
                     }
                 };
                 format!("{} {}{range}", style::bold("Read"), rel(&arg("path")))

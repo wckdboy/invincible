@@ -92,7 +92,7 @@ impl Session {
             let answered =
                 self.messages[at + 1..].iter().any(|m| m["role"] == "tool" && m["tool_call_id"] == id.as_str());
             if !answered {
-                self.push(serde_json::json!({ "role": "tool", "tool_call_id": id, "content": "stopped by the owner before it ran" }))?;
+                self.push(serde_json::json!({ "role": "tool", "tool_call_id": id, "content": "stopped by the owner; it may have partly run (check before doing it again)" }))?;
             }
         }
         Ok(())
@@ -131,9 +131,14 @@ impl Session {
         // Newest first, so a file changed twice ends as it was before the first change.
         for entry in undo.iter().rev() {
             let Some(path) = entry["path"].as_str() else { continue };
-            let result = match entry["before"].as_str() {
-                Some(text) => std::fs::write(path, text),
-                None => std::fs::remove_file(path)
+            let result = match (entry["before"].as_str(), entry["before_hex"].as_str()) {
+                (Some(text), _) => std::fs::write(path, text),
+                (None, Some(hex)) => match unhex(hex) {
+                    Some(bytes) => std::fs::write(path, bytes),
+                    None => return Err(format!("{path}: the undo log is damaged")),
+                },
+                // It did not exist before the turn.
+                (None, None) => std::fs::remove_file(path)
                     .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
             };
             result.map_err(|e| format!("{path}: {e}"))?;
@@ -148,9 +153,14 @@ impl Session {
     }
 
     /// Keeps [path]'s contents before the agent changes it ([before]: None when it does not
-    /// exist yet), for [Session::undo].
-    pub fn checkpoint(dir: &Path, id: &str, at: usize, path: &Path, before: Option<&str>) -> Result<(), String> {
-        let entry = serde_json::json!({ "at": at, "path": path.display().to_string(), "before": before });
+    /// exist yet), for [Session::undo]: as text, or as hex when it is not UTF-8.
+    pub fn checkpoint(dir: &Path, id: &str, at: usize, path: &Path, before: Option<&[u8]>) -> Result<(), String> {
+        let mut entry = serde_json::json!({ "at": at, "path": path.display().to_string() });
+        match before.map(std::str::from_utf8) {
+            Some(Ok(text)) => entry["before"] = text.into(),
+            Some(Err(_)) => entry["before_hex"] = hex(before.unwrap_or_default()).into(),
+            None => {}
+        }
         let file = dir.join(format!("{id}.undo"));
         let mut options = std::fs::OpenOptions::new();
         options.create(true).append(true);
@@ -234,6 +244,17 @@ impl Session {
         let upto = self.window_start();
         self.push(serde_json::json!({ "role": "system", "autobot": "summary", "upto": upto, "content": text }))
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..text.len()).step_by(2).map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok()).collect()
 }
 
 /// Past conversations in [dir] that mention [query]'s words: (session, snippet), best first, at
@@ -423,9 +444,14 @@ mod tests {
         s.push(json!({ "role": "assistant", "content": "ok" })).unwrap();
         s.push(json!({ "role": "user", "content": "change them" })).unwrap();
         // The turn edits old.txt twice and creates new.txt.
-        Session::checkpoint(&dir, "u", 3, &old, Some("first")).unwrap();
+        Session::checkpoint(&dir, "u", 3, &old, Some(b"first")).unwrap();
         std::fs::write(&old, "second").unwrap();
-        Session::checkpoint(&dir, "u", 4, &old, Some("second")).unwrap();
+        Session::checkpoint(&dir, "u", 4, &old, Some(b"second")).unwrap();
+        // A file that is not UTF-8 comes back byte for byte (it is not taken for a new one).
+        let latin = dir.join("latin1.txt");
+        std::fs::write(&latin, b"caf\xe9").unwrap();
+        Session::checkpoint(&dir, "u", 4, &latin, Some(b"caf\xe9")).unwrap();
+        std::fs::write(&latin, "changed").unwrap();
         std::fs::write(&old, "third").unwrap();
         Session::checkpoint(&dir, "u", 4, &new, None).unwrap();
         std::fs::write(&new, "made").unwrap();
@@ -435,8 +461,9 @@ mod tests {
         assert_eq!(s.messages.last().unwrap()["tool_call_id"], "c9");
         let (request, restored) = s.undo().unwrap();
         assert_eq!(request, "change them");
-        assert_eq!(restored.len(), 2);
+        assert_eq!(restored.len(), 3);
         assert_eq!(std::fs::read_to_string(&old).unwrap(), "first");
+        assert_eq!(std::fs::read(&latin).unwrap(), b"caf\xe9");
         assert!(!new.exists());
         assert_eq!(Session::open(&dir, "u").unwrap().messages.len(), 2);
         // The first turn changed nothing; undoing it just drops it.

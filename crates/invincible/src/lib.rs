@@ -14,4 +14,5 @@ pub mod receipts;
 pub mod redact;
 pub mod remote;
 pub mod server;
+pub mod term;
 pub mod token;

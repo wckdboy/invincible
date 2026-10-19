@@ -164,7 +164,7 @@ impl rustyline::completion::Completer for Helper {
                 .collect();
             return Ok((0, pairs));
         }
-        let start = before.rfind(char::is_whitespace).map_or(0, |i| i + 1);
+        let start = before.char_indices().rfind(|(_, c)| c.is_whitespace()).map_or(0, |(i, c)| i + c.len_utf8());
         let Some(word) = before[start..].strip_prefix('@') else { return Ok((pos, Vec::new())) };
         Ok((start + 1, complete_path(&self.workdir, word)))
     }
@@ -267,7 +267,8 @@ impl Approver for KeyApprover {
     }
 }
 
-/// One key from the terminal (a line when it is not one): y, a, n; Esc, ctrl+c and Enter are no.
+/// One key from the terminal (a line when it is not one): y, a, n; any other key, Esc, ctrl+c
+/// and Enter are no.
 fn read_key() -> Option<char> {
     use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
     use std::io::IsTerminal;
@@ -277,6 +278,10 @@ fn read_key() -> Option<char> {
         return line.trim().chars().next().map(|c| c.to_ascii_lowercase());
     }
     crossterm::terminal::enable_raw_mode().ok()?;
+    // What was typed while the agent worked is not an answer: drop it.
+    while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
+        let _ = crossterm::event::read();
+    }
     let key = loop {
         match crossterm::event::read() {
             Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
@@ -285,7 +290,9 @@ fn read_key() -> Option<char> {
                 }
                 match key.code {
                     KeyCode::Char(c @ ('y' | 'Y' | 'a' | 'A' | 'n' | 'N')) => break Some(c.to_ascii_lowercase()),
-                    KeyCode::Esc | KeyCode::Enter => break Some('n'),
+                    // Any other key is someone typing, not answering: no (a sentence typed at
+                    // the prompt must not approve anything with an `a` in it).
+                    KeyCode::Char(_) | KeyCode::Esc | KeyCode::Enter => break Some('n'),
                     _ => {}
                 }
             }
@@ -464,8 +471,9 @@ impl Chat {
 
     async fn turn(&mut self, text: &str) {
         let mut request = expand_mentions(text, self.agent.tools.workdir(), &self.ui);
-        if !self.shell.is_empty() {
-            request = format!("{}\n\n{request}", std::mem::take(&mut self.shell));
+        let shell = std::mem::take(&mut self.shell);
+        if !shell.is_empty() {
+            request = format!("{shell}\n\n{request}");
         }
         let ui = self.ui.clone();
         ui.begin();
@@ -498,8 +506,10 @@ impl Chat {
                 println!("{} {}", style::red("✗"), e);
             }
             None => {
-                // The conversation stays one a model accepts (its open calls get an answer).
+                // The conversation stays one a model accepts (its open calls get an answer), and
+                // what `!command` printed goes with the next request instead.
                 let _ = self.session.close_dangling();
+                self.shell = shell;
                 ui.end(Some("stopped"));
             }
         }
@@ -806,7 +816,20 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
         if name.is_empty() || !seen.insert(name.to_owned()) {
             continue;
         }
-        let path = workdir.join(name);
+        // In the project only: anything else is the agent's to read, with the owner's approval.
+        let Some(path) =
+            workdir.join(name).canonicalize().ok().filter(|p| workdir.canonicalize().is_ok_and(|w| p.starts_with(w)))
+        else {
+            if std::fs::symlink_metadata(workdir.join(name)).is_ok() {
+                println!(
+                    "{}",
+                    style::yellow(&format!(
+                        "  ⎿ @{name} is outside the project; not attached (the agent can ask to read it)"
+                    ))
+                );
+            }
+            continue;
+        };
         if path.is_dir() {
             let mut names: Vec<String> = std::fs::read_dir(&path)
                 .into_iter()
@@ -823,6 +846,9 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
             continue;
         }
         let Ok(meta) = std::fs::metadata(&path) else { continue };
+        if !meta.is_file() {
+            continue;
+        }
         if meta.len() > 256 * 1024 {
             println!(
                 "{}",
@@ -830,7 +856,10 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
             );
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            println!("{}", style::yellow(&format!("  ⎿ @{name} is not a text file; not attached")));
+            continue;
+        };
         println!("{}", style::gray(&format!("  ⎿ attached @{name} ({} lines)", content.lines().count())));
         attached.push_str(&format!("\n\n[Attached @{name}]\n```\n{}\n```", content.trim_end()));
     }
@@ -857,6 +886,14 @@ mod tests {
         );
         assert!(!text.contains("missing.txt]"));
         assert!(expand_mentions("@src", &dir, &ui).contains("[Attached @src: a directory]\nmain.rs"));
+        // Nothing outside the project, by path or through a link.
+        let outside = std::env::temp_dir().join(format!("autobot-mention-out-{}", std::process::id()));
+        std::fs::write(&outside, "secret").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("link")).unwrap();
+        for mention in [format!("@{}", outside.display()), "@../x".into(), "@link".into(), "@/dev/zero".into()] {
+            assert!(!expand_mentions(&mention, &dir, &ui).contains("[Attached"), "{mention}");
+        }
+        std::fs::remove_file(outside).unwrap();
         let names: Vec<String> = complete_path(&dir, "sr").into_iter().map(|p| p.replacement).collect();
         assert_eq!(names, ["src/"]);
         let names: Vec<String> = complete_path(&dir, "src/m").into_iter().map(|p| p.replacement).collect();

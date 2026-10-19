@@ -348,15 +348,37 @@ impl Assembled {
             on(Delta::Reasoning(text));
         }
         for call in delta["tool_calls"].as_array().into_iter().flatten() {
-            let index = call["index"].as_u64().unwrap_or(self.calls.len().saturating_sub(1) as u64) as usize;
+            let id = call["id"].as_str().filter(|i| !i.is_empty());
+            let name = call["function"]["name"].as_str().filter(|n| !n.is_empty());
+            let index = match call["index"].as_u64() {
+                Some(index) => index as usize,
+                // No index (some servers send whole calls): a new call when it brings an id of its
+                // own, or a name with no id after a named call; else more of the last one.
+                None => match self.calls.last() {
+                    None => 0,
+                    Some((last_id, last_name, _)) => {
+                        let new = match id {
+                            Some(id) => !last_id.is_empty() && last_id != id,
+                            None => name.is_some() && !last_name.is_empty(),
+                        };
+                        if new { self.calls.len() } else { self.calls.len() - 1 }
+                    }
+                },
+            };
             while self.calls.len() <= index {
                 self.calls.push(Default::default());
             }
             let slot = &mut self.calls[index];
-            if let Some(id) = call["id"].as_str() {
-                slot.0.push_str(id);
+            // An id comes once (some servers repeat it in every piece).
+            if let Some(id) = id
+                && slot.0.is_empty()
+            {
+                id.clone_into(&mut slot.0);
             }
-            if let Some(name) = call["function"]["name"].as_str() {
+            // So does a name, though some send it repeated, or in pieces.
+            if let Some(name) = name
+                && slot.1 != name
+            {
                 slot.1.push_str(name);
             }
             if let Some(arguments) = call["function"]["arguments"].as_str() {
@@ -419,5 +441,23 @@ mod tests {
         assert_eq!(m["tool_calls"][0]["function"]["arguments"], r#"{"path":"a"}"#);
         assert_eq!(m["tool_calls"][1]["id"], "c2");
         assert!(Assembled::default().line(r#"data: {"error":{"message":"boom"}}"#, &on).is_err());
+        // Whole calls without an index, and ids and names repeated in every piece.
+        let mut b = Assembled::default();
+        for line in [
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"a","function":{"name":"read_file","arguments":"{\"path\":\"x\"}"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"b","function":{"name":"list_dir","arguments":"{}"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":2,"id":"c","function":{"name":"search","arguments":"{\"pat"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":2,"id":"c","function":{"name":"search","arguments":"tern\":\"q\"}"}}]}}]}"#,
+        ] {
+            b.line(line, &on).unwrap();
+        }
+        let m = b.message();
+        let calls = m["tool_calls"].as_array().unwrap();
+        assert_eq!(calls.len(), 3, "{m}");
+        assert_eq!(calls[0]["function"]["name"], "read_file");
+        assert_eq!(calls[1]["function"]["name"], "list_dir");
+        assert_eq!(calls[2]["id"], "c");
+        assert_eq!(calls[2]["function"]["name"], "search");
+        assert_eq!(calls[2]["function"]["arguments"], r#"{"pattern":"q"}"#);
     }
 }

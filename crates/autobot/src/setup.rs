@@ -202,41 +202,37 @@ pub fn run<R: BufRead>(prompt: &mut Prompt<R>, home: &Path) -> Result<(), String
         let names: Vec<&str> = invincible::cloud::PRESETS.iter().map(|p| p.name).collect();
         let answer = prompt.ask(&format!("   provider ({}, or skip)", names.join(", ")), "skip")?;
         if let Some(preset) = invincible::cloud::preset(&answer) {
-            let model = match preset.model {
-                Some(model) => prompt.ask("   model", model)?,
-                None => prompt.ask("   model (the provider's name for it)", "")?,
+            let model = loop {
+                let model = match preset.model {
+                    Some(model) => prompt.ask("   model", model)?,
+                    None => prompt.ask("   model (the provider's name for it)", "")?,
+                };
+                if !model.trim().is_empty() {
+                    break model;
+                }
+                eprintln!("   the provider needs a model name");
             };
-            eprint!("   API key (not shown as you type; paste and press enter): ");
-            let _ = std::io::stderr().flush();
-            let tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
-            if tty {
-                let _ = Command::new("stty").arg("-echo").stdin(std::process::Stdio::inherit()).status();
-            }
-            let key = prompt.line();
-            if tty {
-                let _ = Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
-            }
-            eprintln!();
-            let key = key?;
+            // Not shown as it is typed, and the terminal's echo comes back even on ctrl+c.
+            let key = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                invincible::term::read_hidden("   API key (not shown as you type; paste and press enter): ")
+            } else {
+                eprint!("   API key: ");
+                prompt.line()
+            }?;
             if key.is_empty() {
                 return Err("no API key given; run `autobot setup` again, or `invincible cloud add` later".to_owned());
             }
-            let key_file = gateway_path.with_file_name(format!(".key-{}", std::process::id()));
-            let _ = std::fs::remove_file(&key_file);
-            invincible::fsutil::create_private(&key_file, &key)?;
+            // Handed over on stdin: no copy of the key is left anywhere if this is interrupted.
             let status = Command::new(&invincible_bin)
-                .args([
-                    "cloud",
-                    "add",
-                    preset.name,
-                    "--model",
-                    &model,
-                    "--key-file",
-                    &key_file.display().to_string(),
-                    "--quiet",
-                ])
-                .status();
-            let _ = std::fs::remove_file(&key_file);
+                .args(["cloud", "add", preset.name, "--model", &model, "--key-stdin", "--quiet"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        writeln!(stdin, "{key}")?;
+                    }
+                    child.wait()
+                });
             match status {
                 Ok(s) if s.success() => cloud = Some(preset.name.to_owned()),
                 _ => eprintln!("   ! not added; try again with `invincible cloud add {}`", preset.name),

@@ -19,14 +19,20 @@ pub fn unified(before: &str, after: &str, label: &str) -> String {
     text
 }
 
-/// Lines added and removed in a unified diff.
+/// Lines added and removed in a unified diff (its `---`/`+++` header lines left out: in a hunk,
+/// `--- note` is a removed `-- note`).
 pub fn counts(diff: &str) -> (usize, usize) {
     let mut added = 0;
     let mut removed = 0;
+    let mut in_hunk = false;
     for line in diff.lines() {
-        if line.starts_with('+') && !line.starts_with("+++") {
+        if line.starts_with("@@") {
+            in_hunk = true;
+        } else if !in_hunk {
+            continue;
+        } else if line.starts_with('+') {
             added += 1;
-        } else if line.starts_with('-') && !line.starts_with("---") {
+        } else if line.starts_with('-') {
             removed += 1;
         }
     }
@@ -46,5 +52,7 @@ mod tests {
         assert_eq!(unified("same", "same", "x"), "");
         // A new file is all additions.
         assert_eq!(counts(&unified("", "one\ntwo\n", "new.txt")), (2, 0));
+        // Removing a SQL comment or a Markdown rule counts.
+        assert_eq!(counts(&unified("a\n-- note\n---\n", "a\n", "x.sql")), (0, 2));
     }
 }

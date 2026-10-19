@@ -30,6 +30,7 @@ globset = "0.4"
 regex = "1"
 crossterm = "0.28"
 rustyline = "15"
+unicode-width = "0.2"
 
 [lints]
 workspace = true

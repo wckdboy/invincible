@@ -225,14 +225,13 @@ fn edit(
     config: &std::path::Path,
     change: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<(), String>,
 ) -> Result<(), String> {
-    let text = std::fs::read_to_string(config).unwrap_or_default();
+    // A config that cannot be read is an error, never an empty one to write over.
+    let text = crate::fsutil::read_optional(config)?.unwrap_or_default();
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("{}: {e}", config.display()))?;
     change(&mut doc)?;
     // The result must still be a config the gateway reads.
     crate::config::Config::parse(&doc.to_string()).map_err(|e| format!("the changed config would not load: {e}"))?;
-    let tmp = config.with_extension("toml.tmp");
-    std::fs::write(&tmp, doc.to_string()).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, config).map_err(|e| format!("{}: {e}", config.display()))
+    crate::fsutil::replace_private(config, &doc.to_string())
 }
 
 /// Appends [entry] as a `[[cloud]]` table, keeping the config's comments and layout.

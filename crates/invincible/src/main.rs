@@ -149,6 +149,9 @@ enum CloudAction {
         /// Without the next steps (for `autobot setup`, which goes on to them).
         #[arg(long, hide = true)]
         quiet: bool,
+        /// Read the key as a line from stdin (for programs).
+        #[arg(long, hide = true)]
+        key_stdin: bool,
     },
     /// List the cloud models.
     List {
@@ -163,35 +166,12 @@ enum CloudAction {
     },
 }
 
-/// Reads a secret from the terminal without showing it (a line from stdin when it is not one).
-fn read_secret(prompt: &str) -> Result<String, String> {
-    use std::io::{BufRead, IsTerminal, Write};
-    let tty = std::io::stdin().is_terminal();
-    if tty {
-        eprint!("{prompt}");
-        let _ = std::io::stderr().flush();
-        let _ = std::process::Command::new("stty").arg("-echo").stdin(std::process::Stdio::inherit()).status();
-    }
-    let mut line = String::new();
-    let read = std::io::stdin().lock().read_line(&mut line);
-    if tty {
-        let _ = std::process::Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
-        eprintln!();
-    }
-    read.map_err(|e| e.to_string())?;
-    let secret = line.trim().to_owned();
-    if secret.is_empty() {
-        return Err("no key given".to_owned());
-    }
-    Ok(secret)
-}
-
 /// How to restart the gateway so it reads its config again.
 fn restart_hint() -> &'static str {
     if cfg!(target_os = "macos") {
-        "restart the gateway to use it: launchctl kickstart -k gui/$(id -u)/sh.invincible.gateway (or stop and start `invincible serve`)"
+        "restart the gateway for this to take effect: launchctl kickstart -k gui/$(id -u)/sh.invincible.gateway (or stop and start `invincible serve`)"
     } else {
-        "restart the gateway to use it: systemctl --user restart invincible.service (or stop and start `invincible serve`)"
+        "restart the gateway for this to take effect: systemctl --user restart invincible.service (or stop and start `invincible serve`)"
     }
 }
 
@@ -231,7 +211,7 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
     use invincible::cloud;
     let home = config::home()?;
     match action {
-        CloudAction::Add { provider, id, model, base_url, context, policy, key_file, config, quiet } => {
+        CloudAction::Add { provider, id, model, base_url, context, policy, key_file, config, quiet, key_stdin } => {
             let config_path = config.unwrap_or_else(|| home.join("config.toml"));
             let preset = cloud::preset(&provider);
             if preset.is_none() && provider != "custom" {
@@ -258,12 +238,20 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
             if current.cloud.iter().any(|c| c.id == id) || current.models.iter().any(|m| m.id == id) {
                 return Err(format!("there is a model {id:?} already (--id to name this one differently)"));
             }
+            if model.trim().is_empty() {
+                return Err(format!("{provider} needs --model (the provider's model name)"));
+            }
             let key = match key_file {
                 Some(file) => {
                     let key = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
                     key.trim().to_owned()
                 }
-                None => read_secret(&format!("API key for {id} ({base_url}): "))?,
+                None if key_stdin => {
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line).map_err(|e| e.to_string())?;
+                    line.trim().to_owned()
+                }
+                None => invincible::term::read_hidden(&format!("API key for {id} ({base_url}): "))?,
             };
             let dir = config_path.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| home.clone());
             let keys = dir.join("keys");
@@ -273,8 +261,13 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&keys, std::fs::Permissions::from_mode(0o700));
             }
-            let key_rel = format!("keys/{id}");
-            fsutil::replace_private(&dir.join(&key_rel), &key)?;
+            if key.is_empty() {
+                return Err("the key is empty".to_owned());
+            }
+            // Absolute: the gateway finds it whichever config it is started with.
+            let key_path = keys.join(&id);
+            let key_rel = key_path.display().to_string();
+            fsutil::replace_private(&key_path, &key)?;
             let entry = cloud::Entry {
                 id: &id,
                 upstream_model: &model,
@@ -284,13 +277,10 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 data_policy: &policy,
             };
             if let Err(e) = cloud::add_to_config(&config_path, &entry) {
-                let _ = std::fs::remove_file(dir.join(&key_rel));
+                let _ = std::fs::remove_file(&key_path);
                 return Err(e);
             }
-            println!(
-                "added {id}: {model} at {base_url} (data policy: {policy}; key in {})",
-                dir.join(&key_rel).display()
-            );
+            println!("added {id}: {model} at {base_url} (data policy: {policy}; key in {})", key_path.display());
             if current.node.egress == "never" {
                 cloud::set_egress(&config_path, "ask")?;
                 println!(
@@ -332,11 +322,19 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
         }
         CloudAction::Remove { id, config } => {
             let config_path = config.unwrap_or_else(|| home.join("config.toml"));
+            let current = Config::load(&config_path)?;
+            let key = current.cloud.iter().find(|c| c.id == id).and_then(|c| c.api_key_file.clone());
             if !cloud::remove_from_config(&config_path, &id)? {
                 return Err(format!("no cloud model {id:?}"));
             }
+            // Its key, when `cloud add` put it in the keys directory.
             let dir = config_path.parent().map(std::path::Path::to_path_buf).unwrap_or(home);
-            let _ = std::fs::remove_file(dir.join("keys").join(&id));
+            if let Some(key) = key {
+                let key = if key.is_absolute() { key } else { dir.join(key) };
+                if key.parent() == Some(dir.join("keys").as_path()) {
+                    let _ = std::fs::remove_file(key);
+                }
+            }
             println!("removed {id}");
             println!("{}", restart_hint());
             Ok(())

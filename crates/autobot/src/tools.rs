@@ -567,13 +567,15 @@ impl Tools {
         Some(crate::diff::unified(&before, &after, &label))
     }
 
-    /// The file a write or an edit changes and what it holds now (None: it does not exist), to
-    /// put it back on undo.
-    pub fn before(&self, call: &Call) -> Option<(PathBuf, Option<String>)> {
+    /// The file a write or an edit changes and its bytes now (None: it does not exist), to put
+    /// it back on undo; nothing when it cannot be read (then there is no undo for it).
+    pub fn before(&self, call: &Call) -> Option<(PathBuf, Option<Vec<u8>>)> {
         match call {
-            Call::WriteFile { path, .. } | Call::EditFile { path, .. } => {
-                Some((path.clone(), std::fs::read_to_string(path).ok()))
-            }
+            Call::WriteFile { path, .. } | Call::EditFile { path, .. } => match std::fs::read(path) {
+                Ok(bytes) => Some((path.clone(), Some(bytes))),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some((path.clone(), None)),
+                Err(_) => None,
+            },
             _ => None,
         }
     }
@@ -791,7 +793,7 @@ fn lines(text: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     }
     let all: Vec<&str> = text.lines().collect();
     let start = offset.unwrap_or(1).saturating_sub(1).min(all.len());
-    let end = limit.map_or(all.len(), |n| (start + n).min(all.len()));
+    let end = limit.map_or(all.len(), |n| start.saturating_add(n).min(all.len()));
     let mut out = all[start..end].join("\n");
     if start > 0 || end < all.len() {
         out.push_str(&format!("\n[lines {}-{end} of {}]", start + 1, all.len()));
