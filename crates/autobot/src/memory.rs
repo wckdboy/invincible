@@ -30,6 +30,19 @@ impl Memory {
         Self { path: home.join("memory.jsonl") }
     }
 
+    /// A team member's own memory (`agents/<name>/memory.jsonl`): what it keeps for itself.
+    pub fn member(home: &Path, name: &str) -> Self {
+        Self { path: home.join("agents").join(name).join("memory.jsonl") }
+    }
+
+    /// The memory for this turn: the member's own when a team member is working, else the shared one.
+    pub fn current(home: &Path) -> Self {
+        match crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten() {
+            Some(name) if crate::team::valid_name(&name) => Self::member(home, &name),
+            _ => Self::new(home),
+        }
+    }
+
     pub fn list(&self) -> Vec<Fact> {
         std::fs::read_to_string(&self.path)
             .unwrap_or_default()

@@ -487,9 +487,20 @@ impl Agent {
         }
         if let Some(home) = self.tools.home() {
             if let Some(facts) = crate::memory::Memory::new(home).prompt() {
-                prompt
-                    .push_str("\n\nWhat you remembered from earlier conversations (keep new facts with `remember`):\n");
+                let whose = if member.is_some() {
+                    "What the agent knows about the owner"
+                } else {
+                    "What you remembered from earlier conversations (keep new facts with `remember`)"
+                };
+                prompt.push_str(&format!("\n\n{whose}:\n"));
                 prompt.push_str(&facts);
+            }
+            // A member's own notes, from its earlier tasks.
+            if let Some(name) = &member
+                && let Some(own) = crate::memory::Memory::member(home, name).prompt()
+            {
+                prompt.push_str("\n\nWhat you remembered from your earlier tasks (keep new facts with `remember`):\n");
+                prompt.push_str(&own);
             }
             if let Some(skills) = crate::skills::prompt(home) {
                 prompt.push_str("\n\nThe owner's skills (read one with `read_skill` when it fits the task):\n");

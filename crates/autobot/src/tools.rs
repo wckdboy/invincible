@@ -362,7 +362,7 @@ impl Tools {
             Call::EditFile { path, old, new, all } => edit(path, old, new, *all).await,
             Call::ListDir { path } => list(path).await,
             Call::Remember { text } => match &self.home {
-                Some(home) => crate::memory::Memory::new(home).add(text).map(|id| format!("remembered (#{id})")),
+                Some(home) => crate::memory::Memory::current(home).add(text).map(|id| format!("remembered (#{id})")),
                 None => Err("no memory here".to_owned()),
             },
             Call::ReadSkill { name } => match &self.home {

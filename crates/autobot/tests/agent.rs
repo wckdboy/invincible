@@ -938,3 +938,37 @@ async fn the_heartbeat_checks_the_list_and_is_quiet_when_all_is_well() {
     let log = autobot::actions::ActionLog::new(&dir).read(0, 5);
     assert_eq!((log[0].action.as_str(), log[0].ran, log[0].by.as_str()), ("run: echo disk 42%", true, "policy"));
 }
+
+#[tokio::test]
+async fn a_member_keeps_its_own_memory_and_sees_the_shared_one() {
+    let (url, script) = gateway(vec![
+        calls(&[("delegate", json!({"agent": "researcher", "goal": "Note where logs go"}))]),
+        call("remember", json!({"text": "Logs are in /var/log/app."})),
+        say("Noted."),
+        say("The researcher noted it."),
+    ])
+    .await;
+    let dir = temp("member-memory");
+    let mut lead = agent(&url, &dir, ApprovalMode::Ask, true);
+    lead.tools = lead.tools.with_home(dir.clone());
+    autobot::memory::Memory::new(&dir).add("The owner prefers short answers.").unwrap();
+    let roles = std::collections::BTreeMap::from([(
+        "researcher".to_owned(),
+        autobot::team::RoleConfig {
+            description: "r".into(),
+            instructions: None,
+            tools: vec!["memory".into()],
+            model: None,
+            telegram_token_file: None,
+        },
+    )]);
+    lead.team = Arc::new(autobot::team::Team::from_config(&roles, &Default::default()).unwrap());
+    let mut session = Session::open(&dir.join("sessions"), "lead").unwrap();
+    lead.turn(&mut session, "x", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    // Its own file, not the shared one.
+    assert_eq!(autobot::memory::Memory::member(&dir, "researcher").list()[0].text, "Logs are in /var/log/app.");
+    assert_eq!(autobot::memory::Memory::new(&dir).list().len(), 1);
+    // It saw what the agent knows about the owner.
+    let member = script.lock().unwrap().seen[1].1["messages"][0]["content"].as_str().unwrap().to_owned();
+    assert!(member.contains("What the agent knows about the owner:\n- The owner prefers short answers."), "{member}");
+}
