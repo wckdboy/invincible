@@ -13,15 +13,15 @@ This file is the reference. The Autobot app keeps the same rules in
 | | Invincible | Autobot |
 | --- | --- | --- |
 | What it is | The node you own: a gateway that routes, redacts, receipts and audits every model call | The agent: on your phone, and on your machine through the node |
-| Signal | **Verdigris** `#3F8A7E` (on paper) · `#4FA394` (on ink) | **Lilac** `#5444BA` (on paper) · `#A99BF5` (on ink) |
+| Signal | **Orange** `#9E4C0C` (text on paper) · `#C2651A` (marks on paper) · `#F0882E` (on ink) | **Lilac** `#5444BA` (on paper) · `#A99BF5` (on ink) |
 | Character | Calm infrastructure: tables, receipts, states | A capable colleague: conversation, work in progress, questions |
 | Wordmark | `■ invincible` | `■ autobot` |
 | Mascot | none: only the mark | Pip (below) |
 
-Verdigris and lilac are a pair on purpose: two soft inks of the same weight, a green-blue and a
-blue-violet, both cool against the same warm paper, and neither one the amber of a warning or
-the red of an error. Autobot's code color in a terminal is copper (verdigris is copper's
-patina), the one warm note beside them.
+Orange and lilac are a pair on purpose: complements, opposite each other on the wheel, the same
+weight, both on the same warm paper. Invincible is the warm one (the node, steady, always on),
+Autobot the cool one (the agent, curious). A warning is yellow and an error red, so neither
+product's color ever means "something is wrong". Code in a terminal is sand, a warm neutral.
 
 ## What they share
 
@@ -32,7 +32,7 @@ patina), the one warm note beside them.
   a page's single headline.
 - **The mark.** A small solid square, `■`, in the product's signal, before the lowercase name.
   In running text the name is plain: Invincible, Autobot.
-- **States.** Words first, then a plain glyph: `✓` in ash when fine, `!` in amber `#E3A33B` when
+- **States.** Words first, then a plain glyph: `✓` in ash when fine, `!` in yellow `#E2C044` when
   it needs a look, `✗` in the error color `#FF6A47` when it failed. Color never carries meaning
   alone, so a screen reader, a log file and `NO_COLOR` lose nothing.
 - **The signal is rare.** It marks the product, the prompt, and what needs you now (an approval,
@@ -81,10 +81,14 @@ Both CLIs and the installer speak one grammar:
   corners small (4–8 px) or none.
 - One accent element per view. Halftones and registration marks are print references: at most one
   per page, never behind text.
-- Autobot's screens about the node ("My node", receipts from it) use Invincible's verdigris for
+- Autobot's screens about the node ("My node", receipts from it) use Invincible's orange for
   the node's mark, so the user sees which product is speaking.
 
 ## The mascot
+
+> In design: Pip is being replaced by **Buddy and its drone**, a lilac-plated robot on a charcoal
+> frame with one white eye, and a small orange drone beside it (the node). Pip stays here until
+> Buddy's sprites land.
 
 Autobot's mascot is **Pip**: a small capsule robot, drawn on a 14×14 grid so it works as pixel
 art and in a terminal (half blocks, two pixels to a cell; the 7×6 mini sits beside `autobot`'s
@@ -92,7 +96,7 @@ header). Its face and its antenna carry the feeling; the body never changes.
 
 ```
 ..............
-........RR....   R  antenna light: lilac; verdigris when it works on your node;
+........RR....   R  antenna light: lilac; orange when it works on your node;
 ........S.....      dark (O) when something failed
 .......S......   S  stem, ash; bent, never straight
 ...BBBBBBBB...   B  body: #C9C3BA on ink, #3A3632 on paper
@@ -115,7 +119,7 @@ header). Its face and its antenna carry the feeling; the body never changes.
 - `mini`: for the terminal header.
 
 The light and the cheeks are the only signal pixels. SVGs for ink (`-dark`) and paper (`-light`)
-are in [`assets/brand/mascot/`](assets/brand/mascot) (`pip-*`); `pip-on-node-*` has the verdigris light. Use Pip small: an empty
+are in [`assets/brand/mascot/`](assets/brand/mascot) (`pip-*`); `pip-on-node-*` has the orange light. Use Pip small: an empty
 state, a welcome, the terminal header. Never behind text, never animated for its own sake (a
 blink every few seconds at most), and never on Invincible's own surfaces: the node has no
 mascot, only its mark.

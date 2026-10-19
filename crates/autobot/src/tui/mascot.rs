@@ -120,7 +120,7 @@ fn color(c: u8, light: Color) -> Option<Color> {
 }
 
 /// The frame as terminal lines (one per two pixel rows); empty without color. [light]: the
-/// antenna's color (Autobot's lilac; verdigris on the node).
+/// antenna's color (Autobot's lilac; orange on the node).
 pub fn render(frame: &[&str], light: Color) -> Vec<String> {
     if !brand::colored() {
         return Vec::new();

@@ -3,8 +3,8 @@
 
 use invincible::brand::{self, Color};
 
-/// Code in prose: copper (verdigris is copper's patina; Invincible wears that).
-const COPPER: Color = Color { rgb: (0xC8, 0x95, 0x6C), ansi: 173 };
+/// Code in prose: sand, a warm neutral that is neither product's signal.
+const SAND: Color = Color { rgb: (0xD4, 0xC3, 0x9C), ansi: 187 };
 
 /// Colors on or off for everything printed from now on.
 pub fn set_color(on: bool) {
@@ -43,7 +43,7 @@ pub fn removed(t: &str) -> String {
 }
 /// Needs a look.
 pub fn yellow(t: &str) -> String {
-    brand::paint(brand::AMBER, t)
+    brand::paint(brand::YELLOW, t)
 }
 /// The signal: Autobot's lilac. The mark, the prompt, what needs the owner now.
 pub fn accent(t: &str) -> String {
@@ -51,7 +51,7 @@ pub fn accent(t: &str) -> String {
 }
 /// Code.
 pub fn code(t: &str) -> String {
-    brand::paint(COPPER, t)
+    brand::paint(SAND, t)
 }
 /// Secondary text.
 pub fn gray(t: &str) -> String {

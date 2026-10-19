@@ -4,9 +4,9 @@
 //! - Warm neutrals for almost everything: the terminal's own foreground, ash for what is
 //!   secondary, a fainter ash for structure (gutters, rules).
 //! - One signal color per product, used sparingly: its mark, the prompt, what needs you now.
-//!   Autobot is lilac; Invincible is verdigris.
+//!   Autobot is lilac; Invincible is orange: complements, opposite on the wheel.
 //! - The mark is a small square, `■`, before the lowercase name.
-//! - States are words and plain glyphs: `✓` in ash when fine, `!` amber when it needs a look,
+//! - States are words and plain glyphs: `✓` in ash when fine, `!` yellow when it needs a look,
 //!   `✗` in the error color when it failed. Color never carries meaning alone.
 //!
 //! Truecolor where the terminal says it has it (`COLORTERM`), the nearest of the 256 colors
@@ -27,13 +27,14 @@ const fn color(r: u8, g: u8, b: u8, ansi: u8) -> Color {
 
 /// Autobot's signal: lilac (`#5444BA` on paper, `#A99BF5` here, for dark terminals).
 pub const LILAC: Color = color(0xA9, 0x9B, 0xF5, 147);
-/// Invincible's signal: verdigris.
-pub const VERDIGRIS: Color = color(0x4F, 0xA3, 0x94, 72);
+/// Invincible's signal: orange (`#9E4C0C` on paper, `#F0882E` here, for dark terminals).
+pub const ORANGE: Color = color(0xF0, 0x88, 0x2E, 208);
 /// Secondary text.
 pub const ASH: Color = color(0x8E, 0x8A, 0x84, 245);
 /// Structure: gutters, rules, hints.
 pub const FAINT: Color = color(0x6E, 0x6A, 0x64, 242);
-pub const AMBER: Color = color(0xE3, 0xA3, 0x3B, 179);
+/// Something to look at: yellow, clear of Invincible's orange.
+pub const YELLOW: Color = color(0xE2, 0xC0, 0x44, 185);
 pub const ERROR: Color = color(0xFF, 0x6A, 0x47, 209);
 /// Diffs: added and removed lines, muted so a long diff is not a wall of color.
 pub const ADDED: Color = color(0x8F, 0xB5, 0x73, 107);
@@ -53,7 +54,7 @@ impl Product {
     pub fn signal(self) -> Color {
         match self {
             Self::Autobot => LILAC,
-            Self::Invincible => VERDIGRIS,
+            Self::Invincible => ORANGE,
         }
     }
 
@@ -149,7 +150,7 @@ pub fn ok(what: &str) -> String {
 
 /// Something to look at: `! what`.
 pub fn warn(what: &str) -> String {
-    format!("{} {what}", paint(AMBER, "!"))
+    format!("{} {what}", paint(YELLOW, "!"))
 }
 
 /// A failure: `✗ what`.
