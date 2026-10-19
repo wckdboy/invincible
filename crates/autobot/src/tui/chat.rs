@@ -74,6 +74,8 @@ impl Input {
                 .auto_add_history(false)
                 .completion_type(rustyline::CompletionType::List)
                 .bracketed_paste(true)
+                // A lone Esc is not a prefix for the next key, typed seconds later.
+                .keyseq_timeout(Some(30))
                 .max_history_size(2000)
                 .map(|b| b.build());
             let Ok(config) = config else { return };
@@ -199,6 +201,8 @@ fn complete_path(workdir: &Path, word: &str) -> Vec<rustyline::completion::Pair>
 /// Asks in the terminal, one key: y, a (always, this session), n.
 struct KeyApprover {
     ui: Arc<Ui>,
+    /// The turn's keyboard, when it reads one.
+    keys: Option<Arc<super::keys::TurnKeys>>,
 }
 
 impl Approver for KeyApprover {
@@ -247,7 +251,10 @@ impl Approver for KeyApprover {
                 format_args!("{} no", style::bold("n")),
             );
             let _ = std::io::Write::flush(&mut std::io::stdout());
-            let key = tokio::task::spawn_blocking(read_key).await.ok().flatten();
+            let key = match &self.keys {
+                Some(keys) => keys.answer().await,
+                None => tokio::task::spawn_blocking(read_key).await.ok().flatten(),
+            };
             let answer = match key {
                 Some('y') => Answer::Once,
                 Some('a') => Answer::Always,
@@ -486,20 +493,61 @@ impl Chat {
                 }
             })
         };
-        let approver = KeyApprover { ui: ui.clone() };
+        // The keyboard while it works: typing steers, Esc stops, questions take a key.
+        let (keys, mut presses) = match super::keys::TurnKeys::start() {
+            Some((keys, presses)) => (Some(Arc::new(keys)), Some(presses)),
+            None => (None, None),
+        };
+        let inbox: crate::tools::Inbox = Arc::default();
+        let approver = KeyApprover { ui: ui.clone(), keys: keys.clone() };
         let events = |event: crate::agent::Event| ui.event(event);
         let outcome = {
-            let turn = self.agent.turn(&mut self.session, &request, &approver, &mut self.grants, &events);
-            tokio::select! {
-                outcome = turn => Some(outcome),
-                _ = tokio::signal::ctrl_c() => None,
+            let context = crate::tools::TurnContext { inbox: Some(inbox.clone()), ..Default::default() };
+            let turn = crate::tools::TURN.scope(
+                context,
+                self.agent.turn(&mut self.session, &request, &approver, &mut self.grants, &events),
+            );
+            let mut turn = std::pin::pin!(turn);
+            loop {
+                let press = async {
+                    match presses.as_mut() {
+                        Some(presses) => presses.recv().await,
+                        None => std::future::pending().await,
+                    }
+                };
+                tokio::select! {
+                    outcome = &mut turn => break Some(outcome),
+                    _ = tokio::signal::ctrl_c() => break None,
+                    Some(press) = press => match press {
+                        super::keys::Key::Stop => break None,
+                        super::keys::Key::Steer(text) => {
+                            ui.typing("");
+                            ui.note(&format!("↳ {text}  (it reads this before its next step)"));
+                            inbox.lock().expect("inbox").push(text);
+                        }
+                        super::keys::Key::Typing => {
+                            if let Some(keys) = &keys {
+                                ui.typing(&keys.typing());
+                            }
+                        }
+                    },
+                }
             }
         };
+        drop(approver);
+        drop(keys);
         ticker.abort();
         match outcome {
             Some(Ok(outcome)) => {
                 ui.answer(&outcome.text);
                 ui.end(None);
+                // Typed while it finished: the agent never saw it, so it is the next request.
+                let unread: Vec<String> = std::mem::take(&mut *inbox.lock().expect("inbox"));
+                if !unread.is_empty() {
+                    let next = unread.join("\n");
+                    println!("\n{} {}", style::bold(&style::accent("›")), next);
+                    Box::pin(self.turn(&next)).await;
+                }
             }
             Some(Err(e)) => {
                 ui.end(None);

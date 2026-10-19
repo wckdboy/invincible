@@ -31,6 +31,7 @@ regex = "1"
 crossterm = "0.28"
 rustyline = "15"
 unicode-width = "0.2"
+rustix = { version = "1", features = ["termios", "event", "stdio", "fs"] }
 
 [lints]
 workspace = true

@@ -127,6 +127,7 @@ dependencies = [
  "libc",
  "regex",
  "reqwest",
+ "rustix 1.1.5",
  "rustyline",
  "serde",
  "serde_json",

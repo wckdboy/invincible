@@ -216,8 +216,13 @@ autobot code --model deepseek --approvals edits
   (`⏺ Read src/main.rs`, `⏺ Run cargo test`) with what it gave back (`⎿ 3 matches in 2 files`,
   the last lines of a command and its exit code); every change shows as a colored diff before
   it is made; the agent's task list (`todo`) shows as checkboxes; a spinner shows what it is
-  thinking. Approvals take one key: `y`, `a` (always, this session), `n`. ctrl+c stops a turn;
-  the conversation stays usable.
+  thinking, and the status line the models, tool calls, tokens (and how many were cached) and
+  time of each turn. Approvals take one key: `y`, `a` (always, this session), `n`; any other key
+  is no, and what was typed before the question is dropped.
+- **Steer while it works:** type while the agent works and your words show under the spinner;
+  Enter hands them to the agent before its next step ("use the existing helper instead"), and
+  what arrives as it finishes becomes the next request. Esc (or ctrl+c) stops a turn; the
+  conversation stays usable.
 - **The project:** its `AGENTS.md`, `CLAUDE.md` or `.autobot/AGENTS.md` become part of the
   agent's instructions; in a git repository it works like a careful engineer (find, read, change
   in small edits, run the build and tests, never commit unless asked). `search` (regular
@@ -231,6 +236,10 @@ autobot code --model deepseek --approvals edits
   conversation sent per call grows with its context), `/approvals`, `/private`, `/tools`,
   `/context`, `/diff`, `/undo`, `/status`, `/new`, `/fork`, `/sessions`, `/resume`, `/memory`,
   `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
+- **Big jobs:** coding turns get at least 100 steps; an `explorer` team member takes read-only
+  research (where is this used, how does that work) in a fresh context and answers with
+  file:line references, so the main conversation keeps what it found and not every file it
+  read; reads in one reply run at the same time.
 - **From other tools:** `autobot run -C DIR --model M --approvals edits --cloud "task"` does one
   task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer

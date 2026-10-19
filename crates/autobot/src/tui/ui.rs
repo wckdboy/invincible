@@ -26,6 +26,8 @@ struct State {
     spinner: Option<(String, Instant)>,
     /// The last of the model's reasoning, shown after the spinner.
     thought: String,
+    /// What the owner is typing (to steer), shown instead.
+    typing: String,
     shown: bool,
     paused: bool,
     frame: usize,
@@ -80,8 +82,11 @@ impl Ui {
             style::accent(&label),
             style::gray(&format!("{:.0}s", since.elapsed().as_secs_f64()))
         );
-        let hint = "  ctrl+c to stop";
-        if !s.thought.is_empty() {
+        let hint = if s.typing.is_empty() { "  type to steer · esc to stop" } else { "  enter sends · esc stops" };
+        if !s.typing.is_empty() {
+            let room = style::columns().saturating_sub(style::width(&line) + hint.len() + 5);
+            line.push_str(&format!(" {} {}▌", style::accent("›"), style::last_columns(&s.typing, room)));
+        } else if !s.thought.is_empty() {
             // One row, always: a wrapped spinner leaves its upper rows behind on every redraw.
             let room = style::columns().saturating_sub(style::width(&line) + hint.len() + 2);
             line.push_str(&format!(" {}", style::gray(&style::italic(&style::last_columns(&s.thought, room)))));
@@ -101,6 +106,21 @@ impl Ui {
     fn spin(s: &mut State, label: &str) {
         s.spinner = Some((label.to_owned(), Instant::now()));
         s.thought.clear();
+    }
+
+    /// What the owner is typing, to show under the spinner.
+    pub fn typing(&self, text: &str) {
+        self.state.lock().expect("ui").typing = text.to_owned();
+        self.tick();
+    }
+
+    /// A line of its own (what was sent to steer the agent).
+    pub fn note(&self, text: &str) {
+        let mut s = self.state.lock().expect("ui");
+        Self::unspin(&mut s);
+        Self::finish_line(&mut s);
+        s.answering = false;
+        Self::out(&format!("{}\n", style::accent(text)));
     }
 
     /// Stops the spinner while the owner is asked something.
