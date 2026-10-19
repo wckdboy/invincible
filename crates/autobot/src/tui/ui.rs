@@ -120,7 +120,7 @@ impl Ui {
         Self::unspin(&mut s);
         Self::finish_line(&mut s);
         s.answering = false;
-        Self::out(&format!("{}\n", style::accent(text)));
+        Self::out(&format!("{text}\n"));
     }
 
     /// Stops the spinner while the owner is asked something.

@@ -558,7 +558,7 @@ impl Chat {
                         super::keys::Key::Stop => break None,
                         super::keys::Key::Steer(text) => {
                             ui.typing("");
-                            ui.note(&format!("↳ {text}  (it reads this before its next step)"));
+                            ui.note(&format!("{} {text}  {}", style::accent("↳"), style::faint("(it reads this before its next step)")));
                             inbox.lock().expect("inbox").push(text);
                         }
                         super::keys::Key::Typing => {
