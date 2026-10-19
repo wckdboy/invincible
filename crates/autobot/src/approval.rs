@@ -11,11 +11,13 @@ use crate::config::{ApprovalConfig, ApprovalMode};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Action {
     Command(String),
-    /// [inside]: in the working directory.
+    /// [inside]: in the working directory. [hidden]: under a dot name there (`.git/config`,
+    /// `.envrc`), where a write can make a later command run something else; never unattended.
     Write {
         path: PathBuf,
         bytes: usize,
         inside: bool,
+        hidden: bool,
     },
     /// Read or list outside the working directory.
     Read(PathBuf),
@@ -95,7 +97,7 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
     }
     match (config.mode, action) {
         // Unattended, the agent may still work in its own directory.
-        (ApprovalMode::Allowlist, Action::Write { inside: true, .. }) => Verdict::Run,
+        (ApprovalMode::Allowlist, Action::Write { inside: true, hidden: false, .. }) => Verdict::Run,
         (ApprovalMode::Ask, _) => Verdict::Ask,
         _ => Verdict::Refuse(format!("not allowlisted ([approvals] mode = \"allowlist\"): {}", action.describe())),
     }
@@ -146,11 +148,15 @@ mod tests {
         assert_eq!(check(&config(ApprovalMode::Trust), &command), Verdict::Run);
         assert_eq!(check(&config(ApprovalMode::Allowlist), &Action::Command("ls".into())), Verdict::Run);
         // Writes ask; unattended, only those in the working directory run.
-        let write = Action::Write { path: "x".into(), bytes: 1, inside: true };
+        let write = Action::Write { path: "x".into(), bytes: 1, inside: true, hidden: false };
         assert_eq!(check(&config(ApprovalMode::Ask), &write), Verdict::Ask);
         assert_eq!(check(&config(ApprovalMode::Allowlist), &write), Verdict::Run);
-        let outside = Action::Write { path: "/etc/x".into(), bytes: 1, inside: false };
+        let outside = Action::Write { path: "/etc/x".into(), bytes: 1, inside: false, hidden: false };
         assert!(matches!(check(&config(ApprovalMode::Allowlist), &outside), Verdict::Refuse(_)));
+        // `.git/config` can make an allowlisted `git status` run anything: never unattended.
+        let hidden = Action::Write { path: ".git/config".into(), bytes: 1, inside: true, hidden: true };
+        assert!(matches!(check(&config(ApprovalMode::Allowlist), &hidden), Verdict::Refuse(_)));
+        assert_eq!(check(&config(ApprovalMode::Ask), &hidden), Verdict::Ask);
         assert!(matches!(check(&config(ApprovalMode::Allowlist), &Action::Cloud("x".into())), Verdict::Refuse(_)));
     }
 }

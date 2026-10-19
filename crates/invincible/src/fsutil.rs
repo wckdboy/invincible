@@ -25,8 +25,9 @@ pub fn replace_private(path: &Path, contents: &str) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    let tmp = path.with_extension("tmp");
-    let _ = std::fs::remove_file(&tmp);
+    // A name of its own: two writers at once must not share (and clobber) one temporary file.
+    let suffix = crate::token::hex(&crate::token::random::<6>()?);
+    let tmp = path.with_extension(format!("{suffix}.tmp"));
     let mut file = options().create_new(true).open(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     file.write_all(contents.as_bytes())
         .and_then(|()| file.sync_all())

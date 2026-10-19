@@ -264,13 +264,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&known.key).map_err(|e| e.to_string())?
             };
             let device = StaticKey::load_or_create(&home.join("device.key"))?;
+            let token = token::load_or_create(&home.join("token"))?;
             tracing_subscriber::fmt().with_target(false).init();
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
             runtime.block_on(async {
                 let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("{listen}: {e}"))?;
-                tracing::info!("node \"{}\" reachable at http://{listen}", known.name);
+                tracing::info!(
+                    "node \"{}\" reachable at http://{listen}, with this machine's token (`invincible token`)",
+                    known.name
+                );
                 tokio::select! {
-                    () = remote::tunnel(listener, known.addrs, key, device) => {}
+                    () = remote::tunnel(listener, known.addrs, key, device, token) => {}
                     () = shutdown_signal() => {}
                 }
                 Ok(())

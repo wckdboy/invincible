@@ -134,6 +134,19 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/agent/{*rest}", any(agent))
 }
 
+/// A path the agent proxy passes on: under `/v1/agent`, plain segments only (no `.`/`..`, no
+/// encoded dots or slashes, no backslashes), so it cannot be steered at another path there.
+fn agent_path(path_and_query: &str) -> bool {
+    let path = path_and_query.split('?').next().unwrap_or_default();
+    let lower = path.to_ascii_lowercase();
+    (path == "/v1/agent" || path.starts_with("/v1/agent/"))
+        && !lower.contains("%2e")
+        && !lower.contains("%2f")
+        && !lower.contains("%5c")
+        && !path.contains('\\')
+        && path.split('/').skip(1).all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
 /// Passes `/v1/agent` through to the Autobot Agent on this machine, with the node's token, and
 /// streams its answer back (turns are event streams). Callers here are already trusted: the
 /// local app checked the token, a device was checked by its pinned key.
@@ -143,6 +156,9 @@ async fn agent(
     request: HttpRequest,
 ) -> Response {
     let path = request.uri().path_and_query().map_or("/v1/agent", |p| p.as_str()).to_owned();
+    if !agent_path(&path) {
+        return error(StatusCode::NOT_FOUND, "not_found", "no such agent path");
+    }
     let method = request.method().clone();
     let content_type = request.headers().get(header::CONTENT_TYPE).cloned();
     let body = match axum::body::to_bytes(request.into_body(), 1 << 20).await {
@@ -550,6 +566,25 @@ fn error(status: StatusCode, code: &str, message: &str) -> Response {
 mod tests {
     use super::estimate_tokens;
     use serde_json::json;
+
+    #[test]
+    fn the_agent_proxy_passes_plain_agent_paths_only() {
+        for ok in ["/v1/agent", "/v1/agent/sessions/x/turns", "/v1/agent/actions?since=0&limit=5"] {
+            assert!(super::agent_path(ok), "{ok}");
+        }
+        for bad in [
+            "/v1/agent/../admin/devices",
+            "/v1/agent/%2e%2e/x",
+            "/v1/agent/%2E%2E/x",
+            "/v1/agent/a%2fb",
+            "/v1/agent/./x",
+            "/v1/agent//x",
+            "/v1/agentx",
+            "/v1/agent/a\\b",
+        ] {
+            assert!(!super::agent_path(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn estimates_text_and_parts_and_answer_limit() {

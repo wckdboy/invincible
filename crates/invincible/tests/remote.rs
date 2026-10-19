@@ -83,11 +83,26 @@ fn device(tag: &str) -> (StaticKey, std::path::PathBuf) {
     (StaticKey::load_or_create(&dir.join("device.key")).unwrap(), dir)
 }
 
+const DOOR_TOKEN: &str = "door-token";
+
+/// A client that carries the door's token, as local programs do.
+fn client() -> reqwest::Client {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::AUTHORIZATION, format!("Bearer {DOOR_TOKEN}").parse().unwrap());
+    reqwest::Client::builder().default_headers(headers).build().unwrap()
+}
+
 /// A local door to [node] for [device]; returns its base URL.
 async fn tunnel(node: &Node, device: &StaticKey) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let door = listener.local_addr().unwrap();
-    tokio::spawn(remote::tunnel(listener, vec![node.addr.clone()], node.pairing.key.public.clone(), device.clone()));
+    tokio::spawn(remote::tunnel(
+        listener,
+        vec![node.addr.clone()],
+        node.pairing.key.public.clone(),
+        device.clone(),
+        DOOR_TOKEN.into(),
+    ));
     format!("http://{door}")
 }
 
@@ -102,7 +117,7 @@ async fn a_paired_device_uses_the_api_through_the_tunnel() {
     assert!(node.pairing.devices.is_pinned(&phone.public));
 
     let door = tunnel(&node, &phone).await;
-    let client = reqwest::Client::new();
+    let client = client();
     // No token: the device is authenticated by its key.
     let models: Value = client.get(format!("{door}/v1/models")).send().await.unwrap().json().await.unwrap();
     assert_eq!(models["data"][0]["id"], "small");
@@ -141,6 +156,12 @@ async fn a_paired_device_uses_the_api_through_the_tunnel() {
         .await
         .unwrap();
     assert_eq!(echoed["engine_saw"]["messages"][0]["content"].as_str().unwrap().len(), 300_000);
+
+    // The door wants this machine's token, and a loopback Host: a web page cannot use it.
+    let bare = reqwest::Client::new();
+    assert_eq!(bare.get(format!("{door}/v1/models")).send().await.unwrap().status(), 401);
+    let rebound = client.get(format!("{door}/v1/models")).header("host", "evil.example:7780").send().await.unwrap();
+    assert_eq!(rebound.status(), 403);
 
     // Devices cannot administer the node.
     let admin = client.get(format!("{door}/v1/admin/devices")).send().await.unwrap();
@@ -223,14 +244,12 @@ async fn an_unpaired_device_is_cut_off() {
     let (phone, dir) = device("revoked");
     remote::pair(&node.pairing.start().unwrap(), &phone, "phone").await.unwrap();
     let door = tunnel(&node, &phone).await;
-    let client = reqwest::Client::new();
+    let client = client();
     assert_eq!(client.get(format!("{door}/v1/models")).send().await.unwrap().status(), 200);
 
     assert!(node.pairing.devices.remove("phone").unwrap());
-    // A fresh connection is refused at the handshake.
-    assert!(reqwest::Client::new().get(format!("{door}/v1/models")).send().await.is_err());
-    // A connection opened before the unpairing dies at its next request.
-    assert!(client.get(format!("{door}/v1/models")).send().await.is_err());
+    // Every request through the door is its own session: refused at the handshake now.
+    assert_eq!(client.get(format!("{door}/v1/models")).send().await.unwrap().status(), 502);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -243,7 +262,7 @@ async fn a_device_pins_the_receipt_key_and_checks_receipts_through_the_tunnel() 
     assert_eq!(pinned, node.pairing.receipt_key);
 
     let door = tunnel(&node, &phone).await;
-    let client = reqwest::Client::new();
+    let client = client();
     let response = client
         .post(format!("{door}/v1/chat/completions"))
         .json(&json!({ "messages": [{ "role": "user", "content": "hi" }] }))

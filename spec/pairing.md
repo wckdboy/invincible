@@ -63,14 +63,16 @@ the code. The first implementation had exactly this bug, and a test caught it.)
 ### Pairing (`0x01`)
 
 1. Device → node, handshake message 1. Payload: `{"name": "<device name>"}` (UTF-8 JSON, at most
-   1024 bytes).
-2. The node pins the device's static key under the name. Names are cleaned to letters, digits, `-`
-   and `_`, at most 40 characters. A name already in use by another key gets a number (`phone-2`). A
+   1024 bytes; a longer one is refused).
+2. The node uses up the code, then pins the device's static key under the name. Using up the code
+   is atomic: of two handshakes that both prove the same code, only the first pins a device, and a
+   handshake whose code was replaced, burned or expired while it ran pins nothing. Names are
+   cleaned to ASCII letters, digits, `-` and `_`, at most 40 characters. A name already in use by another key gets a number (`phone-2`). A
    key that paired before keeps one entry, renamed.
 3. Node → device, handshake message 2. Payload:
    `{"node": "<node name>", "device": "<name pinned>", "receipts": "<receipt public key>"}`. The device
    pins the receipt key and uses it to verify the node's receipts ([receipts.md](receipts.md)).
-4. The code is closed. The connection continues as a session (below).
+4. The connection continues as a session (below).
 
 ### Session (`0x02`)
 
@@ -98,12 +100,26 @@ authenticates it. A device cannot reach the admin endpoints.
 ## Revocation
 
 - `invincible devices --remove <name>` on the node unpins a device. Its next handshake fails, and an
-  open connection is dropped at the next frame it sends.
+  open connection is dropped at the next frame in either direction (a stream the device is only
+  reading stops too).
 - A panic wipe in Autobot deletes `device.key`, and with it every pairing.
+
+## Limits
+
+- At most 64 handshakes are in progress at once, from anyone; further connections are dropped
+  until one finishes (each has 10 seconds).
+- A paired device holds at most 32 sessions at once.
+- Request headers must arrive within 30 seconds.
+
+## The tunnel
+
+`invincible tunnel` on a paired machine opens a plain-HTTP door on loopback; each request through
+it is its own session. The door asks for that machine's local token (`Authorization: Bearer`, the
+same file as a node's `invincible token`) and a loopback `Host` header, so a web page open in a
+browser on that machine cannot use it, by cross-site request or DNS rebinding.
 
 ## Open questions
 
 - Key rotation, and re-pairing without a fresh code.
 - Reaching a phone that is asleep (recipes delivering results): polling only, or an optional push
   path that reveals nothing.
-- Whether a node should cap sessions per device.

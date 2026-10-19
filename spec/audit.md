@@ -2,8 +2,9 @@
 
 A node keeps a log of every request it answered: when, who asked, and the request's signed
 receipt ([receipts.md](receipts.md)). The receipt says where it ran and what left the node; the log
-adds the time and the caller, and links each entry to the one before it, so entries cannot be
-removed or changed later without it showing. Like a receipt, it never holds prompt or answer text.
+adds the time and the caller, and links each entry to the one before it, so an entry removed or
+changed later breaks the chain, unless whoever changed it also rewrote every later entry (see
+[what it proves](#what-it-proves)). Like a receipt, it never holds prompt or answer text.
 
 The Autobot Agent keeps a second log, of its actions ([below](#the-agents-action-log)).
 
@@ -45,8 +46,22 @@ Requests the router asked about or refused are logged too: their receipt's decis
    since its predecessor may have been rotated away);
 2. its receipt is signed by this node's receipt key, and the signature verifies.
 
-A removed, reordered or edited entry breaks (1) or (2). Removing the newest entries is not caught by
-the chain alone; a device that kept the receipt ids of its own requests can tell they are missing.
+A removed, reordered or edited entry breaks (1) or (2), unless the later entries were rewritten too.
+
+## What it proves
+
+The chain is plain SHA-256, not keyed, and the node's receipt key lives on the same machine. So:
+
+- **Receipts cannot be forged** without the receipt key: what a receipt says (where a request ran,
+  what left the node) holds for any entry that verifies, and a device that kept its own receipts
+  can check them against the log.
+- **The time, the caller and the order** are not signed. Someone who can write the log can change
+  them, or delete entries, and recompute every later `prev`; `--verify` then still passes.
+  Removing the newest entries, or the rotated file, is never caught by the chain.
+
+The log is a record kept for the owner, protected by the machine's file permissions; it is not
+evidence against someone who controls the machine. Sending checkpoints of the chain's head to a
+paired device (so a later rewrite shows) is a planned addition.
 
 ## Reading it
 

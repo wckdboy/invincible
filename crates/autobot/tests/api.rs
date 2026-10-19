@@ -149,8 +149,13 @@ async fn a_turn_through_the_gateway_with_an_approval() {
         .await
         .unwrap();
     assert_eq!(list["sessions"][0]["id"], "phone-1");
-    let reset =
-        client.post(format!("{gateway}/v1/agent/sessions/phone-1/reset")).bearer_auth(TOKEN).send().await.unwrap();
+    let reset = client
+        .post(format!("{gateway}/v1/agent/sessions/phone-1/reset"))
+        .bearer_auth(TOKEN)
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(reset.status(), 200);
     let history: Value = client
         .get(format!("{gateway}/v1/agent/sessions/phone-1"))
@@ -204,7 +209,7 @@ async fn the_token_is_required_on_both_sides() {
 #[tokio::test]
 async fn a_busy_session_and_bad_ids_are_refused() {
     let slow = json!({ "role": "assistant", "content": "slow" });
-    let (gateway, _, _) = stack("busy", vec![slow], Duration::from_millis(500)).await;
+    let (gateway, agent, _) = stack("busy", vec![slow], Duration::from_millis(500)).await;
     let client = reqwest::Client::new();
     let url = format!("{gateway}/v1/agent/sessions/s/turns");
     let first = client.post(&url).bearer_auth(TOKEN).json(&json!({ "text": "a" })).send().await.unwrap();
@@ -219,7 +224,16 @@ async fn a_busy_session_and_bad_ids_are_refused() {
         .send()
         .await
         .unwrap();
-    assert_eq!(bad.status(), 400);
+    // The gateway refuses it before the agent sees it.
+    assert_eq!(bad.status(), 404);
+    let direct = client
+        .post(format!("{agent}/v1/agent/sessions/bad.id/turns"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "text": "a" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(direct.status(), 400);
 }
 
 #[tokio::test]
@@ -297,8 +311,13 @@ async fn a_recipe_is_handed_over_run_now_and_its_runs_collected() {
     // From the loopback API: no device origin.
     assert!(item.get("origin").is_none());
 
-    let started =
-        client.post(format!("{gateway}/v1/agent/schedules/r-disk/run")).bearer_auth(TOKEN).send().await.unwrap();
+    let started = client
+        .post(format!("{gateway}/v1/agent/schedules/r-disk/run"))
+        .bearer_auth(TOKEN)
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(started.status(), 202);
     let mut runs = Value::Null;
     for _ in 0..100 {
@@ -331,8 +350,23 @@ async fn a_recipe_is_handed_over_run_now_and_its_runs_collected() {
         .await
         .unwrap();
     assert_eq!(later["runs"], json!([]));
-    let missing =
-        client.post(format!("{gateway}/v1/agent/schedules/nope/run")).bearer_auth(TOKEN).send().await.unwrap();
+    let missing = client
+        .post(format!("{gateway}/v1/agent/schedules/nope/run"))
+        .bearer_auth(TOKEN)
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(missing.status(), 404);
+    // Not JSON (a form, a no-cors fetch): refused.
+    let form = client
+        .post(format!("{gateway}/v1/agent/schedules"))
+        .bearer_auth(TOKEN)
+        .header("content-type", "text/plain")
+        .body(r#"{"when":"every 1m","task":"x"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(form.status(), 415);
     assert!(dir.join("runs/r-disk.jsonl").exists());
 }

@@ -31,6 +31,10 @@ const MAX_FRAME: usize = 65535;
 const TAG: usize = 16;
 const MAX_PLAIN: usize = MAX_FRAME - TAG;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Handshakes in progress at once, from anyone: more wait their turn or are dropped.
+const MAX_HANDSHAKES: usize = 64;
+/// Sessions one paired device may hold open at once.
+const MAX_SESSIONS_PER_DEVICE: usize = 32;
 pub const CODE_LIFETIME: Duration = Duration::from_secs(600);
 /// Failed pairing handshakes before a code is burned.
 const MAX_PAIR_FAILURES: u32 = 5;
@@ -189,6 +193,10 @@ where
                 Ok(0) | Err(_) => break,
                 Ok(n) => n,
             };
+            // An unpaired device gets nothing more, not even the rest of a stream.
+            if !allowed() {
+                break;
+            }
             let Ok(m) = transport.lock().expect("transport lock").write_message(&plain[..n], &mut out) else {
                 break;
             };
@@ -224,6 +232,8 @@ pub struct Pairing {
     pub advertise: Vec<String>,
     pub devices: Devices,
     pending: Mutex<Option<Pending>>,
+    /// Open sessions per device key.
+    sessions: Mutex<std::collections::HashMap<Vec<u8>, usize>>,
 }
 
 struct Pending {
@@ -234,7 +244,15 @@ struct Pending {
 
 impl Pairing {
     pub fn new(key: StaticKey, name: String, advertise: Vec<String>, devices: Devices) -> Self {
-        Self { key, name, advertise, devices, receipt_key: String::new(), pending: Mutex::new(None) }
+        Self {
+            key,
+            name,
+            advertise,
+            devices,
+            receipt_key: String::new(),
+            pending: Mutex::new(None),
+            sessions: Mutex::default(),
+        }
     }
 
     pub fn with_receipt_key(mut self, public: String) -> Self {
@@ -281,32 +299,79 @@ impl Pairing {
         }
     }
 
-    fn close_code(&self, secret: &[u8; 32]) {
+    /// Uses up the code [secret] once its handshake succeeded: true for exactly one caller, and
+    /// only while it is still the open, unexpired code (two handshakes racing on one code, or a
+    /// code replaced or burned meanwhile, pin nothing).
+    fn take_code(&self, secret: &[u8; 32]) -> bool {
         let mut pending = self.pending.lock().expect("pending lock");
-        if pending.as_ref().is_some_and(|p| &p.secret == secret) {
+        let open = pending.as_ref().is_some_and(|p| &p.secret == secret && Instant::now() < p.expires);
+        if open {
             *pending = None;
+        }
+        open
+    }
+
+    /// Counts a session of device [key]; None when it has [MAX_SESSIONS_PER_DEVICE] open already.
+    fn session(self: &Arc<Self>, key: &[u8]) -> Option<SessionSlot> {
+        let mut open = self.sessions.lock().expect("sessions lock");
+        let n = open.entry(key.to_vec()).or_insert(0);
+        if *n >= MAX_SESSIONS_PER_DEVICE {
+            return None;
+        }
+        *n += 1;
+        Some(SessionSlot { pairing: self.clone(), key: key.to_vec() })
+    }
+}
+
+/// One open session of a device; counted down when dropped.
+struct SessionSlot {
+    pairing: Arc<Pairing>,
+    key: Vec<u8>,
+}
+
+impl Drop for SessionSlot {
+    fn drop(&mut self) {
+        let mut open = self.pairing.sessions.lock().expect("sessions lock");
+        if let Some(n) = open.get_mut(&self.key) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                open.remove(&self.key);
+            }
         }
     }
 }
 
 /// Accepts remote connections on [listener] and serves [app] to paired devices.
 pub async fn serve(listener: TcpListener, pairing: Arc<Pairing>, app: Router) {
+    let handshakes = Arc::new(tokio::sync::Semaphore::new(MAX_HANDSHAKES));
     loop {
         let Ok((tcp, peer)) = listener.accept().await else { continue };
+        // Unauthenticated work is bounded: past MAX_HANDSHAKES in flight, new peers are dropped.
+        let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+            tracing::debug!(%peer, "too many handshakes in progress; connection dropped");
+            continue;
+        };
         let (pairing, app) = (pairing.clone(), app.clone());
         tokio::spawn(async move {
-            if let Err(e) = accept(tcp, pairing, app).await {
+            if let Err(e) = accept(tcp, pairing, app, permit).await {
                 tracing::info!(%peer, "remote connection refused: {e}");
             }
         });
     }
 }
 
-async fn accept(mut tcp: TcpStream, pairing: Arc<Pairing>, app: Router) -> Result<(), String> {
+async fn accept(
+    mut tcp: TcpStream,
+    pairing: Arc<Pairing>,
+    app: Router,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<(), String> {
     let _ = tcp.set_nodelay(true);
     let (transport, device_key) = timeout(HANDSHAKE_TIMEOUT, respond(&mut tcp, &pairing))
         .await
         .map_err(|_| "handshake timed out".to_owned())??;
+    drop(permit);
+    let _slot = pairing.session(&device_key).ok_or("too many open sessions for this device")?;
 
     let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
     // Requests on this session are the device's (for the audit log).
@@ -315,6 +380,8 @@ async fn accept(mut tcp: TcpStream, pairing: Arc<Pairing>, app: Router) -> Resul
     let service = hyper_util::service::TowerToHyperService::new(app);
     tokio::spawn(async move {
         let _ = hyper::server::conn::http1::Builder::new()
+            .timer(hyper_util::rt::TokioTimer::new())
+            .header_read_timeout(Duration::from_secs(30))
             .serve_connection(hyper_util::rt::TokioIo::new(theirs), service)
             .await;
     });
@@ -340,11 +407,16 @@ async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportSta
                     return Err(format!("pairing handshake failed: {e}"));
                 }
             };
-            let hello: serde_json::Value = serde_json::from_slice(&payload[..n.min(MAX_HANDSHAKE_PAYLOAD)])
-                .map_err(|_| "pairing hello is not JSON".to_owned())?;
+            if n > MAX_HANDSHAKE_PAYLOAD {
+                return Err("pairing hello is too long".to_owned());
+            }
+            let hello: serde_json::Value =
+                serde_json::from_slice(&payload[..n]).map_err(|_| "pairing hello is not JSON".to_owned())?;
             let device_key = hs.get_remote_static().ok_or("no device key")?.to_vec();
+            if !pairing.take_code(&secret) {
+                return Err("the pairing code was used, replaced or expired meanwhile".to_owned());
+            }
             let name = pairing.devices.add(hello["name"].as_str().unwrap_or("device"), &device_key)?;
-            pairing.close_code(&secret);
             let reply = json!({ "node": pairing.name, "device": name, "receipts": pairing.receipt_key }).to_string();
             let m = hs.write_message(reply.as_bytes(), &mut out).map_err(|e| e.to_string())?;
             write_frame(tcp, &out[..m]).await.map_err(|e| e.to_string())?;
@@ -439,19 +511,71 @@ pub async fn connect(
     Ok((tcp, transport))
 }
 
-/// Serves a plain-HTTP door on [listener] (loopback) that leads to the node: each local
-/// connection becomes one encrypted session.
-pub async fn tunnel(listener: TcpListener, addrs: Vec<String>, node_key: Vec<u8>, device: StaticKey) {
-    let (addrs, node_key) = (Arc::new(addrs), Arc::new(node_key));
-    loop {
-        let Ok((local, _)) = listener.accept().await else { continue };
-        let (addrs, node_key, device) = (addrs.clone(), node_key.clone(), device.clone());
-        tokio::spawn(async move {
-            match connect(&addrs, &node_key, &device).await {
-                Ok((tcp, transport)) => pipe(tcp, transport, local, || true).await,
-                Err(e) => tracing::warn!("tunnel: {e}"),
-            }
-        });
+/// The tunnel's door: where the node is, and the local token a request must carry.
+struct Door {
+    addrs: Vec<String>,
+    node_key: Vec<u8>,
+    device: StaticKey,
+    token: String,
+}
+
+/// Serves a plain-HTTP door on [listener] (loopback) that leads to the node: each request goes
+/// through its own encrypted session. A request needs this machine's local token (`Authorization:
+/// Bearer`, as on a node's own API) and a loopback `Host`, so a web page in a browser on this
+/// machine cannot use the door (no cross-site requests, no DNS rebinding).
+pub async fn tunnel(listener: TcpListener, addrs: Vec<String>, node_key: Vec<u8>, device: StaticKey, token: String) {
+    let door = Arc::new(Door { addrs, node_key, device, token });
+    let app = axum::Router::new().fallback(through_door).with_state(door);
+    let _ = axum::serve(listener, app).await;
+}
+
+/// Whether a `Host` header names this machine (`127.0.0.1:7780`, `localhost`, `[::1]:7780`).
+fn loopback_host(host: &str) -> bool {
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        rest.split(']').next().unwrap_or_default()
+    } else {
+        host.rsplit_once(':').map_or(host, |(name, _)| name)
+    };
+    name.eq_ignore_ascii_case("localhost") || name.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+async fn through_door(
+    axum::extract::State(door): axum::extract::State<Arc<Door>>,
+    mut request: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    use axum::response::IntoResponse;
+    let host = request.headers().get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or_default();
+    if !loopback_host(host) {
+        return (StatusCode::FORBIDDEN, "the tunnel answers only requests to 127.0.0.1 or localhost").into_response();
+    }
+    let given = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    if !crate::token::matches(&door.token, given) {
+        return (StatusCode::UNAUTHORIZED, "missing or wrong token (see `invincible token` on this machine)")
+            .into_response();
+    }
+    // The node knows the device by its key; the local token stays here.
+    request.headers_mut().remove(header::AUTHORIZATION);
+    let (tcp, transport) = match connect(&door.addrs, &door.node_key, &door.device).await {
+        Ok(session) => session,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("the node: {e}")).into_response(),
+    };
+    let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
+    tokio::spawn(async move { pipe(tcp, transport, theirs, || true).await });
+    let (mut sender, connection) = match hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(ours)).await
+    {
+        Ok(pair) => pair,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("the node: {e}")).into_response(),
+    };
+    tokio::spawn(connection);
+    match sender.send_request(request).await {
+        Ok(response) => response.map(axum::body::Body::new),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("the node: {e}")).into_response(),
     }
 }
 
@@ -467,5 +591,54 @@ mod tests {
             addrs: vec!["192.168.1.20:7778".into(), "[fd00::1]:7778".into()],
         };
         assert_eq!(PairingCode::decode(&code.encode()).unwrap(), code);
+    }
+
+    #[test]
+    fn a_code_is_taken_once_and_not_after_it_is_replaced() {
+        let dir = std::env::temp_dir().join(format!("invincible-take-{}", std::process::id()));
+        let pairing = super::Pairing::new(
+            crate::devices::StaticKey::load_or_create(&dir.join("node.key")).unwrap(),
+            "n".into(),
+            vec![],
+            crate::devices::Devices::load(&dir.join("devices.json")).unwrap(),
+        );
+        let first = pairing.start().unwrap();
+        assert!(pairing.take_code(&first.secret));
+        assert!(!pairing.take_code(&first.secret), "used once");
+        let old = pairing.start().unwrap();
+        let _new = pairing.start().unwrap();
+        assert!(!pairing.take_code(&old.secret), "replaced");
+        let short = pairing.start_for(std::time::Duration::ZERO).unwrap();
+        assert!(!pairing.take_code(&short.secret), "expired");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_device_holds_a_bounded_number_of_sessions() {
+        let dir = std::env::temp_dir().join(format!("invincible-slots-{}", std::process::id()));
+        let pairing = std::sync::Arc::new(super::Pairing::new(
+            crate::devices::StaticKey::load_or_create(&dir.join("node.key")).unwrap(),
+            "n".into(),
+            vec![],
+            crate::devices::Devices::load(&dir.join("devices.json")).unwrap(),
+        ));
+        let slots: Vec<_> = (0..super::MAX_SESSIONS_PER_DEVICE).map(|_| pairing.session(b"k").unwrap()).collect();
+        assert!(pairing.session(b"k").is_none());
+        assert!(pairing.session(b"other").is_some());
+        drop(slots);
+        assert!(pairing.session(b"k").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_door_knows_loopback_hosts() {
+        for ok in ["127.0.0.1:7780", "localhost:7780", "LOCALHOST", "[::1]:7780", "127.0.0.1"] {
+            assert!(super::loopback_host(ok), "{ok}");
+        }
+        for bad in
+            ["evil.example:7780", "evil.example", "192.168.1.2:7780", "", "[fd00::1]:80", "127.0.0.1.evil.example"]
+        {
+            assert!(!super::loopback_host(bad), "{bad}");
+        }
     }
 }

@@ -171,9 +171,12 @@ impl Tools {
     pub fn action(&self, call: &Call) -> Option<Action> {
         match call {
             Call::Terminal { command } => Some(Action::Command(command.clone())),
-            Call::WriteFile { path, content } => {
-                Some(Action::Write { path: path.clone(), bytes: content.len(), inside: self.inside(path) })
-            }
+            Call::WriteFile { path, content } => Some(Action::Write {
+                path: path.clone(),
+                bytes: content.len(),
+                inside: self.inside(path),
+                hidden: self.hidden(path),
+            }),
             Call::ReadFile { path } | Call::ListDir { path } => {
                 (!self.inside(path)).then(|| Action::Read(path.clone()))
             }
@@ -252,12 +255,14 @@ impl Tools {
         clean
     }
 
-    /// [path] is in the working directory, symlinks followed as far as the path exists.
+    /// [path] is in the working directory, symlinks followed as far as the path exists. A
+    /// symlink that leads nowhere (it could be created through) counts as outside.
     fn inside(&self, path: &Path) -> bool {
-        let real = |p: &Path| {
+        let real = |p: &Path| -> Option<PathBuf> {
             let mut existing = p.to_path_buf();
             let mut rest = Vec::new();
-            while !existing.exists() {
+            // symlink_metadata, not exists(): a dangling link is there, and must resolve.
+            while existing.symlink_metadata().is_err() {
                 match (existing.file_name().map(ToOwned::to_owned), existing.parent()) {
                     (Some(name), Some(parent)) => {
                         rest.push(name);
@@ -266,11 +271,25 @@ impl Tools {
                     _ => break,
                 }
             }
-            let mut full = existing.canonicalize().unwrap_or(existing);
+            let mut full = match existing.canonicalize() {
+                Ok(full) => full,
+                Err(_) if existing.symlink_metadata().is_ok() => return None,
+                Err(_) => existing,
+            };
             full.extend(rest.into_iter().rev());
-            full
+            Some(full)
         };
-        real(path).starts_with(real(&self.workdir))
+        match (real(path), real(&self.workdir)) {
+            (Some(path), Some(workdir)) => path.starts_with(workdir),
+            _ => false,
+        }
+    }
+
+    /// [path] is under a name starting with a dot, inside the working directory.
+    fn hidden(&self, path: &Path) -> bool {
+        path.strip_prefix(&self.workdir).ok().is_some_and(|rel| {
+            rel.components().any(|c| matches!(c, Component::Normal(name) if name.to_string_lossy().starts_with('.')))
+        })
     }
 }
 
@@ -286,7 +305,24 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
     if let Some(dir) = path.parent() {
         tokio::fs::create_dir_all(dir).await.map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    tokio::fs::write(path, content).await.map_err(|e| format!("{}: {e}", path.display()))?;
+    // Never through a link: the approval was for this path, not where a link points.
+    if let Ok(meta) = tokio::fs::symlink_metadata(path).await {
+        if meta.file_type().is_symlink() {
+            return Err(format!("{} is a symbolic link; not writing through it", path.display()));
+        }
+        #[cfg(unix)]
+        if std::os::unix::fs::MetadataExt::nlink(&meta) > 1 {
+            return Err(format!("{} has other hard links; not writing to it", path.display()));
+        }
+    }
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW);
+    let mut file = options.open(path).await.map_err(|e| format!("{}: {e}", path.display()))?;
+    tokio::io::AsyncWriteExt::write_all(&mut file, content.as_bytes())
+        .await
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(format!("wrote {} bytes to {}", content.len(), path.display()))
 }
 
@@ -366,6 +402,35 @@ mod tests {
         assert!(matches!(tools.action(&write), Some(Action::Write { bytes: 2, inside: true, .. })));
         assert!(tools.parse("rm", "{}").is_err());
         assert!(tools.parse("terminal", "{}").is_err());
+    }
+
+    #[tokio::test]
+    async fn writes_never_go_through_links_or_into_dot_names_unseen() {
+        let (tools, dir) = tools();
+        let outside = std::env::temp_dir().join(format!("autobot-escape-{}", rand()));
+        // A dangling link in the working directory, pointing out: outside, and never written through.
+        std::os::unix::fs::symlink(&outside, dir.join("dangling")).unwrap();
+        let call = tools.parse("write_file", r#"{"path":"dangling","content":"pwned"}"#).unwrap();
+        assert!(matches!(tools.action(&call), Some(Action::Write { inside: false, .. })));
+        assert!(tools.run(&call).await.contains("symbolic link"));
+        assert!(!outside.exists());
+        // A link to a file inside is refused too (the approval named the link).
+        std::fs::write(dir.join("real.txt"), "a").unwrap();
+        std::os::unix::fs::symlink(dir.join("real.txt"), dir.join("alias.txt")).unwrap();
+        let alias = tools.parse("write_file", r#"{"path":"alias.txt","content":"b"}"#).unwrap();
+        assert!(tools.run(&alias).await.contains("symbolic link"));
+        // A hard link to a file elsewhere.
+        std::fs::write(&outside, "keep").unwrap();
+        std::fs::hard_link(&outside, dir.join("hard.txt")).unwrap();
+        let hard = tools.parse("write_file", r#"{"path":"hard.txt","content":"x"}"#).unwrap();
+        assert!(tools.run(&hard).await.contains("hard links"));
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+        // Dot names in the working directory are marked.
+        let git = tools.parse("write_file", r#"{"path":".git/config","content":"x"}"#).unwrap();
+        assert!(matches!(tools.action(&git), Some(Action::Write { inside: true, hidden: true, .. })));
+        let plain = tools.parse("write_file", r#"{"path":"notes/a.md","content":"x"}"#).unwrap();
+        assert!(matches!(tools.action(&plain), Some(Action::Write { inside: true, hidden: false, .. })));
+        let _ = std::fs::remove_file(outside);
     }
 
     #[tokio::test]

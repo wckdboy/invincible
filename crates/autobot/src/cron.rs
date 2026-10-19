@@ -75,7 +75,10 @@ impl When {
             if n == 0 {
                 return Err(format!("{text:?}: the interval must be more than zero"));
             }
-            return Ok(Self::Every(Duration::from_secs(n * secs)));
+            // At most a year: longer intervals overflow date arithmetic and are surely a mistake.
+            let total = n.checked_mul(secs).filter(|t| *t <= 366 * 86400);
+            let total = total.ok_or_else(|| format!("{text:?}: at most a year (every 366d)"))?;
+            return Ok(Self::Every(Duration::from_secs(total)));
         }
         Cron::parse(text).map(Self::Cron)
     }
@@ -113,7 +116,9 @@ impl When {
                 }
                 None
             }
-            Self::Every(interval) => Some((last.unwrap_or(created) + TimeDelta::from_std(*interval).ok()?).max(now)),
+            Self::Every(interval) => {
+                Some(last.unwrap_or(created).checked_add_signed(TimeDelta::from_std(*interval).ok()?)?.max(now))
+            }
         }
     }
 }
@@ -382,6 +387,15 @@ impl Schedules {
                 .find(|id| !self.schedules.iter().any(|s| &s.id == id))
                 .expect("a free id"),
         };
+        if origin.is_some() && spec.tools.is_none() {
+            return Err("a schedule from a device names its tools (\"tools\": [...])".to_owned());
+        }
+        if let Some(existing) = self.schedules.iter().find(|s| s.id == id)
+            && existing.origin != origin
+            && origin.is_some()
+        {
+            return Err(format!("{id} was made elsewhere; a device can replace only its own schedules"));
+        }
         let created =
             self.schedules.iter().find(|s| s.id == id).map_or_else(|| Local::now().timestamp(), |s| s.created);
         self.schedules.retain(|s| s.id != id);
@@ -648,6 +662,9 @@ mod tests {
         assert!(!when.due(None, utc, utc + chrono::TimeDelta::minutes(1)));
         assert!(When::parse("CRON_TZ=Europe/Oslo 0 7 * * *").is_err());
         assert!(When::parse("CRON_TZ=UTC every 5m").is_err());
+        assert!(When::parse("every 100000000000d").is_err());
+        assert!(When::parse("every 144115188075855872d").is_err());
+        assert!(When::parse("every 366d").is_ok());
     }
 
     #[test]

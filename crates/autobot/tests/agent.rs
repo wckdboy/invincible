@@ -318,6 +318,23 @@ async fn a_recipe_gets_only_its_tool_groups() {
             )
             .is_err()
     );
+    // A device must name the tools, and cannot replace a schedule made here or by another device.
+    let local = schedules
+        .put(autobot::cron::ScheduleSpec { when: "@daily".into(), task: "local".into(), ..Default::default() }, None)
+        .unwrap();
+    let from_phone = |id: &str, tools: Option<Vec<String>>| autobot::cron::ScheduleSpec {
+        id: Some(id.into()),
+        when: "@daily".into(),
+        task: "x".into(),
+        tools,
+        ..Default::default()
+    };
+    assert!(schedules.put(from_phone("r-new", None), Some("device:phone".into())).is_err());
+    assert!(schedules.put(from_phone(&local, Some(vec![])), Some("device:phone".into())).is_err());
+    assert!(schedules.put(from_phone("r-morning", Some(vec![])), Some("device:other".into())).is_err());
+    assert!(schedules.put(from_phone("r-phone", Some(vec![])), Some("device:phone".into())).is_ok());
+    assert!(schedules.put(from_phone("r-phone", Some(vec![])), Some("device:phone".into())).is_ok());
+    assert!(schedules.put(from_phone("r-phone", Some(vec![])), Some("device:other".into())).is_err());
 }
 
 #[tokio::test]

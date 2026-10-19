@@ -211,7 +211,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   - `allowlist`: for unattended use. Allowlisted commands and writes in the working directory run;
     everything else is refused without asking. An allowlist entry matches the whole command or the
     command plus arguments, never a chained one (`git status; rm -rf ~` does not match
-    `git status`).
+    `git status`). Arguments are not checked: an allowlisted `cat` reads any file you can, so
+    allow only commands that are safe with any arguments. Writes never follow symbolic links or
+    touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
+    since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
 - **Private by default:** agent turns carry `invincible-private`, so the router keeps them on local
   models; tool results carry your files and command output. With `[gateway] private = false` the
@@ -386,6 +389,7 @@ advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, â€
 invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
 invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
 invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
+                                     # (with that machine's token, `invincible token`: web pages cannot use it)
 invincible devices                   # on the node: who is paired
 invincible devices --remove laptop   # unpair: refused at the next handshake or frame
 ```

@@ -77,11 +77,23 @@ async fn require_token(State(state): State<Arc<ApiState>>, request: Request, nex
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
-    if invincible::token::matches(&state.token, given) {
-        next.run(request).await
-    } else {
-        error(StatusCode::UNAUTHORIZED, "unauthorized", "the gateway's token is required")
+    if !invincible::token::matches(&state.token, given) {
+        return error(StatusCode::UNAUTHORIZED, "unauthorized", "the gateway's token is required");
     }
+    // Every POST says it is JSON: a form or a no-cors fetch from a web page cannot.
+    let json = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(';').next().is_some_and(|t| t.trim().eq_ignore_ascii_case("application/json")));
+    if request.method() == axum::http::Method::POST && !json {
+        return error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "invalid_request_error",
+            "send Content-Type: application/json",
+        );
+    }
+    next.run(request).await
 }
 
 fn error(status: StatusCode, code: &str, message: &str) -> Response {
@@ -381,7 +393,7 @@ impl Approver for ApiApprover {
 pub fn describe(action: &Action) -> Value {
     match action {
         Action::Command(command) => json!({ "kind": "command", "command": command }),
-        Action::Write { path, bytes, inside } => {
+        Action::Write { path, bytes, inside, .. } => {
             json!({ "kind": "write", "path": path.display().to_string(), "bytes": bytes, "inside": inside })
         }
         Action::Read(path) => json!({ "kind": "read", "path": path.display().to_string() }),

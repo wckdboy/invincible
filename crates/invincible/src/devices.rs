@@ -116,12 +116,14 @@ impl Devices {
     /// Unpins the device called [name]; false when there is none.
     pub fn remove(&self, name: &str) -> Result<bool, String> {
         let mut list = self.list.write().expect("devices lock");
-        let before = list.len();
-        list.retain(|d| d.name != name);
-        if list.len() == before {
+        let kept: Vec<Device> = list.iter().filter(|d| d.name != name).cloned().collect();
+        if kept.len() == list.len() {
             return Ok(false);
         }
-        self.save(&list)?;
+        // On disk first: if that fails, the device stays paired here too, rather than coming back
+        // at the next start.
+        self.save(&kept)?;
+        *list = kept;
         Ok(true)
     }
 
@@ -130,13 +132,13 @@ impl Devices {
     }
 }
 
-/// Up to 40 letters, digits, `-` and `_`; anything else becomes `-`.
+/// Up to 40 ASCII letters, digits, `-` and `_` (no look-alike letters); anything else becomes `-`.
 fn clean_name(name: &str) -> String {
     let cleaned: String = name
         .trim()
         .chars()
         .take(40)
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
     let cleaned = cleaned.trim_matches('-').to_owned();
     if cleaned.is_empty() { "device".to_owned() } else { cleaned }

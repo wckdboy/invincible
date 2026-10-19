@@ -12,6 +12,11 @@ with `invincible-caller: device:<name>` (or `local`) saying who is asking; only 
 it, since only it has the token.
 If the agent is not running, the gateway answers `503` with error type `agent_unavailable`.
 
+Every `POST` must say `Content-Type: application/json` (`415` otherwise), so a web page cannot
+reach the agent with a form or a no-cors request. The gateway passes on only `/v1/agent` paths made
+of plain segments (no `.`, `..`, encoded dots or slashes, or backslashes), and answers `404` for
+others.
+
 Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "code": "..."}}`.
 
 ## Endpoints
@@ -92,7 +97,9 @@ to the model and run, whatever the approval mode, and still under the unattended
 | `terminal` | `terminal` (allowlisted commands only) |
 | `web`, `vault` | none: this machine has no such tools |
 
-No `tools` means every tool, as for schedules made here. The phone sends its schedule in UTC
+No `tools` means every tool, as for schedules made here; a schedule from a device must name its
+`tools`, and a device can replace only schedules it made itself (`400` otherwise). An interval is
+at most `every 366d`. The phone sends its schedule in UTC
 (`CRON_TZ=UTC 0 5 * * *` for 07:00 at UTC+2), so it runs at the phone's time wherever the
 machine is, and sends it again when its UTC offset changes. The schedule records its `origin`
 (`device:<name>`, from `invincible-caller`). Posting it again with the same `id` replaces it and
