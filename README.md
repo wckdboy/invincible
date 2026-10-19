@@ -27,11 +27,12 @@ they make it faster when you choose to use them.
 > ([spec/audit.md](spec/audit.md)) the phone can read, and a phone recipe can be handed to the node
 > to run there with its results collected back
 > ([autobot#7](https://github.com/wckdboy/autobot/pull/7),
-> [#8](https://github.com/wckdboy/autobot/pull/8), in review). First release:
-> [v0.0.1](https://github.com/wckdboy/invincible/releases/tag/v0.0.1) (static Linux and macOS
-> binaries, reproducible, with build attestations; from v0.0.2 also signed with a pinned key). Not
-> yet: real-task eval suites from Autobot, Omnie and Nightfall. Work is tracked in Plane (project
-> **INV** in the WCKD workspace).
+> [#8](https://github.com/wckdboy/autobot/pull/8), in review). Latest release:
+> [v0.0.3](https://github.com/wckdboy/invincible/releases/tag/v0.0.3) (static Linux and macOS
+> binaries, reproducible, with build attestations, signed with a pinned key; it includes fixes
+> from an internal security review, while the independent one is still to come). An eval suite of
+> 50 tasks built from Autobot, Omnie and Nightfall code runs on local models; the comparison with
+> a frontier model is still to do. Work is tracked in Plane (project **INV** in the WCKD workspace).
 
 ## Why
 
