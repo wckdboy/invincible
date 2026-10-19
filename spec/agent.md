@@ -66,7 +66,7 @@ expire.
 
 ## Scheduled tasks
 
-`when` is a cron expression in the machine's local time (five fields: minute, hour, day of month,
+`when` is a cron expression in the machine's local time (or in UTC, prefixed `CRON_TZ=UTC `) (five fields: minute, hour, day of month,
 month, day of week, where 0 and 7 are Sunday; `*`, lists, ranges and `/steps`), one of `@hourly`,
 `@daily`, `@weekly` and `@monthly`, or `every <n>m|h|d`. Nobody is there to approve a scheduled
 run, so it follows `allowlist` rules: allowlisted commands and writes in the working directory,
@@ -92,7 +92,9 @@ to the model and run, whatever the approval mode, and still under the unattended
 | `terminal` | `terminal` (allowlisted commands only) |
 | `web`, `vault` | none: this machine has no such tools |
 
-No `tools` means every tool, as for schedules made here. The schedule records its `origin`
+No `tools` means every tool, as for schedules made here. The phone sends its schedule in UTC
+(`CRON_TZ=UTC 0 5 * * *` for 07:00 at UTC+2), so it runs at the phone's time wherever the
+machine is, and sends it again when its UTC offset changes. The schedule records its `origin`
 (`device:<name>`, from `invincible-caller`). Posting it again with the same `id` replaces it and
 keeps its creation time; `enabled: false` keeps it without running it. The phone collects results
 with `GET …/runs?after=<last run it has>`, so nothing is lost while it is away.

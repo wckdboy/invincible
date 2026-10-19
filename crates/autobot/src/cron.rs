@@ -18,7 +18,8 @@ use std::time::Duration;
 use chrono::{DateTime, Datelike, Local, TimeDelta, Timelike};
 use serde::{Deserialize, Serialize};
 
-/// When a task runs: a cron expression (`0 8 * * 1-5`, local time) or `every <n>m|h|d`.
+/// When a task runs: a cron expression (`0 8 * * 1-5`, local time; `CRON_TZ=UTC 0 6 * * *` in
+/// UTC) or `every <n>m|h|d`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum When {
     Cron(Cron),
@@ -35,11 +36,22 @@ pub struct Cron {
     weekdays: Vec<bool>,
     /// Day of month and day of week both restricted: either one matching is enough (cron's rule).
     either_day: bool,
+    /// In UTC (`CRON_TZ=UTC`) rather than the machine's local time.
+    utc: bool,
 }
 
 impl When {
     pub fn parse(text: &str) -> Result<Self, String> {
         let text = text.trim();
+        if let Some(rest) = text.strip_prefix("CRON_TZ=UTC ").or_else(|| text.strip_prefix("TZ=UTC ")) {
+            return match Self::parse(rest)? {
+                Self::Cron(cron) => Ok(Self::Cron(Cron { utc: true, ..cron })),
+                Self::Every(_) => Err(format!("{text:?}: CRON_TZ goes with a cron expression")),
+            };
+        }
+        if text.starts_with("CRON_TZ=") || text.starts_with("TZ=") {
+            return Err(format!("{text:?}: only CRON_TZ=UTC is understood"));
+        }
         let shorthand = match text {
             "@hourly" => Some("0 * * * *"),
             "@daily" | "@midnight" => Some("0 0 * * *"),
@@ -131,10 +143,15 @@ impl Cron {
             months: field(month, 1, 12).map_err(|e| format!("month: {e}"))?,
             weekdays,
             either_day: day != "*" && weekday != "*",
+            utc: false,
         })
     }
 
     pub fn matches(&self, t: DateTime<Local>) -> bool {
+        if self.utc { self.matches_in(t.with_timezone(&chrono::Utc)) } else { self.matches_in(t) }
+    }
+
+    fn matches_in<T: Datelike + Timelike>(&self, t: T) -> bool {
         let day = self.days[t.day() as usize];
         let weekday = self.weekdays[t.weekday().num_days_from_sunday() as usize];
         let day_ok = if self.either_day { day || weekday } else { day && weekday };
@@ -621,6 +638,16 @@ mod tests {
         ] {
             assert!(When::parse(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn utc_cron() {
+        let when = When::parse("CRON_TZ=UTC 30 6 * * 1-5").unwrap();
+        let utc = chrono::Utc.with_ymd_and_hms(2026, 10, 19, 6, 30, 0).unwrap().with_timezone(&Local);
+        assert!(when.due(None, utc - chrono::TimeDelta::days(1), utc));
+        assert!(!when.due(None, utc, utc + chrono::TimeDelta::minutes(1)));
+        assert!(When::parse("CRON_TZ=Europe/Oslo 0 7 * * *").is_err());
+        assert!(When::parse("CRON_TZ=UTC every 5m").is_err());
     }
 
     #[test]
