@@ -1,37 +1,40 @@
-# Invincible
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/invincible-dark.svg">
+  <img alt="invincible" src="assets/brand/invincible-light.svg" height="44">
+</picture>
 
-**Intelligence that never relies solely on frontier labs, corporations or countries.**
+**The node you own.** A self-hosted AI gateway: open models on your hardware, frontier models
+only when you allow it, and a signed receipt for every call. It ships with **Autobot**, an agent
+that works through it.
 
-Invincible is a self-hosted AI node. Install it on hardware you own (a desktop, a GPU box, a rack in
-your hackerspace) and it gives every device you own one endpoint for intelligence. It runs open
-models itself, reaches frontier models when you allow it, and keeps working when they are gone.
+[Install](#install-vps-or-desktop) · [Code with Autobot](#code-with-autobot) ·
+[The agent](#the-autobot-agent) · [Specifications](spec/) · [Releases](https://github.com/wckdboy/invincible/releases) · [Brand](BRAND.md)
 
-Frontier models are welcome here. Being dependent on them is not. Everything works without them;
-they make it faster when you choose to use them.
+```sh
+curl -fsSL https://invincible.sh/install.sh | sh
+```
 
-> Status: **early build.** Invincible Gateway (the node) serves open models through llama.cpp
-> behind OpenAI- and Anthropic-compatible APIs, every request goes through the routing rules
-> ([spec/routing.md](spec/routing.md), pinned by 51 conformance vectors), and devices pair with it
-> over Noise ([spec/pairing.md](spec/pairing.md), implemented but not yet independently reviewed).
-> Cloud backends are used only as the rules allow, with personal data redacted before anything
-> leaves ([spec/redaction.md](spec/redaction.md)), and every request gets a signed receipt saying
-> where it ran and what left the node ([spec/receipts.md](spec/receipts.md)). The **Autobot Agent**
-> runs on the gateway on a VPS or desktop, with tools, approvals, a terminal chat and a Telegram
-> bot, and one script installs both. Autobot's protocol layer matches the node byte for byte and
-> pairs with a live node ([autobot#2](https://github.com/wckdboy/autobot/pull/2)), and the Android
-> app drives the agent through the paired gateway, approvals and scheduled tasks included, and
-> shows the node's signed receipts in each turn's privacy receipt
-> ([autobot#3](https://github.com/wckdboy/autobot/pull/3), released in
-> [Autobot 1.9.0](https://github.com/wckdboy/autobot/releases/tag/v1.9.0); iOS, agent screen
-> included, in 1.10.0). Every request lands in a hash-chained audit log
-> ([spec/audit.md](spec/audit.md)) the phone can read, and a phone recipe can be handed to the node
-> to run there with its results collected back
-> ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0), Android and iOS). Latest release:
-> [v0.0.5](https://github.com/wckdboy/invincible/releases/tag/v0.0.5) (static Linux and macOS
-> binaries, reproducible, with build attestations, signed with a pinned key; it includes fixes
-> from an internal security review, while the independent one is still to come). An eval suite of
-> 50 tasks built from Autobot, Omnie and Nightfall code runs on local models; the comparison with
-> a frontier model is still to do. Work is tracked in Plane (project **INV** in the WCKD workspace).
+Intelligence that never relies solely on frontier labs, corporations or countries. Install it on
+hardware you own (a desktop, a GPU box, a rack in your hackerspace) and every device you own gets
+one endpoint for intelligence. It runs open models itself, reaches frontier models when you allow
+it, and keeps working when they are gone.
+
+## Status
+
+Early, and used daily. What is built, and what is not yet:
+
+| Part | State |
+| --- | --- |
+| Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
+| Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
+| Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
+| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal, tools, approvals, a team, schedules, webhooks, Telegram and Discord |
+| Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
+| Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key ([latest](https://github.com/wckdboy/invincible/releases/latest)); fixes from an internal security review are in, the independent review is still to come |
+| Evals | 50 tasks from real code run on local models; the comparison with a frontier model is still to do |
+
+Work is tracked in Plane (project **INV**). Invincible and Autobot are made by
+[Sovware](https://sovware.io).
 
 ## Why
 

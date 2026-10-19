@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
+use invincible::brand;
 use invincible::config::{self, Config};
 use invincible::devices::{Devices, StaticKey, fingerprint};
 use invincible::engine::{self, Engine, Launch};
@@ -213,9 +214,9 @@ fn restart_gateway(config_path: &std::path::Path, home: &std::path::Path) {
                 && quiet(Command::new("systemctl").args(["--user", "restart", "invincible.service"]))
         };
     if restarted {
-        println!("restarted the gateway service; it uses the change now");
+        println!("{}", brand::ok("restarted the gateway service; it uses the change now"));
     } else {
-        println!("restart the gateway (`invincible serve`) for this to take effect");
+        println!("{}", brand::warn("restart the gateway (`invincible serve`) for this to take effect"));
     }
 }
 
@@ -324,44 +325,72 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 let _ = std::fs::remove_file(&key_path);
                 return Err(e);
             }
-            println!("added {id}: {model} at {base_url} (data policy: {policy}; key in {})", key_path.display());
+            println!(
+                "{}",
+                brand::ok(&format!(
+                    "added {} {}",
+                    brand::bold(&id),
+                    brand::ash(&format!(
+                        "{model} at {base_url} · data policy {policy} · key in {}",
+                        key_path.display()
+                    ))
+                ))
+            );
             if current.node.egress == "never" {
                 cloud::set_egress(&config_path, "ask")?;
                 println!(
-                    "[node] egress was \"never\"; now \"ask\": the router asks before a turn goes to a cloud model"
+                    "{}",
+                    brand::warn(
+                        "[node] egress was \"never\"; now \"ask\": the router asks before a turn goes to a cloud model"
+                    )
                 );
             }
             if current.node.network == "offline" {
                 println!(
-                    "note: [node] network is \"offline\", so nothing reaches it until you set network = \"direct\" (or tor/socks5)"
+                    "{}",
+                    brand::warn(
+                        "[node] network is \"offline\", so nothing reaches it until you set network = \"direct\" (or tor/socks5)"
+                    )
                 );
             }
             restart_gateway(&config_path, &home);
             if !quiet {
-                println!("then: autobot code --model {id}");
+                println!("\n  {} {}", brand::ash("next"), format_args!("autobot code --model {id}"));
             }
             Ok(())
         }
         CloudAction::List { config } => {
             let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
             if config.cloud.is_empty() {
-                println!("no cloud models (add one with `invincible cloud add deepseek`)");
+                println!("{}", brand::ash("no cloud models (add one with `invincible cloud add anthropic`)"));
             }
-            for c in &config.cloud {
-                let key = match c.key(&home) {
-                    Ok(Some(_)) => "key set",
-                    Ok(None) => "no key",
-                    Err(_) => "key missing",
-                };
-                println!(
-                    "{}  {} at {}  {}  {key}",
-                    c.id,
-                    c.upstream_model.as_deref().unwrap_or(&c.id),
-                    c.base_url,
-                    c.data_policy
-                );
-            }
-            println!("egress: {} · network: {}", config.node.egress, config.node.network);
+            let rows: Vec<Vec<String>> = config
+                .cloud
+                .iter()
+                .map(|c| {
+                    let key = match c.key(&home) {
+                        Ok(Some(_)) => brand::ash("key set"),
+                        Ok(None) => brand::warn("no key"),
+                        Err(_) => brand::fail("key missing"),
+                    };
+                    vec![
+                        c.id.clone(),
+                        c.upstream_model.clone().unwrap_or_else(|| c.id.clone()),
+                        brand::ash(&c.base_url),
+                        brand::ash(&c.data_policy.to_string()),
+                        key,
+                    ]
+                })
+                .collect();
+            print!("{}", brand::table(&rows));
+            println!(
+                "\n{}",
+                brand::rows(&[
+                    ("egress", config.node.egress.to_string()),
+                    ("network", config.node.network.to_string())
+                ])
+                .trim_end()
+            );
             Ok(())
         }
         CloudAction::Remove { id, config } => {
@@ -379,7 +408,7 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                     let _ = std::fs::remove_file(key);
                 }
             }
-            println!("removed {id}");
+            println!("{}", brand::ok(&format!("removed {id}")));
             restart_gateway(&config_path, &home);
             Ok(())
         }
@@ -387,10 +416,11 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
+    brand::init();
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("invincible: {message}");
+            eprintln!("{}", brand::error_line(brand::Product::Invincible, &message));
             ExitCode::FAILURE
         }
     }
@@ -443,19 +473,22 @@ fn run(cli: Cli) -> Result<(), String> {
             let reply = admin(config, reqwest::Method::GET, "/v1/admin/devices")?;
             let devices = reply["devices"].as_array().cloned().unwrap_or_default();
             if devices.is_empty() {
-                println!("no paired devices");
+                println!("{}", brand::ash("no paired devices (`invincible pair` shows a code)"));
             }
-            for device in devices {
-                let key = device["key"].as_str().and_then(|k| {
-                    use base64::Engine as _;
-                    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(k).ok()
-                });
-                println!(
-                    "{}  {}",
-                    device["name"].as_str().unwrap_or("?"),
-                    key.map(|k| fingerprint(&k)).unwrap_or_default()
-                );
-            }
+            let rows: Vec<Vec<String>> = devices
+                .iter()
+                .map(|device| {
+                    let key = device["key"].as_str().and_then(|k| {
+                        use base64::Engine as _;
+                        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(k).ok()
+                    });
+                    vec![
+                        device["name"].as_str().unwrap_or("?").to_owned(),
+                        brand::ash(&key.map(|k| fingerprint(&k)).unwrap_or_default()),
+                    ]
+                })
+                .collect();
+            print!("{}", brand::table(&rows));
             Ok(())
         }
         Command::Join { code, name } => {
@@ -526,13 +559,18 @@ fn run(cli: Cli) -> Result<(), String> {
             let home = config::home()?;
             let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
             if config.models.is_empty() {
-                println!("no models (add one with `invincible model add`)");
+                println!("{}", brand::ash("no models (add one with `invincible model add`)"));
             }
-            for model in &config.models {
-                let size = std::fs::metadata(&model.path).map(|m| models::gib(m.len())).unwrap_or("missing".into());
-                let context = model.context.map(|c| format!("context {c}")).unwrap_or_default();
-                println!("{}  {}  {size}  {context}", model.id, model.path.display());
-            }
+            let rows: Vec<Vec<String>> = config
+                .models
+                .iter()
+                .map(|model| {
+                    let size = std::fs::metadata(&model.path).map(|m| models::gib(m.len())).unwrap_or("missing".into());
+                    let context = model.context.map(|c| format!("context {c}")).unwrap_or_default();
+                    vec![model.id.clone(), size, brand::ash(&context), brand::ash(&model.path.display().to_string())]
+                })
+                .collect();
+            print!("{}", brand::table(&rows));
             Ok(())
         }
         Command::Model { action: ModelAction::Add { id, source, sha256, context, network, force, config } } => {

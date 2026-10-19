@@ -79,8 +79,8 @@ impl Ui {
         let mut line = format!(
             "{} {} {}",
             style::accent(FRAMES[s.frame]),
-            style::accent(&label),
-            style::gray(&format!("{:.0}s", since.elapsed().as_secs_f64()))
+            style::gray(&label),
+            style::faint(&format!("{:.0}s", since.elapsed().as_secs_f64()))
         );
         let hint = if s.typing.is_empty() { "  type to steer · esc to stop" } else { "  enter sends · esc stops" };
         if !s.typing.is_empty() {
@@ -89,9 +89,9 @@ impl Ui {
         } else if !s.thought.is_empty() {
             // One row, always: a wrapped spinner leaves its upper rows behind on every redraw.
             let room = style::columns().saturating_sub(style::width(&line) + hint.len() + 2);
-            line.push_str(&format!(" {}", style::gray(&style::italic(&style::last_columns(&s.thought, room)))));
+            line.push_str(&format!(" {}", style::faint(&style::italic(&style::last_columns(&s.thought, room)))));
         }
-        line.push_str(&style::gray(hint));
+        line.push_str(&style::faint(hint));
         Self::out(&format!("\r\x1b[2K{line}"));
         s.shown = true;
     }
@@ -221,7 +221,7 @@ impl Ui {
         if let Some(note) = note {
             parts.push(note.to_owned());
         }
-        Self::out(&format!("{}\n", style::gray(&format!("  ─ {}", parts.join(" · ")))));
+        Self::out(&format!("{}\n", style::faint(&format!("  ─ {}", parts.join(" · ")))));
     }
 
     /// Shows [event].
@@ -248,7 +248,7 @@ impl Ui {
                 s.calls += 1;
                 let headed = std::mem::take(&mut s.headed);
                 if !(headed && what.starts_with("write ")) {
-                    Self::out(&format!("\n{} {}\n", style::accent("⏺"), self.pretty(what)));
+                    Self::out(&format!("\n{} {}\n", style::accent("▪"), self.pretty(what)));
                 }
                 Self::spin(&mut s, "working");
             }
@@ -261,7 +261,7 @@ impl Ui {
                 let label = diff.lines().find_map(|l| l.strip_prefix("+++ b/")).unwrap_or("a file");
                 s.headed = true;
                 let body: String = diff.lines().skip(2).map(|l| format!("{l}\n")).collect();
-                Self::out(&format!("\n{} {} {}\n", style::accent("⏺"), style::bold("Change"), label));
+                Self::out(&format!("\n{} {} {}\n", style::accent("▪"), style::bold("Change"), label));
                 Self::out(&render_diff(&body, 60));
             }
             Event::Output { name, text } => {
@@ -276,7 +276,7 @@ impl Ui {
                 s.headed = false;
                 Self::unspin(&mut s);
                 Self::finish_line(&mut s);
-                Self::out(&format!("{} {}\n", style::red("✗"), style::red(why)));
+                Self::out(&format!("{} {why}\n", style::red("✗")));
             }
             Event::Member { name, text } => {
                 let mut s = self.state.lock().expect("ui");
@@ -285,7 +285,7 @@ impl Ui {
                 let first: String = text.lines().next().unwrap_or_default().chars().take(160).collect();
                 let more = text.lines().count().saturating_sub(1);
                 let more = if more > 0 { style::gray(&format!(" (+{more} lines)")) } else { String::new() };
-                Self::out(&format!("{} {}{more}\n", style::magenta(&format!("  ⎿ [{name}]")), first));
+                Self::out(&format!("{} {} {first}{more}\n", style::faint("  └"), style::bold(name)));
             }
             Event::Usage { input, output, cached } => {
                 let mut s = self.state.lock().expect("ui");
@@ -333,8 +333,16 @@ impl Ui {
         if let Some(url) = what.strip_prefix("fetch ") {
             return format!("{} {}", style::bold("Fetch"), style::underline(url));
         }
-        if what.starts_with('[') {
-            return style::magenta(what);
+        // A member's line: `[explorer] read_file {…}`.
+        if let Some(rest) = what.strip_prefix('[')
+            && let Some((name, line)) = rest.split_once("] ")
+        {
+            return format!("{} {}", style::faint(&format!("{name} ·")), self.pretty(line));
+        }
+        if let Some(rest) = what.strip_prefix('[')
+            && let Some((name, goal)) = rest.split_once("] ← ")
+        {
+            return format!("{} {} {}", style::bold("Hand off"), style::bold(name), style::gray(goal));
         }
         let (name, args) = what.split_once(' ').unwrap_or((what, ""));
         let args: Value = serde_json::from_str(args).unwrap_or(Value::Null);
@@ -380,9 +388,9 @@ impl Ui {
                 for item in args["items"].as_array().into_iter().flatten() {
                     let text = item["text"].as_str().unwrap_or_default();
                     let line = match item["status"].as_str() {
-                        Some("done") => format!("{} {}", style::green("☑"), style::gray(text)),
-                        Some("doing") => format!("{} {}", style::accent("◼"), style::bold(text)),
-                        _ => format!("{} {text}", style::gray("☐")),
+                        Some("done") => format!("{} {}", style::gray("✓"), style::gray(text)),
+                        Some("doing") => format!("{} {}", style::accent("■"), style::bold(text)),
+                        _ => format!("{} {text}", style::faint("□")),
                     };
                     out.push_str(&format!("\n    {line}"));
                 }
@@ -415,72 +423,82 @@ pub fn render_diff(diff: &str, max: usize) -> String {
         } else if line.starts_with('+') {
             style::green(line)
         } else if line.starts_with('-') {
-            style::red(line)
+            style::removed(line)
         } else if line.starts_with("@@") {
-            style::cyan(line)
+            style::faint(line)
         } else {
             style::gray(line)
         };
         out.push_str(&format!("    {shown}\n"));
     }
     if lines.len() > max {
-        out.push_str(&style::gray(&format!("    … {} more lines (/diff shows all)\n", lines.len() - max)));
+        out.push_str(&style::faint(&format!("    … {} more lines (/diff shows all)\n", lines.len() - max)));
     }
     out
 }
 
-/// The line under a tool call: what it gave back, in short.
+/// The lines under a tool call: what it gave back, in short, on a light gutter (`│`, then `└`).
 pub fn summary(name: &str, text: &str, diff: Option<(usize, usize)>) -> String {
-    let gutter = style::gray("  ⎿ ");
+    let body = summary_lines(name, text, diff);
+    let n = body.len();
+    body.iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}{line}\n", style::faint(if i + 1 == n { "  └ " } else { "  │ " })))
+        .collect()
+}
+
+fn summary_lines(name: &str, text: &str, diff: Option<(usize, usize)>) -> Vec<String> {
     let failed = text.starts_with("error:") || text.starts_with("refused:");
     if failed {
         let first: String = text.lines().next().unwrap_or_default().chars().take(200).collect();
-        return format!("{gutter}{}\n", style::red(&first));
+        return vec![style::red(&first)];
     }
     let lines: Vec<&str> = text.lines().collect();
     let n = lines.len();
     let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let one = |text: String| vec![style::gray(&text)];
     match name {
         "terminal" => {
-            let code = lines.last().copied().unwrap_or_default();
+            let last = lines.last().copied().unwrap_or_default();
             let body = &lines[..n.saturating_sub(1)];
-            let mut out = String::new();
             let shown = body.len().min(6);
+            let mut out = Vec::new();
             if body.len() > shown {
-                out.push_str(&format!("{gutter}{}\n", style::gray(&format!("… {} lines", body.len() - shown))));
+                out.push(style::faint(&format!("… {} lines", body.len() - shown)));
             }
-            for (i, line) in body[body.len() - shown..].iter().enumerate() {
+            for line in &body[body.len() - shown..] {
                 let line: String = line.chars().take(style::columns().saturating_sub(6)).collect();
-                let lead = if i == 0 && body.len() == shown { gutter.clone() } else { "    ".to_owned() };
-                out.push_str(&format!("{lead}{}\n", style::gray(&line)));
+                out.push(style::gray(&line));
             }
-            let code = if code.contains("exit code 0") { style::gray(code) } else { style::red(code) };
-            out.push_str(&format!("{}{code}\n", if out.is_empty() { gutter } else { "    ".to_owned() }));
+            // `[exit code 3]` → `exit 3`, quiet when it is 0.
+            let code = last.strip_prefix("[exit code ").and_then(|c| c.strip_suffix(']'));
+            out.push(match code {
+                Some("0") => style::faint("exit 0"),
+                Some(code) => style::red(&format!("exit {code}")),
+                None => style::red(last.trim_matches(['[', ']'])),
+            });
             out
         }
-        "read_file" => format!("{gutter}{}\n", style::gray(&plural(n, "line", "lines"))),
-        "list_dir" => format!("{gutter}{}\n", style::gray(&plural(n, "entry", "entries"))),
-        "search" if text.starts_with("no matches") => format!("{gutter}{}\n", style::gray("no matches")),
+        "read_file" => one(plural(n, "line", "lines")),
+        "list_dir" => one(plural(n, "entry", "entries")),
+        "search" if text.starts_with("no matches") => one("no matches".to_owned()),
         "search" => {
             let files: std::collections::HashSet<&str> = lines.iter().filter_map(|l| l.split(':').next()).collect();
-            format!(
-                "{gutter}{}\n",
-                style::gray(&format!("{} in {}", plural(n, "match", "matches"), plural(files.len(), "file", "files")))
-            )
+            one(format!("{} in {}", plural(n, "match", "matches"), plural(files.len(), "file", "files")))
         }
-        "find_files" if text.starts_with("no files") => format!("{gutter}{}\n", style::gray("no files")),
-        "find_files" => format!("{gutter}{}\n", style::gray(&plural(n, "file", "files"))),
+        "find_files" if text.starts_with("no files") => one("no files".to_owned()),
+        "find_files" => one(plural(n, "file", "files")),
         "write_file" | "edit_file" => match diff {
             Some((added, removed)) => {
-                format!("{gutter}{} {}\n", style::green(&format!("+{added}")), style::red(&format!("−{removed}")))
+                vec![format!("{} {}", style::green(&format!("+{added}")), style::removed(&format!("−{removed}")))]
             }
-            None => format!("{gutter}{}\n", style::gray(lines.first().copied().unwrap_or_default())),
+            None => one(lines.first().copied().unwrap_or_default().to_owned()),
         },
-        "delegate" | "todo" => String::new(),
+        "delegate" | "todo" => Vec::new(),
         _ => {
             let first: String = lines.first().copied().unwrap_or_default().chars().take(160).collect();
             let more = if n > 1 { format!(" (+{} lines)", n - 1) } else { String::new() };
-            format!("{gutter}{}\n", style::gray(&format!("{first}{more}")))
+            one(format!("{first}{more}"))
         }
     }
 }
@@ -491,14 +509,14 @@ mod tests {
 
     #[test]
     fn tool_results_in_short() {
-        assert_eq!(summary("read_file", "a\nb\nc", None), "  ⎿ 3 lines\n");
-        assert_eq!(summary("search", "src/a.rs:1: x\nsrc/a.rs:9: x\nb.rs:2: x", None), "  ⎿ 3 matches in 2 files\n");
-        assert_eq!(summary("edit_file", "replaced 1 occurrence in x", Some((2, 1))), "  ⎿ +2 −1\n");
-        assert_eq!(summary("terminal", "error: stopped after 5 seconds", None), "  ⎿ error: stopped after 5 seconds\n");
+        assert_eq!(summary("read_file", "a\nb\nc", None), "  └ 3 lines\n");
+        assert_eq!(summary("search", "src/a.rs:1: x\nsrc/a.rs:9: x\nb.rs:2: x", None), "  └ 3 matches in 2 files\n");
+        assert_eq!(summary("edit_file", "replaced 1 occurrence in x", Some((2, 1))), "  └ +2 −1\n");
+        assert_eq!(summary("terminal", "error: stopped after 5 seconds", None), "  └ error: stopped after 5 seconds\n");
         let run = summary("terminal", "1\n2\n3\n4\n5\n6\n7\n8\n[exit code 0]", None);
-        assert!(run.starts_with("  ⎿ … 2 lines\n    3\n"), "{run}");
-        assert!(run.ends_with("    [exit code 0]\n"));
-        assert_eq!(summary("terminal", "[exit code 1]", None), "  ⎿ [exit code 1]\n");
+        assert!(run.starts_with("  │ … 2 lines\n  │ 3\n"), "{run}");
+        assert!(run.ends_with("  └ exit 0\n"));
+        assert_eq!(summary("terminal", "[exit code 1]", None), "  └ exit 1\n");
     }
 
     #[test]

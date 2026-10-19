@@ -275,15 +275,16 @@ impl Approver for KeyApprover {
                 ),
             };
             print!(
-                "\n{} {}\n{} {}\n{} {}  {}  {}  ",
-                style::yellow("╭─"),
+                "\n{} {}\n  {}\n  {} {}  {} {}  {} {}  ",
+                style::accent("■"),
                 style::bold(&format!("{who}{title}")),
-                style::yellow("│"),
                 what,
-                style::yellow("╰─"),
-                format_args!("{} yes", style::bold("y")),
-                format_args!("{} always this session", style::bold("a")),
-                format_args!("{} no", style::bold("n")),
+                style::bold("y"),
+                style::gray("yes"),
+                style::bold("a"),
+                style::gray("always this session"),
+                style::bold("n"),
+                style::gray("no"),
             );
             let _ = std::io::Write::flush(&mut std::io::stdout());
             let key = match &self.keys {
@@ -298,9 +299,9 @@ impl Approver for KeyApprover {
             println!(
                 "{}",
                 match answer {
-                    Answer::Once => style::green("yes"),
-                    Answer::Always => style::green("always"),
-                    Answer::Deny => style::red("no"),
+                    Answer::Once => style::gray("→ yes"),
+                    Answer::Always => style::gray("→ always, this session"),
+                    Answer::Deny => style::red("→ no"),
                 }
             );
             self.ui.resume();
@@ -477,46 +478,40 @@ impl Chat {
         } else {
             shown
         };
-        let branch = self.agent.tools.git_branch().map(|b| format!(" · {}", style::green(&b))).unwrap_or_default();
-        let notes =
-            if self.agent.tools.project_notes().is_some() { style::gray(" · AGENTS.md") } else { String::new() };
-        let mut lines = vec![
-            format!(
-                "{} {} {}",
-                style::accent("◆"),
-                style::bold("Autobot"),
-                style::gray(&format!("{} · on Invincible", env!("CARGO_PKG_VERSION")))
-            ),
-            format!(
-                "  {} {}  {} {}{}",
-                style::gray("model"),
-                self.model_label(),
-                style::gray("approvals"),
-                self.approvals(),
-                if self.agent.gateway.private() { style::gray(" · private") } else { String::new() }
-            ),
-            format!("  {}{branch}{notes}", shown),
-        ];
-        let messages = self.session.messages.len();
-        lines.push(format!(
-            "  {} {}{}",
-            style::gray("session"),
-            self.session.id,
-            if messages > 0 { style::gray(&format!(" · {messages} messages")) } else { String::new() }
-        ));
-        let inner = lines.iter().map(|l| style::width(l)).max().unwrap_or(0) + 2;
-        println!("{}", style::gray(&format!("╭{}╮", "─".repeat(inner))));
-        for line in &lines {
-            let pad = inner - 1 - style::width(line);
-            println!("{} {line}{}{}", style::gray("│"), " ".repeat(pad), style::gray("│"));
-        }
-        println!("{}", style::gray(&format!("╰{}╯", "─".repeat(inner))));
-        let hint = if code {
-            "/help · @file attaches · !cmd runs · /undo takes a turn back · alt+enter for a new line"
+        let branch = self.agent.tools.git_branch().map(|b| format!("  {}", style::gray(&b))).unwrap_or_default();
+        let notes = if self.agent.tools.project_notes().is_some() {
+            format!("  {}", style::faint("AGENTS.md"))
         } else {
-            "/help · @file attaches · !cmd runs · alt+enter for a new line"
+            String::new()
         };
-        println!("{}", style::gray(&format!("  {hint}")));
+        let messages = self.session.messages.len();
+        // `■ autobot 0.0.9 · via invincible`, then what this session is, as quiet rows.
+        println!(
+            "{} {}",
+            invincible::brand::Product::Autobot.header(env!("CARGO_PKG_VERSION")),
+            style::faint("· via invincible")
+        );
+        let private = if self.agent.gateway.private() { style::faint("  private") } else { String::new() };
+        let rows = [
+            ("model", format!("{}{private}", self.model_label())),
+            ("approvals", self.approvals().to_owned()),
+            ("project", format!("{shown}{branch}{notes}")),
+            (
+                "session",
+                format!(
+                    "{}{}",
+                    self.session.id,
+                    if messages > 0 { style::faint(&format!("  {messages} messages")) } else { String::new() }
+                ),
+            ),
+        ];
+        print!("{}", invincible::brand::rows(&rows));
+        let hint = if code {
+            "/help   @ attach a file   ! run a command   /undo   esc stops a turn"
+        } else {
+            "/help   @ attach a file   ! run a command   esc stops a turn"
+        };
+        println!("\n{}", style::faint(&format!("  {hint}")));
     }
 
     async fn turn(&mut self, text: &str) {
@@ -707,20 +702,20 @@ impl Chat {
             "/exit" | "/quit" | "/q" => return Ok(Some(Next::Exit)),
             "/help" | "/?" => {
                 for (command, what) in COMMANDS {
-                    println!("  {} {}", style::accent(&format!("{command:<11}")), style::gray(what));
+                    println!("  {} {}", style::bold(&format!("{command:<11}")), style::gray(what));
                 }
                 println!(
                     "  {} {}",
-                    style::accent(&format!("{:<11}", "@path")),
+                    style::bold(&format!("{:<11}", "@path")),
                     style::gray("attach a file (tab completes)")
                 );
                 println!(
                     "  {} {}",
-                    style::accent(&format!("{:<11}", "!command")),
+                    style::bold(&format!("{:<11}", "!command")),
                     style::gray("run it yourself; its output goes with your next message")
                 );
                 for c in crate::commands::list(self.agent.tools.workdir(), &self.home) {
-                    println!("  {} {}", style::accent(&format!("/{:<10}", c.name)), style::gray(&c.description));
+                    println!("  {} {}", style::bold(&format!("/{:<10}", c.name)), style::gray(&c.description));
                 }
             }
             "/init" => return Ok(Some(Next::Send(crate::commands::INIT.to_owned()))),
@@ -770,7 +765,7 @@ impl Chat {
                     );
                 }
                 for c in all {
-                    println!("  {} {}", style::accent(&format!("/{:<10}", c.name)), style::gray(&c.description));
+                    println!("  {} {}", style::bold(&format!("/{:<10}", c.name)), style::gray(&c.description));
                 }
             }
             "/clear" => print!("\x1b[2J\x1b[H"),
@@ -884,20 +879,22 @@ impl Chat {
                 );
             }
             "/status" => {
-                println!("  {} {}", style::gray("model    "), self.model_label());
-                println!("  {} {}", style::gray("approvals"), self.approvals());
-                println!("  {} {}", style::gray("private  "), self.agent.gateway.private());
-                println!("  {} {}", style::gray("project  "), self.agent.tools.workdir().display());
-                println!(
-                    "  {} {} ({} messages)",
-                    style::gray("session  "),
-                    self.session.id,
-                    self.session.messages.len()
-                );
+                let mut rows = vec![
+                    ("model", self.model_label()),
+                    ("approvals", self.approvals().to_owned()),
+                    ("private", self.agent.gateway.private().to_string()),
+                    ("project", self.agent.tools.workdir().display().to_string()),
+                    ("session", format!("{} ({} messages)", self.session.id, self.session.messages.len())),
+                ];
+                let running = crate::procs::running();
+                if running > 0 {
+                    rows.push(("processes", format!("{running} running (/ps)")));
+                }
                 let grants: Vec<String> = self.grants.iter().map(Action::describe).collect();
                 if !grants.is_empty() {
-                    println!("  {} {}", style::gray("always   "), grants.join("; "));
+                    rows.push(("always", grants.join("; ")));
                 }
+                print!("{}", invincible::brand::rows(&rows));
             }
             "/undo" => {
                 let (request, files) = self.session.undo()?;
@@ -906,7 +903,7 @@ impl Chat {
                         .strip_prefix(self.agent.tools.workdir())
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| file.clone());
-                    println!("  {} {}", style::accent("↺"), shown);
+                    println!("  {} {}", style::gray("↺"), shown);
                 }
                 println!(
                     "{}",
@@ -1002,7 +999,7 @@ impl Chat {
                     return Err(format!("{other}: not a command (/help)"));
                 };
                 let prompt = crate::commands::expand(command, arg)?;
-                println!("{}", style::gray(&format!("  ⎿ /{} ({} characters)", command.name, prompt.len())));
+                println!("{}", style::gray(&format!("  └ /{} ({} characters)", command.name, prompt.len())));
                 return Ok(Some(Next::Send(prompt)));
             }
         }
@@ -1039,7 +1036,7 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
                 println!(
                     "{}",
                     style::yellow(&format!(
-                        "  ⎿ @{name} is outside the project; not attached (the agent can ask to read it)"
+                        "  └ @{name} is outside the project; not attached (the agent can ask to read it)"
                     ))
                 );
             }
@@ -1056,7 +1053,7 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
                 })
                 .collect();
             names.sort();
-            println!("{}", style::gray(&format!("  ⎿ attached @{name} ({} entries)", names.len())));
+            println!("{}", style::gray(&format!("  └ attached @{name} ({} entries)", names.len())));
             attached.push_str(&format!("\n\n[Attached @{name}: a directory]\n{}", names.join("\n")));
             continue;
         }
@@ -1067,15 +1064,15 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
         if meta.len() > 256 * 1024 {
             println!(
                 "{}",
-                style::yellow(&format!("  ⎿ @{name} is over 256 KiB; not attached (the agent can read it)"))
+                style::yellow(&format!("  └ @{name} is over 256 KiB; not attached (the agent can read it)"))
             );
             continue;
         }
         let Ok(content) = std::fs::read_to_string(&path) else {
-            println!("{}", style::yellow(&format!("  ⎿ @{name} is not a text file; not attached")));
+            println!("{}", style::yellow(&format!("  └ @{name} is not a text file; not attached")));
             continue;
         };
-        println!("{}", style::gray(&format!("  ⎿ attached @{name} ({} lines)", content.lines().count())));
+        println!("{}", style::gray(&format!("  └ attached @{name} ({} lines)", content.lines().count())));
         attached.push_str(&format!("\n\n[Attached @{name}]\n```\n{}\n```", content.trim_end()));
     }
     format!("{text}{attached}")

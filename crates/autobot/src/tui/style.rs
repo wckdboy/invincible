@@ -1,64 +1,65 @@
-//! Terminal colors, off when the output is not a terminal or `NO_COLOR` is set.
+//! Terminal colors, from the lab's shared palette ([invincible::brand]): Autobot's signal is
+//! vermilion. Off when the output is not a terminal or `NO_COLOR` is set.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use invincible::brand::{self, Color};
 
-static COLOR: AtomicBool = AtomicBool::new(false);
+/// Code in prose: copper (verdigris is copper's patina; Invincible wears that).
+const COPPER: Color = Color { rgb: (0xC8, 0x95, 0x6C), ansi: 173 };
 
 /// Colors on or off for everything printed from now on.
 pub fn set_color(on: bool) {
-    COLOR.store(on, Ordering::Relaxed);
+    brand::set_color(on);
 }
 
 /// Whether to color: a terminal, and no `NO_COLOR`.
 pub fn detect() -> bool {
     use std::io::IsTerminal;
-    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
-}
-
-fn paint(code: &str, text: &str) -> String {
-    if COLOR.load(Ordering::Relaxed) { format!("\x1b[{code}m{text}\x1b[0m") } else { text.to_owned() }
+    brand::detect(std::io::stdout().is_terminal())
 }
 
 pub fn bold(t: &str) -> String {
-    paint("1", t)
+    brand::bold(t)
 }
 pub fn dim(t: &str) -> String {
-    paint("2", t)
+    brand::dim(t)
 }
 pub fn italic(t: &str) -> String {
-    paint("3", t)
+    brand::italic(t)
 }
 pub fn underline(t: &str) -> String {
-    paint("4", t)
+    brand::underline(t)
 }
+/// Failures.
 pub fn red(t: &str) -> String {
-    paint("31", t)
+    brand::paint(brand::ERROR, t)
 }
+/// Added lines.
 pub fn green(t: &str) -> String {
-    paint("32", t)
+    brand::paint(brand::ADDED, t)
 }
+/// Removed lines.
+pub fn removed(t: &str) -> String {
+    brand::paint(brand::REMOVED, t)
+}
+/// Needs a look.
 pub fn yellow(t: &str) -> String {
-    paint("33", t)
+    brand::paint(brand::AMBER, t)
 }
-pub fn blue(t: &str) -> String {
-    paint("34", t)
-}
-pub fn magenta(t: &str) -> String {
-    paint("35", t)
-}
-pub fn cyan(t: &str) -> String {
-    paint("36", t)
-}
-/// The accent: Autobot's orange.
+/// The signal: Autobot's vermilion. The mark, the prompt, what needs the owner now.
 pub fn accent(t: &str) -> String {
-    paint("38;5;208", t)
+    brand::paint(brand::VERMILION, t)
 }
-/// Code: a soft teal.
+/// Code.
 pub fn code(t: &str) -> String {
-    paint("38;5;80", t)
+    brand::paint(COPPER, t)
 }
+/// Secondary text.
 pub fn gray(t: &str) -> String {
-    paint("38;5;245", t)
+    brand::ash(t)
+}
+/// Structure: gutters, rules, hints.
+pub fn faint(t: &str) -> String {
+    brand::faint(t)
 }
 
 /// Columns [text] takes on a terminal: escape sequences left out, wide characters (CJK, emoji)

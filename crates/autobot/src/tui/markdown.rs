@@ -25,7 +25,7 @@ impl Markdown {
             };
         }
         if self.fence.is_some() {
-            return format!("{} {}", style::gray("  │"), style::code(line));
+            return format!("{} {}", style::faint("  │"), style::code(line));
         }
         if trimmed.starts_with('#') {
             let level = trimmed.chars().take_while(|c| *c == '#').count();
@@ -33,7 +33,7 @@ impl Markdown {
                 && level <= 6
             {
                 let text = inline(text.trim());
-                return if level <= 2 { style::bold(&style::accent(&text)) } else { style::bold(&text) };
+                return if level <= 2 { style::bold(&style::underline(&text)) } else { style::bold(&text) };
             }
         }
         let indent = &line[..line.len() - trimmed.len()];
@@ -46,19 +46,19 @@ impl Markdown {
         for bullet in ["- [ ] ", "- [x] ", "- [X] "] {
             if let Some(rest) = trimmed.strip_prefix(bullet) {
                 let mark = if bullet == "- [ ] " { "☐" } else { "☑" };
-                return format!("{indent}{} {}", style::accent(mark), inline(rest));
+                return format!("{indent}{} {}", style::gray(mark), inline(rest));
             }
         }
         for bullet in ["- ", "* ", "+ "] {
             if let Some(rest) = trimmed.strip_prefix(bullet) {
-                return format!("{indent}{} {}", style::accent("•"), inline(rest));
+                return format!("{indent}{} {}", style::gray("•"), inline(rest));
             }
         }
         let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
         if digits > 0
             && let Some(rest) = trimmed[digits..].strip_prefix(". ")
         {
-            return format!("{indent}{} {}", style::accent(&trimmed[..=digits]), inline(rest));
+            return format!("{indent}{} {}", style::gray(&trimmed[..=digits]), inline(rest));
         }
         format!("{indent}{}", inline(trimmed))
     }

@@ -242,10 +242,11 @@ enum ServiceAction {
 }
 
 fn main() -> ExitCode {
+    invincible::brand::init();
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("autobot: {message}");
+            eprintln!("{}", invincible::brand::error_line(invincible::brand::Product::Autobot, &message));
             ExitCode::FAILURE
         }
     }
@@ -375,9 +376,13 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Doctor => {
             let checks = runtime()?.block_on(doctor::run(&config, &home));
             let failed = checks.iter().filter(|c| !c.ok).count();
+            println!("{}\n", invincible::brand::Product::Autobot.header(env!("CARGO_PKG_VERSION")));
             for check in &checks {
-                println!("{} {}", if check.ok { "✓" } else { "✗" }, check.what);
+                let line =
+                    if check.ok { invincible::brand::ok(&check.what) } else { invincible::brand::fail(&check.what) };
+                println!("  {line}");
             }
+            println!();
             if failed > 0 { Err(format!("{failed} problem(s)")) } else { Ok(()) }
         }
         Command::Telegram { action } => {
