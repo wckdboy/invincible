@@ -11,6 +11,7 @@ pub mod cron;
 pub mod doctor;
 pub mod eval;
 pub mod gateway;
+pub mod heartbeat;
 pub mod mcp;
 pub mod memory;
 pub mod sandbox;

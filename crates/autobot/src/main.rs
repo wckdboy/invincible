@@ -606,8 +606,21 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
     };
     let schedules = autobot::cron::scheduler(agent.clone(), home.clone(), bot.as_ref().map(|(bot, _)| bot.clone()));
     let board = autobot::board::dispatcher(agent.clone(), home.clone(), bot.clone());
+    let heartbeat = async {
+        match config.agent.heartbeat_every() {
+            Ok(Some(every)) => {
+                autobot::heartbeat::run(agent.clone(), home.clone(), every, bot.as_ref().map(|(b, _)| b.clone())).await
+            }
+            Ok(None) => std::future::pending::<()>().await,
+            Err(e) => {
+                tracing::error!("{e}");
+                std::future::pending::<()>().await
+            }
+        }
+    };
     tokio::select! {
         () = board => Ok(()),
+        () = heartbeat => Ok(()),
         () = api => Ok(()),
         () = telegram => Ok(()),
         () = schedules => Ok(()),

@@ -126,6 +126,27 @@ pub struct AgentConfig {
     /// always, off ([crate::sandbox]).
     #[serde(default)]
     pub sandbox: crate::sandbox::Mode,
+    /// How often the heartbeat works through `HEARTBEAT.md` (`30m`, `2h`; `off`).
+    #[serde(default = "heartbeat")]
+    pub heartbeat: String,
+}
+
+fn heartbeat() -> String {
+    "30m".to_owned()
+}
+
+impl AgentConfig {
+    /// The heartbeat's interval; None when it is off.
+    pub fn heartbeat_every(&self) -> Result<Option<std::time::Duration>, String> {
+        let text = self.heartbeat.trim();
+        if text == "off" {
+            return Ok(None);
+        }
+        match crate::cron::When::parse(&format!("every {text}"))? {
+            crate::cron::When::Every(every) => Ok(Some(every.max(std::time::Duration::from_secs(300)))),
+            _ => Err(format!("[agent] heartbeat = {text:?}: an interval like 30m, or off")),
+        }
+    }
 }
 
 fn max_steps() -> usize {
@@ -138,7 +159,13 @@ fn command_timeout() -> u64 {
 
 impl Default for AgentConfig {
     fn default() -> Self {
-        Self { workdir: None, max_steps: max_steps(), command_timeout: command_timeout(), sandbox: Default::default() }
+        Self {
+            workdir: None,
+            max_steps: max_steps(),
+            command_timeout: command_timeout(),
+            sandbox: Default::default(),
+            heartbeat: heartbeat(),
+        }
     }
 }
 

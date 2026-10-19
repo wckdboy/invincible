@@ -73,6 +73,7 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/sessions/{id}/turns", post(turn))
         .route("/v1/agent/sessions/{id}/reset", post(reset))
         .route("/v1/agent/sessions/{id}/steer", post(steer))
+        .route("/v1/agent/sessions/{id}/fork", post(fork))
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
         .route("/v1/agent/schedules/{id}", axum::routing::delete(remove_schedule))
@@ -192,6 +193,23 @@ async fn reset(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Re
 #[derive(Deserialize)]
 struct TurnBody {
     text: String,
+}
+
+/// `POST …/fork {"to"?, "at"?}`: a new conversation that starts as this one did (up to
+/// message `at`); its id.
+async fn fork(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
+    let args: Value = serde_json::from_slice(&body).unwrap_or_default();
+    let to = args["to"].as_str().map(str::to_owned).unwrap_or_else(|| {
+        let stamp = chrono::Local::now().format("%H%M%S");
+        format!("{}-fork-{stamp}", id.chars().take(48).collect::<String>())
+    });
+    let at = args["at"].as_u64().map(|n| n as usize);
+    let forked =
+        crate::session::Session::open(&state.sessions_dir, &id).and_then(|s| s.fork(&state.sessions_dir, &to, at));
+    match forked {
+        Ok(copy) => Json(json!({ "id": copy.id, "messages": copy.messages.len() })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
 }
 
 /// `POST …/steer {"text"}`: a message for the turn running in the session, taken in before

@@ -920,3 +920,21 @@ async fn a_message_sent_while_the_agent_works_steers_its_next_step() {
     assert!(second.contains("(The owner adds, while you work:) Use Markdown for the note."), "{second}");
     assert!(inbox.lock().unwrap().is_empty(), "taken in once");
 }
+
+#[tokio::test]
+async fn the_heartbeat_checks_the_list_and_is_quiet_when_all_is_well() {
+    let (url, script) = gateway(vec![call("terminal", json!({"command": "echo disk 42%"})), say("OK")]).await;
+    let dir = temp("heartbeat");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.with_home(dir.clone());
+    assert!(autobot::heartbeat::checklist(&dir).is_none(), "no checklist, no check");
+    std::fs::write(dir.join("HEARTBEAT.md"), "- Is the disk over 90% full? (echo the usage)\n").unwrap();
+    let list = autobot::heartbeat::checklist(&dir).unwrap();
+    let answer = autobot::heartbeat::check(&agent, &dir, &list).await.unwrap();
+    assert!(autobot::heartbeat::quiet(&answer));
+    // The checklist went to the model; the allowlisted command ran (unattended rules).
+    let first = script.lock().unwrap().seen[0].1.to_string();
+    assert!(first.contains("Is the disk over 90% full"));
+    let log = autobot::actions::ActionLog::new(&dir).read(0, 5);
+    assert_eq!((log[0].action.as_str(), log[0].ran, log[0].by.as_str()), ("run: echo disk 42%", true, "policy"));
+}

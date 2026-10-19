@@ -57,6 +57,24 @@ impl Session {
         Ok(())
     }
 
+    /// A new conversation [to] that starts as this one did, up to message [at] (all of it when
+    /// None, or at the end of the turn [at] falls in, so no tool call is cut from its result).
+    pub fn fork(&self, dir: &Path, to: &str, at: Option<usize>) -> Result<Session, String> {
+        let mut end = at.unwrap_or(self.messages.len()).min(self.messages.len());
+        // Up to the next user message, so the copy ends between turns.
+        while end < self.messages.len() && self.messages[end]["role"] != "user" {
+            end += 1;
+        }
+        let mut copy = Session::open(dir, to)?;
+        if !copy.messages.is_empty() {
+            return Err(format!("there is a conversation {to:?} already"));
+        }
+        for message in &self.messages[..end] {
+            copy.push(message.clone())?;
+        }
+        Ok(copy)
+    }
+
     /// Starts over: the old conversation is kept under a dated name.
     pub fn reset(&mut self) -> Result<(), String> {
         if self.path.exists() {
@@ -216,6 +234,30 @@ mod tests {
         let window = s.window();
         assert_eq!(window[0]["role"], "user");
         assert!(window.len() <= WINDOW);
+    }
+
+    #[test]
+    fn a_fork_starts_as_the_original_did() {
+        let dir = std::env::temp_dir().join(format!("autobot-fork-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut s = Session::open(&dir, "main").unwrap();
+        for m in [
+            json!({"role": "user", "content": "one"}),
+            json!({"role": "assistant", "content": "", "tool_calls": [{"id": "c"}]}),
+            json!({"role": "tool", "tool_call_id": "c", "content": "x"}),
+            json!({"role": "assistant", "content": "done one"}),
+            json!({"role": "user", "content": "two"}),
+            json!({"role": "assistant", "content": "done two"}),
+        ] {
+            s.push(m).unwrap();
+        }
+        // At 2 (inside the first turn): the whole first turn, not a call without its result.
+        let fork = s.fork(&dir, "branch", Some(2)).unwrap();
+        assert_eq!(fork.messages.len(), 4);
+        assert_eq!(Session::open(&dir, "branch").unwrap().messages.len(), 4);
+        assert_eq!(s.fork(&dir, "all", None).unwrap().messages.len(), 6);
+        assert!(s.fork(&dir, "branch", None).is_err(), "never over another conversation");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

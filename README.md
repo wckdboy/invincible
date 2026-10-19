@@ -239,6 +239,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Private by default:** agent turns carry `invincible-private`, so the router keeps them on local
   models; tool results carry your files and command output. With `[gateway] private = false` the
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
+- **Heartbeat:** put a checklist in `~/.autobot/HEARTBEAT.md` ("is the disk over 90%?", "did
+  last night's backup run?") and every 30 minutes (`[agent] heartbeat`, or `off`) the agent works
+  through it, unattended and sandboxed, and messages you on Telegram only when something needs
+  you; a quiet check stays quiet.
+- **Fork a conversation:** `POST …/sessions/{id}/fork` starts a new one as the old one was, up to
+  a point, to try another direction without losing the first.
 - **Steer while it works:** a message you send while a turn runs (Telegram, or the app with
   `POST …/steer`) is taken in before the agent's next step, so "use Markdown instead" changes the
   work in progress rather than waiting for it to end.
