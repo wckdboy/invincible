@@ -9,6 +9,7 @@ pub mod board;
 pub mod config;
 pub mod cron;
 pub mod doctor;
+pub mod eval;
 pub mod gateway;
 pub mod mcp;
 pub mod memory;

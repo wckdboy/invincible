@@ -64,6 +64,23 @@ enum Command {
         #[arg(long)]
         forget: Option<u64>,
     },
+    /// Run agent tasks for real in throwaway directories and check what they did, per model.
+    Eval {
+        /// The tasks (JSON Lines; see `crates/autobot/src/eval.rs`).
+        tasks: std::path::PathBuf,
+        /// A model to run them on (an id the gateway serves, or `auto`); repeat to compare.
+        #[arg(long = "model", required = true)]
+        models: Vec<String>,
+        /// Let turns use cloud models (they are private, local only, otherwise).
+        #[arg(long)]
+        cloud: bool,
+        /// Only tasks with this tag.
+        #[arg(long)]
+        tag: Option<String>,
+        /// Write every outcome here (JSON).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// What the agent asked to do and who allowed it (the action log).
     Actions {
         /// At most this many (the newest).
@@ -240,6 +257,44 @@ fn run(cli: Cli) -> Result<(), String> {
             for fact in facts {
                 println!("#{}  {}", fact.id, fact.text);
             }
+            Ok(())
+        }
+        Command::Eval { tasks, models, cloud, tag, out } => {
+            let text = std::fs::read_to_string(&tasks).map_err(|e| format!("{}: {e}", tasks.display()))?;
+            let mut list = autobot::eval::parse(&text).map_err(|e| format!("{}: {e}", tasks.display()))?;
+            if let Some(tag) = &tag {
+                list.retain(|t| t.tags.contains(tag));
+            }
+            let mut agent = autobot::agent(&config, &home)?;
+            if cloud {
+                agent.gateway = agent.gateway.with_private(false);
+            }
+            let scratch = std::env::temp_dir().join(format!("autobot-eval-{}", std::process::id()));
+            let outcomes = runtime()?.block_on(async {
+                let mut outcomes = Vec::new();
+                for model in &models {
+                    eprintln!("{model}: {} tasks", list.len());
+                    for task in &list {
+                        let outcome = autobot::eval::run(&agent, model, task, &scratch).await;
+                        let mark = if outcome.pass { "✓" } else { "✗" };
+                        eprintln!(
+                            "  {mark} {} ({:.1} s, {} steps){}",
+                            outcome.id,
+                            outcome.seconds,
+                            outcome.steps,
+                            if outcome.pass { String::new() } else { format!(": {}", outcome.failures.join("; ")) }
+                        );
+                        outcomes.push(outcome);
+                    }
+                }
+                outcomes
+            });
+            print!("{}", autobot::eval::report(&outcomes, &models));
+            if let Some(out) = out {
+                let json = serde_json::to_string_pretty(&outcomes).map_err(|e| e.to_string())?;
+                std::fs::write(&out, json).map_err(|e| format!("{}: {e}", out.display()))?;
+            }
+            let _ = std::fs::remove_dir_all(scratch);
             Ok(())
         }
         Command::Actions { limit } => {

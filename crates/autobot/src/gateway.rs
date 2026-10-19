@@ -66,6 +66,11 @@ impl Gateway {
         &self.model
     }
 
+    /// The same gateway, with turns private (local models only) or not.
+    pub fn with_private(&self, private: bool) -> Self {
+        Self { private, ..self.clone() }
+    }
+
     /// The same gateway, asking for [model].
     pub fn with_model(&self, model: &str) -> Self {
         Self { model: model.to_owned(), ..self.clone() }
