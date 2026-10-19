@@ -89,6 +89,24 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
                 agent.tools.workdir().display(),
                 config.approvals.mode
             )));
+            // Unattended commands need a working sandbox (or they are refused).
+            if config.agent.sandbox == crate::sandbox::Mode::Off {
+                checks.push(ok("sandbox off: unattended commands run unconfined ([agent] sandbox)"));
+            } else {
+                let probe = agent.tools.clone().unattended();
+                let out = probe.run(&crate::tools::Call::Terminal { command: "echo sandboxed".into() }).await;
+                if out.starts_with("sandboxed") {
+                    checks.push(ok(format!(
+                        "sandbox works ({:?}: unattended commands write only in the working directory)",
+                        config.agent.sandbox
+                    )));
+                } else {
+                    checks.push(bad(format!(
+                        "the sandbox does not work here, so unattended commands are refused: {}",
+                        out.lines().next().unwrap_or_default()
+                    )));
+                }
+            }
         }
     }
     finish(checks, config, home).await
