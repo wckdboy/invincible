@@ -508,12 +508,12 @@ impl Chat {
         // The mascot beside the first three lines (only with color; half blocks need it).
         let lines: Vec<String> =
             std::iter::once(header).chain(invincible::brand::rows(&rows).lines().map(str::to_owned)).collect();
-        let mascot = super::mascot::render(&super::mascot::MINI, invincible::brand::VERMILION);
+        let mascot = super::mascot::render(&super::mascot::MINI, invincible::brand::LILAC);
         for (i, line) in lines.iter().enumerate() {
             match (mascot.is_empty(), mascot.get(i)) {
                 (true, _) => println!("{line}"),
                 (false, Some(art)) => println!("{art}  {line}"),
-                (false, None) => println!("        {line}"),
+                (false, None) => println!("         {line}"),
             }
         }
         let hint = if code {

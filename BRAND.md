@@ -13,12 +13,15 @@ This file is the reference. The Autobot app keeps the same rules in
 | | Invincible | Autobot |
 | --- | --- | --- |
 | What it is | The node you own: a gateway that routes, redacts, receipts and audits every model call | The agent: on your phone, and on your machine through the node |
-| Signal | **Verdigris** `#3F8A7E` (on paper) · `#4FA394` (on ink) | **Vermilion** `#E8401C` (on paper) · `#EB5535` (on ink) |
+| Signal | **Verdigris** `#3F8A7E` (on paper) · `#4FA394` (on ink) | **Lilac** `#5444BA` (on paper) · `#A99BF5` (on ink) |
 | Character | Calm infrastructure: tables, receipts, states | A capable colleague: conversation, work in progress, questions |
 | Wordmark | `■ invincible` | `■ autobot` |
+| Mascot | none: only the mark | Pip (below) |
 
-Verdigris is the patina that copper grows over time; Autobot's code color is copper. The two
-colors are a pair on purpose: warm and cool, the same weight, both off the same paper.
+Verdigris and lilac are a pair on purpose: two soft inks of the same weight, a green-blue and a
+blue-violet, both cool against the same warm paper, and neither one the amber of a warning or
+the red of an error. Autobot's code color in a terminal is copper (verdigris is copper's
+patina), the one warm note beside them.
 
 ## What they share
 
@@ -83,32 +86,39 @@ Both CLIs and the installer speak one grammar:
 
 ## The mascot
 
-Autobot has a mascot: a small square robot, drawn on a 12×12 grid so it works as pixel art and
-in a terminal (half blocks, two pixels to a cell; the 6×6 mini sits beside `autobot`'s header).
-It shares the product's restraint: a warm-grey body, an ink visor, bone eyes, and **one colored
-pixel pair, the antenna light**, which is the signal.
+Autobot's mascot is **Pip**: a small capsule robot, drawn on a 14×14 grid so it works as pixel
+art and in a terminal (half blocks, two pixels to a cell; the 7×6 mini sits beside `autobot`'s
+header). Its face and its antenna carry the feeling; the body never changes.
 
 ```
-.....RR.....    R  antenna light: vermilion; verdigris when it works on your node;
-.....SS.....       ash (off) when something failed
-..BBBBBBBB..    S  stem, ash
-.BBBBBBBBBB.    B  body: #C9C3BA on ink, #3A3632 on paper
-.BKKKKKKKKB.    K  visor: ink
-.BKEEKKEEKB.    E  eyes: bone, square like the mark
-.BKEEKKEEKB.
-.BKKKKKKKKB.
-.BBBBBBBBBB.
-..BBBBBBBB..
-..BB....BB..
-............
+..............
+........RR....   R  antenna light: lilac; verdigris when it works on your node;
+........S.....      dark (O) when something failed
+.......S......   S  stem, ash; bent, never straight
+...BBBBBBBB...   B  body: #C9C3BA on ink, #3A3632 on paper
+..BBBBBBBBBB..   K  visor: ink
+.BBKKKKKKKKBB.   E  eyes: bone, one pixel wide, two tall, close together
+.BBKKEKKEKKBB.   C  cheeks: the light's color, half into the visor; only when content
+.BBKKEKKEKKBB.
+.BBKCKKKKCKBB.
+..BBBBBBBBBB..
+...BBBBBBBB...
+....BB..BB....
+..............
 ```
 
-Frames: `idle`, `blink`, `think` (eyes up, antenna tilted), `work` (eyes down, reading),
-`happy` (`^ ^`), `oops` (`x x`, light off), and `mini`. SVGs for ink (`-dark`) and paper
-(`-light`) are in `[`assets/brand/mascot/`](assets/brand/mascot)`; `autobot-on-node-*` has the verdigris light. Use it small: an
-empty state, a welcome, the terminal header. Never as decoration behind text, never animated
-for its own sake (a blink every few seconds at most), and never on Invincible's own surfaces:
-the node has no mascot, only its mark.
+- `idle`, `blink`: eyes open and shut, cheeks on.
+- `happy` (done): `^ ^` eyes, cheeks on, the light sparks.
+- `think`: eyes up and to the side, the antenna tilts, no cheeks.
+- `work`: eyes down (reading), no cheeks.
+- `oops` (failed): small eyes under slanted brows, the antenna droops, the light is off.
+- `mini`: for the terminal header.
+
+The light and the cheeks are the only signal pixels. SVGs for ink (`-dark`) and paper (`-light`)
+are in [`assets/brand/mascot/`](assets/brand/mascot) (`pip-*`); `pip-on-node-*` has the verdigris light. Use Pip small: an empty
+state, a welcome, the terminal header. Never behind text, never animated for its own sake (a
+blink every few seconds at most), and never on Invincible's own surfaces: the node has no
+mascot, only its mark.
 
 ## Writing the names
 

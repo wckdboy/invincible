@@ -4,7 +4,7 @@
 //! - Warm neutrals for almost everything: the terminal's own foreground, ash for what is
 //!   secondary, a fainter ash for structure (gutters, rules).
 //! - One signal color per product, used sparingly: its mark, the prompt, what needs you now.
-//!   Autobot is vermilion; Invincible is verdigris.
+//!   Autobot is lilac; Invincible is verdigris.
 //! - The mark is a small square, `■`, before the lowercase name.
 //! - States are words and plain glyphs: `✓` in ash when fine, `!` amber when it needs a look,
 //!   `✗` in the error color when it failed. Color never carries meaning alone.
@@ -25,8 +25,8 @@ const fn color(r: u8, g: u8, b: u8, ansi: u8) -> Color {
     Color { rgb: (r, g, b), ansi }
 }
 
-/// Autobot's signal: vermilion (`#E8401C` on paper; a touch lighter for dark terminals).
-pub const VERMILION: Color = color(0xEB, 0x55, 0x35, 203);
+/// Autobot's signal: lilac (`#5444BA` on paper, `#A99BF5` here, for dark terminals).
+pub const LILAC: Color = color(0xA9, 0x9B, 0xF5, 147);
 /// Invincible's signal: verdigris.
 pub const VERDIGRIS: Color = color(0x4F, 0xA3, 0x94, 72);
 /// Secondary text.
@@ -52,7 +52,7 @@ pub enum Product {
 impl Product {
     pub fn signal(self) -> Color {
         match self {
-            Self::Autobot => VERMILION,
+            Self::Autobot => LILAC,
             Self::Invincible => VERDIGRIS,
         }
     }
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn plain_without_color() {
         set_color(false);
-        assert_eq!(paint(VERMILION, "x"), "x");
+        assert_eq!(paint(LILAC, "x"), "x");
         assert_eq!(Product::Autobot.header("0.1"), "■ autobot 0.1");
         assert_eq!(ok("gateway"), "✓ gateway");
         assert_eq!(

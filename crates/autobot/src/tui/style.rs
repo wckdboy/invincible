@@ -1,5 +1,5 @@
 //! Terminal colors, from the lab's shared palette ([invincible::brand]): Autobot's signal is
-//! vermilion. Off when the output is not a terminal or `NO_COLOR` is set.
+//! lilac. Off when the output is not a terminal or `NO_COLOR` is set.
 
 use invincible::brand::{self, Color};
 
@@ -45,9 +45,9 @@ pub fn removed(t: &str) -> String {
 pub fn yellow(t: &str) -> String {
     brand::paint(brand::AMBER, t)
 }
-/// The signal: Autobot's vermilion. The mark, the prompt, what needs the owner now.
+/// The signal: Autobot's lilac. The mark, the prompt, what needs the owner now.
 pub fn accent(t: &str) -> String {
-    brand::paint(brand::VERMILION, t)
+    brand::paint(brand::LILAC, t)
 }
 /// Code.
 pub fn code(t: &str) -> String {
