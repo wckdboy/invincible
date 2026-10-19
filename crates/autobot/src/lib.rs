@@ -34,11 +34,18 @@ pub fn agent(config: &Config, home: &Path) -> Result<agent::Agent, String> {
     let gateway = gateway::Gateway::new(&config.gateway.url, &token, &config.gateway.model, config.gateway.private)?;
     let workdir = config.agent.workdir(home);
     std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
+    let mut tools = tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout))
+        .with_home(home.to_owned())
+        .with_sandbox(config.agent.sandbox);
+    if let Some(groups) = &config.agent.tools {
+        if let Some(unknown) = groups.iter().find(|g| !tools::GROUPS.iter().any(|(n, _)| n == g)) {
+            return Err(format!("[agent] tools: unknown group {unknown:?}"));
+        }
+        tools = tools.only(tools::tools_for(groups));
+    }
     Ok(agent::Agent {
         gateway,
-        tools: tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout))
-            .with_home(home.to_owned())
-            .with_sandbox(config.agent.sandbox),
+        tools,
         approvals: config.approvals.clone(),
         max_steps: config.agent.max_steps,
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),

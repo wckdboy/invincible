@@ -126,6 +126,10 @@ pub struct AgentConfig {
     /// always, off ([crate::sandbox]).
     #[serde(default)]
     pub sandbox: crate::sandbox::Mode,
+    /// Only these tool groups for the main agent ([crate::tools::GROUPS]; default: all). A
+    /// shorter tool list makes a small local model's calls faster.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
     /// How often the heartbeat works through `HEARTBEAT.md` (`30m`, `2h`; `off`).
     #[serde(default = "heartbeat")]
     pub heartbeat: String,
@@ -164,6 +168,7 @@ impl Default for AgentConfig {
             max_steps: max_steps(),
             command_timeout: command_timeout(),
             sandbox: Default::default(),
+            tools: None,
             heartbeat: heartbeat(),
         }
     }

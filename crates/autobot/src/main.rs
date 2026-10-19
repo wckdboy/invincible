@@ -74,6 +74,10 @@ enum Command {
         /// Let turns use cloud models (they are private, local only, otherwise).
         #[arg(long)]
         cloud: bool,
+        /// Only these tool groups (comma-separated, e.g. files-read,files-write,terminal), to see
+        /// how the tool list affects a model.
+        #[arg(long, value_delimiter = ',')]
+        tools: Option<Vec<String>>,
         /// Only tasks with this tag.
         #[arg(long)]
         tag: Option<String>,
@@ -259,7 +263,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Eval { tasks, models, cloud, tag, out } => {
+        Command::Eval { tasks, models, cloud, tools, tag, out } => {
             let text = std::fs::read_to_string(&tasks).map_err(|e| format!("{}: {e}", tasks.display()))?;
             let mut list = autobot::eval::parse(&text).map_err(|e| format!("{}: {e}", tasks.display()))?;
             if let Some(tag) = &tag {
@@ -270,12 +274,13 @@ fn run(cli: Cli) -> Result<(), String> {
                 agent.gateway = agent.gateway.with_private(false);
             }
             let scratch = std::env::temp_dir().join(format!("autobot-eval-{}", std::process::id()));
+            let only = tools.map(|groups| autobot::tools::tools_for(&groups));
             let outcomes = runtime()?.block_on(async {
                 let mut outcomes = Vec::new();
                 for model in &models {
                     eprintln!("{model}: {} tasks", list.len());
                     for task in &list {
-                        let outcome = autobot::eval::run(&agent, model, task, &scratch).await;
+                        let outcome = autobot::eval::run(&agent, model, task, &scratch, only.clone()).await;
                         let mark = if outcome.pass { "✓" } else { "✗" };
                         eprintln!(
                             "  {mark} {} ({:.1} s, {} steps){}",

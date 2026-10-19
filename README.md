@@ -548,6 +548,11 @@ autobot eval evals/agent.jsonl --model qwen3.5-4b --model deepseek --cloud
 | Qwen3 0.6B, on the node | 6/16 | | 15 s |
 | DeepSeek V3, cloud | 16/16 | 10/10 | 3 s / 5 s |
 
+With only the core tool groups (`--tools files-read,files-write,terminal`), Qwen3.5 4B passes
+the hard set just as often (8/10) in half the time (17 s median instead of 32 s): every model
+call carries the tool list, and a small model reads a shorter one faster. `[agent] tools =
+["files-read", "files-write", "terminal", "web"]` sets that for the agent itself.
+
 Everyday tasks: write, edit and rename files, fix a one-line bug, sum a CSV column, find a TODO,
 sort a file in place, bump a version, run a script, remember, schedule, read without changing.
 Hard ones: rename a function across files, make failing tests pass, find the IP with most

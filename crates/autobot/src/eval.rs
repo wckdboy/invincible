@@ -121,7 +121,13 @@ impl Approver for Yes {
 }
 
 /// Runs [task] with [agent] (its gateway asking for [model]) in a fresh directory under [scratch].
-pub async fn run(agent: &crate::agent::Agent, model: &str, task: &Task, scratch: &Path) -> Outcome {
+pub async fn run(
+    agent: &crate::agent::Agent,
+    model: &str,
+    task: &Task,
+    scratch: &Path,
+    only: Option<Vec<String>>,
+) -> Outcome {
     let dir = scratch.join(format!("{}-{}", task.id, model.replace(['/', ':'], "_")));
     let _ = std::fs::remove_dir_all(&dir);
     let work = dir.join("work");
@@ -141,6 +147,9 @@ pub async fn run(agent: &crate::agent::Agent, model: &str, task: &Task, scratch:
     worker.tools = crate::tools::Tools::new(work.clone(), Duration::from_secs(60))
         .with_home(dir.join("home"))
         .with_sandbox(crate::sandbox::Mode::Always);
+    if let Some(only) = only {
+        worker.tools = worker.tools.only(only);
+    }
     worker.approvals = crate::config::ApprovalConfig { mode: crate::config::ApprovalMode::Ask, allow: Vec::new() };
     worker.max_steps = task.max_steps.unwrap_or(12);
     worker.team = Default::default();
