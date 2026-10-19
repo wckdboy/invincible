@@ -440,12 +440,18 @@ and geometry arithmetic Nightfall does. Every expected answer was checked by run
 
 | model | all | Autobot | Omnie | Nightfall |
 |---|---|---|---|---|
-| Qwen3.5 4B (Q4_K_M) | 30/50 | 9/17 | 10/16 | 11/17 |
-| Qwen3 0.6B (Q8_0) | 8/50 | 2/17 | 4/16 | 2/17 |
+| Qwen3.5 4B (Q4_K_M), on the node | 30/50 | 9/17 | 10/16 | 11/17 |
+| Qwen3 0.6B (Q8_0), on the node | 8/50 | 2/17 | 4/16 | 2/17 |
+| DeepSeek V3 (`deepseek-chat`, cloud) | 45/50 | 16/17 | 15/16 | 14/17 |
+
+On the 40 seed tasks DeepSeek passes 40/40 against Qwen3.5 4B's 34/40. So a 4B model on a
+laptop is at two thirds of a frontier model on this code, and level with it on extraction,
+shell and instructions; the gap is in multi-step reading and arithmetic. Each of DeepSeek's 90
+requests went through the gateway like any other: confirmed, redacted, receipted, and listed by
+`invincible audit --summary` (62 KB sent to `api.deepseek.com` for both suites).
 
 The 4B model's misses are real ones, for example a glob whose `**/` needs a slash, a module
-resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254. Next: the same files
-against a frontier model, and samples of real requests.
+resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254.
 
 ## Repository
 
