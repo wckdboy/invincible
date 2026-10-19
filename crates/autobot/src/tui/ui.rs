@@ -40,6 +40,8 @@ struct State {
     started: Option<Instant>,
     models: Vec<String>,
     calls: usize,
+    /// Tokens this turn: input, output, cached input.
+    tokens: (u64, u64, u64),
 }
 
 impl Ui {
@@ -186,6 +188,14 @@ impl Ui {
         if s.calls > 0 {
             parts.push(format!("{} tool call{}", s.calls, if s.calls == 1 { "" } else { "s" }));
         }
+        let (input, output, cached) = s.tokens;
+        if input > 0 {
+            let mut tokens = format!("{} in · {} out", short(input), short(output));
+            if cached > 0 {
+                tokens.push_str(&format!(" ({} cached)", short(cached)));
+            }
+            parts.push(tokens);
+        }
         parts.push(format!("{secs:.1}s"));
         if let Some(note) = note {
             parts.push(note.to_owned());
@@ -255,6 +265,12 @@ impl Ui {
                 let more = text.lines().count().saturating_sub(1);
                 let more = if more > 0 { style::gray(&format!(" (+{more} lines)")) } else { String::new() };
                 Self::out(&format!("{} {}{more}\n", style::magenta(&format!("  ⎿ [{name}]")), first));
+            }
+            Event::Usage { input, output, cached } => {
+                let mut s = self.state.lock().expect("ui");
+                s.tokens.0 += input;
+                s.tokens.1 += output;
+                s.tokens.2 += cached;
             }
             Event::Receipt { model, tier, .. } => {
                 let mut s = self.state.lock().expect("ui");
@@ -344,6 +360,15 @@ impl Ui {
                 style::bold(&short)
             }
         }
+    }
+}
+
+/// 1234 → 1.2k, 1234567 → 1.2M.
+fn short(n: u64) -> String {
+    match n {
+        0..1000 => n.to_string(),
+        1000..1_000_000 => format!("{:.1}k", n as f64 / 1000.0),
+        _ => format!("{:.1}M", n as f64 / 1_000_000.0),
     }
 }
 

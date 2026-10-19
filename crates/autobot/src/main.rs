@@ -249,7 +249,8 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             let session = session.unwrap_or_else(|| project_session(&dir));
             runtime()?.block_on(async {
-                let agent = autobot::agent_in(&config, &home, Some(dir))?;
+                let mut agent = autobot::agent_in(&config, &home, Some(dir))?;
+                autobot::for_coding(&mut agent);
                 let options = autobot::tui::chat::Options { session, new, model, code: true };
                 autobot::tui::chat::run(&config, home, agent, options).await
             })
@@ -260,7 +261,11 @@ fn run(cli: Cli) -> Result<(), String> {
                 config.approvals.mode = approval_mode(&mode)?;
             }
             let dir = dir.map(|d| d.canonicalize().map_err(|e| format!("{}: {e}", d.display()))).transpose()?;
+            let coding = dir.is_some();
             let mut agent = autobot::agent_in(&config, &home, dir)?;
+            if coding {
+                autobot::for_coding(&mut agent);
+            }
             if let Some(model) = &model {
                 let models = agent.gateway.model_info().await.unwrap_or_default();
                 autobot::use_model(&mut agent, &config, &models, model)?;
@@ -283,6 +288,10 @@ fn run(cli: Cli) -> Result<(), String> {
                 } else {
                     if open.swap(false, Relaxed) && !matches!(event, Event::Reasoning(_)) {
                         println!();
+                    }
+                    // The answer is what streams after the last tool call.
+                    if matches!(event, Event::Tool(_) | Event::Output { .. }) {
+                        streamed.store(false, Relaxed);
                     }
                     print_event(event);
                 }
@@ -705,6 +714,9 @@ fn event_json(event: &Event) -> serde_json::Value {
         Event::Reasoning(text) => json!({ "type": "reasoning", "text": text }),
         Event::Diff(diff) => json!({ "type": "diff", "diff": diff }),
         Event::Output { name, text } => json!({ "type": "output", "tool": name, "text": text }),
+        Event::Usage { input, output, cached } => {
+            json!({ "type": "usage", "input": input, "output": output, "cached": cached })
+        }
     }
 }
 
@@ -722,7 +734,7 @@ fn print_event(event: Event) {
         }
         Event::Member { name, text } => eprintln!("\x1b[2m[{name}] → {}\x1b[0m", text.replace('\n', " ")),
         Event::Diff(diff) => eprint!("{}", autobot::tui::ui::render_diff(diff, 80)),
-        Event::Text(_) | Event::Reasoning(_) | Event::Output { .. } => {}
+        Event::Text(_) | Event::Reasoning(_) | Event::Output { .. } | Event::Usage { .. } => {}
     }
 }
 

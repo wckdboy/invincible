@@ -33,6 +33,20 @@ pub struct Reply {
     pub request_id: Option<String>,
     /// The routing decision (spec/routing.md).
     pub decision: Option<Value>,
+    /// Tokens: the provider's `usage` (prompt_tokens, completion_tokens, cached ones).
+    pub usage: Option<Value>,
+}
+
+/// (input, output, cached input) tokens from a `usage` object; cached from DeepSeek's
+/// `prompt_cache_hit_tokens` or OpenAI's `prompt_tokens_details.cached_tokens`.
+pub fn tokens(usage: &Value) -> Option<(u64, u64, u64)> {
+    let input = usage["prompt_tokens"].as_u64()?;
+    let output = usage["completion_tokens"].as_u64().unwrap_or(0);
+    let cached = usage["prompt_cache_hit_tokens"]
+        .as_u64()
+        .or_else(|| usage["prompt_tokens_details"]["cached_tokens"].as_u64())
+        .unwrap_or(0);
+    Some((input, output, cached))
 }
 
 /// A model the gateway serves.
@@ -132,6 +146,9 @@ impl Gateway {
         on: &(dyn Fn(Delta) + Send + Sync),
     ) -> Result<Reply, GatewayError> {
         let mut body = json!({ "model": self.model, "messages": messages, "stream": self.stream });
+        if self.stream {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
         if tools.as_array().is_some_and(|t| !t.is_empty()) {
             body["tools"] = tools.clone();
         }
@@ -155,8 +172,8 @@ impl Gateway {
             .and_then(|v| v.to_str().ok())
             .is_some_and(|t| t.starts_with("text/event-stream"));
         if status.is_success() && streamed {
-            let message = read_stream(response, on).await.map_err(GatewayError::Failed)?;
-            return Ok(Reply { message, request_id, decision });
+            let (message, usage) = read_stream(response, on).await.map_err(GatewayError::Failed)?;
+            return Ok(Reply { message, request_id, decision, usage });
         }
         let text = response.text().await.map_err(|e| GatewayError::Failed(format!("the gateway's answer: {e}")))?;
         let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -180,7 +197,8 @@ impl Gateway {
         if !message.is_object() {
             return Err(GatewayError::Failed(format!("the gateway's answer has no message: {text}")));
         }
-        Ok(Reply { message, request_id, decision })
+        let usage = parsed.get("usage").filter(|u| u.is_object()).cloned();
+        Ok(Reply { message, request_id, decision, usage })
     }
 
     /// A web page through the gateway (its `/v1/fetch`: the node's network policy, receipted):
@@ -272,7 +290,10 @@ impl Gateway {
 /// An answer streamed as server-sent events (OpenAI's chunk shape), put back together as one
 /// message: its text, reasoning and tool calls (whose names and arguments come in pieces, by
 /// index).
-async fn read_stream(response: reqwest::Response, on: &(dyn Fn(Delta) + Send + Sync)) -> Result<Value, String> {
+async fn read_stream(
+    response: reqwest::Response,
+    on: &(dyn Fn(Delta) + Send + Sync),
+) -> Result<(Value, Option<Value>), String> {
     use futures_util::StreamExt;
     let mut stream = response.bytes_stream();
     let mut pending: Vec<u8> = Vec::new();
@@ -284,13 +305,15 @@ async fn read_stream(response: reqwest::Response, on: &(dyn Fn(Delta) + Send + S
             let line: Vec<u8> = pending.drain(..=end).collect();
             let line = String::from_utf8_lossy(&line);
             if assembled.line(line.trim(), on)? {
-                return Ok(assembled.message());
+                let usage = assembled.usage.take();
+                return Ok((assembled.message(), usage));
             }
         }
     }
     let rest = String::from_utf8_lossy(&pending).into_owned();
     assembled.line(rest.trim(), on)?;
-    Ok(assembled.message())
+    let usage = assembled.usage.take();
+    Ok((assembled.message(), usage))
 }
 
 #[derive(Default)]
@@ -298,6 +321,7 @@ struct Assembled {
     text: String,
     reasoning: String,
     calls: Vec<(String, String, String)>,
+    usage: Option<Value>,
 }
 
 impl Assembled {
@@ -310,6 +334,9 @@ impl Assembled {
         let Ok(chunk) = serde_json::from_str::<Value>(data) else { return Ok(false) };
         if let Some(error) = chunk.get("error") {
             return Err(format!("the model failed: {}", error["message"].as_str().unwrap_or("error")));
+        }
+        if let Some(usage) = chunk.get("usage").filter(|u| u.is_object()) {
+            self.usage = Some(usage.clone());
         }
         let delta = &chunk["choices"][0]["delta"];
         if let Some(text) = delta["content"].as_str().filter(|t| !t.is_empty()) {

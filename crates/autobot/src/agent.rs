@@ -52,6 +52,8 @@ pub enum Event<'a> {
     Diff(&'a str),
     /// What a tool handed back to the model.
     Output { name: &'a str, text: &'a str },
+    /// Tokens one model call used: input (of which cached), output.
+    Usage { input: u64, output: u64, cached: u64 },
 }
 
 pub struct Outcome {
@@ -141,7 +143,7 @@ impl Agent {
             list.push(self.team.definition());
         }
         if let Some(list) = definitions.as_array_mut() {
-            if self.leads_team() && self.tools.home().is_some() {
+            if self.leads_team() && self.team.configured() && self.tools.home().is_some() {
                 list.extend(crate::board::lead_tools(&self.team));
             }
             if crate::tools::TURN.try_with(|t| t.board_task.is_some()).unwrap_or(false) {
@@ -169,7 +171,8 @@ impl Agent {
         loop {
             steps += 1;
             if steps > self.max_steps {
-                let note = format!("Stopped after {} steps ([agent] max_steps).", self.max_steps);
+                let note =
+                    format!("Stopped after {} steps ([agent] max_steps); say \"continue\" to go on.", self.max_steps);
                 let last = json!({ "role": "assistant", "content": note });
                 session.push(last.clone())?;
                 // What was sent last, its tool results, and the stop.
@@ -233,6 +236,9 @@ impl Agent {
                     tier: decision.and_then(|d| d["tier"].as_str()),
                 });
             }
+            if let Some((input, output, cached)) = reply.usage.as_ref().and_then(crate::gateway::tokens) {
+                events(Event::Usage { input, output, cached });
+            }
             let mut message = reply.message;
             if let Some(object) = message.as_object_mut() {
                 // Reasoning is not part of the conversation the model sees again.
@@ -264,13 +270,50 @@ impl Agent {
                     session.push(json!({ "role": "tool", "tool_call_id": id, "content": text }))?;
                 }
             }
-            for (id, name, arguments) in own {
+            // Reads that need no approval, next to each other, run at the same time; the rest in
+            // order. Results go back in the order the model asked.
+            let mut rest = own.into_iter().peekable();
+            while let Some(first) = rest.next() {
+                let mut batch = vec![first];
+                while batch.iter().all(|(_, n, a)| self.reads_freely(n, a))
+                    && rest.peek().is_some_and(|(_, n, a)| self.reads_freely(n, a))
+                {
+                    batch.extend(rest.next());
+                }
+                if batch.len() > 1 {
+                    let quiet = |event: Event| {
+                        if !matches!(event, Event::Tool(_)) {
+                            events(event)
+                        }
+                    };
+                    let at = session.messages.len();
+                    let runs = batch.iter().map(|(_, name, arguments)| {
+                        let quiet = &quiet;
+                        let id = session.id.clone();
+                        async move { self.call(&id, at, name, arguments, approver, &mut HashSet::new(), quiet).await }
+                    });
+                    let results = futures_util::future::join_all(runs).await;
+                    for ((id, name, arguments), result) in batch.iter().zip(results) {
+                        events(Event::Tool(&format!("{name} {arguments}")));
+                        events(Event::Output { name, text: &result });
+                        session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
+                    }
+                    continue;
+                }
+                let (id, name, arguments) = batch.remove(0);
                 let at = session.messages.len();
                 let result = self.call(&session.id, at, &name, &arguments, approver, grants, events).await;
                 events(Event::Output { name: &name, text: &result });
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
             }
         }
+    }
+
+    /// A call that only reads in the working directory: nothing to approve, safe to run beside
+    /// others.
+    fn reads_freely(&self, name: &str, arguments: &str) -> bool {
+        matches!(name, "read_file" | "list_dir" | "search" | "find_files")
+            && self.tools.parse(name, arguments).is_ok_and(|call| self.tools.action(&call).is_none())
     }
 
     /// Whether this agent hands work to a team: it has members, and it is not one itself.

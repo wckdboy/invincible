@@ -528,7 +528,7 @@ async fn handle(
         Event::Member { name, text } => {
             let _ = progress.send((Some(name.to_owned()), cut_line(&format!("→ {text}"))));
         }
-        Event::Text(_) | Event::Reasoning(_) | Event::Diff(_) | Event::Output { .. } => {}
+        Event::Text(_) | Event::Reasoning(_) | Event::Diff(_) | Event::Output { .. } | Event::Usage { .. } => {}
         Event::Receipt { id, model, tier } => {
             *last_route.lock().expect("route") = Some(format!(
                 "{} · {} · receipt {}",

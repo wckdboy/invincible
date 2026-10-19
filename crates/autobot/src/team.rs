@@ -71,6 +71,8 @@ pub struct Role {
     pub instructions: Option<String>,
     pub tools: Vec<String>,
     pub model: Option<String>,
+    /// Built in (the coding explorer), not from the config: no board for it.
+    pub builtin: bool,
 }
 
 /// The members, by name.
@@ -102,6 +104,7 @@ impl Team {
                 instructions: role.instructions.clone().filter(|i| !i.trim().is_empty()),
                 tools: role.tools.clone(),
                 model: role.model.clone().filter(|m| !m.trim().is_empty()),
+                builtin: false,
             });
         }
         Ok(Self { roles, max_parallel: team.max_parallel.clamp(1, 8) })
@@ -109,6 +112,27 @@ impl Team {
 
     pub fn is_empty(&self) -> bool {
         self.roles.is_empty()
+    }
+
+    /// With `explorer`, a read-only member for research in a code base (unless the config has
+    /// a member of that name).
+    pub fn with_explorer(mut self) -> Self {
+        if self.get("explorer").is_none() {
+            self.roles.push(Role {
+                name: "explorer".to_owned(),
+                description: "explores the code base without changing it: where something is defined and used, how a part works, what a change would touch. Hand it questions that need many files read; it answers with file:line references".to_owned(),
+                instructions: Some("You explore a code base read-only: `search` and `find_files` to find, `read_file` (in parts for long files) to understand. Answer the lead's question precisely and completely, with file:line references, and only what you read.".to_owned()),
+                tools: vec!["files-read".to_owned()],
+                model: None,
+                builtin: true,
+            });
+        }
+        self
+    }
+
+    /// Members from the config (the board is for them).
+    pub fn configured(&self) -> bool {
+        self.roles.iter().any(|r| !r.builtin)
     }
 
     pub fn get(&self, name: &str) -> Option<&Role> {

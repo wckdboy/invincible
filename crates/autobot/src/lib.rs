@@ -69,6 +69,14 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
     })
 }
 
+/// Coding in a project (`autobot code`, `autobot run -C`): room for long tasks (at least 100
+/// steps), and an `explorer` to hand read-only research to, so the main conversation keeps
+/// only what it found.
+pub fn for_coding(agent: &mut agent::Agent) {
+    agent.max_steps = agent.max_steps.max(100);
+    agent.team = std::sync::Arc::new((*agent.team).clone().with_explorer());
+}
+
 /// Switches [agent] to the model [id] of [models] (what the gateway serves): a cloud model lets
 /// turns leave the machine (they are private otherwise, as configured), and the conversation
 /// sent per call and the tool results grow with the model's context, unless the config sets it.

@@ -1107,3 +1107,48 @@ async fn a_streamed_turn_shows_its_text_and_diffs_and_can_be_undone() {
     assert_eq!(std::fs::read_to_string(dir.join("work/a.txt")).unwrap(), "one\ntwo\n");
     assert!(session.messages.is_empty());
 }
+
+#[tokio::test]
+async fn reads_in_one_reply_run_together_and_come_back_in_order() {
+    let mut first = calls(&[
+        ("read_file", json!({ "path": "a.txt" })),
+        ("search", json!({ "pattern": "two" })),
+        ("terminal", json!({ "command": "echo hi" })),
+    ]);
+    first.1["usage"] = json!({ "prompt_tokens": 1200, "completion_tokens": 30, "prompt_cache_hit_tokens": 1000 });
+    let (url, _script) = gateway(vec![first, say("done")]).await;
+    let dir = temp("parallel");
+    std::fs::create_dir_all(dir.join("work")).unwrap();
+    std::fs::write(dir.join("work/a.txt"), "one\n").unwrap();
+    std::fs::write(dir.join("work/b.txt"), "two\n").unwrap();
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let seen = Mutex::new(Vec::<String>::new());
+    let events = |e: Event| {
+        let line = match e {
+            Event::Tool(t) => format!("tool {}", t.split(' ').next().unwrap()),
+            Event::Output { name, .. } => format!("output {name}"),
+            Event::Usage { input, output, cached } => format!("usage {input}/{output}/{cached}"),
+            _ => return,
+        };
+        seen.lock().unwrap().push(line);
+    };
+    let mut session = Session::open(&dir.join("sessions"), "p").unwrap();
+    agent.turn(&mut session, "look", &owner(Answer::Once), &mut HashSet::new(), &events).await.unwrap();
+    assert_eq!(
+        seen.into_inner().unwrap(),
+        [
+            "usage 1200/30/1000",
+            "tool read_file",
+            "output read_file",
+            "tool search",
+            "output search",
+            "tool run:",
+            "output terminal",
+        ]
+    );
+    let results: Vec<&str> =
+        session.messages.iter().filter(|m| m["role"] == "tool").map(|m| m["content"].as_str().unwrap()).collect();
+    assert_eq!(results[0], "one\n");
+    assert_eq!(results[1], "b.txt:1: two\n");
+    assert!(results[2].starts_with("hi"));
+}
