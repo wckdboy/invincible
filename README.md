@@ -526,6 +526,30 @@ requests went through the gateway like any other: confirmed, redacted, receipted
 The 4B model's misses are real ones, for example a glob whose `**/` needs a slash, a module
 resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254.
 
+### Agent evals: whole tasks, not single answers
+
+`autobot eval` runs agent tasks for real: each in a fresh directory with its files, the agent
+working it with its tools (commands sandboxed), then checks on the files it left, the task's own
+tests, the tools it called and its answer.
+
+```sh
+autobot eval evals/agent.jsonl --model qwen3.5-4b --model deepseek --cloud
+```
+
+| model | everyday (16) | hard (10) | median time (everyday / hard) |
+|---|---|---|---|
+| Qwen3.5 4B, on the node | 16/16 | 8/10 | 8 s / 32 s |
+| Qwen3 0.6B, on the node | 6/16 | | 15 s |
+| DeepSeek V3, cloud | 16/16 | 10/10 | 3 s / 5 s |
+
+Everyday tasks: write, edit and rename files, fix a one-line bug, sum a CSV column, find a TODO,
+sort a file in place, bump a version, run a script, remember, schedule, read without changing.
+Hard ones: rename a function across files, make failing tests pass, find the IP with most
+errors in a log, convert INI to JSON, join two CSVs, implement a function to a spec, delete only
+`.tmp` files, count files by extension, fix a failing shell script, collect TODOs with line
+numbers. The 4B model's two misses are real: a nested `.tmp` file left behind, and line numbers
+off by one.
+
 ## Repository
 
 | Path | What |
