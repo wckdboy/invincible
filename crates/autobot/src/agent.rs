@@ -47,7 +47,7 @@ impl Agent {
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> Result<Outcome, String> {
         session.push(json!({ "role": "user", "content": text }))?;
-        let definitions = Tools::definitions();
+        let definitions = self.tools.definitions();
         let mut receipts = Vec::new();
         let mut confirmed = false;
         let mut steps = 0;
@@ -152,7 +152,7 @@ impl Agent {
     }
 
     fn system_prompt(&self) -> String {
-        format!(
+        let mut prompt = format!(
             "You are Autobot, an agent running on its owner's own machine ({os}). Your model is served by \
              Invincible Gateway on that machine.\n\
              Working directory: {dir}\n\
@@ -162,7 +162,19 @@ impl Agent {
              Work step by step, check results, and answer briefly in plain text.",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
-        )
+        );
+        if let Some(home) = self.tools.home() {
+            if let Some(facts) = crate::memory::Memory::new(home).prompt() {
+                prompt
+                    .push_str("\n\nWhat you remembered from earlier conversations (keep new facts with `remember`):\n");
+                prompt.push_str(&facts);
+            }
+            if let Some(skills) = crate::skills::prompt(home) {
+                prompt.push_str("\n\nThe owner's skills (read one with `read_skill` when it fits the task):\n");
+                prompt.push_str(&skills);
+            }
+        }
+        prompt
     }
 }
 

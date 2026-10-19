@@ -254,3 +254,35 @@ async fn a_scheduled_run_follows_allowlist_rules_with_nobody_to_ask() {
     let session = Session::open(&dir.join("sessions"), "cron-t1").unwrap();
     assert!(session.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.starts_with("refused"))));
 }
+
+#[tokio::test]
+async fn the_agent_remembers_and_reads_skills_from_its_home() {
+    let (url, script) = gateway(vec![
+        call("remember", json!({"text": "The owner deploys on Fridays."})),
+        call("read_skill", json!({"name": "deploy"})),
+        say("Noted, and I have the deploy steps."),
+        say("You deploy on Fridays."),
+    ])
+    .await;
+    let dir = temp("memory");
+    std::fs::create_dir_all(dir.join("skills")).unwrap();
+    std::fs::write(dir.join("skills/deploy.md"), "---\ndescription: Deploy the site\n---\n1. git pull\n2. restart")
+        .unwrap();
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let owner = owner(Answer::Deny);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "Remember that I deploy on Fridays", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    assert!(owner.asked.lock().unwrap().is_empty(), "nothing to approve");
+    let mut later = Session::open(&dir.join("sessions"), "later").unwrap();
+    agent.turn(&mut later, "When do I deploy?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+
+    let script = script.lock().unwrap();
+    let first = &script.seen[0].1;
+    assert_eq!(first["tools"].as_array().unwrap().len(), 6);
+    assert!(first["messages"][0]["content"].as_str().unwrap().contains("- deploy: Deploy the site"));
+    assert!(script.seen[1].1.to_string().contains("remembered (#1)"));
+    assert!(script.seen[2].1.to_string().contains("git pull"));
+    // A new conversation starts with what was remembered.
+    assert!(script.seen[3].1["messages"][0]["content"].as_str().unwrap().contains("- The owner deploys on Fridays."));
+}

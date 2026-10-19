@@ -58,6 +58,14 @@ enum Command {
     },
     /// List the saved conversations.
     Sessions,
+    /// What the agent remembered between conversations (`remember`): list, or forget one.
+    Memory {
+        /// The id of a fact to forget.
+        #[arg(long)]
+        forget: Option<u64>,
+    },
+    /// The owner's skills: how-to notes for the agent, one Markdown file each in $AUTOBOT_HOME/skills.
+    Skills,
     /// Scheduled tasks, run by `autobot serve` without anyone to ask: allowlisted commands and
     /// writes in the working directory only.
     Cron {
@@ -199,6 +207,34 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Cron { action } => cron(action, &config, &home),
+        Command::Memory { forget } => {
+            let memory = autobot::memory::Memory::new(&home);
+            if let Some(id) = forget {
+                if !memory.forget(id)? {
+                    return Err(format!("no remembered fact #{id}"));
+                }
+                println!("forgot #{id}");
+                return Ok(());
+            }
+            let facts = memory.list();
+            if facts.is_empty() {
+                println!("nothing remembered yet");
+            }
+            for fact in facts {
+                println!("#{}  {}", fact.id, fact.text);
+            }
+            Ok(())
+        }
+        Command::Skills => {
+            let skills = autobot::skills::list(&home);
+            if skills.is_empty() {
+                println!("no skills yet: put Markdown files in {}", home.join("skills").display());
+            }
+            for skill in skills {
+                println!("{}  {}", skill.name, skill.description);
+            }
+            Ok(())
+        }
         Command::Sessions => {
             for (name, modified) in autobot::session::list(&home.join("sessions")) {
                 let ago = modified.elapsed().map(|d| d.as_secs()).unwrap_or(0);

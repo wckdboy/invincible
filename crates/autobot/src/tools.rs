@@ -16,6 +16,8 @@ pub const RESULT_LIMIT: usize = 16 * 1024;
 pub struct Tools {
     workdir: PathBuf,
     timeout: Duration,
+    /// `$AUTOBOT_HOME`: with it, the agent remembers (memory) and reads skills.
+    home: Option<PathBuf>,
 }
 
 /// One tool call, parsed.
@@ -25,19 +27,51 @@ pub enum Call {
     ReadFile { path: PathBuf },
     WriteFile { path: PathBuf, content: String },
     ListDir { path: PathBuf },
+    Remember { text: String },
+    ReadSkill { name: String },
 }
 
 impl Tools {
     pub fn new(workdir: PathBuf, timeout: Duration) -> Self {
-        Self { workdir, timeout }
+        Self { workdir, timeout, home: None }
+    }
+
+    /// With memory and skills from [home] (`$AUTOBOT_HOME`).
+    pub fn with_home(mut self, home: PathBuf) -> Self {
+        self.home = Some(home);
+        self
     }
 
     pub fn workdir(&self) -> &Path {
         &self.workdir
     }
 
-    /// The tools in the OpenAI `tools` shape.
-    pub fn definitions() -> Value {
+    pub fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
+    }
+
+    /// The tools this agent has, in the OpenAI `tools` shape.
+    pub fn definitions(&self) -> Value {
+        let mut tools = Self::base_definitions();
+        if self.home.is_some()
+            && let Some(list) = tools.as_array_mut()
+        {
+            list.push(json!({ "type": "function", "function": {
+                "name": "remember",
+                "description": "Keep a short fact for later conversations (the owner's preferences, where things are, decisions). Not for secrets.",
+                "parameters": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "read_skill",
+                "description": "Read one of the owner's skills (how-to notes listed in your instructions) by name.",
+                "parameters": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] },
+            }}));
+        }
+        tools
+    }
+
+    /// The tools every agent has.
+    fn base_definitions() -> Value {
         let function = |name: &str, description: &str, properties: Value, required: &[&str]| {
             json!({
                 "type": "function",
@@ -91,6 +125,8 @@ impl Tools {
             "read_file" => Call::ReadFile { path: self.resolve(&text("path")?) },
             "write_file" => Call::WriteFile { path: self.resolve(&text("path")?), content: text("content")? },
             "list_dir" => Call::ListDir { path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())) },
+            "remember" if self.home.is_some() => Call::Remember { text: text("text")? },
+            "read_skill" if self.home.is_some() => Call::ReadSkill { name: text("name")? },
             other => return Err(format!("there is no tool named {other:?}")),
         })
     }
@@ -105,6 +141,8 @@ impl Tools {
             Call::ReadFile { path } | Call::ListDir { path } => {
                 (!self.inside(path)).then(|| Action::Read(path.clone()))
             }
+            // Its own notes and the owner's skills, in its home: nothing to approve.
+            Call::Remember { .. } | Call::ReadSkill { .. } => None,
         }
     }
 
@@ -114,6 +152,14 @@ impl Tools {
             Call::ReadFile { path } => read(path).await,
             Call::WriteFile { path, content } => write(path, content).await,
             Call::ListDir { path } => list(path).await,
+            Call::Remember { text } => match &self.home {
+                Some(home) => crate::memory::Memory::new(home).add(text).map(|id| format!("remembered (#{id})")),
+                None => Err("no memory here".to_owned()),
+            },
+            Call::ReadSkill { name } => match &self.home {
+                Some(home) => crate::skills::read(home, name),
+                None => Err("no skills here".to_owned()),
+            },
         };
         cut(result.unwrap_or_else(|e| format!("error: {e}")))
     }

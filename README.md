@@ -213,6 +213,13 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   models; tool results carry your files and command output. With `[gateway] private = false` the
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
 - **Sessions:** one JSONL file per conversation in `~/.autobot/sessions`.
+- **Memory:** the agent keeps short facts with `remember` (your preferences, where things are,
+  decisions) in `~/.autobot/memory.jsonl`, and every later conversation starts with them, newest
+  first. `autobot memory` lists them; `autobot memory --forget 3` removes one.
+- **Skills:** how-to notes you give it, one Markdown file each in `~/.autobot/skills/` (a
+  `description:` line in front matter, or the first line, says what it is for). The agent sees
+  their names and descriptions, and reads one with `read_skill` when it fits the task.
+  `autobot skills` lists them.
 - **Scheduled tasks:** `autobot cron add "0 8 * * 1-5" "summarize the overnight logs" --telegram`
   (cron in local time, `@daily`, or `every 30m`); `autobot cron list` shows the next and last
   runs. They run inside `autobot serve` with nobody to ask, so they follow `allowlist` rules
