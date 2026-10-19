@@ -63,6 +63,8 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/schedules/{id}/runs", get(schedule_runs))
         .route("/v1/agent/schedules/{id}/run", post(run_schedule))
         .route("/v1/agent/actions", get(actions))
+        .route("/v1/agent/board", get(board))
+        .route("/v1/agent/board/{id}/answer", post(answer_board))
         .route("/v1/agent/memory", get(memory))
         .route("/v1/agent/memory/{id}", axum::routing::delete(forget))
         .route("/v1/agent/skills", get(skills))
@@ -294,6 +296,28 @@ struct ActionsQuery {
 async fn actions(State(state): State<Arc<ApiState>>, Query(q): Query<ActionsQuery>) -> Json<Value> {
     let log = crate::actions::ActionLog::new(&state.home);
     Json(json!({ "actions": log.read(q.since, q.limit.unwrap_or(100).clamp(1, 500)) }))
+}
+
+async fn board(State(state): State<Arc<ApiState>>) -> Response {
+    match crate::board::Board::load(&state.home) {
+        Ok(board) => Json(json!({ "tasks": board.tasks })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+async fn answer_board(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
+    let Some(text) = serde_json::from_slice::<Value>(&body).ok().and_then(|b| b["text"].as_str().map(str::to_owned))
+    else {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is {\"text\": \"…\"}");
+    };
+    let answered = crate::board::Board::load(&state.home).and_then(|mut board| {
+        board.answer(&id, &text)?;
+        board.save(&state.home)
+    });
+    match answered {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => error(StatusCode::NOT_FOUND, "not_found", &e),
+    }
 }
 
 async fn memory(State(state): State<Arc<ApiState>>) -> Json<Value> {

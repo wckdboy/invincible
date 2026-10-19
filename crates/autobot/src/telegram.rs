@@ -422,7 +422,7 @@ async fn handle(
         "/start" | "/help" => {
             bot.send(
                 chat_id,
-                "Autobot here, running on your own machine. Send a task, or ask for one later (\"remind me in 10 minutes to …\").\n\n/new: a new conversation\n/cron: scheduled tasks (/cron add <when> | <task>, /cron rm <id>)\n/actions: what I ran lately, and who allowed it\n/memory: what I remember (/memory forget <id>)\n/skills: your how-to notes",
+                "Autobot here, running on your own machine. Send a task, or ask for one later (\"remind me in 10 minutes to …\").\n\n/new: a new conversation\n/cron: scheduled tasks (/cron add <when> | <task>, /cron rm <id>)\n/board: the team's background work (/board answer <id> <text>)\n/actions: what I ran lately, and who allowed it\n/memory: what I remember (/memory forget <id>)\n/skills: your how-to notes",
             )
             .await?;
             return Ok(());
@@ -435,6 +435,10 @@ async fn handle(
         }
         "/cron" => {
             bot.send(chat_id, &cron_command(home, text.trim_start_matches("/cron").trim(), chat_id)).await?;
+            return Ok(());
+        }
+        "/board" => {
+            bot.send(chat_id, &board_command(home, text.trim_start_matches("/board").trim())).await?;
             return Ok(());
         }
         "/actions" => {
@@ -516,7 +520,12 @@ async fn handle(
     };
     let approver = ChatApprover { bot: bot.clone(), chat: chat_id, user: user.id, waiting: waiting.clone() };
     let Chat { session, grants } = &mut *chat;
-    let context = crate::tools::TurnContext { session: session.id.clone(), telegram_chat: Some(chat_id), agent: None };
+    let context = crate::tools::TurnContext {
+        session: session.id.clone(),
+        telegram_chat: Some(chat_id),
+        agent: None,
+        board_task: None,
+    };
     let result = crate::tools::TURN.scope(context, agent.turn(session, text, &approver, grants, &events)).await;
     typing.abort();
     drop(progress);
@@ -553,6 +562,24 @@ pub fn actions_command(home: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// `/board`, `/board answer <id> <text>`.
+pub fn board_command(home: &Path, args: &str) -> String {
+    if let Some(rest) = args.strip_prefix("answer") {
+        let Some((id, answer)) = rest.trim().split_once(' ') else {
+            return "/board answer <id> <your answer>, for example: /board answer b2 Markdown, please".to_owned();
+        };
+        let answered = crate::board::Board::load(home).and_then(|mut board| {
+            board.answer(id, answer)?;
+            board.save(home)
+        });
+        return match answered {
+            Ok(()) => format!("Thanks: {id} goes on with that."),
+            Err(e) => format!("✗ {e}"),
+        };
+    }
+    crate::board::Board::load(home).map_or_else(|e| format!("✗ {e}"), |b| cut_line(&b.listing()))
 }
 
 /// `/skills`, `/skills show <name>`, `/skills accept <name>`, `/skills reject <name>`.

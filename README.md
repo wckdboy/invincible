@@ -259,6 +259,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   whatever channel you use, they never get more than the agent may do, and their receipts are
   part of the turn's.
 
+  **The team board** is for work that outlives a conversation: the agent plans tasks for members
+  (`board_plan`), with what each depends on; `autobot serve` runs each as soon as its
+  dependencies are done (independent ones at the same time), handing a member the results it
+  builds on. A member that needs you asks (`ask_owner`): its task waits, the question comes to
+  the chat, and `/board answer b2 Markdown, please` sends it on. When the plan is done, the
+  results come to that chat. Board work runs unattended, so it follows the allowlist rules.
+  `/board` (Telegram) and `GET /v1/agent/board` show it.
+
   **In a Telegram group,** add the bot and talk to it with an @mention or a reply (only users you
   approved; the rest of the group is ignored, and only the person who asked can press an approval
   button). Give a member a bot of its own (`telegram_token_file = "coder.token"`, a token from

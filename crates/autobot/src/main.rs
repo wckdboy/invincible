@@ -550,7 +550,9 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         }
     };
     let schedules = autobot::cron::scheduler(agent.clone(), home.clone(), bot.as_ref().map(|(bot, _)| bot.clone()));
+    let board = autobot::board::dispatcher(agent.clone(), home.clone(), bot.clone());
     tokio::select! {
+        () = board => Ok(()),
         () = api => Ok(()),
         () = telegram => Ok(()),
         () = schedules => Ok(()),

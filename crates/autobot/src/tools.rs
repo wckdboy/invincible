@@ -51,6 +51,8 @@ pub struct TurnContext {
     pub telegram_chat: Option<i64>,
     /// The team member doing this turn; None for the main agent.
     pub agent: Option<String>,
+    /// The board task it works on, when it is one ([crate::board]).
+    pub board_task: Option<String>,
 }
 
 tokio::task_local! {

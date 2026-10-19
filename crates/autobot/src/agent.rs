@@ -73,6 +73,14 @@ impl Agent {
         {
             list.push(self.team.definition());
         }
+        if let Some(list) = definitions.as_array_mut() {
+            if self.leads_team() && self.tools.home().is_some() {
+                list.extend(crate::board::lead_tools(&self.team));
+            }
+            if crate::tools::TURN.try_with(|t| t.board_task.is_some()).unwrap_or(false) {
+                list.push(crate::board::ask_owner_tool());
+            }
+        }
         if !self.mcp.is_empty()
             && self.tools.offers("mcp")
             && let Some(list) = definitions.as_array_mut()
@@ -192,43 +200,19 @@ impl Agent {
             return ("error: `goal` is missing".to_owned(), Vec::new());
         };
         let context = args["context"].as_str().map(str::trim).filter(|c| !c.is_empty());
-        let Some(home) = self.tools.home() else {
-            return ("error: a team needs the agent's home for its conversations".to_owned(), Vec::new());
-        };
-        let mut member = self.clone();
-        member.tools = member.tools.clone().only(crate::tools::tools_for(&role.tools));
-        if let Some(model) = &role.model {
-            member.gateway = member.gateway.with_model(model);
-        }
-        // Its own conversation for this task: `<parent>--<member>-<stamp><n>`.
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() % 100_000)
             .unwrap_or_default();
+        // Its own conversation for this task: `<parent>--<member>-<stamp><n>`.
         let id: String = format!("{parent}--{}-{stamp}{n}", role.name).chars().take(64).collect();
-        let mut session = match Session::open(&home.join("sessions"), &id) {
-            Ok(session) => session,
-            Err(e) => return (format!("error: {e}"), Vec::new()),
-        };
         let mut task = format!("Goal: {goal}");
         if let Some(context) = context {
             task.push_str("\n\nContext:\n");
             task.push_str(context);
         }
-        // Its tool progress shows under its name.
-        let label = role.name.clone();
-        let tagged = |event: Event| match event {
-            Event::Tool(what) => events(Event::Tool(&format!("[{label}] {what}"))),
-            Event::Refused(why) => events(Event::Refused(&format!("[{label}] {why}"))),
-            other => events(other),
-        };
-        events(Event::Tool(&format!("[{label}] ← {}", goal.chars().take(160).collect::<String>())));
-        let outer = crate::tools::TURN.try_with(Clone::clone).ok().unwrap_or_default();
-        let context = crate::tools::TurnContext { session: id.clone(), agent: Some(role.name.clone()), ..outer };
-        // No grants from the lead: its "always" answers were for its own conversation.
-        let mut grants = HashSet::new();
-        let run = member.turn_inner(&mut session, &task, approver, &mut grants, &tagged);
-        match crate::tools::TURN.scope(context, run).await {
+        events(Event::Tool(&format!("[{}] ← {}", role.name, goal.chars().take(160).collect::<String>())));
+        match self.run_member(role, &id, &task, approver, events, None).await {
             Ok(outcome) => {
                 events(Event::Member { name: &role.name, text: &outcome.text });
                 (format!("{} answered:\n{}", role.name, outcome.text), outcome.receipts)
@@ -241,6 +225,43 @@ impl Agent {
         }
     }
 
+    /// [role] works [task] in conversation [session_id]: with its tools, model and instructions,
+    /// asking the owner through [approver], its progress tagged with its name, and no grants
+    /// from the lead. [board_task]: the board task it works on (it may then `ask_owner`).
+    pub async fn run_member(
+        &self,
+        role: &crate::team::Role,
+        session_id: &str,
+        task: &str,
+        approver: &dyn Approver,
+        events: &(dyn Fn(Event) + Send + Sync),
+        board_task: Option<String>,
+    ) -> Result<Outcome, String> {
+        let home = self.tools.home().ok_or("a team needs the agent's home for its conversations")?;
+        let mut member = self.clone();
+        member.tools = member.tools.clone().only(crate::tools::tools_for(&role.tools));
+        if let Some(model) = &role.model {
+            member.gateway = member.gateway.with_model(model);
+        }
+        let mut session = Session::open(&home.join("sessions"), session_id)?;
+        let label = role.name.clone();
+        let tagged = |event: Event| match event {
+            Event::Tool(what) => events(Event::Tool(&format!("[{label}] {what}"))),
+            Event::Refused(why) => events(Event::Refused(&format!("[{label}] {why}"))),
+            other => events(other),
+        };
+        let outer = crate::tools::TURN.try_with(Clone::clone).ok().unwrap_or_default();
+        let context = crate::tools::TurnContext {
+            session: session_id.to_owned(),
+            agent: Some(role.name.clone()),
+            board_task,
+            ..outer
+        };
+        let mut grants = HashSet::new();
+        let run = member.turn_inner(&mut session, task, approver, &mut grants, &tagged);
+        crate::tools::TURN.scope(context, run).await
+    }
+
     async fn call(
         &self,
         session: &str,
@@ -250,6 +271,39 @@ impl Agent {
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> String {
+        // The board: the lead plans and reads it; a member on a board task asks the owner.
+        if let Some(home) = self.tools.home() {
+            let board_task = crate::tools::TURN.try_with(|t| t.board_task.clone()).ok().flatten();
+            match name {
+                "board_plan" if self.leads_team() => {
+                    events(Event::Tool("board_plan"));
+                    return crate::board::plan_tool(home, &self.team, arguments);
+                }
+                "board_status" if self.leads_team() => {
+                    return crate::board::Board::load(home).map_or_else(|e| format!("error: {e}"), |b| b.listing());
+                }
+                "ask_owner" if board_task.is_some() => {
+                    let question = serde_json::from_str::<Value>(arguments)
+                        .ok()
+                        .and_then(|a| a["question"].as_str().map(str::to_owned));
+                    let Some(question) = question.filter(|q| !q.trim().is_empty()) else {
+                        return "error: `question` is missing".to_owned();
+                    };
+                    let id = board_task.unwrap_or_default();
+                    let blocked = crate::board::Board::load(home).and_then(|mut b| {
+                        b.block(&id, &question)?;
+                        b.save(home)
+                    });
+                    return match blocked {
+                        Ok(()) => {
+                            "asked the owner: stop here and answer that you are waiting for their answer".to_owned()
+                        }
+                        Err(e) => format!("error: {e}"),
+                    };
+                }
+                _ => {}
+            }
+        }
         // An MCP server's tool: `<server>__<tool>`, asked for like a command.
         if let Some((server, tool)) = name.split_once("__")
             && !self.mcp.is_empty()

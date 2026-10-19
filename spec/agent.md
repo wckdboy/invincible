@@ -34,6 +34,8 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `DELETE /v1/agent/schedules/{id}` | | `{"ok": true}`, or `404` |
 | `POST /v1/agent/schedules/{id}/run` | | `202 {"started": true}`: runs it now, in the background; `409` (`schedule_running`) if it is running |
 | `GET /v1/agent/schedules/{id}/runs?after=` | | `{"runs": [{"at", "finished", "ok", "result", "receipts", "trigger"}]}`: finished runs that started after `after` (Unix seconds), oldest first; the newest 100 are kept |
+| `GET /v1/agent/board` | | `{"tasks": [{"id", "plan", "agent", "goal", "context", "depends_on", "status", "result", "question", "answers", "receipts", "origin", "notify", "created", "updated"}]}`: the team board; `status` is `todo`, `running`, `blocked` (waiting for the owner's answer to `question`), `done` or `failed` |
+| `POST /v1/agent/board/{id}/answer` | `{"text": "…"}` | `{"ok": true}`: a blocked task runs again with the answer; `404` when it is not waiting |
 | `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by"}]}`: the action log ([audit.md](audit.md)), newest `limit` (default 100, at most 500), oldest first |
 | `GET /v1/agent/memory` | | `{"facts": [{"id", "at", "text"}]}`: what the agent remembered (`remember`) |
 | `DELETE /v1/agent/memory/{id}` | | `{"ok": true}`, or `404` |

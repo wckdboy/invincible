@@ -5,6 +5,7 @@ pub mod actions;
 pub mod agent;
 pub mod api;
 pub mod approval;
+pub mod board;
 pub mod config;
 pub mod cron;
 pub mod doctor;

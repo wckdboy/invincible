@@ -407,7 +407,8 @@ async fn the_agent_schedules_its_own_tasks_for_the_chat_that_asked() {
     agent.tools = agent.tools.with_home(dir.clone());
     let mut session = Session::open(&dir.join("sessions"), "telegram-42").unwrap();
     let owner = owner(Answer::Deny);
-    let context = autobot::tools::TurnContext { session: String::new(), telegram_chat: Some(42), agent: None };
+    let context =
+        autobot::tools::TurnContext { session: String::new(), telegram_chat: Some(42), agent: None, board_task: None };
     let before = chrono::Local::now();
     autobot::tools::TURN
         .scope(context, agent.turn(&mut session, "remind me in 2 minutes", &owner, &mut HashSet::new(), &quiet))
@@ -780,4 +781,111 @@ async fn mcp_results_errors_and_the_allowlist() {
     let call = |tool: &str| Action::Mcp { tool: tool.into(), arguments: "{}".into() };
     assert_eq!(check(&config, &call("calc/add")), Verdict::Run);
     assert!(matches!(check(&config, &call("calc/secret")), Verdict::Refuse(_)));
+}
+
+#[tokio::test]
+async fn a_plan_on_the_board_runs_in_order_asks_the_owner_and_finishes() {
+    let (url, script) = gateway(vec![
+        // The lead plans: find, then draft (which needs find's result).
+        call(
+            "board_plan",
+            json!({"tasks": [
+                {"key": "find", "agent": "researcher", "goal": "Find where backups go"},
+                {"key": "draft", "agent": "writer", "goal": "Draft a backup note", "depends_on": ["find"]}
+            ]}),
+        ),
+        say("Planned: the team is on it."),
+        // The researcher.
+        say("Backups go to /srv/backup."),
+        // The writer asks the owner first.
+        call("ask_owner", json!({"question": "Markdown or plain text?"})),
+        say("Waiting for the owner."),
+        // After the answer, it runs again.
+        say("Wrote the note in Markdown."),
+    ])
+    .await;
+    let dir = temp("board");
+    let mut lead = agent(&url, &dir, ApprovalMode::Ask, true);
+    lead.tools = lead.tools.with_home(dir.clone());
+    let role = |d: &str| autobot::team::RoleConfig {
+        description: d.into(),
+        instructions: None,
+        tools: vec![],
+        model: None,
+        telegram_token_file: None,
+    };
+    let roles = std::collections::BTreeMap::from([
+        ("researcher".to_owned(), role("finds")),
+        ("writer".to_owned(), role("writes")),
+    ]);
+    lead.team = Arc::new(autobot::team::Team::from_config(&roles, &Default::default()).unwrap());
+    let lead = Arc::new(lead);
+    let mut session = Session::open(&dir.join("sessions"), "owner").unwrap();
+    let outcome = lead
+        .turn(
+            &mut session,
+            "Write up our backups, in the background",
+            &owner(Answer::Deny),
+            &mut HashSet::new(),
+            &quiet,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.text, "Planned: the team is on it.");
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m["content"].as_str().is_some_and(|c| c.starts_with("planned p1: find = b1, draft = b2")))
+    );
+
+    tokio::spawn(autobot::board::dispatcher(lead.clone(), dir.clone(), None));
+    let wait = |status: autobot::board::Status, id: &'static str| {
+        let dir = dir.clone();
+        async move {
+            for _ in 0..200 {
+                if autobot::board::Board::load(&dir).unwrap().get(id).is_some_and(|t| t.status == status) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            panic!("{id} never became {status:?}: {}", autobot::board::Board::load(&dir).unwrap().listing());
+        }
+    };
+    wait(autobot::board::Status::Blocked, "b2").await;
+    let board = autobot::board::Board::load(&dir).unwrap();
+    assert_eq!(board.get("b1").unwrap().result.as_deref(), Some("Backups go to /srv/backup."));
+    assert_eq!(board.get("b2").unwrap().question.as_deref(), Some("Markdown or plain text?"));
+    // The writer was handed the researcher's result.
+    let writer_first = script
+        .lock()
+        .unwrap()
+        .seen
+        .iter()
+        .find(|(_, b)| b["messages"][0]["content"].as_str().unwrap().contains("You are writer"))
+        .unwrap()
+        .1
+        .clone();
+    assert!(
+        writer_first["messages"][1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Result of b1 (researcher: Find where backups go):\nBackups go to /srv/backup.")
+    );
+    assert!(writer_first["tools"].as_array().unwrap().iter().any(|t| t["function"]["name"] == "ask_owner"));
+
+    let mut board = board;
+    board.answer("b2", "Markdown").unwrap();
+    board.save(&dir).unwrap();
+    wait(autobot::board::Status::Done, "b2").await;
+    let board = autobot::board::Board::load(&dir).unwrap();
+    assert_eq!(board.get("b2").unwrap().result.as_deref(), Some("Wrote the note in Markdown."));
+    assert!(board.finished("p1"));
+    let again = script.lock().unwrap().seen.last().unwrap().1.clone();
+    assert!(
+        again["messages"][1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("You asked the owner: Markdown or plain text?\nThe owner answered: Markdown")
+    );
 }
