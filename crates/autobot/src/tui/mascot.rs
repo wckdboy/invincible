@@ -66,8 +66,8 @@ pub fn render(frame: &[&str], light: Color) -> Vec<String> {
             let top = rows[0].as_bytes();
             let bottom = rows.get(1).map_or(&[][..], |r| r.as_bytes());
             let mut line = String::new();
-            for x in 0..top.len() {
-                let (t, b) = (color(top[x], light), bottom.get(x).and_then(|c| color(*c, light)));
+            for (x, &pixel) in top.iter().enumerate() {
+                let (t, b) = (color(pixel, light), bottom.get(x).and_then(|c| color(*c, light)));
                 line.push_str(&match (t, b) {
                     (None, None) => " ".to_owned(),
                     (Some(t), None) => format!("{}▀\x1b[0m", fg(t)),
