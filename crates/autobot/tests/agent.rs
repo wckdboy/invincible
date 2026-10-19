@@ -100,6 +100,7 @@ fn agent(url: &str, dir: &std::path::Path, mode: ApprovalMode, private: bool) ->
         tools: Tools::new(dir.join("work"), Duration::from_secs(5)),
         approvals: ApprovalConfig { mode, allow: vec!["echo".into()] },
         max_steps: 6,
+        team: Default::default(),
     }
 }
 
@@ -401,7 +402,7 @@ async fn the_agent_schedules_its_own_tasks_for_the_chat_that_asked() {
     agent.tools = agent.tools.with_home(dir.clone());
     let mut session = Session::open(&dir.join("sessions"), "telegram-42").unwrap();
     let owner = owner(Answer::Deny);
-    let context = autobot::tools::TurnContext { session: String::new(), telegram_chat: Some(42) };
+    let context = autobot::tools::TurnContext { session: String::new(), telegram_chat: Some(42), agent: None };
     let before = chrono::Local::now();
     autobot::tools::TURN
         .scope(context, agent.turn(&mut session, "remind me in 2 minutes", &owner, &mut HashSet::new(), &quiet))
@@ -463,4 +464,189 @@ async fn a_long_conversation_is_summarized_not_forgotten() {
     assert!(!seen[1].1["messages"].to_string().contains("step 0:"), "the old part is not resent");
     assert_eq!(session.summary(), Some("The owner set up backups to /srv/backup and wants a weekly check."));
     assert!(Session::open(&dir.join("sessions"), "long").unwrap().compaction().is_none());
+}
+
+fn calls(list: &[(&str, Value)]) -> (u16, Value) {
+    let tool_calls: Vec<Value> = list
+        .iter()
+        .enumerate()
+        .map(|(i, (name, arguments))| {
+            json!({ "id": format!("c{i}"), "type": "function", "function": { "name": name, "arguments": arguments.to_string() } })
+        })
+        .collect();
+    (200, json!({ "choices": [{ "message": { "role": "assistant", "content": "", "tool_calls": tool_calls } }] }))
+}
+
+#[tokio::test]
+async fn the_lead_hands_work_to_its_team_in_parallel() {
+    let (url, script) = gateway(vec![
+        calls(&[
+            (
+                "delegate",
+                json!({"agent": "researcher", "goal": "Find where backups go", "context": "Look in notes.md"}),
+            ),
+            ("delegate", json!({"agent": "coder", "goal": "Print the date", "context": "Use the terminal"})),
+        ]),
+        // The two members, in whichever order they ask.
+        say("member done"),
+        say("member done"),
+        say("Backups go to /srv/backup; the date was printed."),
+    ])
+    .await;
+    let dir = temp("team");
+    let mut lead = agent(&url, &dir, ApprovalMode::Ask, true);
+    lead.tools = lead.tools.with_home(dir.clone());
+    let roles = std::collections::BTreeMap::from([
+        (
+            "researcher".to_owned(),
+            autobot::team::RoleConfig {
+                description: "Reads and reports".into(),
+                instructions: Some("Never change files.".into()),
+                tools: vec!["files-read".into()],
+                model: Some("qwen3-0.6b".into()),
+            },
+        ),
+        (
+            "coder".to_owned(),
+            autobot::team::RoleConfig {
+                description: "Runs commands".into(),
+                instructions: None,
+                tools: vec!["terminal".into()],
+                model: None,
+            },
+        ),
+    ]);
+    lead.team = std::sync::Arc::new(autobot::team::Team::from_config(&roles, &Default::default()).unwrap());
+    let progress = Mutex::new(Vec::<String>::new());
+    let events = |e: Event| {
+        if let Event::Tool(t) = e {
+            progress.lock().unwrap().push(t.to_owned());
+        }
+    };
+    let mut session = Session::open(&dir.join("sessions"), "lead").unwrap();
+    let outcome = lead
+        .turn(
+            &mut session,
+            "Where do backups go, and what time is it?",
+            &owner(Answer::Deny),
+            &mut HashSet::new(),
+            &events,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.text, "Backups go to /srv/backup; the date was printed.");
+    // The lead's own receipt plus each member's.
+    assert_eq!(outcome.receipts.len(), 4);
+
+    let seen = script.lock().unwrap().seen.clone();
+    let names = |body: &Value| -> Vec<String> {
+        body["tools"]
+            .as_array()
+            .map_or(Vec::new(), |t| t.iter().map(|t| t["function"]["name"].as_str().unwrap().to_owned()).collect())
+    };
+    // The lead has `delegate` and knows its team.
+    assert!(names(&seen[0].1).contains(&"delegate".to_owned()));
+    assert!(
+        seen[0].1["messages"][0]["content"].as_str().unwrap().contains("- researcher: Reads and reports (files-read)")
+    );
+    // Each member: its own instructions and tools, no `delegate`, only the goal and context.
+    let member = |who: &str| {
+        seen[1..3]
+            .iter()
+            .find(|(_, b)| b["messages"][0]["content"].as_str().unwrap().contains(&format!("You are {who}")))
+            .unwrap()
+            .1
+            .clone()
+    };
+    let researcher = member("researcher");
+    assert_eq!(names(&researcher), ["read_file", "list_dir", "read_skill"]);
+    assert_eq!(researcher["model"], "qwen3-0.6b");
+    assert!(researcher["messages"][0]["content"].as_str().unwrap().contains("Never change files."));
+    assert_eq!(researcher["messages"][1]["content"], "Goal: Find where backups go\n\nContext:\nLook in notes.md");
+    assert!(
+        !researcher["messages"].to_string().contains("what time is it"),
+        "the lead's conversation stays with the lead"
+    );
+    let coder = member("coder");
+    assert_eq!(names(&coder), ["terminal"]);
+    assert_eq!(coder["model"], "auto");
+    // Both answers went back to the lead, by name.
+    let back = seen[3].1["messages"].to_string();
+    assert!(back.contains("researcher answered") && back.contains("coder answered"), "{back}");
+    // Progress is tagged with who did what.
+    let progress = progress.lock().unwrap();
+    assert!(progress.iter().any(|p| p.starts_with("[researcher] ← Find where backups go")), "{progress:?}");
+    // Members have their own conversations, named after the lead's.
+    let sessions = autobot::session::list(&dir.join("sessions"));
+    assert!(sessions.iter().any(|(n, _)| n.starts_with("lead--researcher-")), "{sessions:?}");
+}
+
+#[tokio::test]
+async fn a_members_actions_ask_the_owner_and_it_cannot_delegate() {
+    let (url, _) = gateway(vec![
+        calls(&[("delegate", json!({"agent": "coder", "goal": "Run printf team-ok"}))]),
+        call("terminal", json!({"command": "printf team-ok"})),
+        call("delegate", json!({"agent": "coder", "goal": "again"})),
+        say("ran it"),
+        say("The coder ran it."),
+    ])
+    .await;
+    let dir = temp("team-approve");
+    let mut lead = agent(&url, &dir, ApprovalMode::Ask, true);
+    lead.tools = lead.tools.with_home(dir.clone());
+    let roles = std::collections::BTreeMap::from([(
+        "coder".to_owned(),
+        autobot::team::RoleConfig {
+            description: "Runs commands".into(),
+            instructions: None,
+            tools: vec!["terminal".into()],
+            model: None,
+        },
+    )]);
+    lead.team = std::sync::Arc::new(autobot::team::Team::from_config(&roles, &Default::default()).unwrap());
+    let owner = owner(Answer::Once);
+    let mut session = Session::open(&dir.join("sessions"), "lead").unwrap();
+    lead.turn(&mut session, "have the coder run it", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    // The owner was asked for the member's command, once, and it is logged as the member's.
+    assert_eq!(*owner.asked.lock().unwrap(), vec![Action::Command("printf team-ok".into())]);
+    let log = autobot::actions::ActionLog::new(&dir).read(0, 10);
+    assert!(log[0].session.starts_with("lead--coder-") && log[0].ran, "{log:?}");
+    // A member has no `delegate`: the call is refused, not run.
+    let member = autobot::session::list(&dir.join("sessions"))
+        .into_iter()
+        .find(|(n, _)| n.starts_with("lead--coder-"))
+        .unwrap()
+        .0;
+    let member = Session::open(&dir.join("sessions"), &member).unwrap();
+    assert!(
+        member.messages.iter().any(|m| m["content"]
+            .as_str()
+            .is_some_and(|c| c.contains("no tool named \"delegate\"") || c.contains("not allowed"))),
+        "{:?}",
+        member.messages
+    );
+}
+
+#[test]
+fn a_team_config_is_checked() {
+    let bad = |name: &str, tools: &[&str]| {
+        let roles = std::collections::BTreeMap::from([(
+            name.to_owned(),
+            autobot::team::RoleConfig {
+                description: "x".into(),
+                instructions: None,
+                tools: tools.iter().map(|t| (*t).to_owned()).collect(),
+                model: None,
+            },
+        )]);
+        autobot::team::Team::from_config(&roles, &Default::default()).is_err()
+    };
+    assert!(bad("has space", &[]));
+    assert!(bad("coder", &["web"]));
+    assert!(!bad("coder", &["files-read", "terminal"]));
+    let config: autobot::config::Config =
+        toml::from_str("[agents.r]\ndescription = \"reads\"\ntools = [\"files-read\"]\n[team]\nmax_parallel = 3\n")
+            .unwrap();
+    assert_eq!(config.team.max_parallel, 3);
+    assert_eq!(config.agents["r"].tools, ["files-read"]);
 }

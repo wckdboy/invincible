@@ -205,7 +205,7 @@ The same agent as on the phone, for a machine that is always on. It is written i
 provider, so the gateway's rules hold for every agent turn: routing, redaction, receipts.
 
 - **Tools:** `terminal` (a shell command in the working directory, with a timeout), `read_file`,
-  `write_file`, `list_dir`. Results are cut to a size small local models can take.
+  `write_file`, `edit_file` (replace an exact piece of a file), `list_dir`. Results are cut to a size small local models can take.
 - **Approvals** (`[approvals]` in `~/.autobot/config.toml`):
   - `ask` (default): commands, file writes and reads outside the working directory ask first:
     yes, always for this session, or no.
@@ -231,6 +231,29 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `description:` line in front matter, or the first line, says what it is for). The agent sees
   their names and descriptions, and reads one with `read_skill` when it fits the task.
   `autobot skills` lists them.
+- **A team of agents:** define members in `config.toml`, and the agent hands them work with its
+  `delegate` tool. Each member has its own instructions, only the tool groups you give it, and
+  optionally its own model; it starts every task fresh, with just the goal and context it was
+  handed (small models need small contexts, and nothing leaks between tasks). Several hand-offs
+  in one reply work at the same time (`[team] max_parallel`, what your model can serve). Their
+  progress shows under their names, their questions come to you as `[coder] Approve? …` on
+  whatever channel you use, they never get more than the agent may do, and their receipts are
+  part of the turn's.
+
+  ```toml
+  [agents.researcher]
+  description = "Reads files and logs, reports facts with paths"
+  instructions = "Never change anything."
+  tools = ["files-read"]
+
+  [agents.coder]
+  description = "Changes code and runs it"
+  tools = ["files-read", "files-write", "terminal"]
+  model = "qwen3.5-4b"
+
+  [team]
+  max_parallel = 2
+  ```
 - **The agent schedules its own work:** "remind me in 10 minutes to stretch" or "check the disk
   every morning" becomes a schedule through its `schedule_task` tool (also `list_schedules`,
   `cancel_schedule`), never the system crontab. One-off times (`in 10m`, `at 18:30`) run once and

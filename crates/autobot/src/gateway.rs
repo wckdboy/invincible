@@ -66,6 +66,11 @@ impl Gateway {
         &self.model
     }
 
+    /// The same gateway, asking for [model].
+    pub fn with_model(&self, model: &str) -> Self {
+        Self { model: model.to_owned(), ..self.clone() }
+    }
+
     /// One chat completion with [tools]; [confirmed] answers a [GatewayError::Confirm].
     pub async fn chat(&self, messages: &[Value], tools: &Value, confirmed: bool) -> Result<Reply, GatewayError> {
         let mut body = json!({ "model": self.model, "messages": messages, "stream": false });

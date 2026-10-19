@@ -55,6 +55,11 @@ pub enum Answer {
     Deny,
 }
 
+/// The team member asking, when it is not the main agent: `[coder] ` to put before a question.
+pub fn asker() -> String {
+    crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten().map(|a| format!("[{a}] ")).unwrap_or_default()
+}
+
 /// Whoever can say yes: the terminal, a Telegram chat, a paired app.
 pub trait Approver: Send + Sync {
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>>;

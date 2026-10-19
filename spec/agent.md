@@ -56,6 +56,9 @@ has a `type`:
 | `answer` | `text`, `receipts` | The turn's answer; the last event |
 | `error` | `text` | The turn failed; the last event |
 
+An `approval` from a team member also has `agent` (its name), and its `text` starts with
+`[<name>] `; `tool` and `refused` texts from a member start the same way.
+
 `action` says what is asked, so a client can show it properly:
 
 ```json

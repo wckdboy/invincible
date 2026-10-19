@@ -116,6 +116,7 @@ async fn pairing_then_a_task_with_an_approval_by_button() {
         tools: Tools::new(home.join("work"), Duration::from_secs(5)),
         approvals: ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() },
         max_steps: 5,
+        team: Default::default(),
     });
     let bot = Bot::new(reqwest::Client::new(), &api, "TOKEN").unwrap();
     tokio::spawn(serve(bot, agent, home.clone()));

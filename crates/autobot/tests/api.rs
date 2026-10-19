@@ -60,6 +60,7 @@ async fn stack(name: &str, answers: Vec<Value>, delay: Duration) -> (String, Str
         tools: Tools::new(dir.join("work"), Duration::from_secs(5)).with_home(dir.clone()),
         approvals: ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() },
         max_steps: 5,
+        team: Default::default(),
     });
     let info = json!({ "name": "Autobot", "approvals": "ask" });
     let agent_url = listen(app(Arc::new(ApiState::new(agent, TOKEN.into(), dir.clone(), info)))).await;

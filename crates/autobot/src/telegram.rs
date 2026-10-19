@@ -229,7 +229,7 @@ impl Approver for ChatApprover {
                 { "text": "Always (this chat)", "callback_data": format!("{id}:always") },
                 { "text": "Deny", "callback_data": format!("{id}:deny") },
             ]]});
-            let text = format!("Approve? {}", action.describe());
+            let text = format!("{}Approve? {}", crate::approval::asker(), action.describe());
             let body = json!({ "chat_id": self.chat, "text": cut_line(&text), "reply_markup": keyboard });
             if self.bot.call("sendMessage", body, Duration::from_secs(20)).await.is_err() {
                 self.waiting.lock().expect("waiting").remove(&id);
@@ -466,7 +466,7 @@ async fn handle(
     };
     let approver = ChatApprover { bot: bot.clone(), chat: chat_id, waiting: waiting.clone() };
     let Chat { session, grants } = &mut *chat;
-    let context = crate::tools::TurnContext { session: session.id.clone(), telegram_chat: Some(chat_id) };
+    let context = crate::tools::TurnContext { session: session.id.clone(), telegram_chat: Some(chat_id), agent: None };
     let result = crate::tools::TURN.scope(context, agent.turn(session, text, &approver, grants, &events)).await;
     typing.abort();
     drop(progress);

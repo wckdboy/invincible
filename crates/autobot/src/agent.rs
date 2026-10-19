@@ -17,6 +17,8 @@ pub struct Agent {
     pub tools: Tools,
     pub approvals: ApprovalConfig,
     pub max_steps: usize,
+    /// Members the agent can hand work to (empty: no `delegate` tool).
+    pub team: std::sync::Arc<crate::team::Team>,
 }
 
 /// What happens during a turn, for whoever is watching (a terminal, a chat).
@@ -47,8 +49,8 @@ impl Agent {
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> Result<Outcome, String> {
         // Tools that act later know which conversation (and Telegram chat) this turn is for.
-        let telegram_chat = crate::tools::TURN.try_with(|t| t.telegram_chat).ok().flatten();
-        let context = crate::tools::TurnContext { session: session.id.clone(), telegram_chat };
+        let outer = crate::tools::TURN.try_with(Clone::clone).ok().unwrap_or_default();
+        let context = crate::tools::TurnContext { session: session.id.clone(), ..outer };
         crate::tools::TURN.scope(context, self.turn_inner(session, text, approver, grants, events)).await
     }
 
@@ -61,7 +63,12 @@ impl Agent {
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> Result<Outcome, String> {
         session.push(json!({ "role": "user", "content": text }))?;
-        let definitions = self.tools.definitions();
+        let mut definitions = self.tools.definitions();
+        if self.leads_team()
+            && let Some(list) = definitions.as_array_mut()
+        {
+            list.push(self.team.definition());
+        }
         let mut receipts = Vec::new();
         let mut confirmed = false;
         let mut steps = 0;
@@ -116,10 +123,107 @@ impl Agent {
                 let text = message["content"].as_str().unwrap_or_default().trim().to_owned();
                 return Ok(Outcome { text: if text.is_empty() { "(no answer)".to_owned() } else { text }, receipts });
             }
-            for (id, name, arguments) in calls {
+            // Hand-offs to the team in one reply work at the same time (bounded); the rest in order.
+            let (delegated, own): (Vec<_>, Vec<_>) =
+                calls.into_iter().partition(|(_, name, _)| name == "delegate" && self.leads_team());
+            if !delegated.is_empty() {
+                let gate = tokio::sync::Semaphore::new(self.team.max_parallel.max(1));
+                let runs = delegated.iter().enumerate().map(|(n, (_, _, arguments))| {
+                    let gate = &gate;
+                    let parent = session.id.clone();
+                    async move {
+                        let _permit = gate.acquire().await.ok();
+                        self.delegate(&parent, n, arguments, approver, events).await
+                    }
+                });
+                let results = futures_util::future::join_all(runs).await;
+                for ((id, _, _), (text, child_receipts)) in delegated.iter().zip(results) {
+                    receipts.extend(child_receipts);
+                    session.push(json!({ "role": "tool", "tool_call_id": id, "content": text }))?;
+                }
+            }
+            for (id, name, arguments) in own {
                 let result = self.call(&session.id, &name, &arguments, approver, grants, events).await;
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
             }
+        }
+    }
+
+    /// Whether this agent hands work to a team: it has members, and it is not one itself.
+    fn leads_team(&self) -> bool {
+        !self.team.is_empty() && crate::tools::TURN.try_with(|t| t.agent.is_none()).unwrap_or(true)
+    }
+
+    /// One `delegate` call: the member works the task in a fresh conversation of its own, with
+    /// its tools and instructions, asking the owner through [approver]; its answer and receipts.
+    async fn delegate(
+        &self,
+        parent: &str,
+        n: usize,
+        arguments: &str,
+        approver: &dyn Approver,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> (String, Vec<String>) {
+        let args: Value = serde_json::from_str(arguments).unwrap_or_default();
+        let name = args["agent"].as_str().unwrap_or_default();
+        let Some(role) = self.team.get(name) else {
+            let names: Vec<&str> = self.team.roles.iter().map(|r| r.name.as_str()).collect();
+            return (format!("error: there is no team member {name:?} (members: {})", names.join(", ")), Vec::new());
+        };
+        let Some(goal) = args["goal"].as_str().map(str::trim).filter(|g| !g.is_empty()) else {
+            return ("error: `goal` is missing".to_owned(), Vec::new());
+        };
+        let context = args["context"].as_str().map(str::trim).filter(|c| !c.is_empty());
+        let Some(home) = self.tools.home() else {
+            return ("error: a team needs the agent's home for its conversations".to_owned(), Vec::new());
+        };
+        let mut member = self.clone();
+        member.tools = member.tools.clone().only(crate::tools::tools_for(&role.tools));
+        if let Some(model) = &role.model {
+            member.gateway = member.gateway.with_model(model);
+        }
+        // Its own conversation for this task: `<parent>--<member>-<stamp><n>`.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() % 100_000)
+            .unwrap_or_default();
+        let id: String = format!("{parent}--{}-{stamp}{n}", role.name).chars().take(64).collect();
+        let mut session = match Session::open(&home.join("sessions"), &id) {
+            Ok(session) => session,
+            Err(e) => return (format!("error: {e}"), Vec::new()),
+        };
+        let mut task = format!("Goal: {goal}");
+        if let Some(context) = context {
+            task.push_str(&format!(
+                "
+
+Context:
+{context}"
+            ));
+        }
+        // Its tool progress shows under its name.
+        let label = role.name.clone();
+        let tagged = |event: Event| match event {
+            Event::Tool(what) => events(Event::Tool(&format!("[{label}] {what}"))),
+            Event::Refused(why) => events(Event::Refused(&format!("[{label}] {why}"))),
+            other => events(other),
+        };
+        events(Event::Tool(&format!("[{label}] ← {}", goal.chars().take(160).collect::<String>())));
+        let outer = crate::tools::TURN.try_with(Clone::clone).ok().unwrap_or_default();
+        let context = crate::tools::TurnContext { session: id.clone(), agent: Some(role.name.clone()), ..outer };
+        // No grants from the lead: its "always" answers were for its own conversation.
+        let mut grants = HashSet::new();
+        let run = member.turn_inner(&mut session, &task, approver, &mut grants, &tagged);
+        match crate::tools::TURN.scope(context, run).await {
+            Ok(outcome) => (
+                format!(
+                    "{} answered:
+{}",
+                    role.name, outcome.text
+                ),
+                outcome.receipts,
+            ),
+            Err(e) => (format!("{} could not finish: {e}", role.name), Vec::new()),
         }
     }
 
@@ -250,6 +354,27 @@ impl Agent {
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
         );
+        // A member: who it is, before the rest; it reports back to the lead.
+        let member = crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten();
+        if let Some(role) = member.as_deref().and_then(|name| self.team.get(name)) {
+            let mut lead = format!(
+                "You are {}, a member of Autobot's team on the owner's machine: {}. The lead agent gave you \
+                 one task; do it with your tools, then answer the lead with your result: what you found or \
+                 did, with paths and facts, briefly. Do not ask questions; say what is missing instead.",
+                role.name, role.description
+            );
+            if let Some(instructions) = &role.instructions {
+                lead.push('\n');
+                lead.push_str(instructions);
+            }
+            prompt = format!("{lead}\n\n{prompt}");
+        } else if self.leads_team() {
+            prompt.push_str(
+                "\n\nYour team (hand them work with `delegate`; several delegate calls in one reply run at the \
+                 same time; each starts fresh, so give it the goal and all the context it needs):\n",
+            );
+            prompt.push_str(&self.team.prompt());
+        }
         if let Some(home) = self.tools.home() {
             if let Some(facts) = crate::memory::Memory::new(home).prompt() {
                 prompt

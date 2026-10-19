@@ -415,7 +415,11 @@ impl Approver for TerminalApprover {
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
         Box::pin(async move {
             loop {
-                eprint!("\x1b[1mApprove?\x1b[0m {}  [y]es / [a]lways this session / [N]o: ", action.describe());
+                eprint!(
+                    "{}\x1b[1mApprove?\x1b[0m {}  [y]es / [a]lways this session / [N]o: ",
+                    autobot::approval::asker(),
+                    action.describe()
+                );
                 std::io::stderr().flush().ok();
                 let Some(line) = self.lines.lock().await.recv().await else { return Answer::Deny };
                 match line.trim().to_ascii_lowercase().as_str() {

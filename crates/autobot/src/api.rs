@@ -376,12 +376,17 @@ impl Approver for ApiApprover {
             let id = invincible::token::hex(&bytes);
             let (tx, rx) = oneshot::channel();
             self.waiting.lock().expect("waiting").insert(id.clone(), tx);
-            let _ = self.events.send(json!({
+            let mut event = json!({
                 "type": "approval",
                 "id": id,
-                "text": action.describe(),
+                "text": format!("{}{}", crate::approval::asker(), action.describe()),
                 "action": describe(action),
-            }));
+            });
+            // A team member's question says whose it is.
+            if let Some(agent) = crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten() {
+                event["agent"] = json!(agent);
+            }
+            let _ = self.events.send(event);
             let answer = tokio::time::timeout(APPROVAL_WAIT, rx).await.ok().and_then(Result::ok);
             self.waiting.lock().expect("waiting").remove(&id);
             answer.unwrap_or(Answer::Deny)

@@ -37,6 +37,11 @@ pub struct Config {
     pub telegram: TelegramConfig,
     #[serde(default)]
     pub serve: ServeConfig,
+    /// Team members the main agent can hand work to ([crate::team]).
+    #[serde(default)]
+    pub agents: std::collections::BTreeMap<String, crate::team::RoleConfig>,
+    #[serde(default)]
+    pub team: crate::team::TeamConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
