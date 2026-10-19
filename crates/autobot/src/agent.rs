@@ -23,6 +23,14 @@ pub struct Agent {
     pub mcp: std::sync::Arc<crate::mcp::Hub>,
     /// Where finished turns are kept for fine-tuning ([crate::trajectory]); None: not kept.
     pub trajectories: Option<std::sync::Arc<crate::trajectory::Recorder>>,
+    pub options: Options,
+}
+
+/// How the agent works, beyond its tools and approvals.
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    /// KiB of recent conversation sent per call (default [crate::session::CHAR_BUDGET]).
+    pub context_kib: Option<usize>,
 }
 
 /// What happens during a turn, for whoever is watching (a terminal, a chat).
@@ -36,6 +44,14 @@ pub enum Event<'a> {
     Receipt { id: &'a str, model: Option<&'a str>, tier: Option<&'a str> },
     /// A team member finished the task it was handed: its answer to the lead.
     Member { name: &'a str, text: &'a str },
+    /// Part of the answer, as it streams in (when the gateway streams).
+    Text(&'a str),
+    /// Part of the model's reasoning, as it streams in.
+    Reasoning(&'a str),
+    /// What a write or an edit changes, as a unified diff: before it is approved.
+    Diff(&'a str),
+    /// What a tool handed back to the model.
+    Output { name: &'a str, text: &'a str },
 }
 
 pub struct Outcome {
@@ -113,6 +129,10 @@ impl Agent {
                     },
                 }));
             };
+        session.close_dangling()?;
+        if let Some(kib) = self.options.context_kib {
+            session.budget = kib.max(8) * 1024;
+        }
         session.push(json!({ "role": "user", "content": text }))?;
         let mut definitions = self.tools.definitions();
         if self.leads_team()
@@ -187,7 +207,11 @@ impl Agent {
             messages[0] = json!({ "role": "system", "content": system });
             messages.extend(session.window());
             sent.clone_from(&messages);
-            let reply = match self.gateway.chat(&messages, &definitions, confirmed).await {
+            let streamed = |delta: crate::gateway::Delta| match delta {
+                crate::gateway::Delta::Text(text) => events(Event::Text(text)),
+                crate::gateway::Delta::Reasoning(text) => events(Event::Reasoning(text)),
+            };
+            let reply = match self.gateway.chat_with(&messages, &definitions, confirmed, &streamed).await {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
                     let action = Action::Cloud(why);
@@ -241,7 +265,9 @@ impl Agent {
                 }
             }
             for (id, name, arguments) in own {
-                let result = self.call(&session.id, &name, &arguments, approver, grants, events).await;
+                let at = session.messages.len();
+                let result = self.call(&session.id, at, &name, &arguments, approver, grants, events).await;
+                events(Event::Output { name: &name, text: &result });
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
             }
         }
@@ -334,9 +360,11 @@ impl Agent {
         crate::tools::TURN.scope(context, run).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn call(
         &self,
         session: &str,
+        at: usize,
         name: &str,
         arguments: &str,
         approver: &dyn Approver,
@@ -396,6 +424,9 @@ impl Agent {
             Ok(call) => call,
             Err(e) => return format!("error: {e}"),
         };
+        if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
+            events(Event::Diff(&diff));
+        }
         if let Some(action) = self.tools.action(&call) {
             if !self.allowed(session, &action, approver, grants, events).await {
                 return format!("refused: the owner did not approve this ({})", action.describe());
@@ -414,6 +445,12 @@ impl Agent {
                 }
                 Err(e) => format!("error: {e}"),
             };
+        }
+        // What a change replaces, for `/undo`.
+        if let (Some(home), Some((path, before))) = (self.tools.home(), self.tools.before(&call))
+            && let Err(e) = Session::checkpoint(&home.join("sessions"), session, at, &path, before.as_deref())
+        {
+            tracing::warn!("no undo for {}: {e}", path.display());
         }
         self.tools.run(&call).await
     }
@@ -507,7 +544,7 @@ impl Agent {
         ran
     }
 
-    fn system_prompt(&self) -> String {
+    pub fn system_prompt(&self) -> String {
         let mut prompt = format!(
             "You are Autobot, an agent running on its owner's own machine ({os}). Your model is served by \
              Invincible Gateway on that machine.\n\
@@ -543,6 +580,19 @@ impl Agent {
                  same time; each starts fresh, so give it the goal and all the context it needs):\n",
             );
             prompt.push_str(&self.team.prompt());
+        }
+        if let Some(branch) = self.tools.git_branch() {
+            prompt.push_str(&format!(
+                "\n\nThe working directory is a git repository (branch {branch}). Work on it like a careful \
+                 senior engineer: find your way with `search` and `find_files`, read the code before you change \
+                 it, change it with `edit_file` (small, exact edits), keep to the project's style, then run its \
+                 build, linter and tests and fix what you broke. Never commit, push, or rewrite history unless \
+                 the owner asks. When done, say what you changed and how you checked it, briefly."
+            ));
+        }
+        if let Some(notes) = self.tools.project_notes() {
+            prompt.push_str("\n\nThe project's instructions for agents (follow them):\n");
+            prompt.push_str(&notes);
         }
         if let Some(home) = self.tools.home() {
             if let Some(facts) = crate::memory::Memory::new(home).prompt() {

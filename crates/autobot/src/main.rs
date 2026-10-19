@@ -1,20 +1,15 @@
 //! The `autobot` command.
 
 use std::collections::HashSet;
-use std::future::Future;
-use std::io::Write;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use autobot::agent::Event;
-use autobot::approval::{Action, Answer, Approver, Refuse};
 use autobot::config::{self, Config};
 use autobot::session::Session;
 use autobot::{doctor, service, setup, telegram};
 use clap::{Parser, Subcommand};
-use tokio::sync::{Mutex, mpsc};
 
 #[derive(Parser)]
 #[command(version, about = "The Autobot Agent, on Invincible Gateway. With no command: chat.")]
@@ -35,12 +30,51 @@ enum Command {
         /// Start the conversation over.
         #[arg(long)]
         new: bool,
+        /// The model to use (an id the gateway serves; a cloud model allows cloud use).
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Code in a project: the agent works in DIR (default: here), with the project's AGENTS.md or
+    /// CLAUDE.md, search tools, diffs of every change and /undo. One conversation per project.
+    Code {
+        /// The project [default: the current directory].
+        dir: Option<PathBuf>,
+        /// The model to use (an id the gateway serves; a cloud model allows cloud use).
+        #[arg(long)]
+        model: Option<String>,
+        /// ask, edits (changes in the project run without asking), allowlist or trust.
+        #[arg(long)]
+        approvals: Option<String>,
+        /// The conversation [default: one per project].
+        #[arg(long)]
+        session: Option<String>,
+        /// Start the conversation over.
+        #[arg(long)]
+        new: bool,
     },
     /// Do one task and print the answer. Anything that needs approval is refused unless allowlisted.
     Run {
         task: String,
         #[arg(long, default_value = "run")]
         session: String,
+        /// Work in this directory (a project: its AGENTS.md, search tools, undo).
+        #[arg(long, short = 'C')]
+        dir: Option<PathBuf>,
+        /// The model to use (an id the gateway serves; a cloud model allows cloud use).
+        #[arg(long)]
+        model: Option<String>,
+        /// ask (nothing is asked here, so: refused), edits (changes in the directory run),
+        /// allowlist or trust. Allowlisted commands run in every mode.
+        #[arg(long)]
+        approvals: Option<String>,
+        /// Print every event as a JSON line (text deltas, tool calls, outputs, diffs, receipts)
+        /// and the answer last, for programs that drive the agent.
+        #[arg(long)]
+        json: bool,
+        /// Say yes, for this run, when the gateway asks before using a cloud model (nobody is
+        /// there to ask). Nothing else is approved by it.
+        #[arg(long)]
+        cloud: bool,
     },
     /// Serve the agent API (for paired apps, through the gateway) and Telegram if enabled.
     Serve,
@@ -193,15 +227,90 @@ fn run(cli: Cli) -> Result<(), String> {
     let home = config::home()?;
     let config_path = home.join("config.toml");
     let config = Config::load(&config_path)?;
-    match cli.command.unwrap_or(Command::Chat { session: "cli".into(), new: false }) {
+    match cli.command.unwrap_or(Command::Chat { session: "cli".into(), new: false, model: None }) {
         Command::Setup => setup::run(&mut setup::Prompt::new(std::io::stdin().lock()), &home),
-        Command::Chat { session, new } => runtime()?.block_on(chat(&config, home, &session, new)),
-        Command::Run { task, session } => runtime()?.block_on(async {
+        Command::Chat { session, new, model } => runtime()?.block_on(async {
             let agent = autobot::agent(&config, &home)?;
+            let options = autobot::tui::chat::Options { session, new, model, code: false };
+            autobot::tui::chat::run(&config, home, agent, options).await
+        }),
+        Command::Code { dir, model, approvals, session, new } => {
+            let dir = match dir {
+                Some(dir) => dir,
+                None => std::env::current_dir().map_err(|e| format!("the current directory: {e}"))?,
+            };
+            let dir = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
+            if !dir.is_dir() {
+                return Err(format!("{} is not a directory", dir.display()));
+            }
+            let mut config = config;
+            if let Some(mode) = approvals {
+                config.approvals.mode = approval_mode(&mode)?;
+            }
+            let session = session.unwrap_or_else(|| project_session(&dir));
+            runtime()?.block_on(async {
+                let agent = autobot::agent_in(&config, &home, Some(dir))?;
+                let options = autobot::tui::chat::Options { session, new, model, code: true };
+                autobot::tui::chat::run(&config, home, agent, options).await
+            })
+        }
+        Command::Run { task, session, dir, model, approvals, json, cloud } => runtime()?.block_on(async {
+            let mut config = config;
+            if let Some(mode) = approvals {
+                config.approvals.mode = approval_mode(&mode)?;
+            }
+            let dir = dir.map(|d| d.canonicalize().map_err(|e| format!("{}: {e}", d.display()))).transpose()?;
+            let mut agent = autobot::agent_in(&config, &home, dir)?;
+            if let Some(model) = &model {
+                let models = agent.gateway.model_info().await.unwrap_or_default();
+                autobot::use_model(&mut agent, &config, &models, model)?;
+            }
             let mut session = Session::open(&home.join("sessions"), &session)?;
-            let outcome = agent.turn(&mut session, &task, &Refuse, &mut HashSet::new(), &print_event).await?;
-            println!("{}", outcome.text);
-            Ok(())
+            let streamed = std::sync::atomic::AtomicBool::new(false);
+            // Streamed text that has not ended its line yet.
+            let open = std::sync::atomic::AtomicBool::new(false);
+            let events = |event: Event| {
+                if json {
+                    println!("{}", event_json(&event));
+                    return;
+                }
+                use std::sync::atomic::Ordering::Relaxed;
+                if let Event::Text(text) = event {
+                    streamed.store(true, Relaxed);
+                    open.store(!text.ends_with('\n'), Relaxed);
+                    print!("{text}");
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                } else {
+                    if open.swap(false, Relaxed) && !matches!(event, Event::Reasoning(_)) {
+                        println!();
+                    }
+                    print_event(event);
+                }
+            };
+            let approver = Unattended { cloud };
+            let outcome = agent.turn(&mut session, &task, &approver, &mut HashSet::new(), &events).await;
+            match outcome {
+                Ok(outcome) if json => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts })
+                    );
+                    Ok(())
+                }
+                Ok(outcome) => {
+                    if streamed.load(std::sync::atomic::Ordering::Relaxed) {
+                        println!();
+                    } else {
+                        println!("{}", outcome.text);
+                    }
+                    Ok(())
+                }
+                Err(e) if json => {
+                    println!("{}", serde_json::json!({ "type": "error", "text": e }));
+                    Err(e)
+                }
+                Err(e) => Err(e),
+            }
         }),
         Command::Serve => {
             tracing_subscriber::fmt().with_target(false).init();
@@ -535,6 +644,70 @@ fn human(secs: u64) -> String {
     }
 }
 
+/// The conversation for the project in [dir]: `code-<name>-<hash of the path>`.
+fn project_session(dir: &std::path::Path) -> String {
+    let name: String = dir
+        .file_name()
+        .map(|n| {
+            n.to_string_lossy()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .take(32)
+                .collect()
+        })
+        .unwrap_or_default();
+    // FNV-1a: stable across runs and versions (std's hasher is not).
+    let mut hash: u32 = 0x811c9dc5;
+    for b in dir.as_os_str().as_encoded_bytes() {
+        hash = (hash ^ u32::from(*b)).wrapping_mul(0x01000193);
+    }
+    format!("code-{}-{:06x}", if name.is_empty() { "root" } else { &name }, hash & 0xffffff)
+}
+
+/// Nobody to ask: no, except to a cloud model when the run said so (`--cloud`).
+struct Unattended {
+    cloud: bool,
+}
+
+impl autobot::approval::Approver for Unattended {
+    fn approve<'a>(
+        &'a self,
+        action: &'a autobot::approval::Action,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = autobot::approval::Answer> + Send + 'a>> {
+        let yes = self.cloud && matches!(action, autobot::approval::Action::Cloud(_));
+        Box::pin(async move { if yes { autobot::approval::Answer::Once } else { autobot::approval::Answer::Deny } })
+    }
+
+    fn channel(&self) -> &'static str {
+        "unattended"
+    }
+}
+
+fn approval_mode(mode: &str) -> Result<config::ApprovalMode, String> {
+    Ok(match mode {
+        "ask" => config::ApprovalMode::Ask,
+        "edits" => config::ApprovalMode::Edits,
+        "allowlist" => config::ApprovalMode::Allowlist,
+        "trust" => config::ApprovalMode::Trust,
+        other => return Err(format!("--approvals {other:?}: ask, edits, allowlist or trust")),
+    })
+}
+
+/// [event] as a JSON line (`autobot run --json`).
+fn event_json(event: &Event) -> serde_json::Value {
+    use serde_json::json;
+    match event {
+        Event::Tool(text) => json!({ "type": "tool", "text": text }),
+        Event::Refused(text) => json!({ "type": "refused", "text": text }),
+        Event::Receipt { id, model, tier } => json!({ "type": "receipt", "id": id, "model": model, "tier": tier }),
+        Event::Member { name, text } => json!({ "type": "member", "agent": name, "text": text }),
+        Event::Text(text) => json!({ "type": "text", "text": text }),
+        Event::Reasoning(text) => json!({ "type": "reasoning", "text": text }),
+        Event::Diff(diff) => json!({ "type": "diff", "diff": diff }),
+        Event::Output { name, text } => json!({ "type": "output", "tool": name, "text": text }),
+    }
+}
+
 fn print_event(event: Event) {
     match event {
         Event::Tool(what) => eprintln!("\x1b[2m› {what}\x1b[0m"),
@@ -548,92 +721,8 @@ fn print_event(event: Event) {
             )
         }
         Event::Member { name, text } => eprintln!("\x1b[2m[{name}] → {}\x1b[0m", text.replace('\n', " ")),
-    }
-}
-
-/// Terminal lines, read on their own thread so the prompt and approvals share one stdin.
-type Lines = Arc<Mutex<mpsc::UnboundedReceiver<String>>>;
-
-fn stdin_lines() -> Lines {
-    let (tx, rx) = mpsc::unbounded_channel();
-    std::thread::spawn(move || {
-        for line in std::io::stdin().lines() {
-            let Ok(line) = line else { break };
-            if tx.send(line).is_err() {
-                break;
-            }
-        }
-    });
-    Arc::new(Mutex::new(rx))
-}
-
-struct TerminalApprover {
-    lines: Lines,
-}
-
-impl Approver for TerminalApprover {
-    fn channel(&self) -> &'static str {
-        "cli"
-    }
-
-    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
-        Box::pin(async move {
-            loop {
-                eprint!(
-                    "{}\x1b[1mApprove?\x1b[0m {}  [y]es / [a]lways this session / [N]o: ",
-                    autobot::approval::asker(),
-                    action.describe()
-                );
-                std::io::stderr().flush().ok();
-                let Some(line) = self.lines.lock().await.recv().await else { return Answer::Deny };
-                match line.trim().to_ascii_lowercase().as_str() {
-                    "y" | "yes" => return Answer::Once,
-                    "a" | "always" => return Answer::Always,
-                    "" | "n" | "no" => return Answer::Deny,
-                    _ => {}
-                }
-            }
-        })
-    }
-}
-
-async fn chat(config: &Config, home: PathBuf, name: &str, new: bool) -> Result<(), String> {
-    let agent = autobot::agent(config, &home)?;
-    let mut session = Session::open(&home.join("sessions"), name)?;
-    if new {
-        session.reset()?;
-    }
-    let lines = stdin_lines();
-    let approver = TerminalApprover { lines: lines.clone() };
-    let mut grants = HashSet::new();
-    eprintln!(
-        "Autobot · {} via Invincible Gateway · tools in {} · /new, /exit",
-        agent.gateway.model(),
-        agent.tools.workdir().display()
-    );
-    if !session.messages.is_empty() {
-        eprintln!("(continuing \"{}\", {} messages; /new to start over)", session.id, session.messages.len());
-    }
-    loop {
-        eprint!("\n\x1b[1m›\x1b[0m ");
-        std::io::stderr().flush().ok();
-        let Some(line) = lines.lock().await.recv().await else { return Ok(()) };
-        let text = line.trim();
-        match text {
-            "" => continue,
-            "/exit" | "/quit" => return Ok(()),
-            "/new" => {
-                session.reset()?;
-                grants.clear();
-                eprintln!("new conversation");
-                continue;
-            }
-            _ => {}
-        }
-        match agent.turn(&mut session, text, &approver, &mut grants, &print_event).await {
-            Ok(outcome) => println!("\n{}", outcome.text),
-            Err(e) => eprintln!("✗ {e}"),
-        }
+        Event::Diff(diff) => eprint!("{}", autobot::tui::ui::render_diff(diff, 80)),
+        Event::Text(_) | Event::Reasoning(_) | Event::Output { .. } => {}
     }
 }
 

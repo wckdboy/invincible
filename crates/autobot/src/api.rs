@@ -258,6 +258,8 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
             let tx = tx.clone();
             move |event: Event| {
                 let _ = tx.send(match event {
+                    // The app shows the answer when it is done, and tool lines.
+                    Event::Text(_) | Event::Reasoning(_) | Event::Diff(_) | Event::Output { .. } => return,
                     Event::Tool(text) => json!({ "type": "tool", "text": text }),
                     Event::Refused(text) => json!({ "type": "refused", "text": text }),
                     Event::Receipt { id, model, tier } => {

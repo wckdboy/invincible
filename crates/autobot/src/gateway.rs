@@ -14,6 +14,15 @@ pub struct Gateway {
     token: String,
     model: String,
     private: bool,
+    /// Ask for the answer as a stream (server-sent events) and hand on its parts as they come.
+    stream: bool,
+}
+
+/// Part of an answer as it streams in.
+#[derive(Debug)]
+pub enum Delta<'a> {
+    Text(&'a str),
+    Reasoning(&'a str),
 }
 
 /// One answer: the assistant message, and what the gateway says about it.
@@ -24,6 +33,29 @@ pub struct Reply {
     pub request_id: Option<String>,
     /// The routing decision (spec/routing.md).
     pub decision: Option<Value>,
+}
+
+/// A model the gateway serves.
+#[derive(Clone, Debug)]
+pub struct ModelInfo {
+    pub id: String,
+    /// `node` (this machine), `cloud`, …
+    pub tier: String,
+    /// Its context, in tokens.
+    pub context: Option<u64>,
+    pub healthy: bool,
+}
+
+impl ModelInfo {
+    /// KiB of conversation to send it per call: about half its context (at ~4 characters a
+    /// token, leaving room for the tools, the system prompt and the answer); at least 48.
+    pub fn context_kib(&self) -> usize {
+        self.context.map_or(48, |tokens| ((tokens as usize * 2) / 1024).max(48))
+    }
+
+    pub fn is_cloud(&self) -> bool {
+        self.tier != "node"
+    }
 }
 
 /// Why a call did not produce an answer.
@@ -59,6 +91,7 @@ impl Gateway {
             token: token.to_owned(),
             model: model.to_owned(),
             private,
+            stream: false,
         })
     }
 
@@ -71,6 +104,15 @@ impl Gateway {
         Self { private, ..self.clone() }
     }
 
+    pub fn private(&self) -> bool {
+        self.private
+    }
+
+    /// The same gateway, streaming answers or not.
+    pub fn with_stream(&self, stream: bool) -> Self {
+        Self { stream, ..self.clone() }
+    }
+
     /// The same gateway, asking for [model].
     pub fn with_model(&self, model: &str) -> Self {
         Self { model: model.to_owned(), ..self.clone() }
@@ -78,7 +120,18 @@ impl Gateway {
 
     /// One chat completion with [tools]; [confirmed] answers a [GatewayError::Confirm].
     pub async fn chat(&self, messages: &[Value], tools: &Value, confirmed: bool) -> Result<Reply, GatewayError> {
-        let mut body = json!({ "model": self.model, "messages": messages, "stream": false });
+        self.chat_with(messages, tools, confirmed, &|_| {}).await
+    }
+
+    /// [Gateway::chat], handing [on] the answer's parts as they stream in (when streaming).
+    pub async fn chat_with(
+        &self,
+        messages: &[Value],
+        tools: &Value,
+        confirmed: bool,
+        on: &(dyn Fn(Delta) + Send + Sync),
+    ) -> Result<Reply, GatewayError> {
+        let mut body = json!({ "model": self.model, "messages": messages, "stream": self.stream });
         if tools.as_array().is_some_and(|t| !t.is_empty()) {
             body["tools"] = tools.clone();
         }
@@ -96,6 +149,15 @@ impl Gateway {
         let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
         let request_id = header(invincible::receipts::REQUEST_ID_HEADER);
         let decision = header(invincible::server::DECISION_HEADER).and_then(|d| serde_json::from_str(&d).ok());
+        let streamed = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|t| t.starts_with("text/event-stream"));
+        if status.is_success() && streamed {
+            let message = read_stream(response, on).await.map_err(GatewayError::Failed)?;
+            return Ok(Reply { message, request_id, decision });
+        }
         let text = response.text().await.map_err(|e| GatewayError::Failed(format!("the gateway's answer: {e}")))?;
         let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         if !status.is_success() {
@@ -151,6 +213,24 @@ impl Gateway {
         Ok(reply["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_owned)).collect())
     }
 
+    /// The models the gateway serves, with where they run and their context size.
+    pub async fn model_info(&self) -> Result<Vec<ModelInfo>, String> {
+        let reply = self.get("/models").await?;
+        Ok(reply["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| {
+                Some(ModelInfo {
+                    id: m["id"].as_str()?.to_owned(),
+                    tier: m["invincible"]["tier"].as_str().unwrap_or("node").to_owned(),
+                    context: m["invincible"]["context"].as_u64(),
+                    healthy: m["invincible"]["healthy"].as_bool().unwrap_or(true),
+                })
+            })
+            .collect())
+    }
+
     /// The gateway's name and receipt key.
     pub async fn node(&self) -> Result<Value, String> {
         self.get("/node").await
@@ -178,5 +258,131 @@ impl Gateway {
         } else {
             format!("the gateway: {e}")
         }
+    }
+}
+
+/// An answer streamed as server-sent events (OpenAI's chunk shape), put back together as one
+/// message: its text, reasoning and tool calls (whose names and arguments come in pieces, by
+/// index).
+async fn read_stream(response: reqwest::Response, on: &(dyn Fn(Delta) + Send + Sync)) -> Result<Value, String> {
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut pending: Vec<u8> = Vec::new();
+    let mut assembled = Assembled::default();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("the gateway's answer stopped: {e}"))?;
+        pending.extend_from_slice(&chunk);
+        while let Some(end) = pending.iter().position(|b| *b == b'\n') {
+            let line: Vec<u8> = pending.drain(..=end).collect();
+            let line = String::from_utf8_lossy(&line);
+            if assembled.line(line.trim(), on)? {
+                return Ok(assembled.message());
+            }
+        }
+    }
+    let rest = String::from_utf8_lossy(&pending).into_owned();
+    assembled.line(rest.trim(), on)?;
+    Ok(assembled.message())
+}
+
+#[derive(Default)]
+struct Assembled {
+    text: String,
+    reasoning: String,
+    calls: Vec<(String, String, String)>,
+}
+
+impl Assembled {
+    /// Takes in one line of the stream; true at its end.
+    fn line(&mut self, line: &str, on: &(dyn Fn(Delta) + Send + Sync)) -> Result<bool, String> {
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else { return Ok(false) };
+        if data == "[DONE]" {
+            return Ok(true);
+        }
+        let Ok(chunk) = serde_json::from_str::<Value>(data) else { return Ok(false) };
+        if let Some(error) = chunk.get("error") {
+            return Err(format!("the model failed: {}", error["message"].as_str().unwrap_or("error")));
+        }
+        let delta = &chunk["choices"][0]["delta"];
+        if let Some(text) = delta["content"].as_str().filter(|t| !t.is_empty()) {
+            self.text.push_str(text);
+            on(Delta::Text(text));
+        }
+        if let Some(text) = delta["reasoning_content"].as_str().filter(|t| !t.is_empty()) {
+            self.reasoning.push_str(text);
+            on(Delta::Reasoning(text));
+        }
+        for call in delta["tool_calls"].as_array().into_iter().flatten() {
+            let index = call["index"].as_u64().unwrap_or(self.calls.len().saturating_sub(1) as u64) as usize;
+            while self.calls.len() <= index {
+                self.calls.push(Default::default());
+            }
+            let slot = &mut self.calls[index];
+            if let Some(id) = call["id"].as_str() {
+                slot.0.push_str(id);
+            }
+            if let Some(name) = call["function"]["name"].as_str() {
+                slot.1.push_str(name);
+            }
+            if let Some(arguments) = call["function"]["arguments"].as_str() {
+                slot.2.push_str(arguments);
+            }
+        }
+        Ok(false)
+    }
+
+    fn message(self) -> Value {
+        let mut message = json!({ "role": "assistant", "content": self.text });
+        if !self.reasoning.is_empty() {
+            message["reasoning_content"] = self.reasoning.into();
+        }
+        let calls: Vec<Value> = self
+            .calls
+            .into_iter()
+            .filter(|(_, name, _)| !name.is_empty())
+            .map(|(id, name, arguments)| {
+                json!({ "id": id, "type": "function", "function": { "name": name, "arguments": arguments } })
+            })
+            .collect();
+        if !calls.is_empty() {
+            message["tool_calls"] = calls.into();
+        }
+        message
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Assembled, Delta};
+
+    #[test]
+    fn a_stream_is_put_back_together() {
+        let seen = std::sync::Mutex::new(String::new());
+        let on = |d: Delta| {
+            if let Delta::Text(t) = d {
+                seen.lock().unwrap().push_str(t);
+            }
+        };
+        let mut a = Assembled::default();
+        for line in [
+            r#"data: {"choices":[{"delta":{"role":"assistant","content":"Hel"}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"lo"}}]}"#,
+            r#"data: {"choices":[{"delta":{"reasoning_content":"hm"}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_","arguments":"{\"pa"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"file","arguments":"th\":\"a\"}"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c2","function":{"name":"list_dir","arguments":"{}"}}]}}]}"#,
+            ": keep-alive",
+        ] {
+            assert!(!a.line(line, &on).unwrap());
+        }
+        assert!(a.line("data: [DONE]", &on).unwrap());
+        assert_eq!(*seen.lock().unwrap(), "Hello");
+        let m = a.message();
+        assert_eq!(m["content"], "Hello");
+        assert_eq!(m["reasoning_content"], "hm");
+        assert_eq!(m["tool_calls"][0]["function"]["name"], "read_file");
+        assert_eq!(m["tool_calls"][0]["function"]["arguments"], r#"{"path":"a"}"#);
+        assert_eq!(m["tool_calls"][1]["id"], "c2");
+        assert!(Assembled::default().line(r#"data: {"error":{"message":"boom"}}"#, &on).is_err());
     }
 }

@@ -178,6 +178,7 @@ Then:
 
 ```sh
 autobot              # chat in the terminal
+autobot code         # code in this directory (see "Code with Autobot")
 autobot run "task"   # one task, no questions: anything not allowlisted is refused
 autobot doctor       # check the gateway, the model, the tools, Telegram and the services
 autobot cron add "@daily" "check disk space and warn me if a disk is over 90% full" --telegram
@@ -197,6 +198,41 @@ ssh-keygen -Y verify -f allowed_signers -I invincible-release -n invincible-rele
 shasum -a 256 -c SHA256SUMS
 ```
 
+## Code with Autobot
+
+`autobot code` works on the project in the current directory, next to Claude Code or opencode,
+with its model behind your own gateway: every call receipted and in the audit log, cloud use
+confirmed once per session, private work on local models.
+
+```sh
+cd ~/src/my-project
+autobot code --model deepseek --approvals edits
+```
+
+- **The terminal:** answers stream in as Markdown (headings, lists, code blocks); each tool call is a line
+  (`⏺ Read src/main.rs`, `⏺ Run cargo test`) with what it gave back (`⎿ 3 matches in 2 files`,
+  the last lines of a command and its exit code); every change shows as a colored diff before
+  it is made; the agent's task list (`todo`) shows as checkboxes; a spinner shows what it is
+  thinking. Approvals take one key: `y`, `a` (always, this session), `n`. ctrl+c stops a turn;
+  the conversation stays usable.
+- **The project:** its `AGENTS.md`, `CLAUDE.md` or `.autobot/AGENTS.md` become part of the
+  agent's instructions; in a git repository it works like a careful engineer (find, read, change
+  in small edits, run the build and tests, never commit unless asked). `search` (regular
+  expressions over the files, `.gitignore` respected) and `find_files` (globs) find code without a
+  shell command to approve; `read_file` reads long files in parts.
+- **Control:** `edits` approvals let changes in the project run without asking (commands still
+  ask); `/undo` puts back every file the last turn changed and hands its request back to edit.
+  `@path` attaches a file (tab completes), `!command` runs one yourself and hands its output to
+  the next message, alt+enter starts a new line.
+- **Commands:** `/model` (list, or switch: a cloud model lets turns leave the machine, and the
+  conversation sent per call grows with its context), `/approvals`, `/private`, `/tools`,
+  `/context`, `/diff`, `/undo`, `/status`, `/new`, `/fork`, `/sessions`, `/resume`, `/memory`,
+  `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
+- **From other tools:** `autobot run -C DIR --model M --approvals edits --cloud "task"` does one
+  task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
+  prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
+  last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
+
 ## The Autobot Agent
 
 The same agent as on the phone, for a machine that is always on. It is written in Rust
@@ -207,7 +243,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `write_file`, `edit_file` (replace an exact piece of a file), `list_dir`, `web_fetch` (a page as
   text, through the gateway: under the node's network mode, so offline means no fetch and Tor
   carries it; HTTPS only; receipted and in the audit log; it asks first, and unattended runs may
-  fetch only sites in the allowlist, written `https://docs.rs`). Results are cut to a size small local models can take.
+  fetch only sites in the allowlist, written `https://docs.rs`), `search` and `find_files`
+  (ripgrep's walker: `.gitignore` respected), `todo` (its task list for a longer job). Results
+  are cut to a size small local models can take, larger for models with large contexts
+  (`[agent] context_kib`, or set by `/model`). Answers stream (`[agent] stream`).
 - **MCP servers:** any [Model Context Protocol](https://modelcontextprotocol.io) server over stdio
   adds its tools (`<server>__<tool>`), each call asked for like a command, logged, and allowed
   unattended only with `mcp:<server>/<tool>` in the allowlist:
@@ -222,6 +261,8 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Approvals** (`[approvals]` in `~/.autobot/config.toml`):
   - `ask` (default): commands, file writes and reads outside the working directory ask first:
     yes, always for this session, or no.
+  - `edits`: like `ask`, but writes and edits in the working directory (not under dot names) run
+    without asking; each is shown as a diff, and `/undo` puts it back. For coding.
   - `allowlist`: for unattended use. Allowlisted commands and writes in the working directory run;
     everything else is refused without asking. An allowlist entry matches the whole command or the
     command plus arguments, never a chained one (`git status; rm -rf ~` does not match

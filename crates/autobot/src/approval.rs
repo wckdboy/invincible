@@ -132,8 +132,10 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
     }
     match (config.mode, action) {
         // Unattended, the agent may still work in its own directory.
-        (ApprovalMode::Allowlist, Action::Write { inside: true, hidden: false, .. }) => Verdict::Run,
-        (ApprovalMode::Ask, _) => Verdict::Ask,
+        (ApprovalMode::Allowlist | ApprovalMode::Edits, Action::Write { inside: true, hidden: false, .. }) => {
+            Verdict::Run
+        }
+        (ApprovalMode::Ask | ApprovalMode::Edits, _) => Verdict::Ask,
         _ => Verdict::Refuse(format!("not allowlisted ([approvals] mode = \"allowlist\"): {}", action.describe())),
     }
 }
@@ -193,5 +195,10 @@ mod tests {
         assert!(matches!(check(&config(ApprovalMode::Allowlist), &hidden), Verdict::Refuse(_)));
         assert_eq!(check(&config(ApprovalMode::Ask), &hidden), Verdict::Ask);
         assert!(matches!(check(&config(ApprovalMode::Allowlist), &Action::Cloud("x".into())), Verdict::Refuse(_)));
+        // Edits: writes in the working directory run, everything else asks.
+        assert_eq!(check(&config(ApprovalMode::Edits), &write), Verdict::Run);
+        assert_eq!(check(&config(ApprovalMode::Edits), &hidden), Verdict::Ask);
+        assert_eq!(check(&config(ApprovalMode::Edits), &outside), Verdict::Ask);
+        assert_eq!(check(&config(ApprovalMode::Edits), &command), Verdict::Ask);
     }
 }

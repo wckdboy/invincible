@@ -103,6 +103,7 @@ fn agent(url: &str, dir: &std::path::Path, mode: ApprovalMode, private: bool) ->
         team: Default::default(),
         mcp: Default::default(),
         trajectories: None,
+        options: Default::default(),
     }
 }
 
@@ -126,7 +127,11 @@ async fn an_approved_command_runs_and_its_output_goes_back() {
     let (headers, first) = &script.seen[0];
     assert_eq!(headers["authorization"], "Bearer secret");
     assert_eq!(headers["invincible-private"], "1", "agent turns are private by default");
-    assert_eq!(first["tools"].as_array().unwrap().len(), 6, "terminal, read, write, edit, fetch, list");
+    assert_eq!(
+        first["tools"].as_array().unwrap().len(),
+        9,
+        "terminal, read, todo, write, edit, fetch, search, find, list"
+    );
     assert_eq!(first["messages"][0]["role"], "system");
     // The second call carries the tool call and its result, without the reasoning.
     let messages = script.seen[1].1["messages"].as_array().unwrap();
@@ -290,7 +295,7 @@ async fn a_recipe_gets_only_its_tool_groups() {
     let offered: Vec<&str> =
         seen[0].1["tools"].as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
     // The recipe's `web` group: web_fetch, on the node too.
-    assert_eq!(offered, ["read_file", "web_fetch", "list_dir"]);
+    assert_eq!(offered, ["read_file", "web_fetch", "search", "find_files", "list_dir"]);
     assert!(!dir.join("work/notes.md").exists());
     let session = Session::open(&dir.join("sessions"), "cron-r-morning").unwrap();
     assert!(
@@ -372,9 +377,12 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
         [
             "terminal",
             "read_file",
+            "todo",
             "write_file",
             "edit_file",
             "web_fetch",
+            "search",
+            "find_files",
             "list_dir",
             "remember",
             "schedule_task",
@@ -567,7 +575,7 @@ async fn the_lead_hands_work_to_its_team_in_parallel() {
             .clone()
     };
     let researcher = member("researcher");
-    assert_eq!(names(&researcher), ["read_file", "list_dir", "read_skill"]);
+    assert_eq!(names(&researcher), ["read_file", "search", "find_files", "list_dir", "read_skill"]);
     assert_eq!(researcher["model"], "qwen3-0.6b");
     assert!(researcher["messages"][0]["content"].as_str().unwrap().contains("Never change files."));
     assert_eq!(researcher["messages"][1]["content"], "Goal: Find where backups go\n\nContext:\nLook in notes.md");
@@ -997,7 +1005,7 @@ async fn a_finished_turn_is_kept_as_a_trajectory_with_what_the_model_saw() {
     let roles: Vec<&str> = t["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
     assert_eq!(roles, ["system", "user", "assistant", "tool", "assistant", "tool", "assistant"]);
     assert_eq!(t["messages"][6]["content"], "It is ok.");
-    assert_eq!(t["tools"].as_array().unwrap().len(), 6);
+    assert_eq!(t["tools"].as_array().unwrap().len(), 9);
     assert_eq!(t["meta"]["outcome"], "answer");
     assert_eq!(t["meta"]["refused"], 1, "rm was not allowlisted");
     assert_eq!(t["meta"]["models"], json!(["qwen"]));
@@ -1014,4 +1022,88 @@ async fn a_finished_turn_is_kept_as_a_trajectory_with_what_the_model_saw() {
     assert!(messages.last().unwrap()["content"].as_str().unwrap().starts_with("Stopped after 2 steps"));
     assert_eq!(messages[messages.len() - 2]["role"], "tool");
     assert_eq!(messages.iter().filter(|m| m["role"] == "system").count(), 1);
+}
+
+/// A gateway that streams: each call answers with the next list of SSE chunks.
+async fn streaming_gateway(answers: Vec<Vec<Value>>) -> String {
+    let answers = Arc::new(Mutex::new(VecDeque::from(answers)));
+    let app = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |Json(body): Json<Value>| {
+            let answers = answers.clone();
+            async move {
+                assert_eq!(body["stream"], true);
+                let chunks = answers.lock().unwrap().pop_front().expect("an answer for every call");
+                let mut text = String::new();
+                for chunk in chunks {
+                    text.push_str(&format!("data: {chunk}\n\n"));
+                }
+                text.push_str("data: [DONE]\n\n");
+                let mut response = text.into_response();
+                response.headers_mut().insert("content-type", "text/event-stream".parse().unwrap());
+                response.headers_mut().insert("invincible-request-id", "req-s".parse().unwrap());
+                response
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    url
+}
+
+#[tokio::test]
+async fn a_streamed_turn_shows_its_text_and_diffs_and_can_be_undone() {
+    let dir = temp("stream");
+    std::fs::create_dir_all(dir.join("work")).unwrap();
+    std::fs::write(dir.join("work/a.txt"), "one\ntwo\n").unwrap();
+    let edit = json!({ "path": "a.txt", "old_text": "two", "new_text": "TWO" }).to_string();
+    let url = streaming_gateway(vec![
+        vec![
+            json!({ "choices": [{ "delta": { "content": "Editing" } }] }),
+            json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "id": "e1", "function": { "name": "edit_file", "arguments": &edit[..10] } }] } }] }),
+            json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "function": { "arguments": &edit[10..] } }] } }] }),
+        ],
+        vec![
+            json!({ "choices": [{ "delta": { "content": "Done: " } }] }),
+            json!({ "choices": [{ "delta": { "content": "two is TWO." } }] }),
+        ],
+    ])
+    .await;
+    let mut agent = agent(&url, &dir, ApprovalMode::Edits, true);
+    agent.gateway = agent.gateway.with_stream(true);
+    agent.tools = Tools::new(dir.join("work"), Duration::from_secs(5)).with_home(dir.join("home"));
+    let seen = Mutex::new(Vec::<String>::new());
+    let events = |e: Event| {
+        let line = match e {
+            Event::Text(t) => format!("text {t}"),
+            Event::Diff(d) => {
+                format!("diff {}", d.lines().filter(|l| l.starts_with(['+', '-'])).collect::<Vec<_>>().join("|"))
+            }
+            Event::Output { name, text } => format!("output {name}: {text}"),
+            Event::Tool(t) => format!("tool {}", t.split(" to ").next().unwrap()),
+            _ => return,
+        };
+        seen.lock().unwrap().push(line);
+    };
+    let mut session = Session::open(&dir.join("home/sessions"), "s").unwrap();
+    // Edits: a change in the working directory runs without asking.
+    let outcome =
+        agent.turn(&mut session, "make it loud", &owner(Answer::Deny), &mut HashSet::new(), &events).await.unwrap();
+    assert_eq!(outcome.text, "Done: two is TWO.");
+    assert_eq!(std::fs::read_to_string(dir.join("work/a.txt")).unwrap(), "one\nTWO\n");
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(seen[0], "text Editing");
+    assert_eq!(seen[1], "diff --- a/a.txt|+++ b/a.txt|-two|+TWO");
+    assert_eq!(seen[2], "tool write 3 bytes");
+    assert!(seen[3].starts_with("output edit_file: replaced 1 occurrence"));
+    assert_eq!(&seen[4..], ["text Done: ", "text two is TWO."]);
+    // The streamed call was put back together for the conversation.
+    assert_eq!(session.messages[1]["tool_calls"][0]["function"]["arguments"], edit);
+    // Undo puts the file back and takes the turn away.
+    let (request, files) = session.undo().unwrap();
+    assert_eq!(request, "make it loud");
+    assert_eq!(files.len(), 1);
+    assert_eq!(std::fs::read_to_string(dir.join("work/a.txt")).unwrap(), "one\ntwo\n");
+    assert!(session.messages.is_empty());
 }

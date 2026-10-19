@@ -8,6 +8,7 @@ pub mod approval;
 pub mod board;
 pub mod config;
 pub mod cron;
+pub mod diff;
 pub mod doctor;
 pub mod eval;
 pub mod gateway;
@@ -15,6 +16,7 @@ pub mod heartbeat;
 pub mod mcp;
 pub mod memory;
 pub mod sandbox;
+pub mod search;
 pub mod service;
 pub mod session;
 pub mod setup;
@@ -23,6 +25,7 @@ pub mod team;
 pub mod telegram;
 pub mod tools;
 pub mod trajectory;
+pub mod tui;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -31,13 +34,23 @@ use config::Config;
 
 /// The agent [config] describes.
 pub fn agent(config: &Config, home: &Path) -> Result<agent::Agent, String> {
+    agent_in(config, home, None)
+}
+
+/// The agent [config] describes, working in [workdir] instead of the configured one (`autobot
+/// code` in a project).
+pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Result<agent::Agent, String> {
     let token = config.gateway.token()?;
-    let gateway = gateway::Gateway::new(&config.gateway.url, &token, &config.gateway.model, config.gateway.private)?;
-    let workdir = config.agent.workdir(home);
+    let gateway = gateway::Gateway::new(&config.gateway.url, &token, &config.gateway.model, config.gateway.private)?
+        .with_stream(config.agent.stream);
+    let workdir = workdir.unwrap_or_else(|| config.agent.workdir(home));
     std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
     let mut tools = tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout))
         .with_home(home.to_owned())
         .with_sandbox(config.agent.sandbox);
+    if let Some(kib) = config.agent.context_kib {
+        tools = tools.with_context(kib);
+    }
     if let Some(groups) = &config.agent.tools {
         if let Some(unknown) = groups.iter().find(|g| !tools::GROUPS.iter().any(|(n, _)| n == g)) {
             return Err(format!("[agent] tools: unknown group {unknown:?}"));
@@ -52,7 +65,34 @@ pub fn agent(config: &Config, home: &Path) -> Result<agent::Agent, String> {
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),
         mcp: std::sync::Arc::new(mcp::Hub::new(config.mcp.clone())?),
         trajectories: config.agent.trajectories.then(|| std::sync::Arc::new(trajectory::Recorder::dir(home))),
+        options: agent::Options { context_kib: config.agent.context_kib },
     })
+}
+
+/// Switches [agent] to the model [id] of [models] (what the gateway serves): a cloud model lets
+/// turns leave the machine (they are private otherwise, as configured), and the conversation
+/// sent per call and the tool results grow with the model's context, unless the config sets it.
+pub fn use_model(
+    agent: &mut agent::Agent,
+    config: &Config,
+    models: &[gateway::ModelInfo],
+    id: &str,
+) -> Result<(), String> {
+    let info = models.iter().find(|m| m.id == id);
+    if info.is_none() && id != "auto" && !models.is_empty() {
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        return Err(format!("no model {id:?} (the gateway serves: {}, and auto)", ids.join(", ")));
+    }
+    agent.gateway = agent.gateway.with_model(id).with_private(match info {
+        Some(m) if m.is_cloud() => false,
+        _ => config.gateway.private,
+    });
+    if config.agent.context_kib.is_none() {
+        let kib = info.map_or(session::CHAR_BUDGET / 1024, gateway::ModelInfo::context_kib);
+        agent.options.context_kib = Some(kib);
+        agent.tools = agent.tools.clone().with_context(kib);
+    }
+    Ok(())
 }
 
 /// The gateway's configuration file.

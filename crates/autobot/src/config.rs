@@ -15,7 +15,7 @@ use serde::Deserialize;
 /// max_steps = 24                     # model calls per turn, tool rounds included
 ///
 /// [approvals]
-/// mode = "ask"                       # ask, allowlist, trust
+/// mode = "ask"                       # ask, edits, allowlist, trust
 /// allow = ["git status", "ls"]       # commands that run without asking (exact or prefix + space)
 ///
 /// [telegram]
@@ -130,6 +130,13 @@ pub struct AgentConfig {
     /// shorter tool list makes a small local model's calls faster.
     #[serde(default)]
     pub tools: Option<Vec<String>>,
+    /// KiB of recent conversation sent per model call (default 48: small local models have small
+    /// contexts). Frontier models take far more: `context_kib = 400`.
+    #[serde(default)]
+    pub context_kib: Option<usize>,
+    /// Stream answers as they are written (the terminal shows them live).
+    #[serde(default = "yes")]
+    pub stream: bool,
     /// How often the heartbeat works through `HEARTBEAT.md` (`30m`, `2h`; `off`).
     #[serde(default = "heartbeat")]
     pub heartbeat: String,
@@ -175,6 +182,8 @@ impl Default for AgentConfig {
             tools: None,
             heartbeat: heartbeat(),
             trajectories: false,
+            context_kib: None,
+            stream: true,
         }
     }
 }
@@ -192,6 +201,10 @@ impl AgentConfig {
 pub enum ApprovalMode {
     /// Ask, unless allowlisted. The default.
     Ask,
+    /// Like ask, but writes and edits in the working directory (not under dot names) run
+    /// without asking: for coding, where every change is shown as a diff and `/undo` puts it
+    /// back.
+    Edits,
     /// Run allowlisted commands and writes in the working directory; refuse everything else
     /// without asking (unattended use).
     Allowlist,

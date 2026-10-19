@@ -23,18 +23,21 @@ pub struct Tools {
     sandbox: crate::sandbox::Mode,
     /// Commands run sandboxed now: always, or unattended in a run with nobody watching.
     confined: bool,
+    /// Most text one result hands back ([RESULT_LIMIT] unless the model takes more).
+    limit: usize,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
 /// no tools for (`web`, `vault`) allow nothing.
 pub const GROUPS: &[(&str, &[&str])] = &[
-    ("files-read", &["read_file", "list_dir", "read_skill"]),
+    ("files-read", &["read_file", "list_dir", "search", "find_files", "read_skill"]),
     ("web", &["web_fetch"]),
     // Every MCP server's tools.
     ("mcp", &["mcp"]),
     ("files-write", &["write_file", "edit_file"]),
     ("memory", &["remember", "search_sessions", "propose_skill"]),
     ("terminal", &["terminal"]),
+    ("plan", &["todo"]),
 ];
 
 /// The tool names [groups] allow.
@@ -75,6 +78,10 @@ pub enum Call {
     },
     ReadFile {
         path: PathBuf,
+        /// The first line to read (1-based).
+        offset: Option<usize>,
+        /// How many lines.
+        limit: Option<usize>,
     },
     WriteFile {
         path: PathBuf,
@@ -116,11 +123,35 @@ pub enum Call {
     CancelSchedule {
         id: String,
     },
+    /// File contents matching a regular expression, under [path] (`.gitignore` respected).
+    Search {
+        pattern: String,
+        path: PathBuf,
+        glob: Option<String>,
+        ignore_case: bool,
+    },
+    /// Files whose path matches a glob, under the working directory.
+    FindFiles {
+        pattern: String,
+        path: PathBuf,
+    },
+    /// The agent's task list for a longer job: the whole list each time.
+    Todo {
+        items: Value,
+    },
 }
 
 impl Tools {
     pub fn new(workdir: PathBuf, timeout: Duration) -> Self {
-        Self { workdir, timeout, home: None, only: None, sandbox: crate::sandbox::Mode::Off, confined: false }
+        Self {
+            workdir,
+            timeout,
+            home: None,
+            only: None,
+            sandbox: crate::sandbox::Mode::Off,
+            confined: false,
+            limit: RESULT_LIMIT,
+        }
     }
 
     /// With memory and skills from [home] (`$AUTOBOT_HOME`).
@@ -133,6 +164,13 @@ impl Tools {
     pub fn with_sandbox(mut self, mode: crate::sandbox::Mode) -> Self {
         self.sandbox = mode;
         self.confined = mode == crate::sandbox::Mode::Always;
+        self
+    }
+
+    /// Results up to about a sixth of [context_kib] (16 to 96 KiB): a frontier model reads a
+    /// whole source file at once, a small local one gets the start and the end.
+    pub fn with_context(mut self, context_kib: usize) -> Self {
+        self.limit = (context_kib * 1024 / 6).clamp(RESULT_LIMIT, 96 * 1024);
         self
     }
 
@@ -242,9 +280,22 @@ impl Tools {
             ),
             function(
                 "read_file",
-                "Read a text file. Relative paths are in the working directory.",
-                json!({ "path": { "type": "string" } }),
+                "Read a text file. Relative paths are in the working directory. A long file comes in parts: offset and limit (lines) read the rest.",
+                json!({
+                    "path": { "type": "string" },
+                    "offset": { "type": "integer", "description": "The first line to read (1-based)." },
+                    "limit": { "type": "integer", "description": "How many lines (default: to the end)." },
+                }),
                 &["path"],
+            ),
+            function(
+                "todo",
+                "Keep a task list for a job with several steps: send the whole list each time, with each item's status. Mark an item doing when you start it and done when it is finished. The owner sees it.",
+                json!({ "items": { "type": "array", "items": { "type": "object", "properties": {
+                    "text": { "type": "string" },
+                    "status": { "type": "string", "enum": ["pending", "doing", "done"] },
+                }, "required": ["text", "status"] } } }),
+                &["items"],
             ),
             function(
                 "write_file",
@@ -270,6 +321,26 @@ impl Tools {
                 &["url"],
             ),
             function(
+                "search",
+                "Search file contents with a regular expression, like ripgrep (.gitignore respected, binary files skipped). Returns path:line: text, at most 200 matches. Use it to find where something is defined or used before reading files.",
+                json!({
+                    "pattern": { "type": "string", "description": "A regular expression (Rust regex syntax)." },
+                    "path": { "type": "string", "description": "A directory or file to search. Default: the working directory." },
+                    "glob": { "type": "string", "description": "Only files matching this glob, e.g. *.rs or src/**/*.ts." },
+                    "ignore_case": { "type": "boolean" },
+                }),
+                &["pattern"],
+            ),
+            function(
+                "find_files",
+                "Find files by path glob, e.g. **/*.rs, src/**/test_*.py, **/Cargo.toml (.gitignore respected). Returns paths relative to the working directory, at most 500.",
+                json!({
+                    "pattern": { "type": "string" },
+                    "path": { "type": "string", "description": "Where to look. Default: the working directory." },
+                }),
+                &["pattern"],
+            ),
+            function(
                 "list_dir",
                 "List a directory's entries. Relative paths are in the working directory.",
                 json!({ "path": { "type": "string", "description": "Default: the working directory." } }),
@@ -293,7 +364,12 @@ impl Tools {
         };
         Ok(match name {
             "terminal" => Call::Terminal { command: text("command")? },
-            "read_file" => Call::ReadFile { path: self.resolve(&text("path")?) },
+            "read_file" => Call::ReadFile {
+                path: self.resolve(&text("path")?),
+                offset: args.get("offset").and_then(Value::as_u64).map(|n| n.max(1) as usize),
+                limit: args.get("limit").and_then(Value::as_u64).map(|n| n.max(1) as usize),
+            },
+            "todo" => Call::Todo { items: args.get("items").cloned().unwrap_or_else(|| json!([])) },
             "write_file" => Call::WriteFile { path: self.resolve(&text("path")?), content: text("content")? },
             "edit_file" => Call::EditFile {
                 path: self.resolve(&text("path")?),
@@ -303,6 +379,16 @@ impl Tools {
             },
             "web_fetch" => Call::Fetch { url: text("url")?.trim().to_owned() },
             "list_dir" => Call::ListDir { path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())) },
+            "search" => Call::Search {
+                pattern: text("pattern")?,
+                path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())),
+                glob: args.get("glob").and_then(Value::as_str).map(str::to_owned).filter(|g| !g.trim().is_empty()),
+                ignore_case: args.get("ignore_case").and_then(Value::as_bool).unwrap_or(false),
+            },
+            "find_files" => Call::FindFiles {
+                pattern: text("pattern")?,
+                path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())),
+            },
             "remember" if self.home.is_some() => Call::Remember { text: text("text")? },
             "read_skill" if self.home.is_some() => Call::ReadSkill { name: text("name")? },
             "schedule_task" if self.home.is_some() => Call::Schedule {
@@ -338,9 +424,10 @@ impl Tools {
                 inside: self.inside(path),
                 hidden: self.hidden(path),
             }),
-            Call::ReadFile { path } | Call::ListDir { path } => {
-                (!self.inside(path)).then(|| Action::Read(path.clone()))
-            }
+            Call::ReadFile { path, .. }
+            | Call::ListDir { path }
+            | Call::Search { path, .. }
+            | Call::FindFiles { path, .. } => (!self.inside(path)).then(|| Action::Read(path.clone())),
             // Its own notes and the owner's skills, in its home: nothing to approve.
             // Its own notes, the owner's skills, its own scheduler (whose runs follow the
             // unattended rules): nothing to approve.
@@ -350,17 +437,36 @@ impl Tools {
             | Call::ProposeSkill { .. }
             | Call::SearchSessions { .. }
             | Call::ListSchedules
-            | Call::CancelSchedule { .. } => None,
+            | Call::CancelSchedule { .. }
+            | Call::Todo { .. } => None,
         }
     }
 
     pub async fn run(&self, call: &Call) -> String {
         let result = match call {
             Call::Terminal { command } => self.terminal(command).await,
-            Call::ReadFile { path } => read(path).await,
+            Call::ReadFile { path, offset, limit } => read(path).await.map(|text| lines(&text, *offset, *limit)),
+            Call::Todo { items } => todo(items),
             Call::WriteFile { path, content } => write(path, content).await,
             Call::EditFile { path, old, new, all } => edit(path, old, new, *all).await,
             Call::ListDir { path } => list(path).await,
+            Call::Search { pattern, path, glob, ignore_case } => {
+                let (pattern, path, glob, ignore_case, root) =
+                    (pattern.clone(), path.clone(), glob.clone(), *ignore_case, self.workdir.clone());
+                tokio::task::spawn_blocking(move || {
+                    crate::search::grep(&root, &path, &pattern, glob.as_deref(), ignore_case)
+                })
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r)
+            }
+            Call::FindFiles { pattern, path } => {
+                let (pattern, path, root) = (pattern.clone(), path.clone(), self.workdir.clone());
+                tokio::task::spawn_blocking(move || crate::search::find(&root, &path, &pattern))
+                    .await
+                    .map_err(|e| e.to_string())
+                    .and_then(|r| r)
+            }
             Call::Remember { text } => match &self.home {
                 Some(home) => crate::memory::Memory::current(home).add(text).map(|id| format!("remembered (#{id})")),
                 None => Err("no memory here".to_owned()),
@@ -398,7 +504,7 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
         };
-        cut(result.unwrap_or_else(|e| format!("error: {e}")))
+        cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit)
     }
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
@@ -439,6 +545,60 @@ impl Tools {
                 Ok(format!("{text}{}[{code}]", if text.is_empty() || text.ends_with('\n') { "" } else { "\n" }))
             }
         }
+    }
+
+    /// What a write or an edit would change, as a unified diff (paths relative to the working
+    /// directory); None for other calls, or an edit that would fail.
+    pub fn preview(&self, call: &Call) -> Option<String> {
+        let (path, after) = match call {
+            Call::WriteFile { path, content } => (path, content.clone()),
+            Call::EditFile { path, old, new, all } => {
+                let text = std::fs::read_to_string(path).ok()?;
+                let found = text.matches(old.as_str()).count();
+                if old.is_empty() || found == 0 || (found > 1 && !all) {
+                    return None;
+                }
+                (path, text.replace(old.as_str(), new))
+            }
+            _ => return None,
+        };
+        let before = std::fs::read_to_string(path).unwrap_or_default();
+        let label = path.strip_prefix(&self.workdir).unwrap_or(path).display().to_string();
+        Some(crate::diff::unified(&before, &after, &label))
+    }
+
+    /// The file a write or an edit changes and what it holds now (None: it does not exist), to
+    /// put it back on undo.
+    pub fn before(&self, call: &Call) -> Option<(PathBuf, Option<String>)> {
+        match call {
+            Call::WriteFile { path, .. } | Call::EditFile { path, .. } => {
+                Some((path.clone(), std::fs::read_to_string(path).ok()))
+            }
+            _ => None,
+        }
+    }
+
+    /// The project's instructions for agents in the working directory (`AGENTS.md`,
+    /// `CLAUDE.md`, `.autobot/AGENTS.md`), with their names; at most 24 KiB in all.
+    pub fn project_notes(&self) -> Option<String> {
+        let mut out = String::new();
+        for name in ["AGENTS.md", "CLAUDE.md", ".autobot/AGENTS.md"] {
+            let Ok(text) = std::fs::read_to_string(self.workdir.join(name)) else { continue };
+            let text = text.trim();
+            if text.is_empty() || out.len() >= 24 * 1024 {
+                continue;
+            }
+            let room = 24 * 1024 - out.len();
+            let cut = &text[..floor(text, text.len().min(room))];
+            out.push_str(&format!("--- {name} ---\n{cut}\n"));
+        }
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// The git branch, when the working directory is a repository.
+    pub fn git_branch(&self) -> Option<String> {
+        let head = std::fs::read_to_string(self.workdir.join(".git/HEAD")).ok()?;
+        Some(head.trim().strip_prefix("ref: refs/heads/").unwrap_or("(detached)").to_owned())
     }
 
     /// [path] relative to the working directory, with `~` expanded and `.`/`..` folded.
@@ -624,6 +784,39 @@ async fn edit(path: &Path, old: &str, new: &str, all: bool) -> Result<String, St
     ))
 }
 
+/// Lines [offset].. of [text] ([limit] of them), with a note of where the rest is.
+fn lines(text: &str, offset: Option<usize>, limit: Option<usize>) -> String {
+    if offset.is_none() && limit.is_none() {
+        return text.to_owned();
+    }
+    let all: Vec<&str> = text.lines().collect();
+    let start = offset.unwrap_or(1).saturating_sub(1).min(all.len());
+    let end = limit.map_or(all.len(), |n| (start + n).min(all.len()));
+    let mut out = all[start..end].join("\n");
+    if start > 0 || end < all.len() {
+        out.push_str(&format!("\n[lines {}-{end} of {}]", start + 1, all.len()));
+    }
+    out
+}
+
+/// The task list as the owner and the model see it.
+fn todo(items: &Value) -> Result<String, String> {
+    let items = items.as_array().ok_or("`items` is a list")?;
+    let mut out = String::new();
+    for item in items {
+        let text = item["text"].as_str().unwrap_or_default();
+        let mark = match item["status"].as_str() {
+            Some("done") => "[x]",
+            Some("doing") => "[>]",
+            _ => "[ ]",
+        };
+        out.push_str(&format!("{mark} {text}\n"));
+    }
+    let done = items.iter().filter(|i| i["status"] == "done").count();
+    out.push_str(&format!("({done} of {} done)", items.len()));
+    Ok(out)
+}
+
 async fn list(path: &Path) -> Result<String, String> {
     let mut entries = tokio::fs::read_dir(path).await.map_err(|e| format!("{}: {e}", path.display()))?;
     let mut names = Vec::new();
@@ -637,10 +830,15 @@ async fn list(path: &Path) -> Result<String, String> {
 
 /// Keeps the start and the end of a long result: errors tend to be at the end.
 pub fn cut(text: String) -> String {
-    if text.len() <= RESULT_LIMIT {
+    cut_to(text, RESULT_LIMIT)
+}
+
+/// [cut] to [limit] bytes.
+pub fn cut_to(text: String, limit: usize) -> String {
+    if text.len() <= limit {
         return text;
     }
-    let half = RESULT_LIMIT / 2;
+    let half = limit / 2;
     let start = floor(&text, half);
     let end = ceil(&text, text.len() - half);
     format!("{}\n[… {} bytes cut …]\n{}", &text[..start], end - start, &text[end..])
@@ -678,6 +876,19 @@ mod tests {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos() as u64) << 16 | n
+    }
+
+    #[test]
+    fn long_files_read_in_parts_and_todos_list() {
+        let text = "a\nb\nc\nd";
+        assert_eq!(super::lines(text, None, None), text);
+        assert_eq!(super::lines(text, Some(2), Some(2)), "b\nc\n[lines 2-3 of 4]");
+        assert_eq!(super::lines(text, Some(4), None), "d\n[lines 4-4 of 4]");
+        let items = serde_json::json!([{ "text": "read", "status": "done" }, { "text": "fix", "status": "doing" }, { "text": "test", "status": "pending" }]);
+        assert_eq!(super::todo(&items).unwrap(), "[x] read\n[>] fix\n[ ] test\n(1 of 3 done)");
+        let (tools, _) = tools();
+        assert_eq!(tools.clone().with_context(48).limit, RESULT_LIMIT);
+        assert_eq!(tools.with_context(1000).limit, 96 * 1024);
     }
 
     #[test]

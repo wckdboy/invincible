@@ -10,13 +10,16 @@ pub struct Session {
     pub id: String,
     path: PathBuf,
     pub messages: Vec<Value>,
+    /// Characters of recent messages sent per call at most ([CHAR_BUDGET] unless set).
+    pub budget: usize,
 }
 
-/// Messages sent per call at most; older ones stay on disk, summarized ([Session::compaction]).
+/// Messages sent per call at most (or a 1 KiB budget each, when the budget is larger); older ones
+/// stay on disk, summarized ([Session::compaction]).
 const WINDOW: usize = 60;
 /// Characters of recent messages sent per call at most (about 12k tokens: small local models
 /// have small contexts, and one tool result can be 16 KiB).
-const CHAR_BUDGET: usize = 48 * 1024;
+pub const CHAR_BUDGET: usize = 48 * 1024;
 
 /// A summary of the conversation up to a point, kept in the session file as a line of its own:
 /// `{"role": "system", "autobot": "summary", "upto": <messages covered>, "content": "…"}`.
@@ -40,7 +43,7 @@ impl Session {
                 }
             }
         }
-        Ok(Self { id: id.to_owned(), path, messages })
+        Ok(Self { id: id.to_owned(), path, messages, budget: CHAR_BUDGET })
     }
 
     pub fn push(&mut self, message: Value) -> Result<(), String> {
@@ -75,6 +78,99 @@ impl Session {
         Ok(copy)
     }
 
+    /// Answers tool calls left without a result (a turn stopped mid-way), so the conversation
+    /// stays one a model accepts.
+    pub fn close_dangling(&mut self) -> Result<(), String> {
+        let Some(at) = self.messages.iter().rposition(|m| m["role"] == "assistant") else { return Ok(()) };
+        let ids: Vec<String> = self.messages[at]["tool_calls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["id"].as_str().map(str::to_owned))
+            .collect();
+        for id in ids {
+            let answered =
+                self.messages[at + 1..].iter().any(|m| m["role"] == "tool" && m["tool_call_id"] == id.as_str());
+            if !answered {
+                self.push(serde_json::json!({ "role": "tool", "tool_call_id": id, "content": "stopped by the owner before it ran" }))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn undo_path(&self) -> PathBuf {
+        self.path.with_extension("undo")
+    }
+
+    /// The index of the last turn's request (not a note added while it worked).
+    fn last_turn(&self) -> Option<usize> {
+        self.messages.iter().rposition(|m| {
+            m["role"] == "user" && !m["content"].as_str().is_some_and(|c| c.starts_with("(The owner adds"))
+        })
+    }
+
+    /// Undoes the last turn: files it wrote or edited go back to what they were (or are removed,
+    /// when it created them), and the turn leaves the conversation. Its request and the files
+    /// put back.
+    pub fn undo(&mut self) -> Result<(String, Vec<String>), String> {
+        let start = self.last_turn().ok_or("nothing to undo")?;
+        let request = self.messages[start]["content"].as_str().unwrap_or_default().to_owned();
+        let log = invincible::fsutil::read_optional(&self.undo_path())?.unwrap_or_default();
+        let mut keep = String::new();
+        let mut undo: Vec<Value> = Vec::new();
+        for line in log.lines() {
+            let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
+            if entry["at"].as_u64().is_some_and(|at| at as usize > start) {
+                undo.push(entry);
+            } else {
+                keep.push_str(line);
+                keep.push('\n');
+            }
+        }
+        let mut restored = Vec::new();
+        // Newest first, so a file changed twice ends as it was before the first change.
+        for entry in undo.iter().rev() {
+            let Some(path) = entry["path"].as_str() else { continue };
+            let result = match entry["before"].as_str() {
+                Some(text) => std::fs::write(path, text),
+                None => std::fs::remove_file(path)
+                    .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
+            };
+            result.map_err(|e| format!("{path}: {e}"))?;
+            if !restored.iter().any(|p| p == path) {
+                restored.push(path.to_owned());
+            }
+        }
+        invincible::fsutil::replace_private(&self.undo_path(), &keep)?;
+        self.truncate(start)?;
+        restored.reverse();
+        Ok((request, restored))
+    }
+
+    /// Keeps [path]'s contents before the agent changes it ([before]: None when it does not
+    /// exist yet), for [Session::undo].
+    pub fn checkpoint(dir: &Path, id: &str, at: usize, path: &Path, before: Option<&str>) -> Result<(), String> {
+        let entry = serde_json::json!({ "at": at, "path": path.display().to_string(), "before": before });
+        let file = dir.join(format!("{id}.undo"));
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut out = options.open(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        writeln!(out, "{entry}").map_err(|e| format!("{}: {e}", file.display()))
+    }
+
+    /// Keeps only the first [n] messages, on disk too.
+    pub fn truncate(&mut self, n: usize) -> Result<(), String> {
+        self.messages.truncate(n);
+        let mut text = String::new();
+        for m in &self.messages {
+            text.push_str(&m.to_string());
+            text.push('\n');
+        }
+        invincible::fsutil::replace_private(&self.path, &text)
+    }
+
     /// Starts over: the old conversation is kept under a dated name.
     pub fn reset(&mut self) -> Result<(), String> {
         if self.path.exists() {
@@ -85,6 +181,7 @@ impl Session {
             let old = self.path.with_file_name(format!("{}-{stamp}.jsonl", self.id));
             std::fs::rename(&self.path, &old).map_err(|e| format!("{}: {e}", self.path.display()))?;
         }
+        let _ = std::fs::remove_file(self.undo_path());
         self.messages.clear();
         Ok(())
     }
@@ -99,7 +196,7 @@ impl Session {
                 continue;
             }
             used += m.to_string().len();
-            if used > CHAR_BUDGET || self.messages.len() - i > WINDOW {
+            if used > self.budget || self.messages.len() - i > WINDOW.max(self.budget / 1024) {
                 break;
             }
             from = i;
@@ -311,6 +408,40 @@ mod tests {
         // Kept on disk.
         let again = Session::open(&dir, "c").unwrap();
         assert_eq!(again.summary(), Some("The owner asked for tasks 0 to 4."));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn undo_puts_files_back_and_drops_the_turn() {
+        let dir = std::env::temp_dir().join(format!("autobot-undo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (old, new) = (dir.join("old.txt"), dir.join("new.txt"));
+        std::fs::write(&old, "first").unwrap();
+        let mut s = Session::open(&dir, "u").unwrap();
+        s.push(json!({ "role": "user", "content": "one" })).unwrap();
+        s.push(json!({ "role": "assistant", "content": "ok" })).unwrap();
+        s.push(json!({ "role": "user", "content": "change them" })).unwrap();
+        // The turn edits old.txt twice and creates new.txt.
+        Session::checkpoint(&dir, "u", 3, &old, Some("first")).unwrap();
+        std::fs::write(&old, "second").unwrap();
+        Session::checkpoint(&dir, "u", 4, &old, Some("second")).unwrap();
+        std::fs::write(&old, "third").unwrap();
+        Session::checkpoint(&dir, "u", 4, &new, None).unwrap();
+        std::fs::write(&new, "made").unwrap();
+        s.push(json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": "c9", "type": "function", "function": { "name": "terminal", "arguments": "{}" } }] })).unwrap();
+        // Stopped mid-way: the call gets an answer.
+        s.close_dangling().unwrap();
+        assert_eq!(s.messages.last().unwrap()["tool_call_id"], "c9");
+        let (request, restored) = s.undo().unwrap();
+        assert_eq!(request, "change them");
+        assert_eq!(restored.len(), 2);
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), "first");
+        assert!(!new.exists());
+        assert_eq!(Session::open(&dir, "u").unwrap().messages.len(), 2);
+        // The first turn changed nothing; undoing it just drops it.
+        assert_eq!(s.undo().unwrap(), ("one".to_owned(), vec![]));
+        assert!(s.undo().is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
