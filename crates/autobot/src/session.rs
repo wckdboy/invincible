@@ -12,8 +12,17 @@ pub struct Session {
     pub messages: Vec<Value>,
 }
 
-/// Messages sent per call at most; older ones stay on disk.
+/// Messages sent per call at most; older ones stay on disk, summarized ([Session::compaction]).
 const WINDOW: usize = 60;
+/// Characters of recent messages sent per call at most (about 12k tokens: small local models
+/// have small contexts, and one tool result can be 16 KiB).
+const CHAR_BUDGET: usize = 48 * 1024;
+
+/// A summary of the conversation up to a point, kept in the session file as a line of its own:
+/// `{"role": "system", "autobot": "summary", "upto": <messages covered>, "content": "…"}`.
+fn is_summary(message: &Value) -> bool {
+    message["autobot"] == "summary"
+}
 
 impl Session {
     /// The session [id] in [dir], with what it already holds.
@@ -62,12 +71,53 @@ impl Session {
         Ok(())
     }
 
-    /// The recent part of the conversation, starting at a user message so no tool result is
-    /// cut off from the call it answers.
-    pub fn window(&self) -> &[Value] {
-        let from = self.messages.len().saturating_sub(WINDOW);
-        let start = (from..self.messages.len()).find(|&i| self.messages[i]["role"] == "user").unwrap_or(from);
-        &self.messages[start..]
+    /// Where the recent part starts: at most [WINDOW] messages and [CHAR_BUDGET] characters,
+    /// beginning at a user message so no tool result is cut off from the call it answers.
+    fn window_start(&self) -> usize {
+        let mut used = 0;
+        let mut from = self.messages.len();
+        for (i, m) in self.messages.iter().enumerate().rev() {
+            if is_summary(m) {
+                continue;
+            }
+            used += m.to_string().len();
+            if used > CHAR_BUDGET || self.messages.len() - i > WINDOW {
+                break;
+            }
+            from = i;
+        }
+        (from..self.messages.len())
+            .find(|&i| self.messages[i]["role"] == "user")
+            // A single turn over the budget: from its start anyway, the model sees the request.
+            .or_else(|| (0..self.messages.len()).rev().find(|&i| self.messages[i]["role"] == "user"))
+            .unwrap_or(from)
+    }
+
+    /// The recent part of the conversation, summaries left out (see [Session::summary]).
+    pub fn window(&self) -> Vec<Value> {
+        self.messages[self.window_start()..].iter().filter(|m| !is_summary(m)).cloned().collect()
+    }
+
+    /// The latest summary of what came before the window, if there is one.
+    pub fn summary(&self) -> Option<&str> {
+        self.messages.iter().rev().find(|m| is_summary(m)).and_then(|m| m["content"].as_str())
+    }
+
+    /// Messages that left the window since the last summary: the previous summary (if any) and
+    /// those messages, to be summarized together; None when there are none.
+    pub fn compaction(&self) -> Option<(Option<String>, Vec<Value>)> {
+        let start = self.window_start();
+        let last = self.messages.iter().rev().find(|m| is_summary(m));
+        let covered = last.and_then(|m| m["upto"].as_u64()).unwrap_or(0) as usize;
+        let pending: Vec<Value> =
+            self.messages.get(covered..start)?.iter().filter(|m| !is_summary(m)).cloned().collect();
+        (!pending.is_empty()).then(|| (last.and_then(|m| m["content"].as_str()).map(str::to_owned), pending))
+    }
+
+    /// Keeps [text] as the summary of everything before the window.
+    pub fn add_summary(&mut self, text: &str) -> Result<(), String> {
+        let upto = self.window_start();
+        self.push(serde_json::json!({ "role": "system", "autobot": "summary", "upto": upto, "content": text }))
     }
 }
 
@@ -127,5 +177,39 @@ mod tests {
         let window = s.window();
         assert_eq!(window[0]["role"], "user");
         assert!(window.len() <= WINDOW);
+    }
+
+    #[test]
+    fn what_leaves_the_window_is_summarized_once() {
+        let dir = std::env::temp_dir().join(format!("autobot-compact-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut s = Session::open(&dir, "c").unwrap();
+        assert!(s.compaction().is_none());
+        // Big tool results: the character budget, not the count, closes the window.
+        for i in 0..8 {
+            s.push(json!({"role": "user", "content": format!("task {i}")})).unwrap();
+            s.push(json!({"role": "tool", "content": "x".repeat(12 * 1024)})).unwrap();
+        }
+        let window = s.window();
+        assert!(window.len() < 16 && window[0]["role"] == "user");
+        let (previous, pending) = s.compaction().unwrap();
+        assert!(previous.is_none());
+        assert_eq!(pending[0]["content"], "task 0");
+        s.add_summary("The owner asked for tasks 0 to 4.").unwrap();
+        assert!(s.compaction().is_none(), "nothing new left the window");
+        assert_eq!(s.summary(), Some("The owner asked for tasks 0 to 4."));
+        assert!(s.window().iter().all(|m| m["autobot"] != "summary"));
+        // More turns push more out: they come with the previous summary.
+        for i in 8..10 {
+            s.push(json!({"role": "user", "content": format!("task {i}")})).unwrap();
+            s.push(json!({"role": "tool", "content": "y".repeat(12 * 1024)})).unwrap();
+        }
+        let (previous, pending) = s.compaction().unwrap();
+        assert_eq!(previous.as_deref(), Some("The owner asked for tasks 0 to 4."));
+        assert!(pending.iter().all(|m| m["autobot"] != "summary"));
+        // Kept on disk.
+        let again = Session::open(&dir, "c").unwrap();
+        assert_eq!(again.summary(), Some("The owner asked for tasks 0 to 4."));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

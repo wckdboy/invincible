@@ -434,3 +434,33 @@ async fn the_agent_schedules_its_own_tasks_for_the_chat_that_asked() {
     assert!(cron.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.contains("cannot schedule more"))));
     assert_eq!(autobot::cron::Schedules::load(&dir).unwrap().schedules.len(), 1);
 }
+
+#[tokio::test]
+async fn a_long_conversation_is_summarized_not_forgotten() {
+    let (url, script) = gateway(vec![
+        say("The owner set up backups to /srv/backup and wants a weekly check."),
+        say("Weekly, as agreed."),
+    ])
+    .await;
+    let dir = temp("compact");
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let mut session = Session::open(&dir.join("sessions"), "long").unwrap();
+    for i in 0..10 {
+        session.push(json!({ "role": "user", "content": format!("step {i}: back up to /srv/backup") })).unwrap();
+        session.push(json!({ "role": "assistant", "content": "z".repeat(10 * 1024) })).unwrap();
+    }
+    let outcome = agent
+        .turn(&mut session, "How often do we check?", &owner(Answer::Deny), &mut HashSet::new(), &quiet)
+        .await
+        .unwrap();
+    assert_eq!(outcome.text, "Weekly, as agreed.");
+    let seen = script.lock().unwrap().seen.clone();
+    // First the summary (no tools), then the turn, with the summary in its system prompt.
+    assert!(seen[0].1.get("tools").is_none());
+    assert!(seen[0].1["messages"][1]["content"].as_str().unwrap().contains("step 0"));
+    let system = seen[1].1["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("Earlier in this conversation") && system.contains("/srv/backup"), "{system}");
+    assert!(!seen[1].1["messages"].to_string().contains("step 0:"), "the old part is not resent");
+    assert_eq!(session.summary(), Some("The owner set up backups to /srv/backup and wants a weekly check."));
+    assert!(Session::open(&dir.join("sessions"), "long").unwrap().compaction().is_none());
+}

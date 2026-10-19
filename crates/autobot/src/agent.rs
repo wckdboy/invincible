@@ -72,8 +72,17 @@ impl Agent {
                 session.push(json!({ "role": "assistant", "content": note }))?;
                 return Ok(Outcome { text: note, receipts });
             }
-            let mut messages = vec![json!({ "role": "system", "content": self.system_prompt() })];
-            messages.extend(session.window().iter().cloned());
+            let mut messages = vec![Value::Null];
+            if steps == 1 {
+                self.compact(session, events).await;
+            }
+            let mut system = self.system_prompt();
+            if let Some(summary) = session.summary() {
+                system.push_str("\n\nEarlier in this conversation (a summary; the recent part follows):\n");
+                system.push_str(summary);
+            }
+            messages[0] = json!({ "role": "system", "content": system });
+            messages.extend(session.window());
             let reply = match self.gateway.chat(&messages, &definitions, confirmed).await {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
@@ -136,6 +145,50 @@ impl Agent {
             events(Event::Tool(&format!("{name} {arguments}")));
         }
         self.tools.run(&call).await
+    }
+
+    /// Summarizes what left the window, so it is not simply forgotten. On the gateway like any
+    /// call (private turns stay local), with its receipt; when it fails, the old part is dropped
+    /// as before.
+    async fn compact(&self, session: &mut Session, events: &(dyn Fn(Event) + Send + Sync)) {
+        let Some((previous, pending)) = session.compaction() else { return };
+        let mut transcript = String::new();
+        if let Some(previous) = &previous {
+            transcript.push_str("Summary so far:\n");
+            transcript.push_str(previous);
+            transcript.push_str("\n\nThen:\n");
+        }
+        for m in &pending {
+            let text = match m["content"].as_str() {
+                Some(text) => text.chars().take(2000).collect::<String>(),
+                None if m.get("tool_calls").is_some() => format!("(calls {})", m["tool_calls"]),
+                None => continue,
+            };
+            transcript.push_str(&format!("{}: {text}\n", m["role"].as_str().unwrap_or("?")));
+        }
+        let ask = [
+            json!({ "role": "system", "content": "You summarize an agent's conversation for its own later use. Keep: what the owner asked for, decisions, facts learned, file and path names, commands that worked, and what is still open. At most 200 words, plain text, no preamble." }),
+            json!({ "role": "user", "content": transcript.chars().take(24_000).collect::<String>() }),
+        ];
+        match self.gateway.chat(&ask, &json!([]), false).await {
+            Ok(reply) => {
+                if let Some(id) = &reply.request_id {
+                    let decision = reply.decision.as_ref();
+                    events(Event::Receipt {
+                        id,
+                        model: decision.and_then(|d| d["model"].as_str()),
+                        tier: decision.and_then(|d| d["tier"].as_str()),
+                    });
+                }
+                let text = reply.message["content"].as_str().unwrap_or_default().trim().to_owned();
+                if !text.is_empty()
+                    && let Err(e) = session.add_summary(&text)
+                {
+                    tracing::warn!("summary not kept: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("conversation not summarized: {e}"),
+        }
     }
 
     /// Whether [action] may run, asking [approver] when the policy says to; logged either way.

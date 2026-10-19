@@ -220,7 +220,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Private by default:** agent turns carry `invincible-private`, so the router keeps them on local
   models; tool results carry your files and command output. With `[gateway] private = false` the
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
-- **Sessions:** one JSONL file per conversation in `~/.autobot/sessions`.
+- **Sessions:** one JSONL file per conversation in `~/.autobot/sessions`. Each model call gets the
+  recent part (at most about 12k tokens, so small local models keep room to think); what falls out
+  of it is summarized first, on the gateway like any call, and the summary leads the next prompt,
+  so a long conversation is condensed, not forgotten.
 - **Memory:** the agent keeps short facts with `remember` (your preferences, where things are,
   decisions) in `~/.autobot/memory.jsonl`, and every later conversation starts with them, newest
   first. `autobot memory` lists them; `autobot memory --forget 3` removes one.
