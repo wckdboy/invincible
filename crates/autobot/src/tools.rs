@@ -20,6 +20,9 @@ pub struct Tools {
     home: Option<PathBuf>,
     /// Only these tools (by name), when set: a recipe's tool groups ([groups]).
     only: Option<Vec<String>>,
+    sandbox: crate::sandbox::Mode,
+    /// Commands run sandboxed now: always, or unattended in a run with nobody watching.
+    confined: bool,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -112,12 +115,25 @@ pub enum Call {
 
 impl Tools {
     pub fn new(workdir: PathBuf, timeout: Duration) -> Self {
-        Self { workdir, timeout, home: None, only: None }
+        Self { workdir, timeout, home: None, only: None, sandbox: crate::sandbox::Mode::Off, confined: false }
     }
 
     /// With memory and skills from [home] (`$AUTOBOT_HOME`).
     pub fn with_home(mut self, home: PathBuf) -> Self {
         self.home = Some(home);
+        self
+    }
+
+    /// Commands sandboxed as [mode] says.
+    pub fn with_sandbox(mut self, mode: crate::sandbox::Mode) -> Self {
+        self.sandbox = mode;
+        self.confined = mode == crate::sandbox::Mode::Always;
+        self
+    }
+
+    /// For a run with nobody watching: commands are confined unless the sandbox is off.
+    pub fn unattended(mut self) -> Self {
+        self.confined = self.sandbox != crate::sandbox::Mode::Off;
         self
     }
 
@@ -382,9 +398,14 @@ impl Tools {
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
         tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
-        let mut child = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
+        let mut child = if self.confined {
+            crate::sandbox::command(command, &self.workdir)?
+        } else {
+            let mut plain = tokio::process::Command::new("sh");
+            plain.arg("-c").arg(command);
+            plain
+        };
+        let mut child = child
             .current_dir(&self.workdir)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -730,6 +751,32 @@ mod tests {
         assert!(matches!(tools.action(&git), Some(Action::Write { inside: true, hidden: true, .. })));
         let plain = tools.parse("write_file", r#"{"path":"notes/a.md","content":"x"}"#).unwrap();
         assert!(matches!(tools.action(&plain), Some(Action::Write { inside: true, hidden: false, .. })));
+        let _ = std::fs::remove_file(outside);
+    }
+
+    #[tokio::test]
+    async fn unattended_commands_write_only_in_the_working_directory() {
+        let (tools, dir) = tools();
+        let outside = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap()
+            .join(format!(".autobot-sandbox-test-{}", rand()));
+        let confined = tools.clone().with_sandbox(crate::sandbox::Mode::Unattended).unattended();
+        let command = format!("echo in > inside.txt; echo out > {}; echo done", outside.display());
+        let out = confined.run(&Call::Terminal { command: command.clone() }).await;
+        if out.contains("bwrap") {
+            // No usable sandbox here (not installed, or user namespaces disallowed): refused or
+            // failed, never run unconfined.
+            assert!(!dir.join("inside.txt").exists());
+            return;
+        }
+        assert_eq!(std::fs::read_to_string(dir.join("inside.txt")).unwrap(), "in\n", "{out}");
+        assert!(!outside.exists(), "a confined command wrote outside: {out}");
+        assert!(out.contains("done"), "{out}");
+        // Interactive turns are not confined unless the sandbox is \"always\".
+        let plain = tools.with_sandbox(crate::sandbox::Mode::Unattended);
+        plain.run(&Call::Terminal { command }).await;
+        assert!(outside.exists());
         let _ = std::fs::remove_file(outside);
     }
 

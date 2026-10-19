@@ -576,6 +576,7 @@ pub async fn run(agent: &crate::agent::Agent, home: &Path, schedule: &Schedule) 
     if unattended.approvals.mode != crate::config::ApprovalMode::Trust {
         unattended.approvals.mode = crate::config::ApprovalMode::Allowlist;
     }
+    unattended.tools = unattended.tools.clone().unattended();
     if let Some(groups) = &schedule.tools {
         unattended.tools = unattended.tools.clone().only(crate::tools::tools_for(groups));
     }

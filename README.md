@@ -231,6 +231,11 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
+- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes) run
+  sandboxed: they read what you can, but write only in the working directory and temporary
+  directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users
+  may need to install). Without a sandbox they are refused, not run unconfined.
+  `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off.
 - **Private by default:** agent turns carry `invincible-private`, so the router keeps them on local
   models; tool results carry your files and command output. With `[gateway] private = false` the
   router may use cloud models, and when its rules want a confirmation, the agent asks you.

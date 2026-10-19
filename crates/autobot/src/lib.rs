@@ -12,6 +12,7 @@ pub mod doctor;
 pub mod gateway;
 pub mod mcp;
 pub mod memory;
+pub mod sandbox;
 pub mod service;
 pub mod session;
 pub mod setup;
@@ -33,7 +34,9 @@ pub fn agent(config: &Config, home: &Path) -> Result<agent::Agent, String> {
     std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
     Ok(agent::Agent {
         gateway,
-        tools: tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout)).with_home(home.to_owned()),
+        tools: tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout))
+            .with_home(home.to_owned())
+            .with_sandbox(config.agent.sandbox),
         approvals: config.approvals.clone(),
         max_steps: config.agent.max_steps,
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),

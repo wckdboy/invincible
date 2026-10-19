@@ -466,6 +466,7 @@ async fn work(
     if unattended.approvals.mode != crate::config::ApprovalMode::Trust {
         unattended.approvals.mode = crate::config::ApprovalMode::Allowlist;
     }
+    unattended.tools = unattended.tools.clone().unattended();
     let post = |member: Option<&str>, text: String| {
         let telegram = telegram.cloned();
         let chat = task.notify;
