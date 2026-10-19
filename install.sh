@@ -236,6 +236,20 @@ else
     say "llama.cpp installed in $LLAMA_DIR"
 fi
 
+# --- The sandbox for unattended commands (Linux: bubblewrap) ---------------------------------
+# Scheduled tasks, board work and phone recipes run commands sandboxed; without bwrap they are
+# refused. macOS has sandbox-exec built in.
+if [ "$OS" = Linux ] && ! have bwrap; then
+    if have apt-get && ask "Install bubblewrap (the sandbox for unattended agent commands) with sudo?" y; then
+        sudo apt-get install -y -qq bubblewrap >&2 || warn "bubblewrap did not install"
+    elif have dnf && ask "Install bubblewrap (the sandbox for unattended agent commands) with sudo?" y; then
+        sudo dnf install -y -q bubblewrap >&2 || warn "bubblewrap did not install"
+    elif have apk && ask "Install bubblewrap (the sandbox for unattended agent commands) with sudo?" y; then
+        sudo apk add -q bubblewrap >&2 || warn "bubblewrap did not install"
+    fi
+    have bwrap || warn "no bubblewrap: the agent's scheduled tasks and recipes will refuse to run commands until it is installed (or [agent] sandbox = \"off\")"
+fi
+
 # The gateway finds llama-server on its PATH, unless told where it is.
 if [ -n "${LLAMA_SERVER:-}" ]; then
     config="$INV_HOME/config.toml"
