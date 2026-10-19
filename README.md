@@ -432,7 +432,19 @@ instructions, not making things up). On a MacBook (M-series, Metal), October 202
 | Qwen3 0.6B (Q8_0) | 13/40 | 0.2 s |
 | Qwen3.5 4B, thinking, reasoning tasks only | 4/4 (2/4 without) | 8.3 s |
 
-Real tasks from Autobot, Omnie and Nightfall go in task files of their own next to it.
+[`evals/projects.jsonl`](evals/projects.jsonl) has 50 tasks built from the code of Autobot,
+Omnie and Nightfall: each carries a real excerpt (Kotlin, Swift, TypeScript, C++, docs) and asks
+what it returns, which line is wrong, for one line of code, a JSON extraction, or the kind of unit
+and geometry arithmetic Nightfall does. Every expected answer was checked by running the code.
+
+| model | all | Autobot | Omnie | Nightfall |
+|---|---|---|---|---|
+| Qwen3.5 4B (Q4_K_M) | 30/50 | 9/17 | 10/16 | 11/17 |
+| Qwen3 0.6B (Q8_0) | 8/50 | 2/17 | 4/16 | 2/17 |
+
+The 4B model's misses are real ones, for example a glob whose `**/` needs a slash, a module
+resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254. Next: the same files
+against a frontier model, and samples of real requests.
 
 ## Repository
 
