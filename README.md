@@ -23,11 +23,10 @@ they make it faster when you choose to use them.
 > shows the node's signed receipts in each turn's privacy receipt
 > ([autobot#3](https://github.com/wckdboy/autobot/pull/3), released in
 > [Autobot 1.9.0](https://github.com/wckdboy/autobot/releases/tag/v1.9.0); iOS, agent screen
-> included, merged for the next release). Every request lands in a hash-chained audit log
+> included, in 1.10.0). Every request lands in a hash-chained audit log
 > ([spec/audit.md](spec/audit.md)) the phone can read, and a phone recipe can be handed to the node
 > to run there with its results collected back
-> ([autobot#7](https://github.com/wckdboy/autobot/pull/7),
-> [#8](https://github.com/wckdboy/autobot/pull/8), in review). Latest release:
+> ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0), Android and iOS). Latest release:
 > [v0.0.4](https://github.com/wckdboy/invincible/releases/tag/v0.0.4) (static Linux and macOS
 > binaries, reproducible, with build attestations, signed with a pinned key; it includes fixes
 > from an internal security review, while the independent one is still to come). An eval suite of
@@ -343,8 +342,7 @@ Done when, with the internet unplugged:
 1. One node, installed by the script, serves one strong open model.
 2. Autobot pairs with it and runs a real agent session on it, end to end.
 3. A recipe handed to the node runs past Autobot's 8-minute on-device limit and delivers its result.
-   (Built: [autobot#8](https://github.com/wckdboy/autobot/pull/8); a live test hands one over,
-   runs it on the node and collects it.)
+   (Shipped in Autobot 1.10.0; shown live: a recipe ran 9 min 54 s on the node and delivered.)
 4. The eval harness scores node vs. frontier on 50 real tasks from Autobot, Omnie and Nightfall.
 
 ## Running a node (today)
