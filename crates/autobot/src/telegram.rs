@@ -205,6 +205,13 @@ struct Chat {
     grants: HashSet<Action>,
 }
 
+/// A chat, and what was sent to it while a turn runs ([crate::tools::Inbox]).
+#[derive(Clone)]
+struct Slot {
+    chat: Arc<tokio::sync::Mutex<Chat>>,
+    inbox: crate::tools::Inbox,
+}
+
 /// Approvals waiting for a button, by number: the user who may press it, and where the answer goes.
 type Waiting = Arc<Mutex<HashMap<u64, (i64, oneshot::Sender<Answer>)>>>;
 
@@ -263,7 +270,7 @@ fn cut_line(text: &str) -> String {
 
 /// Answers messages until the process stops.
 pub async fn serve(bot: Bot, bots: Arc<Bots>, agent: Arc<Agent>, home: PathBuf) {
-    let chats: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<Chat>>>>> = Arc::default();
+    let chats: Arc<Mutex<HashMap<i64, Slot>>> = Arc::default();
     let waiting: Waiting = Arc::default();
     let mut offset = 0;
     let mut backoff = Duration::from_secs(1);
@@ -349,7 +356,7 @@ async fn handle(
     bots: &Bots,
     agent: &Arc<Agent>,
     home: &Path,
-    chats: &Mutex<HashMap<i64, Arc<tokio::sync::Mutex<Chat>>>>,
+    chats: &Mutex<HashMap<i64, Slot>>,
     waiting: &Waiting,
     message: &Value,
 ) -> Result<(), String> {
@@ -403,21 +410,33 @@ async fn handle(
         bot.send(chat_id, "Only text messages for now.").await?;
         return Ok(());
     };
-    let chat = {
+    let slot = {
         let mut chats = chats.lock().expect("chats");
         match chats.get(&chat_id) {
-            Some(chat) => chat.clone(),
+            Some(slot) => slot.clone(),
             None => {
                 let name =
                     if group { format!("telegram-g{}", chat_id.unsigned_abs()) } else { format!("telegram-{chat_id}") };
                 let session = Session::open(&home.join("sessions"), &name)?;
-                let chat = Arc::new(tokio::sync::Mutex::new(Chat { session, grants: HashSet::new() }));
-                chats.insert(chat_id, chat.clone());
-                chat
+                let slot = Slot {
+                    chat: Arc::new(tokio::sync::Mutex::new(Chat { session, grants: HashSet::new() })),
+                    inbox: Arc::default(),
+                };
+                chats.insert(chat_id, slot.clone());
+                slot
             }
         }
     };
-    let mut chat = chat.lock().await;
+    // A message while a turn runs steers it: taken in before the agent's next step.
+    let mut chat = match slot.chat.try_lock() {
+        Ok(chat) => chat,
+        Err(_) if !text.starts_with('/') => {
+            slot.inbox.lock().expect("inbox").push(text.to_owned());
+            bot.send(chat_id, "↪ Noted: I'll take that in before my next step.").await?;
+            return Ok(());
+        }
+        Err(_) => slot.chat.lock().await,
+    };
     match text.split_whitespace().next().unwrap_or_default() {
         "/start" | "/help" => {
             bot.send(
@@ -523,8 +542,8 @@ async fn handle(
     let context = crate::tools::TurnContext {
         session: session.id.clone(),
         telegram_chat: Some(chat_id),
-        agent: None,
-        board_task: None,
+        inbox: Some(slot.inbox.clone()),
+        ..Default::default()
     };
     let result = crate::tools::TURN.scope(context, agent.turn(session, text, &approver, grants, &events)).await;
     typing.abort();

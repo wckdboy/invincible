@@ -27,6 +27,7 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/sessions` | | `{"sessions": [{"id", "modified"}]}`, newest first; `modified` in Unix seconds |
 | `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape |
 | `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}` | An event stream (below) |
+| `POST /v1/agent/sessions/{id}/steer` | `{"text": "..."}` | `{"ok": true}`: a message for the turn running in the session, taken in before the agent's next step; `409` (`no_turn`) when none is running |
 | `POST /v1/agent/sessions/{id}/reset` | | `{"id"}`: the conversation starts over; the old one is kept on disk |
 | `POST /v1/agent/approvals/{approval}` | `{"answer": "once"\|"always"\|"deny"}` | `{"ok": true}`, or `404` when no such question is waiting |
 | `GET /v1/agent/schedules` | | `{"schedules": [{"id", "when", "task", "telegram", "enabled", "running", "next", "last"}]}`, plus `name`, `tools` and `origin` when set; `next` in Unix seconds or null, `last` null or `{"at", "ok", "result"}` |

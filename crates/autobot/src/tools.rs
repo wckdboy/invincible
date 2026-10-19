@@ -56,7 +56,12 @@ pub struct TurnContext {
     pub agent: Option<String>,
     /// The board task it works on, when it is one ([crate::board]).
     pub board_task: Option<String>,
+    /// What the owner sent while the turn runs: taken in before its next step.
+    pub inbox: Option<Inbox>,
 }
+
+/// Messages for a running turn ([TurnContext::inbox]).
+pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
 
 tokio::task_local! {
     pub static TURN: TurnContext;

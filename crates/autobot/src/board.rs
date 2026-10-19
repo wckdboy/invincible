@@ -488,12 +488,8 @@ async fn work(
     };
     tracing::info!(task = %task.id, agent = %task.agent, "board: working");
     let session = format!("board-{}-{}", task.id, task.answers.len());
-    let context = crate::tools::TurnContext {
-        session: session.clone(),
-        telegram_chat: task.notify,
-        agent: None,
-        board_task: None,
-    };
+    let context =
+        crate::tools::TurnContext { session: session.clone(), telegram_chat: task.notify, ..Default::default() };
     let run = unattended.run_member(&role, &session, &brief, &crate::approval::Refuse, &|_| {}, Some(task.id.clone()));
     let outcome = crate::tools::TURN.scope(context, run).await;
     let Ok(mut board) = Board::load(home) else { return };

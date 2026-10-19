@@ -407,8 +407,7 @@ async fn the_agent_schedules_its_own_tasks_for_the_chat_that_asked() {
     agent.tools = agent.tools.with_home(dir.clone());
     let mut session = Session::open(&dir.join("sessions"), "telegram-42").unwrap();
     let owner = owner(Answer::Deny);
-    let context =
-        autobot::tools::TurnContext { session: String::new(), telegram_chat: Some(42), agent: None, board_task: None };
+    let context = autobot::tools::TurnContext { session: String::new(), telegram_chat: Some(42), ..Default::default() };
     let before = chrono::Local::now();
     autobot::tools::TURN
         .scope(context, agent.turn(&mut session, "remind me in 2 minutes", &owner, &mut HashSet::new(), &quiet))
@@ -888,4 +887,36 @@ async fn a_plan_on_the_board_runs_in_order_asks_the_owner_and_finishes() {
             .unwrap()
             .contains("You asked the owner: Markdown or plain text?\nThe owner answered: Markdown")
     );
+}
+
+/// Approves, and while asked, the owner also sends a message to the running turn.
+struct Steering {
+    inbox: autobot::tools::Inbox,
+}
+
+impl Approver for Steering {
+    fn approve<'a>(&'a self, _: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        self.inbox.lock().unwrap().push("Use Markdown for the note.".into());
+        Box::pin(async { Answer::Once })
+    }
+}
+
+#[tokio::test]
+async fn a_message_sent_while_the_agent_works_steers_its_next_step() {
+    let (url, script) =
+        gateway(vec![call("terminal", json!({"command": "printf draft"})), say("Wrote it in Markdown.")]).await;
+    let dir = temp("steer");
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let inbox: autobot::tools::Inbox = Arc::default();
+    let owner = Steering { inbox: inbox.clone() };
+    let mut session = Session::open(&dir.join("sessions"), "s").unwrap();
+    let context = autobot::tools::TurnContext { inbox: Some(inbox.clone()), ..Default::default() };
+    let outcome = autobot::tools::TURN
+        .scope(context, agent.turn(&mut session, "write a note", &owner, &mut HashSet::new(), &quiet))
+        .await
+        .unwrap();
+    assert_eq!(outcome.text, "Wrote it in Markdown.");
+    let second = script.lock().unwrap().seen[1].1["messages"].to_string();
+    assert!(second.contains("(The owner adds, while you work:) Use Markdown for the note."), "{second}");
+    assert!(inbox.lock().unwrap().is_empty(), "taken in once");
 }

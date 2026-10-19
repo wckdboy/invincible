@@ -33,6 +33,8 @@ pub struct ApiState {
     sessions_dir: PathBuf,
     info: Value,
     open: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Open>>>>,
+    /// Messages for a session's running turn (`…/steer`).
+    inboxes: Mutex<HashMap<String, crate::tools::Inbox>>,
     waiting: Arc<Mutex<HashMap<String, oneshot::Sender<Answer>>>>,
 }
 
@@ -43,10 +45,23 @@ struct Open {
 }
 
 impl ApiState {
+    fn inbox(&self, id: &str) -> crate::tools::Inbox {
+        self.inboxes.lock().expect("inboxes").entry(id.to_owned()).or_default().clone()
+    }
+
     /// [home]: `$AUTOBOT_HOME` (conversations in `sessions/`, schedules beside them).
     pub fn new(agent: Arc<Agent>, token: String, home: PathBuf, info: Value) -> Self {
         let sessions_dir = home.join("sessions");
-        Self { agent, token, home, sessions_dir, info, open: Mutex::default(), waiting: Arc::default() }
+        Self {
+            agent,
+            token,
+            home,
+            sessions_dir,
+            info,
+            open: Mutex::default(),
+            inboxes: Mutex::default(),
+            waiting: Arc::default(),
+        }
     }
 }
 
@@ -57,6 +72,7 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/sessions/{id}", get(history))
         .route("/v1/agent/sessions/{id}/turns", post(turn))
         .route("/v1/agent/sessions/{id}/reset", post(reset))
+        .route("/v1/agent/sessions/{id}/steer", post(steer))
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
         .route("/v1/agent/schedules/{id}", axum::routing::delete(remove_schedule))
@@ -178,6 +194,23 @@ struct TurnBody {
     text: String,
 }
 
+/// `POST …/steer {"text"}`: a message for the turn running in the session, taken in before
+/// the agent's next step; `409` when no turn is running.
+async fn steer(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
+    let Ok(TurnBody { text }) = serde_json::from_slice(&body) else {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
+    };
+    let open = match state.open(&id) {
+        Ok(open) => open,
+        Err(e) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    };
+    if open.try_lock().is_ok() {
+        return error(StatusCode::CONFLICT, "no_turn", "no turn is running in this session; start one");
+    }
+    state.inbox(&id).lock().expect("inbox").push(text);
+    Json(json!({ "ok": true })).into_response()
+}
+
 async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
@@ -196,6 +229,7 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
         return error(StatusCode::CONFLICT, "session_busy", "a turn is running in this session");
     };
 
+    let inbox = state.inbox(&id);
     let (tx, rx) = mpsc::unbounded_channel::<Value>();
     let agent = state.agent.clone();
     let waiting = state.waiting.clone();
@@ -216,7 +250,9 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
             }
         };
         let Open { session, grants } = &mut *guard;
-        let last = match agent.turn(session, &text, &approver, grants, &events).await {
+        let context = crate::tools::TurnContext { inbox: Some(inbox), ..Default::default() };
+        let last = match crate::tools::TURN.scope(context, agent.turn(session, &text, &approver, grants, &events)).await
+        {
             Ok(outcome) => json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts }),
             Err(e) => json!({ "type": "error", "text": e }),
         };

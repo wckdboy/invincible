@@ -105,6 +105,19 @@ impl Agent {
                 session.push(json!({ "role": "assistant", "content": note }))?;
                 return Ok(Outcome { text: note, receipts });
             }
+            // What the owner added while it works (the lead only: members get their brief).
+            let added: Vec<String> = crate::tools::TURN
+                .try_with(|t| {
+                    t.agent.is_none().then(|| t.inbox.as_ref().map(|i| std::mem::take(&mut *i.lock().expect("inbox"))))
+                })
+                .ok()
+                .flatten()
+                .flatten()
+                .unwrap_or_default();
+            for text in added {
+                session
+                    .push(json!({ "role": "user", "content": format!("(The owner adds, while you work:) {text}") }))?;
+            }
             let mut messages = vec![Value::Null];
             if steps == 1 {
                 self.compact(session, events).await;
