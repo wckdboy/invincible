@@ -17,7 +17,7 @@ This file is the reference. The Autobot app keeps the same rules in
 | | Invincible | Autobot |
 | --- | --- | --- |
 | What it is | The node you own: a gateway that routes, redacts, receipts and audits every model call | The agent: on your phone, and on your machine through the node |
-| Signal | **Orange** `#9E4C0C` (text on paper) · `#C2651A` (marks on paper) · `#F0882E` (on ink) | **Lilac** `#5444BA` (on paper) · `#A99BF5` (on ink) |
+| Signal | **Orange** `#FF9A3D` (the symbol, on ink and on paper) · `#A85300` (text on paper) | **Lilac** `#5444BA` (on paper) · `#A99BF5` (on ink) |
 | Character | Calm infrastructure: tables, receipts, states | A capable colleague: conversation, work in progress, questions |
 | Symbol | a pixel lowercase **i** | a pixel lowercase **a** |
 | Wordmark | the i, then `invincible` | the a, then `autobot` |

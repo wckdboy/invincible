@@ -37,7 +37,7 @@ LLAMA_URL="https://github.com/ggml-org/llama.cpp/releases/download/$LLAMA_TAG"
 # The lab's terminal grammar (BRAND.md): a small square for each step in Invincible's orange,
 # yellow ! for what needs a look, ✗ for a failure; no color off a terminal or with NO_COLOR.
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-    C_SIGNAL='\033[38;5;208m' C_AMBER='\033[38;5;185m' C_ERROR='\033[38;5;209m' C_ASH='\033[38;5;245m' C_BOLD='\033[1m' C_OFF='\033[0m'
+    C_SIGNAL='\033[38;5;215m' C_AMBER='\033[38;5;185m' C_ERROR='\033[38;5;209m' C_ASH='\033[38;5;245m' C_BOLD='\033[1m' C_OFF='\033[0m'
 else
     C_SIGNAL='' C_AMBER='' C_ERROR='' C_ASH='' C_BOLD='' C_OFF=''
 fi

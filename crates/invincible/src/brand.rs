@@ -27,8 +27,8 @@ const fn color(r: u8, g: u8, b: u8, ansi: u8) -> Color {
 
 /// Autobot's signal: lilac (`#5444BA` on paper, `#A99BF5` here, for dark terminals).
 pub const LILAC: Color = color(0xA9, 0x9B, 0xF5, 147);
-/// Invincible's signal: orange (`#9E4C0C` on paper, `#F0882E` here, for dark terminals).
-pub const ORANGE: Color = color(0xF0, 0x88, 0x2E, 208);
+/// Invincible's signal: a bright, slightly pastel orange (`#FF9A3D`; `#A85300` for text on paper).
+pub const ORANGE: Color = color(0xFF, 0x9A, 0x3D, 215);
 /// Secondary text.
 pub const ASH: Color = color(0x8E, 0x8A, 0x84, 245);
 /// Structure: gutters, rules, hints.
