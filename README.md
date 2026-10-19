@@ -28,7 +28,7 @@ they make it faster when you choose to use them.
 > to run there with its results collected back
 > ([autobot#7](https://github.com/wckdboy/autobot/pull/7),
 > [#8](https://github.com/wckdboy/autobot/pull/8), in review). Latest release:
-> [v0.0.3](https://github.com/wckdboy/invincible/releases/tag/v0.0.3) (static Linux and macOS
+> [v0.0.4](https://github.com/wckdboy/invincible/releases/tag/v0.0.4) (static Linux and macOS
 > binaries, reproducible, with build attestations, signed with a pinned key; it includes fixes
 > from an internal security review, while the independent one is still to come). An eval suite of
 > 50 tasks built from Autobot, Omnie and Nightfall code runs on local models; the comparison with
