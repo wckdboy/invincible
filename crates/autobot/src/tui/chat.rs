@@ -503,10 +503,8 @@ impl Chat {
         let events = |event: crate::agent::Event| ui.event(event);
         let outcome = {
             let context = crate::tools::TurnContext { inbox: Some(inbox.clone()), ..Default::default() };
-            let turn = crate::tools::TURN.scope(
-                context,
-                self.agent.turn(&mut self.session, &request, &approver, &mut self.grants, &events),
-            );
+            let turn = crate::tools::TURN
+                .scope(context, self.agent.turn(&mut self.session, &request, &approver, &mut self.grants, &events));
             let mut turn = std::pin::pin!(turn);
             loop {
                 let press = async {
