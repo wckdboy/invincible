@@ -486,7 +486,7 @@ impl Chat {
         };
         let messages = self.session.messages.len();
         // `■ autobot 0.0.9 · via invincible`, then what this session is, as quiet rows.
-        println!(
+        let header = format!(
             "{} {}",
             invincible::brand::Product::Autobot.header(env!("CARGO_PKG_VERSION")),
             style::faint("· via invincible")
@@ -505,7 +505,17 @@ impl Chat {
                 ),
             ),
         ];
-        print!("{}", invincible::brand::rows(&rows));
+        // The mascot beside the first three lines (only with color; half blocks need it).
+        let lines: Vec<String> =
+            std::iter::once(header).chain(invincible::brand::rows(&rows).lines().map(str::to_owned)).collect();
+        let mascot = super::mascot::render(&super::mascot::MINI, invincible::brand::VERMILION);
+        for (i, line) in lines.iter().enumerate() {
+            match (mascot.is_empty(), mascot.get(i)) {
+                (true, _) => println!("{line}"),
+                (false, Some(art)) => println!("{art}  {line}"),
+                (false, None) => println!("        {line}"),
+            }
+        }
         let hint = if code {
             "/help   @ attach a file   ! run a command   /undo   esc stops a turn"
         } else {

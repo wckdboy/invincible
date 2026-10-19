@@ -81,6 +81,35 @@ Both CLIs and the installer speak one grammar:
 - Autobot's screens about the node ("My node", receipts from it) use Invincible's verdigris for
   the node's mark, so the user sees which product is speaking.
 
+## The mascot
+
+Autobot has a mascot: a small square robot, drawn on a 12×12 grid so it works as pixel art and
+in a terminal (half blocks, two pixels to a cell; the 6×6 mini sits beside `autobot`'s header).
+It shares the product's restraint: a warm-grey body, an ink visor, bone eyes, and **one colored
+pixel pair, the antenna light**, which is the signal.
+
+```
+.....RR.....    R  antenna light: vermilion; verdigris when it works on your node;
+.....SS.....       ash (off) when something failed
+..BBBBBBBB..    S  stem, ash
+.BBBBBBBBBB.    B  body: #C9C3BA on ink, #3A3632 on paper
+.BKKKKKKKKB.    K  visor: ink
+.BKEEKKEEKB.    E  eyes: bone, square like the mark
+.BKEEKKEEKB.
+.BKKKKKKKKB.
+.BBBBBBBBBB.
+..BBBBBBBB..
+..BB....BB..
+............
+```
+
+Frames: `idle`, `blink`, `think` (eyes up, antenna tilted), `work` (eyes down, reading),
+`happy` (`^ ^`), `oops` (`x x`, light off), and `mini`. SVGs for ink (`-dark`) and paper
+(`-light`) are in `[`assets/brand/mascot/`](assets/brand/mascot)`; `autobot-on-node-*` has the verdigris light. Use it small: an
+empty state, a welcome, the terminal header. Never as decoration behind text, never animated
+for its own sake (a blink every few seconds at most), and never on Invincible's own surfaces:
+the node has no mascot, only its mark.
+
 ## Writing the names
 
 - `Invincible`, `Autobot`, `Sovware`: capitalized in prose, lowercase in the wordmark and in
