@@ -42,6 +42,9 @@ pub struct Config {
     pub agents: std::collections::BTreeMap<String, crate::team::RoleConfig>,
     #[serde(default)]
     pub team: crate::team::TeamConfig,
+    /// MCP servers whose tools the agent can use ([crate::mcp]).
+    #[serde(default)]
+    pub mcp: std::collections::BTreeMap<String, crate::mcp::ServerConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

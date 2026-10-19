@@ -9,6 +9,7 @@ pub mod config;
 pub mod cron;
 pub mod doctor;
 pub mod gateway;
+pub mod mcp;
 pub mod memory;
 pub mod service;
 pub mod session;
@@ -35,6 +36,7 @@ pub fn agent(config: &Config, home: &Path) -> Result<agent::Agent, String> {
         approvals: config.approvals.clone(),
         max_steps: config.agent.max_steps,
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),
+        mcp: std::sync::Arc::new(mcp::Hub::new(config.mcp.clone())?),
     })
 }
 

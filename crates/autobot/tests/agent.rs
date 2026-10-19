@@ -101,6 +101,7 @@ fn agent(url: &str, dir: &std::path::Path, mode: ApprovalMode, private: bool) ->
         approvals: ApprovalConfig { mode, allow: vec!["echo".into()] },
         max_steps: 6,
         team: Default::default(),
+        mcp: Default::default(),
     }
 }
 
@@ -714,4 +715,69 @@ fn unattended_fetches_need_the_site_allowlisted() {
     }
     let ask = ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() };
     assert_eq!(check(&ask, &Action::Fetch("https://example.com".into())), Verdict::Ask);
+}
+
+fn mcp_hub(only: Option<Vec<String>>) -> autobot::mcp::Hub {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_server.py");
+    autobot::mcp::Hub::new(std::collections::BTreeMap::from([(
+        "calc".to_owned(),
+        autobot::mcp::ServerConfig {
+            command: "python3".into(),
+            args: vec![script.display().to_string()],
+            env: Default::default(),
+            tools: only,
+        },
+    )]))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_mcp_servers_tools_are_the_agents_own_approved_like_commands() {
+    let (url, script) = gateway(vec![call("calc__add", json!({"a": 2, "b": 40})), say("It is 42.")]).await;
+    let dir = temp("mcp");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.mcp = Arc::new(mcp_hub(Some(vec!["add".into()])));
+    let owner = owner(Answer::Once);
+    let mut session = Session::open(&dir.join("sessions"), "m").unwrap();
+    let outcome = agent.turn(&mut session, "2 + 40?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "It is 42.");
+    assert_eq!(
+        *owner.asked.lock().unwrap(),
+        vec![Action::Mcp { tool: "calc/add".into(), arguments: r#"{"a":2,"b":40}"#.into() }]
+    );
+    assert!(session.messages.iter().any(|m| m["role"] == "tool" && m["content"] == "42"));
+    // Only the tools it was told to offer.
+    let names: Vec<String> = script.lock().unwrap().seen[0].1["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(names.contains(&"calc__add".to_owned()) && !names.contains(&"calc__secret".to_owned()), "{names:?}");
+}
+
+#[tokio::test]
+async fn mcp_results_errors_and_the_allowlist() {
+    let hub = mcp_hub(None);
+    assert_eq!(hub.call("calc", "add", json!({"a": 1, "b": 2})).await.unwrap(), "3");
+    assert_eq!(hub.call("calc", "secret", json!({})).await.unwrap_err(), "nope");
+    assert!(hub.call("calc", "missing", json!({})).await.unwrap_err().contains("no tool"));
+    assert!(hub.call("nope", "add", json!({})).await.is_err());
+    let broken = autobot::mcp::Hub::new(std::collections::BTreeMap::from([(
+        "gone".to_owned(),
+        autobot::mcp::ServerConfig {
+            command: "/nonexistent/server".into(),
+            args: vec![],
+            env: Default::default(),
+            tools: None,
+        },
+    )]))
+    .unwrap();
+    let (tools, problems) = broken.tools().await;
+    assert!(tools.is_empty() && problems[0].contains("MCP server gone"));
+    use autobot::approval::{Verdict, check};
+    let config = ApprovalConfig { mode: ApprovalMode::Allowlist, allow: vec!["mcp:calc/add".into()] };
+    let call = |tool: &str| Action::Mcp { tool: tool.into(), arguments: "{}".into() };
+    assert_eq!(check(&config, &call("calc/add")), Verdict::Run);
+    assert!(matches!(check(&config, &call("calc/secret")), Verdict::Refuse(_)));
 }

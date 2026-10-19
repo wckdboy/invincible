@@ -429,5 +429,6 @@ pub fn describe(action: &Action) -> Value {
         Action::Read(path) => json!({ "kind": "read", "path": path.display().to_string() }),
         Action::Cloud(reason) => json!({ "kind": "cloud", "reason": reason }),
         Action::Fetch(url) => json!({ "kind": "fetch", "url": url }),
+        Action::Mcp { tool, arguments } => json!({ "kind": "mcp", "tool": tool, "arguments": arguments }),
     }
 }

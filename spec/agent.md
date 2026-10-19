@@ -69,6 +69,8 @@ An `approval` from a team member also has `agent` (its name), and its `text` sta
 {"kind": "write", "path": "/home/me/work/notes.md", "bytes": 120, "inside": true}
 {"kind": "read", "path": "/etc/hosts"}
 {"kind": "cloud", "reason": "cloud use needs confirmation"}
+{"kind": "fetch", "url": "https://docs.rs/serde"}
+{"kind": "mcp", "tool": "github/get_issue", "arguments": "{\"number\": 7}"}
 ```
 
 A question nobody answers within 10 minutes counts as `deny`. The turn goes on if the client
@@ -103,6 +105,7 @@ to the model and run, whatever the approval mode, and still under the unattended
 | `files-write` | `write_file`, `edit_file` (in the working directory) |
 | `memory` | `remember`, `search_sessions`, `propose_skill` |
 | `terminal` | `terminal` (allowlisted commands only) |
+| `mcp` | every configured MCP server's tools (`<server>__<tool>`; unattended, only `mcp:<server>/<tool>` allowlisted) |
 | `vault` | none: this machine has no such tool |
 
 No `tools` means every tool, as for schedules made here; a schedule from a device must name its

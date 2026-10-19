@@ -209,6 +209,17 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   text, through the gateway: under the node's network mode, so offline means no fetch and Tor
   carries it; HTTPS only; receipted and in the audit log; it asks first, and unattended runs may
   fetch only sites in the allowlist, written `https://docs.rs`). Results are cut to a size small local models can take.
+- **MCP servers:** any [Model Context Protocol](https://modelcontextprotocol.io) server over stdio
+  adds its tools (`<server>__<tool>`), each call asked for like a command, logged, and allowed
+  unattended only with `mcp:<server>/<tool>` in the allowlist:
+
+  ```toml
+  [mcp.github]
+  command = "npx"
+  args = ["-y", "@modelcontextprotocol/server-github"]
+  env = { GITHUB_PERSONAL_ACCESS_TOKEN = "…" }
+  tools = ["search_repositories", "get_issue"]   # optional: only these
+  ```
 - **Approvals** (`[approvals]` in `~/.autobot/config.toml`):
   - `ask` (default): commands, file writes and reads outside the working directory ask first:
     yes, always for this session, or no.

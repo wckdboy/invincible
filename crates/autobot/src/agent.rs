@@ -19,6 +19,8 @@ pub struct Agent {
     pub max_steps: usize,
     /// Members the agent can hand work to (empty: no `delegate` tool).
     pub team: std::sync::Arc<crate::team::Team>,
+    /// MCP servers whose tools it has.
+    pub mcp: std::sync::Arc<crate::mcp::Hub>,
 }
 
 /// What happens during a turn, for whoever is watching (a terminal, a chat).
@@ -70,6 +72,20 @@ impl Agent {
             && let Some(list) = definitions.as_array_mut()
         {
             list.push(self.team.definition());
+        }
+        if !self.mcp.is_empty()
+            && self.tools.offers("mcp")
+            && let Some(list) = definitions.as_array_mut()
+        {
+            let (tools, problems) = self.mcp.tools().await;
+            for problem in problems {
+                tracing::warn!("{problem}");
+            }
+            for tool in tools {
+                list.push(json!({ "type": "function", "function": {
+                    "name": tool.qualified(), "description": tool.description, "parameters": tool.schema,
+                }}));
+            }
         }
         let mut receipts = Vec::new();
         let mut confirmed = false;
@@ -234,6 +250,22 @@ impl Agent {
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> String {
+        // An MCP server's tool: `<server>__<tool>`, asked for like a command.
+        if let Some((server, tool)) = name.split_once("__")
+            && !self.mcp.is_empty()
+            && self.tools.offers("mcp")
+        {
+            let action = Action::Mcp { tool: format!("{server}/{tool}"), arguments: arguments.to_owned() };
+            if !self.allowed(session, &action, approver, grants, events).await {
+                return format!("refused: the owner did not approve this ({})", action.describe());
+            }
+            events(Event::Tool(&action.describe()));
+            let args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
+            return match self.mcp.call(server, tool, args).await {
+                Ok(text) => crate::tools::cut(text),
+                Err(e) => format!("error: {e}"),
+            };
+        }
         let call = match self.tools.parse(name, arguments) {
             Ok(call) => call,
             Err(e) => return format!("error: {e}"),

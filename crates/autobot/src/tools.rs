@@ -27,6 +27,8 @@ pub struct Tools {
 pub const GROUPS: &[(&str, &[&str])] = &[
     ("files-read", &["read_file", "list_dir", "read_skill"]),
     ("web", &["web_fetch"]),
+    // Every MCP server's tools.
+    ("mcp", &["mcp"]),
     ("files-write", &["write_file", "edit_file"]),
     ("memory", &["remember", "search_sessions", "propose_skill"]),
     ("terminal", &["terminal"]),
@@ -121,6 +123,11 @@ impl Tools {
     pub fn only(mut self, tools: Vec<String>) -> Self {
         self.only = Some(tools);
         self
+    }
+
+    /// Whether [name] is offered ("mcp" stands for every MCP tool).
+    pub fn offers(&self, name: &str) -> bool {
+        self.offered(name)
     }
 
     fn offered(&self, name: &str) -> bool {

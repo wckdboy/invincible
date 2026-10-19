@@ -120,6 +120,7 @@ async fn pairing_then_a_task_with_an_approval_by_button() {
         approvals: ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() },
         max_steps: 5,
         team: Default::default(),
+        mcp: Default::default(),
     });
     let bot = Bot::new(reqwest::Client::new(), &api, "TOKEN").unwrap();
     let bots = Arc::new(Bots { username: "test_bot".into(), members: Default::default() });
@@ -219,6 +220,7 @@ async fn a_team_works_in_a_group_each_member_on_its_own_bot() {
         approvals: ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() },
         max_steps: 5,
         team: Arc::new(autobot::team::Team::from_config(&roles, &Default::default()).unwrap()),
+        mcp: Default::default(),
     });
     let bot = Bot::new(reqwest::Client::new(), &api, "TOKEN").unwrap();
     let members = std::collections::HashMap::from([(

@@ -25,6 +25,11 @@ pub enum Action {
     Cloud(String),
     /// Fetch a web page (through the gateway, under the node's network policy).
     Fetch(String),
+    /// Call an MCP server's tool: `server/tool`, and the arguments (JSON).
+    Mcp {
+        tool: String,
+        arguments: String,
+    },
 }
 
 impl Action {
@@ -36,6 +41,7 @@ impl Action {
             Self::Read(_) => "read",
             Self::Cloud(_) => "cloud",
             Self::Fetch(_) => "fetch",
+            Self::Mcp { .. } => "mcp",
         }
     }
 
@@ -47,6 +53,9 @@ impl Action {
             Self::Read(path) => format!("read {} (outside the working directory)", path.display()),
             Self::Cloud(why) => format!("send this turn to a cloud model: {why}"),
             Self::Fetch(url) => format!("fetch {url}"),
+            Self::Mcp { tool, arguments } => {
+                format!("use {tool} {}", arguments.chars().take(300).collect::<String>())
+            }
         }
     }
 }
@@ -101,6 +110,12 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
     }
     if let Action::Command(command) = action
         && allowlisted(&config.allow, command)
+    {
+        return Verdict::Run;
+    }
+    // `mcp:<server>/<tool>` allows that tool, whatever its arguments.
+    if let Action::Mcp { tool, .. } = action
+        && config.allow.iter().any(|a| a.trim().strip_prefix("mcp:") == Some(tool.as_str()))
     {
         return Verdict::Run;
     }
