@@ -143,7 +143,19 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
                 config.approvals.mode
             )));
             // Unattended commands need a working sandbox (or they are refused).
-            if config.agent.sandbox == crate::sandbox::Mode::Off {
+            if let Some(docker) = &config.agent.docker {
+                let out = agent.tools.run(&crate::tools::Call::Terminal { command: "uname -sm".into() }).await;
+                if out.contains("[exit code 0]") {
+                    checks.push(ok(format!(
+                        "commands run in the container {} ({}): {}",
+                        docker.name(agent.tools.workdir()),
+                        docker.image,
+                        out.lines().next().unwrap_or_default()
+                    )));
+                } else {
+                    checks.push(bad(format!("[agent.docker]: {}", out.lines().next().unwrap_or_default())));
+                }
+            } else if config.agent.sandbox == crate::sandbox::Mode::Off {
                 checks.push(ok("sandbox off: unattended commands run unconfined ([agent] sandbox)"));
             } else {
                 let probe = agent.tools.clone().unattended();

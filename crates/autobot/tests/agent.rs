@@ -129,8 +129,8 @@ async fn an_approved_command_runs_and_its_output_goes_back() {
     assert_eq!(headers["invincible-private"], "1", "agent turns are private by default");
     assert_eq!(
         first["tools"].as_array().unwrap().len(),
-        9,
-        "terminal, read, todo, write, edit, fetch, search, find, list"
+        10,
+        "terminal, process, read, todo, write, edit, fetch, search, find, list"
     );
     assert_eq!(first["messages"][0]["role"], "system");
     // The second call carries the tool call and its result, without the reasoning.
@@ -376,6 +376,7 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
         names,
         [
             "terminal",
+            "process",
             "read_file",
             "todo",
             "write_file",
@@ -584,7 +585,7 @@ async fn the_lead_hands_work_to_its_team_in_parallel() {
         "the lead's conversation stays with the lead"
     );
     let coder = member("coder");
-    assert_eq!(names(&coder), ["terminal"]);
+    assert_eq!(names(&coder), ["terminal", "process"]);
     assert_eq!(coder["model"], "auto");
     // Both answers went back to the lead, by name.
     let back = seen[3].1["messages"].to_string();
@@ -1005,7 +1006,7 @@ async fn a_finished_turn_is_kept_as_a_trajectory_with_what_the_model_saw() {
     let roles: Vec<&str> = t["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
     assert_eq!(roles, ["system", "user", "assistant", "tool", "assistant", "tool", "assistant"]);
     assert_eq!(t["messages"][6]["content"], "It is ok.");
-    assert_eq!(t["tools"].as_array().unwrap().len(), 9);
+    assert_eq!(t["tools"].as_array().unwrap().len(), 10);
     assert_eq!(t["meta"]["outcome"], "answer");
     assert_eq!(t["meta"]["refused"], 1, "rm was not allowlisted");
     assert_eq!(t["meta"]["models"], json!(["qwen"]));

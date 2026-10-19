@@ -25,6 +25,8 @@ pub struct Tools {
     confined: bool,
     /// Most text one result hands back ([RESULT_LIMIT] unless the model takes more).
     limit: usize,
+    /// Commands run in this container instead of here ([crate::docker]).
+    docker: Option<std::sync::Arc<crate::docker::Docker>>,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -36,7 +38,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("mcp", &["mcp"]),
     ("files-write", &["write_file", "edit_file"]),
     ("memory", &["remember", "search_sessions", "propose_skill"]),
-    ("terminal", &["terminal"]),
+    ("terminal", &["terminal", "process"]),
     ("plan", &["todo"]),
 ];
 
@@ -75,6 +77,16 @@ tokio::task_local! {
 pub enum Call {
     Terminal {
         command: String,
+    },
+    /// A command left running ([crate::procs]): a server, a watcher.
+    Background {
+        command: String,
+    },
+    /// A background process: list, output, wait or stop.
+    Process {
+        action: String,
+        id: Option<u32>,
+        seconds: u64,
     },
     ReadFile {
         path: PathBuf,
@@ -151,7 +163,19 @@ impl Tools {
             sandbox: crate::sandbox::Mode::Off,
             confined: false,
             limit: RESULT_LIMIT,
+            docker: None,
         }
+    }
+
+    /// Commands in a container ([crate::docker]).
+    pub fn with_docker(mut self, docker: crate::docker::Docker) -> Self {
+        self.docker = Some(std::sync::Arc::new(docker));
+        self
+    }
+
+    /// The container commands run in, if any.
+    pub fn docker(&self) -> Option<&crate::docker::Docker> {
+        self.docker.as_deref()
     }
 
     /// With memory and skills from [home] (`$AUTOBOT_HOME`).
@@ -274,9 +298,22 @@ impl Tools {
         json!([
             function(
                 "terminal",
-                "Run a shell command (sh -c) in the working directory and return its output and exit code.",
-                json!({ "command": { "type": "string", "description": "The command line." } }),
+                "Run a shell command (sh -c) in the working directory and return its output and exit code. For something that keeps running (a dev server, a watcher, a long build), set background: it returns at once with a process number for the process tool.",
+                json!({
+                    "command": { "type": "string", "description": "The command line." },
+                    "background": { "type": "boolean", "description": "Leave it running and return at once (default false)." },
+                }),
                 &["command"],
+            ),
+            function(
+                "process",
+                "The commands left running in the background: list them, read what one printed since you last looked (output), wait up to seconds for it to end and read (wait), or stop it and what it started (stop).",
+                json!({
+                    "action": { "type": "string", "enum": ["list", "output", "wait", "stop"] },
+                    "id": { "type": "integer", "description": "The process number (not for list)." },
+                    "seconds": { "type": "integer", "description": "For wait: at most this long (default 30)." },
+                }),
+                &["action"],
             ),
             function(
                 "read_file",
@@ -363,7 +400,22 @@ impl Tools {
             args.get(key).and_then(Value::as_str).map(str::to_owned).ok_or(format!("`{key}` is missing"))
         };
         Ok(match name {
+            "terminal" if args.get("background").and_then(Value::as_bool) == Some(true) => {
+                Call::Background { command: text("command")? }
+            }
             "terminal" => Call::Terminal { command: text("command")? },
+            "process" => {
+                let action = text("action")?;
+                if !matches!(action.as_str(), "list" | "output" | "wait" | "stop") {
+                    return Err(format!("unknown action {action:?} (list, output, wait or stop)"));
+                }
+                let id = args.get("id").and_then(Value::as_u64).map(|n| n.min(u32::MAX as u64) as u32);
+                if action != "list" && id.is_none() {
+                    return Err("`id` is missing".to_owned());
+                }
+                let seconds = args.get("seconds").and_then(Value::as_u64).unwrap_or(30);
+                Call::Process { action, id, seconds }
+            }
             "read_file" => Call::ReadFile {
                 path: self.resolve(&text("path")?),
                 offset: args.get("offset").and_then(Value::as_u64).map(|n| n.max(1) as usize),
@@ -409,7 +461,7 @@ impl Tools {
     /// What [call] needs approved, if anything. Reading inside the working directory does not.
     pub fn action(&self, call: &Call) -> Option<Action> {
         match call {
-            Call::Terminal { command } => Some(Action::Command(command.clone())),
+            Call::Terminal { command } | Call::Background { command } => Some(Action::Command(command.clone())),
             Call::Fetch { url } => Some(Action::Fetch(url.clone())),
             Call::WriteFile { path, content } => Some(Action::Write {
                 path: path.clone(),
@@ -438,6 +490,7 @@ impl Tools {
             | Call::SearchSessions { .. }
             | Call::ListSchedules
             | Call::CancelSchedule { .. }
+            | Call::Process { .. }
             | Call::Todo { .. } => None,
         }
     }
@@ -445,6 +498,16 @@ impl Tools {
     pub async fn run(&self, call: &Call) -> String {
         let result = match call {
             Call::Terminal { command } => self.terminal(command).await,
+            Call::Background { command } => self.background(command).await,
+            Call::Process { action, id, seconds } => {
+                let wait = Duration::from_secs((*seconds).min(self.timeout.as_secs().max(1)));
+                match (action.as_str(), id) {
+                    ("output", Some(id)) => crate::procs::output(*id, Duration::ZERO).await,
+                    ("wait", Some(id)) => crate::procs::output(*id, wait).await,
+                    ("stop", Some(id)) => crate::procs::stop(*id).await,
+                    _ => Ok(crate::procs::list()),
+                }
+            }
             Call::ReadFile { path, offset, limit } => read(path).await.map(|text| lines(&text, *offset, *limit)),
             Call::Todo { items } => todo(items),
             Call::WriteFile { path, content } => write(path, content).await,
@@ -507,9 +570,38 @@ impl Tools {
         cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit)
     }
 
+    /// [command] left running; its number, and what it printed in its first second.
+    async fn background(&self, command: &str) -> Result<String, String> {
+        std::fs::create_dir_all(&self.workdir).map_err(|e| format!("{}: {e}", self.workdir.display()))?;
+        let mut stopper = None;
+        let child = if let Some(docker) = &self.docker {
+            let name = docker.ensure(&self.workdir).await?;
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default();
+            let pidfile = format!("/tmp/autobot-bg-{stamp}.pid");
+            stopper = Some(crate::docker::Docker::stop_command(&name, &pidfile));
+            docker.background(&name, command, &self.workdir, &pidfile)
+        } else if self.confined {
+            crate::sandbox::command(command, &self.workdir)?
+        } else {
+            let mut plain = tokio::process::Command::new("sh");
+            plain.arg("-c").arg(command);
+            plain
+        };
+        let id = crate::procs::start(command, child, &self.workdir, stopper)?;
+        Ok(format!(
+            "started background process {id}; read its output with process {{\"action\": \"output\", \"id\": {id}}}, stop it with action stop"
+        ))
+    }
+
     async fn terminal(&self, command: &str) -> Result<String, String> {
         tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
-        let mut child = if self.confined {
+        let mut child = if let Some(docker) = &self.docker {
+            let name = docker.ensure(&self.workdir).await?;
+            docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
+        } else if self.confined {
             crate::sandbox::command(command, &self.workdir)?
         } else {
             let mut plain = tokio::process::Command::new("sh");

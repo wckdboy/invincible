@@ -474,7 +474,12 @@ impl Agent {
             if !self.allowed(session, &action, approver, grants, events).await {
                 return format!("refused: the owner did not approve this ({})", action.describe());
             }
-            events(Event::Tool(&action.describe()));
+            match &call {
+                crate::tools::Call::Background { command } => {
+                    events(Event::Tool(&format!("run in the background: {command}")))
+                }
+                _ => events(Event::Tool(&action.describe())),
+            }
         } else {
             events(Event::Tool(&format!("{name} {arguments}")));
         }
@@ -503,13 +508,38 @@ impl Agent {
     /// as before.
     async fn compact(&self, session: &mut Session, events: &(dyn Fn(Event) + Send + Sync)) {
         let Some((previous, pending)) = session.compaction() else { return };
+        if let Err(e) = self.summarize(session, previous, &pending, None, events).await {
+            tracing::warn!("conversation not summarized: {e}");
+        }
+    }
+
+    /// Folds everything but the last turn into the summary now (`/compact`); how many messages
+    /// it folded.
+    pub async fn compact_now(
+        &self,
+        session: &mut Session,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> Result<usize, String> {
+        let Some((previous, pending, cut)) = session.compaction_all() else { return Ok(0) };
+        self.summarize(session, previous, &pending, Some(cut), events).await?;
+        Ok(pending.len())
+    }
+
+    async fn summarize(
+        &self,
+        session: &mut Session,
+        previous: Option<String>,
+        pending: &[Value],
+        upto: Option<usize>,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> Result<(), String> {
         let mut transcript = String::new();
         if let Some(previous) = &previous {
             transcript.push_str("Summary so far:\n");
             transcript.push_str(previous);
             transcript.push_str("\n\nThen:\n");
         }
-        for m in &pending {
+        for m in pending {
             let text = match m["content"].as_str() {
                 Some(text) => text.chars().take(2000).collect::<String>(),
                 None if m.get("tool_calls").is_some() => format!("(calls {})", m["tool_calls"]),
@@ -532,13 +562,15 @@ impl Agent {
                     });
                 }
                 let text = reply.message["content"].as_str().unwrap_or_default().trim().to_owned();
-                if !text.is_empty()
-                    && let Err(e) = session.add_summary(&text)
-                {
-                    tracing::warn!("summary not kept: {e}");
+                if text.is_empty() {
+                    return Err("the model gave no summary".to_owned());
+                }
+                match upto {
+                    Some(upto) => session.add_summary_upto(&text, upto),
+                    None => session.add_summary(&text),
                 }
             }
-            Err(e) => tracing::warn!("conversation not summarized: {e}"),
+            Err(e) => Err(e.to_string()),
         }
     }
 
@@ -602,6 +634,19 @@ impl Agent {
              Work step by step, check results, and answer briefly in plain text.",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
+        );
+        if let Some(docker) = self.tools.docker() {
+            prompt.push_str(&format!(
+                "\nCommands run in a Linux container ({image}, network {net}) with the working directory \
+                 mounted at the same path: what you install there stays in the container, the files are \
+                 the owner's.",
+                image = docker.image,
+                net = docker.network,
+            ));
+        }
+        prompt.push_str(
+            "\nFor something that keeps running (a dev server, a watcher), use terminal with background: \
+             true, then the process tool to read its output or stop it; never end a command with `&`.",
         );
         // A member: who it is, before the rest; it reports back to the lead.
         let member = crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten();

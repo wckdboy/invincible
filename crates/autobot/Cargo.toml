@@ -24,6 +24,8 @@ tracing-subscriber.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 chrono.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
 similar = "2"
 ignore = "0.4"
 globset = "0.4"
@@ -31,7 +33,7 @@ regex = "1"
 crossterm = "0.28"
 rustyline = "15"
 unicode-width = "0.2"
-rustix = { version = "1", features = ["termios", "event", "stdio", "fs"] }
+rustix = { version = "1", features = ["termios", "event", "stdio", "fs", "process"] }
 
 [lints]
 workspace = true

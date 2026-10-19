@@ -163,6 +163,12 @@ enum Command {
         #[command(subcommand)]
         action: Option<SkillsAction>,
     },
+    /// Webhooks that start tasks in `autobot serve` ([hooks] in the config): list them, or make
+    /// a secret for a new one.
+    Hooks {
+        #[command(subcommand)]
+        action: Option<HooksAction>,
+    },
     /// Scheduled tasks, run by `autobot serve` without anyone to ask: allowlisted commands and
     /// writes in the working directory only.
     Cron {
@@ -177,6 +183,12 @@ enum SkillsAction {
     Accept { name: String },
     /// Throw a proposed skill away.
     Reject { name: String },
+}
+
+#[derive(Subcommand)]
+enum HooksAction {
+    /// Make (or replace) the secret for hook NAME and print it, with the config to add.
+    New { name: String },
 }
 
 #[derive(Subcommand)]
@@ -244,7 +256,9 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Chat { session, new, model } => runtime()?.block_on(async {
             let agent = autobot::agent(&config, &home)?;
             let options = autobot::tui::chat::Options { session, new, model, code: false };
-            autobot::tui::chat::run(&config, home, agent, options).await
+            let done = autobot::tui::chat::run(&config, home, agent, options).await;
+            autobot::procs::stop_all().await;
+            done
         }),
         Command::Code { dir, model, approvals, session, new } => {
             let dir = match dir {
@@ -267,7 +281,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 let mut agent = autobot::agent_in(&config, &home, Some(dir))?;
                 autobot::for_coding(&mut agent);
                 let options = autobot::tui::chat::Options { session, new, model, code: true };
-                autobot::tui::chat::run(&config, home, agent, options).await
+                let done = autobot::tui::chat::run(&config, home, agent, options).await;
+                autobot::procs::stop_all().await;
+                done
             })
         }
         Command::Run { task, session, dir, model, approvals, json, cloud } => runtime()?.block_on(async {
@@ -313,6 +329,7 @@ fn run(cli: Cli) -> Result<(), String> {
             };
             let approver = Unattended { cloud };
             let outcome = agent.turn(&mut session, &task, &approver, &mut HashSet::new(), &events).await;
+            autobot::procs::stop_all().await;
             match outcome {
                 Ok(outcome) if json => {
                     println!(
@@ -406,6 +423,7 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Cron { action } => cron(action, &config, &home),
+        Command::Hooks { action } => hooks(action, &config, &home),
         Command::Memory { forget } => {
             let memory = autobot::memory::Memory::new(&home);
             if let Some(id) = forget {
@@ -795,6 +813,33 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
             None => std::future::pending::<()>().await,
         }
     };
+    let hooks = async {
+        let Some(listen) = config.hooks.listen.filter(|_| !config.hooks.hooks.is_empty()) else {
+            return std::future::pending::<()>().await;
+        };
+        if let Some(bad) = config.hooks.hooks.keys().find(|n| !autobot::hooks::valid_name(n)) {
+            tracing::error!("[hooks.{bad}]: not a hook name (letters, digits, - and _); hooks are off");
+            return std::future::pending::<()>().await;
+        }
+        let listener = match tokio::net::TcpListener::bind(listen).await {
+            Ok(listener) => listener,
+            Err(e) => {
+                tracing::error!("hooks: listen on {listen}: {e}");
+                return std::future::pending::<()>().await;
+            }
+        };
+        let names: Vec<&String> = config.hooks.hooks.keys().collect();
+        tracing::info!("webhooks on http://{listen}/hooks/<name> ({names:?})");
+        let app = autobot::hooks::app(
+            agent.clone(),
+            home.clone(),
+            config.hooks.hooks.clone(),
+            bot.as_ref().map(|(bot, _)| bot.clone()),
+        );
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!("hooks: {e}");
+        }
+    };
     let schedules = autobot::cron::scheduler(agent.clone(), home.clone(), bot.as_ref().map(|(bot, _)| bot.clone()));
     let board = autobot::board::dispatcher(agent.clone(), home.clone(), bot.clone());
     let heartbeat = async {
@@ -815,6 +860,7 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         () = api => Ok(()),
         () = telegram => Ok(()),
         () = schedules => Ok(()),
+        () = hooks => Ok(()),
         () = shutdown() => Ok(()),
     }
 }
@@ -862,4 +908,51 @@ async fn shutdown() {
     }
     #[cfg(not(unix))]
     let _ = tokio::signal::ctrl_c().await;
+}
+
+fn hooks(action: Option<HooksAction>, config: &Config, home: &std::path::Path) -> Result<(), String> {
+    match action {
+        Some(HooksAction::New { name }) => {
+            let secret = autobot::hooks::new_secret(home, &name)?;
+            let listen = config.hooks.listen.map_or("127.0.0.1:7794".to_owned(), |l| l.to_string());
+            println!(
+                "secret for {name} (kept in {}):\n\n  {secret}\n",
+                autobot::hooks::secret_path(home, &name).display()
+            );
+            if !config.hooks.hooks.contains_key(&name) {
+                println!("add to {}:\n", home.join("config.toml").display());
+                if config.hooks.listen.is_none() {
+                    println!("  [hooks]\n  listen = \"{listen}\"\n");
+                }
+                println!("  [hooks.{name}]\n  task = \"What to do when it is called\"\n  telegram = true\n");
+            }
+            println!(
+                "then restart `autobot serve`. Callers sign the body like GitHub (X-Hub-Signature-256) or send\n\
+                 Authorization: Bearer <secret> to POST http://{listen}/hooks/{name}"
+            );
+            Ok(())
+        }
+        None => {
+            if config.hooks.hooks.is_empty() {
+                println!("no hooks: `autobot hooks new <name>` makes one");
+                return Ok(());
+            }
+            let listen = config.hooks.listen.map_or("(no [hooks] listen: off)".to_owned(), |l| format!("http://{l}"));
+            for (name, hook) in &config.hooks.hooks {
+                let secret = if autobot::hooks::secret_path(home, name).exists() || hook.secret_file.is_some() {
+                    ""
+                } else {
+                    " (no secret yet: `autobot hooks new` it)"
+                };
+                println!("{name}  {listen}/hooks/{name}{secret}");
+                println!("    {}", hook.task.trim().chars().take(100).collect::<String>());
+                if let Some(run) = autobot::hooks::last_run(home, name) {
+                    let when = autobot::cron::local(run.at).format("%Y-%m-%d %H:%M");
+                    let first = run.result.lines().next().unwrap_or_default().chars().take(100).collect::<String>();
+                    println!("    last run {when}: {}{first}", if run.ok { "" } else { "✗ " });
+                }
+            }
+            Ok(())
+        }
+    }
 }

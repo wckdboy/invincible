@@ -113,6 +113,11 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
     {
         return Verdict::Run;
     }
+    // `cloud`: turns with nobody to ask (schedules, hooks, the board) may use a cloud model
+    // that keeps prompts; the owner said so ahead of time.
+    if matches!(action, Action::Cloud(_)) && config.allow.iter().any(|a| a.trim() == "cloud") {
+        return Verdict::Run;
+    }
     // `mcp:<server>/<tool>` allows that tool, whatever its arguments.
     if let Action::Mcp { tool, .. } = action
         && config.allow.iter().any(|a| a.trim().strip_prefix("mcp:") == Some(tool.as_str()))
@@ -150,7 +155,8 @@ pub fn allowlisted(allow: &[String], command: &str) -> bool {
     allow
         .iter()
         .map(|a| a.trim())
-        .filter(|a| !a.is_empty())
+        // `cloud` is a permission, not a command.
+        .filter(|a| !a.is_empty() && *a != "cloud")
         .any(|a| command == a || command.strip_prefix(a).is_some_and(|rest| rest.starts_with(' ')))
 }
 
@@ -161,6 +167,16 @@ mod tests {
 
     fn config(mode: ApprovalMode) -> ApprovalConfig {
         ApprovalConfig { mode, allow: vec!["git status".into(), "ls".into()] }
+    }
+
+    #[test]
+    fn cloud_in_the_allowlist_lets_unattended_turns_use_cloud_models() {
+        let mut c = config(ApprovalMode::Allowlist);
+        let cloud = Action::Cloud("deepseek keeps prompts".into());
+        assert!(matches!(check(&c, &cloud), Verdict::Refuse(_)));
+        c.allow.push("cloud".into());
+        assert_eq!(check(&c, &cloud), Verdict::Run);
+        assert!(!allowlisted(&c.allow, "cloud"), "not a command");
     }
 
     #[test]

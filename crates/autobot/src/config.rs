@@ -45,6 +45,9 @@ pub struct Config {
     /// MCP servers whose tools the agent can use ([crate::mcp]).
     #[serde(default)]
     pub mcp: std::collections::BTreeMap<String, crate::mcp::ServerConfig>,
+    /// Webhooks that start tasks ([crate::hooks]).
+    #[serde(default)]
+    pub hooks: crate::hooks::HooksConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -144,6 +147,9 @@ pub struct AgentConfig {
     /// on the agent's own work ([crate::trajectory]).
     #[serde(default)]
     pub trajectories: bool,
+    /// Commands run in a container ([crate::docker]): `[agent.docker] image = "…"`.
+    #[serde(default)]
+    pub docker: Option<crate::docker::Docker>,
 }
 
 fn heartbeat() -> String {
@@ -184,6 +190,7 @@ impl Default for AgentConfig {
             trajectories: false,
             context_kib: None,
             stream: true,
+            docker: None,
         }
     }
 }

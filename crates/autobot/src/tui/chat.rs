@@ -62,6 +62,10 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/context", "how much of the conversation each call sends, or set it in KiB"),
     ("/undo", "put back the files the last turn changed, and take the turn back"),
     ("/diff", "the project's uncommitted changes (git diff)"),
+    ("/init", "write or improve the project's AGENTS.md"),
+    ("/compact", "fold the conversation so far into a summary (keeps the last turn)"),
+    ("/ps", "background processes: /ps, /ps <n> (its output), /ps stop <n>"),
+    ("/commands", "your own commands (.autobot/commands, .claude/commands, ~/.autobot/commands)"),
     ("/status", "model, approvals, session, context"),
     ("/new", "start the conversation over"),
     ("/fork", "continue in a copy of this conversation: /fork [name]"),
@@ -94,6 +98,7 @@ impl Input {
         let (asks, asked) = std::sync::mpsc::channel::<String>();
         let (reply, replies) = tokio::sync::mpsc::unbounded_channel();
         let history = home.join("history");
+        let home = home.to_owned();
         std::thread::spawn(move || {
             let config = rustyline::Config::builder()
                 .auto_add_history(false)
@@ -108,7 +113,8 @@ impl Input {
             else {
                 return;
             };
-            editor.set_helper(Some(Helper { workdir }));
+            let custom = crate::commands::list(&workdir, &home).into_iter().map(|c| format!("/{}", c.name)).collect();
+            editor.set_helper(Some(Helper { workdir, custom }));
             editor.bind_sequence(
                 rustyline::KeyEvent(rustyline::KeyCode::Enter, rustyline::Modifiers::ALT),
                 rustyline::Cmd::Newline,
@@ -146,6 +152,8 @@ impl Input {
 /// go on to the next.
 struct Helper {
     workdir: PathBuf,
+    /// The owner's own commands, with their slash.
+    custom: Vec<String>,
 }
 
 impl rustyline::Helper for Helper {}
@@ -186,8 +194,10 @@ impl rustyline::completion::Completer for Helper {
         if before.starts_with('/') && !before.contains(' ') {
             let pairs = COMMANDS
                 .iter()
-                .filter(|(c, _)| c.starts_with(before))
-                .map(|(c, _)| rustyline::completion::Pair { display: (*c).to_owned(), replacement: format!("{c} ") })
+                .map(|(c, _)| *c)
+                .chain(self.custom.iter().map(String::as_str))
+                .filter(|c| c.starts_with(before))
+                .map(|c| rustyline::completion::Pair { display: c.to_owned(), replacement: format!("{c} ") })
                 .collect();
             return Ok((0, pairs));
         }
@@ -409,6 +419,7 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
             match chat.command(text).await {
                 Ok(Some(Next::Exit)) => return Ok(()),
                 Ok(Some(Next::Prefill(text))) => initial = text,
+                Ok(Some(Next::Send(text))) => chat.turn(&text).await,
                 Ok(None) => {}
                 Err(e) => println!("{}", style::red(&e)),
             }
@@ -422,6 +433,8 @@ enum Next {
     Exit,
     /// Start the next prompt with this text (an undone request, to change and send again).
     Prefill(String),
+    /// Send this as the owner's message (a command's prompt).
+    Send(String),
 }
 
 impl Chat {
@@ -706,6 +719,52 @@ impl Chat {
                     style::accent(&format!("{:<11}", "!command")),
                     style::gray("run it yourself; its output goes with your next message")
                 );
+                for c in crate::commands::list(self.agent.tools.workdir(), &self.home) {
+                    println!("  {} {}", style::accent(&format!("/{:<10}", c.name)), style::gray(&c.description));
+                }
+            }
+            "/init" => return Ok(Some(Next::Send(crate::commands::INIT.to_owned()))),
+            "/compact" => {
+                println!("{}", style::gray("summarizing…"));
+                let folded = self.agent.compact_now(&mut self.session, &|_| {}).await?;
+                if folded == 0 {
+                    println!("{}", style::gray("nothing to fold yet"));
+                } else {
+                    println!(
+                        "{}",
+                        style::gray(&format!(
+                            "folded {folded} messages into the summary; the last turn stays as it is"
+                        ))
+                    );
+                }
+            }
+            "/ps" => {
+                let (action, id) = match arg.split_once(' ') {
+                    Some((action, id)) => (action, id.trim()),
+                    None if arg.is_empty() => ("list", ""),
+                    None => ("output", arg),
+                };
+                let id = || id.parse::<u32>().map_err(|_| "/ps <n> or /ps stop <n> (see /ps)".to_owned());
+                let text = match action {
+                    "list" => crate::procs::list(),
+                    "stop" | "kill" => crate::procs::stop(id()?).await?,
+                    _ => crate::procs::output(id()?, std::time::Duration::ZERO).await?,
+                };
+                println!("{}", style::gray(text.trim_end()));
+            }
+            "/commands" => {
+                let all = crate::commands::list(self.agent.tools.workdir(), &self.home);
+                if all.is_empty() {
+                    println!(
+                        "{}",
+                        style::gray(
+                            "no commands yet: a Markdown file in .autobot/commands (this project) or ~/.autobot/commands is one; $ARGUMENTS takes what follows"
+                        )
+                    );
+                }
+                for c in all {
+                    println!("  {} {}", style::accent(&format!("/{:<10}", c.name)), style::gray(&c.description));
+                }
             }
             "/clear" => print!("\x1b[2J\x1b[H"),
             "/new" => {
@@ -930,7 +989,15 @@ impl Chat {
                 }
             }
             "/board" => print!("{}", crate::board::Board::load(&self.home)?.listing()),
-            other => return Err(format!("{other}: not a command (/help)")),
+            other => {
+                let custom = crate::commands::list(self.agent.tools.workdir(), &self.home);
+                let Some(command) = custom.iter().find(|c| other.strip_prefix('/') == Some(c.name.as_str())) else {
+                    return Err(format!("{other}: not a command (/help)"));
+                };
+                let prompt = crate::commands::expand(command, arg)?;
+                println!("{}", style::gray(&format!("  ⎿ /{} ({} characters)", command.name, prompt.len())));
+                return Ok(Some(Next::Send(prompt)));
+            }
         }
         Ok(None)
     }

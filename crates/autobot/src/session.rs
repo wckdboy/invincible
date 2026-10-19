@@ -211,6 +211,8 @@ impl Session {
             }
             from = i;
         }
+        // Never before what the latest summary covers (`/compact` summarizes up to the last turn).
+        let from = from.max(self.covered()).min(self.messages.len());
         (from..self.messages.len())
             .find(|&i| self.messages[i]["role"] == "user")
             // A single turn over the budget: from its start anyway, the model sees the request.
@@ -242,7 +244,26 @@ impl Session {
     /// Keeps [text] as the summary of everything before the window.
     pub fn add_summary(&mut self, text: &str) -> Result<(), String> {
         let upto = self.window_start();
+        self.add_summary_upto(text, upto)
+    }
+
+    /// Keeps [text] as the summary of the messages before [upto] (a user message).
+    pub fn add_summary_upto(&mut self, text: &str, upto: usize) -> Result<(), String> {
         self.push(serde_json::json!({ "role": "system", "autobot": "summary", "upto": upto, "content": text }))
+    }
+
+    /// How many messages the latest summary covers.
+    fn covered(&self) -> usize {
+        self.messages.iter().rev().find(|m| is_summary(m)).and_then(|m| m["upto"].as_u64()).unwrap_or(0) as usize
+    }
+
+    /// Everything not yet summarized but the last turn (`/compact`): the previous summary, those
+    /// messages, and where the last turn starts; None when there is nothing to fold.
+    pub fn compaction_all(&self) -> Option<(Option<String>, Vec<Value>, usize)> {
+        let cut = (0..self.messages.len()).rev().find(|&i| self.messages[i]["role"] == "user")?;
+        let covered = self.covered();
+        let pending: Vec<Value> = self.messages.get(covered..cut)?.iter().filter(|m| !is_summary(m)).cloned().collect();
+        (!pending.is_empty()).then(|| (self.summary().map(str::to_owned), pending, cut))
     }
 }
 
@@ -396,6 +417,27 @@ mod tests {
         assert!(super::search(&dir, "database", 5, "a").is_empty(), "the current conversation is skipped");
         assert!(super::search(&dir, "xy", 5, "").is_empty(), "short words alone find nothing");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn compact_folds_all_but_the_last_turn() {
+        let dir = std::env::temp_dir().join(format!("autobot-compact-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut s = Session::open(&dir, "c").unwrap();
+        for i in 0..3 {
+            s.push(json!({"role": "user", "content": format!("task {i}")})).unwrap();
+            s.push(json!({"role": "assistant", "content": format!("done {i}")})).unwrap();
+        }
+        let (previous, pending, cut) = s.compaction_all().unwrap();
+        assert!(previous.is_none());
+        assert_eq!(pending.len(), 4);
+        s.add_summary_upto("tasks 0 and 1 done", cut).unwrap();
+        let window = s.window();
+        assert_eq!(window.len(), 2, "{window:?}");
+        assert_eq!(window[0]["content"], "task 2");
+        assert!(s.compaction_all().is_none());
+        assert!(s.compaction().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

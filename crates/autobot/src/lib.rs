@@ -6,15 +6,19 @@ pub mod agent;
 pub mod api;
 pub mod approval;
 pub mod board;
+pub mod commands;
 pub mod config;
 pub mod cron;
 pub mod diff;
+pub mod docker;
 pub mod doctor;
 pub mod eval;
 pub mod gateway;
 pub mod heartbeat;
+pub mod hooks;
 pub mod mcp;
 pub mod memory;
+pub mod procs;
 pub mod sandbox;
 pub mod search;
 pub mod service;
@@ -50,6 +54,9 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         .with_sandbox(config.agent.sandbox);
     if let Some(kib) = config.agent.context_kib {
         tools = tools.with_context(kib);
+    }
+    if let Some(docker) = &config.agent.docker {
+        tools = tools.with_docker(docker.clone());
     }
     if let Some(groups) = &config.agent.tools {
         if let Some(unknown) = groups.iter().find(|g| !tools::GROUPS.iter().any(|(n, _)| n == g)) {

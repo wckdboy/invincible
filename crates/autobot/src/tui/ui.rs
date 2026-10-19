@@ -314,6 +314,9 @@ impl Ui {
             let path = std::path::Path::new(p);
             path.strip_prefix(&self.workdir).map(|r| r.display().to_string()).unwrap_or_else(|_| p.to_owned())
         };
+        if let Some(command) = what.strip_prefix("run in the background: ") {
+            return format!("{} {} {}", style::bold("Start"), style::code(command), style::gray("(background)"));
+        }
         if let Some(command) = what.strip_prefix("run: ") {
             return format!("{} {}", style::bold("Run"), style::code(command));
         }
@@ -358,6 +361,15 @@ impl Ui {
                 line
             }
             "find_files" => format!("{} {}", style::bold("Find"), style::code(&arg("pattern"))),
+            "process" => {
+                let id = args["id"].as_u64().map(|n| format!(" {n}")).unwrap_or_default();
+                match args["action"].as_str().unwrap_or("list") {
+                    "list" => style::bold("Processes"),
+                    "stop" => format!("{}{id}", style::bold("Stop process")),
+                    "wait" => format!("{}{id}", style::bold("Wait for process")),
+                    _ => format!("{}{id}", style::bold("Output of process")),
+                }
+            }
             "remember" => format!("{} {}", style::bold("Remember"), style::italic(&arg("text"))),
             "read_skill" => format!("{} {}", style::bold("Skill"), arg("name")),
             "search_sessions" => format!("{} {}", style::bold("Recall"), arg("query")),
