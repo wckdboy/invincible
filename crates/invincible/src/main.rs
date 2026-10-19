@@ -167,11 +167,55 @@ enum CloudAction {
 }
 
 /// How to restart the gateway so it reads its config again.
-fn restart_hint() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "restart the gateway for this to take effect: launchctl kickstart -k gui/$(id -u)/sh.invincible.gateway (or stop and start `invincible serve`)"
+/// The home the gateway service uses (its INVINCIBLE_HOME, or ~/.invincible), when there is a
+/// service.
+fn service_home() -> Option<std::path::PathBuf> {
+    let user = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    let file = if cfg!(target_os = "macos") {
+        user.join("Library/LaunchAgents/sh.invincible.gateway.plist")
     } else {
-        "restart the gateway for this to take effect: systemctl --user restart invincible.service (or stop and start `invincible serve`)"
+        user.join(".config/systemd/user/invincible.service")
+    };
+    let text = std::fs::read_to_string(file).ok()?;
+    // `INVINCIBLE_HOME=/x` (systemd) or `<key>INVINCIBLE_HOME</key><string>/x</string>` (launchd).
+    let set = text.split_once("INVINCIBLE_HOME").map(|(_, rest)| {
+        let rest = rest.trim_start_matches(['=', '<', '/', 'k', 'e', 'y', '>']).trim_start();
+        let rest = rest.strip_prefix("<string>").unwrap_or(rest);
+        rest.split(['<', '"', '\n']).next().unwrap_or_default().trim().to_owned()
+    });
+    Some(set.filter(|h| !h.is_empty()).map(std::path::PathBuf::from).unwrap_or_else(|| user.join(".invincible")))
+}
+
+fn same(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// The gateway reads its config when it starts: restarts it when it runs as a service with
+/// [config_path] (the default config), and says how otherwise.
+fn restart_gateway(config_path: &std::path::Path, home: &std::path::Path) {
+    use std::process::{Command, Stdio};
+    let quiet = |c: &mut Command| c.stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+    let default = config_path == home.join("config.toml") && service_home().is_some_and(|served| same(&served, home));
+    let restarted = default
+        && if cfg!(target_os = "macos") {
+            let uid =
+                Command::new("id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
+            uid.is_ok_and(|uid| {
+                let label = format!("gui/{uid}/sh.invincible.gateway");
+                quiet(Command::new("launchctl").args(["print", &label]))
+                    && quiet(Command::new("launchctl").args(["kickstart", "-k", &label]))
+            })
+        } else {
+            quiet(Command::new("systemctl").args(["--user", "is-active", "--quiet", "invincible.service"]))
+                && quiet(Command::new("systemctl").args(["--user", "restart", "invincible.service"]))
+        };
+    if restarted {
+        println!("restarted the gateway service; it uses the change now");
+    } else {
+        println!("restart the gateway (`invincible serve`) for this to take effect");
     }
 }
 
@@ -292,8 +336,8 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                     "note: [node] network is \"offline\", so nothing reaches it until you set network = \"direct\" (or tor/socks5)"
                 );
             }
+            restart_gateway(&config_path, &home);
             if !quiet {
-                println!("{}", restart_hint());
                 println!("then: autobot code --model {id}");
             }
             Ok(())
@@ -328,7 +372,7 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 return Err(format!("no cloud model {id:?}"));
             }
             // Its key, when `cloud add` put it in the keys directory.
-            let dir = config_path.parent().map(std::path::Path::to_path_buf).unwrap_or(home);
+            let dir = config_path.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| home.clone());
             if let Some(key) = key {
                 let key = if key.is_absolute() { key } else { dir.join(key) };
                 if key.parent() == Some(dir.join("keys").as_path()) {
@@ -336,7 +380,7 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 }
             }
             println!("removed {id}");
-            println!("{}", restart_hint());
+            restart_gateway(&config_path, &home);
             Ok(())
         }
     }

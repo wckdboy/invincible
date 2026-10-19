@@ -27,6 +27,31 @@ pub struct Options {
     pub code: bool,
 }
 
+/// What `autobot code` remembers between runs: the model and the approvals last chosen
+/// (`$AUTOBOT_HOME/code.json`), so a plain `autobot code` starts as the last one ended.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct Remembered {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub approvals: Option<String>,
+}
+
+impl Remembered {
+    pub fn load(home: &Path) -> Self {
+        std::fs::read_to_string(home.join("code.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, home: &Path) {
+        if let Ok(text) = serde_json::to_string_pretty(self) {
+            let _ = invincible::fsutil::replace_private(&home.join("code.json"), &text);
+        }
+    }
+}
+
 /// The slash commands, for `/help` and completion.
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "this list"),
@@ -324,6 +349,8 @@ struct Chat {
     models: Vec<ModelInfo>,
     /// What `!command` printed, for the next request.
     shell: String,
+    /// `autobot code`: the model and approvals are remembered for next time.
+    code: bool,
 }
 
 pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options) -> Result<(), String> {
@@ -344,10 +371,13 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
         ui: ui.clone(),
         models,
         shell: String::new(),
+        code: false,
     };
     if let Some(model) = &options.model {
-        chat.switch_model(model)?;
+        chat.choose_model(model).await?;
     }
+    chat.code = options.code;
+    chat.remember();
     chat.banner(options.code);
     let mut input = Input::start(&home, chat.agent.tools.workdir().to_owned());
     let mut initial = String::new();
@@ -589,6 +619,69 @@ impl Chat {
         }
     }
 
+    /// `autobot code` remembers the model and approvals for next time.
+    fn remember(&self) {
+        if self.code {
+            let remembered = Remembered {
+                model: Some(self.agent.gateway.model().to_owned()).filter(|m| m != "auto"),
+                approvals: Some(self.approvals().to_owned()),
+            };
+            remembered.save(&self.home);
+        }
+    }
+
+    /// Switches to [id]; a provider the gateway does not have yet (`anthropic`, `deepseek`, …)
+    /// is offered to be set up first: its key asked for here, added with `invincible cloud add`
+    /// (which restarts the gateway service).
+    async fn choose_model(&mut self, id: &str) -> Result<(), String> {
+        // What the gateway serves now (when it cannot say, the switch itself finds out).
+        let known = match self.agent.gateway.model_info().await {
+            Ok(models) => {
+                self.models = models;
+                id == "auto" || self.models.iter().any(|m| m.id == id)
+            }
+            Err(_) => true,
+        };
+        let Some(preset) = invincible::cloud::preset(id).filter(|_| !known) else { return self.switch_model(id) };
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return Err(format!("{id} is not set up on the gateway: `invincible cloud add {id}`"));
+        }
+        let model =
+            preset.model.ok_or(format!("{id} needs a model name: `invincible cloud add {id} --model <name>`"))?;
+        println!(
+            "{} {}",
+            style::bold(&format!("{id} is not set up on this gateway yet.")),
+            style::gray(&format!("It would use {model} at {}, data policy {}.", preset.base_url, preset.data_policy))
+        );
+        let key = invincible::term::read_hidden(&format!("  {id} API key (not shown; empty to cancel): "))
+            .map_err(|_| "cancelled".to_owned())?;
+        let invincible = crate::find_program("invincible").ok_or("the `invincible` command is not installed")?;
+        let mut child = std::process::Command::new(invincible)
+            .args(["cloud", "add", id, "--key-stdin", "--quiet"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write as _;
+            let _ = writeln!(stdin, "{key}");
+        }
+        if !child.wait().is_ok_and(|s| s.success()) {
+            return Err(format!("{id} was not added"));
+        }
+        // The gateway comes back with it.
+        let started = std::time::Instant::now();
+        while started.elapsed() < std::time::Duration::from_secs(20) {
+            if let Ok(models) = self.agent.gateway.model_info().await
+                && models.iter().any(|m| m.id == id)
+            {
+                self.models = models;
+                return self.switch_model(id);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        Err(format!("{id} is added; restart the gateway (`invincible serve`), then /model {id}"))
+    }
+
     fn switch_model(&mut self, id: &str) -> Result<(), String> {
         crate::use_model(&mut self.agent, &self.config, &self.models, id)?;
         self.all_tools = self.all_tools.clone().with_context(self.agent.options.context_kib.unwrap_or(48));
@@ -639,7 +732,8 @@ impl Chat {
                 println!("  {auto} {} {}", style::bold("auto"), style::gray("the gateway's router picks"));
             }
             "/model" | "/models" => {
-                self.switch_model(arg)?;
+                self.choose_model(arg).await?;
+                self.remember();
                 println!(
                     "{} {}{}",
                     style::gray("model"),
@@ -656,6 +750,7 @@ impl Chat {
                         "trust" => ApprovalMode::Trust,
                         other => return Err(format!("{other:?}: ask, edits, allowlist or trust")),
                     };
+                    self.remember();
                 }
                 let what = match self.agent.approvals.mode {
                     ApprovalMode::Ask => "everything that changes something asks first",

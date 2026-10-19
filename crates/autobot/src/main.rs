@@ -12,7 +12,10 @@ use autobot::{doctor, service, setup, telegram};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(version, about = "The Autobot Agent, on Invincible Gateway. With no command: chat.")]
+#[command(
+    version,
+    about = "The Autobot Agent, on Invincible Gateway. With no command: `autobot code` in a git repository, the chat anywhere else."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -39,10 +42,12 @@ enum Command {
     Code {
         /// The project [default: the current directory].
         dir: Option<PathBuf>,
-        /// The model to use (an id the gateway serves; a cloud model allows cloud use).
+        /// The model to use: an id the gateway serves (a cloud model allows cloud use), or a
+        /// provider to set up now (anthropic, deepseek, …). Remembered for next time.
         #[arg(long)]
         model: Option<String>,
         /// ask, edits (changes in the project run without asking), allowlist or trust.
+        /// Remembered for next time.
         #[arg(long)]
         approvals: Option<String>,
         /// The conversation [default: one per project].
@@ -227,7 +232,14 @@ fn run(cli: Cli) -> Result<(), String> {
     let home = config::home()?;
     let config_path = home.join("config.toml");
     let config = Config::load(&config_path)?;
-    match cli.command.unwrap_or(Command::Chat { session: "cli".into(), new: false, model: None }) {
+    // `autobot` alone: coding, in a git repository; the chat anywhere else.
+    let in_repo = std::env::current_dir().is_ok_and(|d| d.join(".git").exists());
+    let default = if in_repo {
+        Command::Code { dir: None, model: None, approvals: None, session: None, new: false }
+    } else {
+        Command::Chat { session: "cli".into(), new: false, model: None }
+    };
+    match cli.command.unwrap_or(default) {
         Command::Setup => setup::run(&mut setup::Prompt::new(std::io::stdin().lock()), &home),
         Command::Chat { session, new, model } => runtime()?.block_on(async {
             let agent = autobot::agent(&config, &home)?;
@@ -243,8 +255,11 @@ fn run(cli: Cli) -> Result<(), String> {
             if !dir.is_dir() {
                 return Err(format!("{} is not a directory", dir.display()));
             }
+            // What the last `autobot code` used, unless named here.
+            let remembered = autobot::tui::chat::Remembered::load(&home);
+            let model = model.or(remembered.model);
             let mut config = config;
-            if let Some(mode) = approvals {
+            if let Some(mode) = approvals.or(remembered.approvals) {
                 config.approvals.mode = approval_mode(&mode)?;
             }
             let session = session.unwrap_or_else(|| project_session(&dir));

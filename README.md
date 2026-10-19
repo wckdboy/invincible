@@ -209,8 +209,14 @@ confirmed once per session, private work on local models.
 
 ```sh
 cd ~/src/my-project
-autobot code --model deepseek --approvals edits
+autobot code --model anthropic --approvals edits   # the first time
+autobot                                            # after that, in any git repository
 ```
+
+Naming a provider the gateway does not have yet (`anthropic`, `deepseek`, …) sets it up there and
+then: the key is asked for (not shown), added with `invincible cloud add`, and the gateway
+service restarted. The model and approvals are remembered (`~/.autobot/code.json`), and plain
+`autobot` in a git repository is `autobot code`.
 
 - **The terminal:** answers stream in as Markdown (headings, lists, code blocks); each tool call is a line
   (`⏺ Read src/main.rs`, `⏺ Run cargo test`) with what it gave back (`⎿ 3 matches in 2 files`,
@@ -469,8 +475,8 @@ invincible cloud remove ds
 ```
 
 Presets know each provider's API, a model to start with, its context and its data policy;
-`egress = "never"` becomes `"ask"` with the first cloud model. Restart the gateway to use a new
-one. Automatic routing never picks a model that trains on prompts (DeepSeek's API does), so with
+`egress = "never"` becomes `"ask"` with the first cloud model, and the gateway service is
+restarted to use it (a gateway started by hand needs a restart). Automatic routing never picks a model that trains on prompts (DeepSeek's API does), so with
 no local model, name one: `autobot code --model deepseek`, or `[gateway] model` in the agent's
 config (setup does this for a gateway with only cloud models).
 
