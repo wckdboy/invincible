@@ -25,6 +25,10 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/schedules` | | `{"schedules": [{"id", "when", "task", "telegram", "next", "last"}]}`; `next` in Unix seconds or null, `last` null or `{"at", "ok", "result"}` |
 | `POST /v1/agent/schedules` | `{"when": "...", "task": "...", "telegram": bool}` | `{"id"}`, or `400` when `when` does not parse |
 | `DELETE /v1/agent/schedules/{id}` | | `{"ok": true}`, or `404` |
+| `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by"}]}`: the action log ([audit.md](audit.md)), newest `limit` (default 100, at most 500), oldest first |
+| `GET /v1/agent/memory` | | `{"facts": [{"id", "at", "text"}]}`: what the agent remembered (`remember`) |
+| `DELETE /v1/agent/memory/{id}` | | `{"ok": true}`, or `404` |
+| `GET /v1/agent/skills` | | `{"skills": [{"name", "description"}]}`: the owner's skills in `$AUTOBOT_HOME/skills` |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
 already running one answers `409` with type `session_busy`.

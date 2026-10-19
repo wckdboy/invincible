@@ -215,6 +215,10 @@ struct ChatApprover {
 }
 
 impl Approver for ChatApprover {
+    fn channel(&self) -> &'static str {
+        "telegram"
+    }
+
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
         Box::pin(async move {
             let id = u64::from_le_bytes(invincible::token::random::<8>().unwrap_or_default());

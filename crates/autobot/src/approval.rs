@@ -24,6 +24,16 @@ pub enum Action {
 }
 
 impl Action {
+    /// The kind, for the action log.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Command(_) => "command",
+            Self::Write { .. } => "write",
+            Self::Read(_) => "read",
+            Self::Cloud(_) => "cloud",
+        }
+    }
+
     /// One line for a prompt or a chat message.
     pub fn describe(&self) -> String {
         match self {
@@ -46,6 +56,11 @@ pub enum Answer {
 /// Whoever can say yes: the terminal, a Telegram chat, a paired app.
 pub trait Approver: Send + Sync {
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>>;
+
+    /// Where the owner answers, for the action log: `cli`, `app`, `telegram`.
+    fn channel(&self) -> &'static str {
+        "owner"
+    }
 }
 
 /// Says no to everything (one-shot runs with no one to ask).
@@ -54,6 +69,10 @@ pub struct Refuse;
 impl Approver for Refuse {
     fn approve<'a>(&'a self, _: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
         Box::pin(async { Answer::Deny })
+    }
+
+    fn channel(&self) -> &'static str {
+        "unattended"
     }
 }
 

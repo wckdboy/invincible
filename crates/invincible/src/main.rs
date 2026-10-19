@@ -88,6 +88,24 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Show what the node answered and what left it (the audit log, spec/audit.md).
+    Audit {
+        /// Only entries this recent: `30m`, `24h`, `7d`.
+        #[arg(long)]
+        since: Option<String>,
+        /// At most this many entries (the newest).
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+        /// Totals per model and per host reached, instead of the entries.
+        #[arg(long)]
+        summary: bool,
+        /// Check the log's chain and every receipt's signature.
+        #[arg(long)]
+        verify: bool,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print where a request would run, given a routing input (spec/routing.md) as JSON.
     Route {
         /// The input file; reads stdin when absent or `-`.
@@ -401,6 +419,73 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Audit { since, limit, summary, verify, json } => {
+            let home = config::home()?;
+            let log = invincible::audit::AuditLog::new(&home);
+            if verify {
+                let key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
+                let n = log.verify(&key.public())?;
+                println!("audit log intact: {n} entries, every receipt signed by this node");
+                return Ok(());
+            }
+            let since = match since {
+                Some(s) => {
+                    let seconds = parse_age(&s).ok_or_else(|| format!("--since {s:?}: use 30m, 24h or 7d"))?;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or_default();
+                    now.saturating_sub(seconds)
+                }
+                None => 0,
+            };
+            let entries = log.read(since, if summary { usize::MAX } else { limit });
+            if summary {
+                let totals = invincible::audit::summary(&entries);
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&totals).map_err(|e| e.to_string())?);
+                    return Ok(());
+                }
+                println!(
+                    "{} requests: {} ran, {} refused or asked",
+                    totals["requests"], totals["ran"], totals["refused"]
+                );
+                for m in totals["models"].as_array().into_iter().flatten() {
+                    println!(
+                        "  {:<24} {:>6} requests  {:>9} tokens in  {:>9} out",
+                        m["model"].as_str().unwrap_or("?"),
+                        m["requests"],
+                        m["tokens_in"],
+                        m["tokens_out"]
+                    );
+                }
+                let egress = totals["egress"].as_array().cloned().unwrap_or_default();
+                if egress.is_empty() {
+                    println!("nothing left the node");
+                }
+                for h in &egress {
+                    println!(
+                        "  left for {:<20} {:>6} requests  {:>10} bytes sent  {:>10} received",
+                        h["host"].as_str().unwrap_or("?"),
+                        h["requests"],
+                        h["bytes_sent"],
+                        h["bytes_received"]
+                    );
+                }
+                return Ok(());
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())?);
+                return Ok(());
+            }
+            if entries.is_empty() {
+                println!("no requests logged{}", if since > 0 { " in that time" } else { " yet" });
+            }
+            for entry in &entries {
+                println!("{}", audit_line(entry));
+            }
+            Ok(())
+        }
         Command::Route { file } => {
             let text = match file.filter(|f| f.as_os_str() != "-") {
                 Some(path) => std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
@@ -466,6 +551,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let mut state = AppState::new(engines, config.node.settings(), token)
         .with_cloud(cloud)
         .with_receipt_key(&config.remote.name(), receipt_key)
+        .with_audit(invincible::audit::AuditLog::new(&home))
         .with_agent(&config.agent.url);
     if config.remote.enabled() {
         let pairing = Arc::new(
@@ -499,6 +585,60 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         supervisor.abort();
     }
     Ok(())
+}
+
+/// `30m`, `24h`, `7d` in seconds.
+fn parse_age(text: &str) -> Option<u64> {
+    let text = text.trim();
+    let (n, unit) = text.split_at(text.find(|c: char| !c.is_ascii_digit())?);
+    let n: u64 = n.parse().ok()?;
+    Some(
+        n * match unit {
+            "s" => 1,
+            "m" => 60,
+            "h" => 3600,
+            "d" => 86_400,
+            _ => return None,
+        },
+    )
+}
+
+/// One audit entry as a line: when, who, where it ran, tokens, what left.
+fn audit_line(entry: &serde_json::Value) -> String {
+    let at = entry["at"]
+        .as_i64()
+        .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+        .map_or_else(|| "?".to_owned(), |t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string());
+    let receipt = &entry["receipt"]["receipt"];
+    let decision = &receipt["decision"];
+    let mut who = entry["caller"].as_str().unwrap_or("?").to_owned();
+    if let Some(client) = entry["client"].as_str() {
+        who = format!("{who} ({client})");
+    }
+    let what = match decision["action"].as_str() {
+        Some("run") => {
+            format!("{} on {}", decision["model"].as_str().unwrap_or("?"), decision["tier"].as_str().unwrap_or("?"))
+        }
+        Some(action) => format!("{action}: {}", decision["reason"].as_str().unwrap_or("?")),
+        None => "?".to_owned(),
+    };
+    let tokens =
+        receipt["tokens"].as_object().map(|t| format!("{}→{} tokens", t["input"], t["output"])).unwrap_or_default();
+    let egress: Vec<String> = receipt["egress"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| {
+            format!(
+                "{} via {}{}",
+                e["host"].as_str().unwrap_or("?"),
+                e["route"].as_str().unwrap_or("?"),
+                if e["ok"] == false { " (failed)" } else { "" }
+            )
+        })
+        .collect();
+    let left = if egress.is_empty() { "nothing left".to_owned() } else { format!("left: {}", egress.join(", ")) };
+    format!("{at}  {who:<22} {what:<32} {tokens:<18} {left}")
 }
 
 /// Calls the running node's admin API on loopback, with the local token.

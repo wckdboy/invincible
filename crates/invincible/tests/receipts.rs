@@ -79,6 +79,50 @@ async fn node(cloud_url: &str) -> String {
     serve(app(Arc::new(state))).await
 }
 
+#[tokio::test]
+async fn the_audit_log_keeps_every_receipt_with_who_asked() {
+    let dir = std::env::temp_dir().join(format!("invincible-audit-api-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (url, _) = provider(false).await;
+    let engine = Engine::attached("local", &engine().await, Some(64), true);
+    let cloud = CloudModel::new("claude", "upstream", &url, None, None, DataPolicy::Retention { days: 30 });
+    let key = ReceiptKey::from_seed(&[9; 32]);
+    let public = key.public();
+    let state =
+        AppState::new(vec![engine], NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto }, "t".into())
+            .with_cloud(vec![cloud])
+            .with_receipt_key("studio", key)
+            .with_audit(invincible::audit::AuditLog::new(&dir));
+    let node = serve(app(Arc::new(state))).await;
+    receipt_for(&node, say("auto", "hi"), &[("invincible-client", "autobot-agent")]).await;
+    receipt_for(&node, say("claude", "hi"), &[("invincible-confirmed", "1")]).await;
+    let audit: Value =
+        client().get(format!("{node}/v1/audit")).bearer_auth("t").send().await.unwrap().json().await.unwrap();
+    let entries = audit["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["caller"], "local");
+    assert_eq!(entries[0]["client"], "autobot-agent");
+    assert_eq!(entries[0]["api"], "chat");
+    assert_eq!(entries[1]["receipt"]["receipt"]["decision"]["model"], "claude");
+    assert_eq!(audit["summary"]["ran"], 2);
+    assert_eq!(audit["summary"]["egress"][0]["requests"], 1);
+    // `since` in the future: nothing.
+    let later: Value = client()
+        .get(format!("{node}/v1/audit?since=99999999999"))
+        .bearer_auth("t")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(later["entries"], json!([]));
+    // Behind the token.
+    assert_eq!(client().get(format!("{node}/v1/audit")).send().await.unwrap().status(), 401);
+    assert_eq!(invincible::audit::AuditLog::new(&dir).verify(&public), Ok(2));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn client() -> reqwest::Client {
     reqwest::Client::new()
 }

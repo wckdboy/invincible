@@ -229,6 +229,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `/cron add 0 8 * * 1-5 | summarize the overnight logs`, `/cron rm t1`) and from the Autobot app,
   through the agent API.
 - **Receipts:** each model call shows its model, tier and receipt id.
+- **Action log:** every command, file write, outside read and cloud send the agent asked for, whether
+  it ran, and who decided (the rules, an "always" earlier in the session, or you on the CLI, the
+  app or Telegram), in `~/.autobot/actions.jsonl`. `autobot actions` shows it; the app reads it
+  through the agent API.
 - **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
   no public address. Strangers get a one-time code, and nobody gets in until you run
   `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
@@ -338,6 +342,22 @@ public key; paired devices receive it when they pair). It records the routing de
 was redacted, and every attempt to reach a host off the node, with bytes sent and received. An empty
 `egress` list is a signed statement that nothing left the node. Receipts never contain prompt or
 answer text.
+
+### Audit log
+
+Every request the node answered is also written to `~/.invincible/audit.jsonl`
+([spec/audit.md](spec/audit.md)): its signed receipt, when, and who asked (`local`, or the paired
+device by name). Each entry carries the hash of the one before it, so an entry removed or edited
+later breaks the chain.
+
+```sh
+invincible audit                    # the newest requests: when, who, where it ran, tokens, what left
+invincible audit --since 7d --summary   # totals per model, and every host anything was sent to
+invincible audit --verify           # check the chain and every receipt's signature
+```
+
+Paired devices read the same log with `GET /v1/audit`. There is no telemetry: nothing about your
+requests leaves the node unless you send it.
 
 ### Pairing other machines
 

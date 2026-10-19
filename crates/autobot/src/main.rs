@@ -64,6 +64,12 @@ enum Command {
         #[arg(long)]
         forget: Option<u64>,
     },
+    /// What the agent asked to do and who allowed it (the action log).
+    Actions {
+        /// At most this many (the newest).
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+    },
     /// The owner's skills: how-to notes for the agent, one Markdown file each in $AUTOBOT_HOME/skills.
     Skills,
     /// Scheduled tasks, run by `autobot serve` without anyone to ask: allowlisted commands and
@@ -225,6 +231,27 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Actions { limit } => {
+            let entries = autobot::actions::ActionLog::new(&home).read(0, limit);
+            if entries.is_empty() {
+                println!("no actions yet");
+            }
+            for e in entries {
+                let at = chrono::DateTime::from_timestamp(e.at as i64, 0)
+                    .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_default();
+                let verdict = match (e.ran, e.by.as_str()) {
+                    (true, "policy") => "allowed by the rules".to_owned(),
+                    (true, "grant") => "allowed (always, this session)".to_owned(),
+                    (true, by) => format!("approved on {by}"),
+                    (false, "policy") => "refused by the rules".to_owned(),
+                    (false, "unattended") => "refused (no one to ask)".to_owned(),
+                    (false, by) => format!("denied on {by}"),
+                };
+                println!("{at}  {:<14} {:<30} {}", e.session, verdict, e.action);
+            }
+            Ok(())
+        }
         Command::Skills => {
             let skills = autobot::skills::list(&home);
             if skills.is_empty() {
@@ -358,6 +385,10 @@ struct TerminalApprover {
 }
 
 impl Approver for TerminalApprover {
+    fn channel(&self) -> &'static str {
+        "cli"
+    }
+
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
         Box::pin(async move {
             loop {

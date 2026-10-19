@@ -71,6 +71,7 @@ async fn node() -> Node {
     let state = Arc::new(
         AppState::new(vec![engine], settings, "token".into())
             .with_receipt_key("studio", receipt_key)
+            .with_audit(invincible::audit::AuditLog::new(&dir))
             .with_pairing(pairing.clone()),
     );
     tokio::spawn(remote::serve(listener, pairing.clone(), device_app(state)));
@@ -254,5 +255,13 @@ async fn a_device_pins_the_receipt_key_and_checks_receipts_through_the_tunnel() 
     let envelope: Value = client.get(format!("{door}/v1/receipts/{id}")).send().await.unwrap().json().await.unwrap();
     assert!(invincible::receipts::verify(&pinned, &envelope["receipt"], envelope["signature"].as_str().unwrap()));
     assert_eq!(envelope["receipt"]["egress"], json!([]));
+
+    // The node's audit log has it, as the device's request, and the device can read it.
+    let audit: Value = client.get(format!("{door}/v1/audit")).send().await.unwrap().json().await.unwrap();
+    let entry = audit["entries"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(entry["caller"], "device:phone");
+    assert_eq!(entry["receipt"], envelope);
+    assert_eq!(audit["summary"]["egress"], json!([]));
+    assert_eq!(invincible::audit::AuditLog::new(&node.dir).verify(&pinned), Ok(1));
     let _ = std::fs::remove_dir_all(dir);
 }

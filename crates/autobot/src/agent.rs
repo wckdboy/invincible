@@ -64,7 +64,7 @@ impl Agent {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
                     let action = Action::Cloud(why);
-                    if self.allowed(&action, approver, grants, events).await {
+                    if self.allowed(&session.id, &action, approver, grants, events).await {
                         confirmed = true;
                         steps -= 1;
                         continue;
@@ -94,7 +94,7 @@ impl Agent {
                 return Ok(Outcome { text: if text.is_empty() { "(no answer)".to_owned() } else { text }, receipts });
             }
             for (id, name, arguments) in calls {
-                let result = self.call(&name, &arguments, approver, grants, events).await;
+                let result = self.call(&session.id, &name, &arguments, approver, grants, events).await;
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
             }
         }
@@ -102,6 +102,7 @@ impl Agent {
 
     async fn call(
         &self,
+        session: &str,
         name: &str,
         arguments: &str,
         approver: &dyn Approver,
@@ -113,7 +114,7 @@ impl Agent {
             Err(e) => return format!("error: {e}"),
         };
         if let Some(action) = self.tools.action(&call) {
-            if !self.allowed(&action, approver, grants, events).await {
+            if !self.allowed(session, &action, approver, grants, events).await {
                 return format!("refused: the owner did not approve this ({})", action.describe());
             }
             events(Event::Tool(&action.describe()));
@@ -123,32 +124,49 @@ impl Agent {
         self.tools.run(&call).await
     }
 
+    /// Whether [action] may run, asking [approver] when the policy says to; logged either way.
     async fn allowed(
         &self,
+        session: &str,
         action: &Action,
         approver: &dyn Approver,
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> bool {
-        let verdict = if grants.contains(action) { Verdict::Run } else { approval::check(&self.approvals, action) };
-        match verdict {
-            Verdict::Run => true,
+        let granted = grants.contains(action);
+        let verdict = if granted { Verdict::Run } else { approval::check(&self.approvals, action) };
+        let (ran, by) = match verdict {
+            Verdict::Run => (true, if granted { "grant" } else { "policy" }),
             Verdict::Refuse(why) => {
                 events(Event::Refused(&why));
-                false
+                (false, "policy")
             }
             Verdict::Ask => match approver.approve(action).await {
-                Answer::Once => true,
+                Answer::Once => (true, approver.channel()),
                 Answer::Always => {
                     grants.insert(action.clone());
-                    true
+                    (true, approver.channel())
                 }
                 Answer::Deny => {
                     events(Event::Refused(&action.describe()));
-                    false
+                    (false, approver.channel())
                 }
             },
+        };
+        if let Some(home) = self.tools.home() {
+            let entry = crate::actions::Entry {
+                at: crate::actions::now(),
+                session: session.to_owned(),
+                kind: action.kind().to_owned(),
+                action: action.describe(),
+                ran,
+                by: by.to_owned(),
+            };
+            if let Err(e) = crate::actions::ActionLog::new(home).append(&entry) {
+                tracing::warn!("action log not written: {e}");
+            }
         }
+        ran
     }
 
     fn system_prompt(&self) -> String {

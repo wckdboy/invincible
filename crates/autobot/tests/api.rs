@@ -57,7 +57,7 @@ async fn stack(name: &str, answers: Vec<Value>, delay: Duration) -> (String, Str
     let model = model(answers, delay).await;
     let agent = Arc::new(Agent {
         gateway: Gateway::new(&format!("{model}/v1"), TOKEN, "auto", true).unwrap(),
-        tools: Tools::new(dir.join("work"), Duration::from_secs(5)),
+        tools: Tools::new(dir.join("work"), Duration::from_secs(5)).with_home(dir.clone()),
         approvals: ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() },
         max_steps: 5,
     });
@@ -162,6 +162,33 @@ async fn a_turn_through_the_gateway_with_an_approval() {
         .await
         .unwrap();
     assert!(history["messages"].as_array().unwrap().is_empty());
+
+    // The action log has the command, approved on the app.
+    let get = async |path: &str| -> Value {
+        client.get(format!("{gateway}{path}")).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap()
+    };
+    let actions = get("/v1/agent/actions").await;
+    assert_eq!(actions["actions"].as_array().unwrap().len(), 1);
+    let action = &actions["actions"][0];
+    assert_eq!(action["session"], "phone-1");
+    assert_eq!(action["kind"], "command");
+    assert_eq!(action["action"], "run: echo hi > out.txt");
+    assert_eq!((action["ran"].clone(), action["by"].clone()), (json!(true), json!("app")));
+
+    // Memory and skills, as the app shows them.
+    autobot::memory::Memory::new(&dir).add("Backups run at 02:00.").unwrap();
+    std::fs::create_dir_all(dir.join("skills")).unwrap();
+    std::fs::write(dir.join("skills/deploy.md"), "# Deploy the site\n1. git pull").unwrap();
+    assert_eq!(get("/v1/agent/memory").await["facts"][0]["text"], "Backups run at 02:00.");
+    assert_eq!(
+        get("/v1/agent/skills").await["skills"],
+        json!([{ "name": "deploy", "description": "Deploy the site" }])
+    );
+    let forget = client.delete(format!("{gateway}/v1/agent/memory/1")).bearer_auth(TOKEN).send().await.unwrap();
+    assert_eq!(forget.status(), 200);
+    assert_eq!(get("/v1/agent/memory").await["facts"], json!([]));
+    let again = client.delete(format!("{gateway}/v1/agent/memory/1")).bearer_auth(TOKEN).send().await.unwrap();
+    assert_eq!(again.status(), 404);
 }
 
 #[tokio::test]

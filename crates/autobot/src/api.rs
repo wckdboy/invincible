@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -60,6 +60,10 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
         .route("/v1/agent/schedules/{id}", axum::routing::delete(remove_schedule))
+        .route("/v1/agent/actions", get(actions))
+        .route("/v1/agent/memory", get(memory))
+        .route("/v1/agent/memory/{id}", axum::routing::delete(forget))
+        .route("/v1/agent/skills", get(skills))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token))
         .with_state(state)
 }
@@ -265,6 +269,38 @@ async fn add_schedule(State(state): State<Arc<ApiState>>, body: Bytes) -> Respon
     }
 }
 
+#[derive(Deserialize)]
+struct ActionsQuery {
+    #[serde(default)]
+    since: u64,
+    limit: Option<usize>,
+}
+
+async fn actions(State(state): State<Arc<ApiState>>, Query(q): Query<ActionsQuery>) -> Json<Value> {
+    let log = crate::actions::ActionLog::new(&state.home);
+    Json(json!({ "actions": log.read(q.since, q.limit.unwrap_or(100).clamp(1, 500)) }))
+}
+
+async fn memory(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    Json(json!({ "facts": crate::memory::Memory::new(&state.home).list() }))
+}
+
+async fn forget(State(state): State<Arc<ApiState>>, Path(id): Path<u64>) -> Response {
+    match crate::memory::Memory::new(&state.home).forget(id) {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "no such fact"),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+async fn skills(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    let skills: Vec<Value> = crate::skills::list(&state.home)
+        .into_iter()
+        .map(|s| json!({ "name": s.name, "description": s.description }))
+        .collect();
+    Json(json!({ "skills": skills }))
+}
+
 async fn remove_schedule(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
     let removed = crate::cron::Schedules::load(&state.home).and_then(|mut schedules| {
         let removed = schedules.remove(&id);
@@ -285,6 +321,10 @@ struct ApiApprover {
 }
 
 impl Approver for ApiApprover {
+    fn channel(&self) -> &'static str {
+        "app"
+    }
+
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
         Box::pin(async move {
             let Ok(bytes) = invincible::token::random::<16>() else { return Answer::Deny };

@@ -17,6 +17,7 @@ use invincible_policy::Decision;
 use regex::Regex;
 use serde_json::{Value, json};
 
+use crate::audit::AuditLog;
 use crate::fsutil;
 
 pub const REQUEST_ID_HEADER: &str = "invincible-request-id";
@@ -171,6 +172,10 @@ pub struct Draft {
     pub data_policy: Option<String>,
     pub redactions: BTreeMap<&'static str, usize>,
     pub attempts: Vec<Attempt>,
+    /// For the audit log, not the receipt: who asked, the client they named, which API.
+    pub caller: crate::audit::Caller,
+    pub client: Option<String>,
+    pub api: &'static str,
     tail: Vec<u8>,
 }
 
@@ -182,6 +187,9 @@ impl Draft {
             data_policy: None,
             redactions: BTreeMap::new(),
             attempts: Vec::new(),
+            caller: crate::audit::Caller::Local,
+            client: None,
+            api: "chat",
             tail: Vec::new(),
         })
     }
@@ -242,13 +250,21 @@ struct Finisher {
     draft: Arc<Mutex<Draft>>,
     key: Arc<ReceiptKey>,
     store: Arc<ReceiptStore>,
+    audit: Option<Arc<AuditLog>>,
 }
 
 impl Drop for Finisher {
     fn drop(&mut self) {
         let draft = self.draft.lock().expect("draft lock");
         match self.key.sign(draft.receipt(&self.key.public())) {
-            Ok(envelope) => self.store.finish(&draft.id, envelope),
+            Ok(envelope) => {
+                if let Some(audit) = &self.audit
+                    && let Err(e) = audit.append(&draft.caller, draft.client.as_deref(), draft.api, &envelope)
+                {
+                    tracing::error!("audit log not written: {e}");
+                }
+                self.store.finish(&draft.id, envelope)
+            }
             Err(e) => tracing::error!("receipt not signed: {e}"),
         }
     }
@@ -261,6 +277,7 @@ pub fn attach(
     draft: Arc<Mutex<Draft>>,
     key: Arc<ReceiptKey>,
     store: Arc<ReceiptStore>,
+    audit: Option<Arc<AuditLog>>,
 ) -> Response {
     let id = draft.lock().expect("draft lock").id.clone();
     store.begin(&id);
@@ -268,7 +285,7 @@ pub fn attach(
     if let Ok(value) = axum::http::HeaderValue::from_str(&id) {
         parts.headers.insert(REQUEST_ID_HEADER, value);
     }
-    let finisher = Finisher { draft, key, store };
+    let finisher = Finisher { draft, key, store, audit };
     let stream =
         futures_util::stream::unfold((body.into_data_stream(), Some(finisher)), |(mut inner, finisher)| async move {
             let finisher = finisher?;

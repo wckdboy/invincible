@@ -15,16 +15,19 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reason, Request, RouteInput, Tier, decide};
 use serde_json::{Value, json};
 
+use crate::audit::{AuditLog, Caller};
 use crate::cloud::{CloudError, CloudModel};
 use crate::engine::Engine;
 use crate::receipts::{Attempt, Draft, ReceiptKey, ReceiptStore};
 use crate::remote::{CODE_LIFETIME, Pairing};
 
 pub const DECISION_HEADER: &str = "invincible-decision";
+/// Names the program sending a request (`autobot-agent`), for the audit log.
+pub const CLIENT_HEADER: &str = "invincible-client";
 
 pub struct AppState {
     pub engines: Vec<Engine>,
@@ -39,6 +42,8 @@ pub struct AppState {
     pub name: String,
     pub receipt_key: Arc<ReceiptKey>,
     pub receipts: Arc<ReceiptStore>,
+    /// Where every answered request is logged (spec/audit.md); `None` keeps no log.
+    pub audit: Option<Arc<AuditLog>>,
     /// The Autobot Agent's API on this machine (spec/agent.md).
     pub agent_url: String,
 }
@@ -63,12 +68,18 @@ impl AppState {
             name: "invincible".to_owned(),
             receipt_key,
             receipts: Arc::default(),
+            audit: None,
             agent_url: "http://127.0.0.1:7792".to_owned(),
         }
     }
 
     pub fn with_agent(mut self, url: &str) -> Self {
         self.agent_url = url.trim_end_matches('/').to_owned();
+        self
+    }
+
+    pub fn with_audit(mut self, audit: AuditLog) -> Self {
+        self.audit = Some(Arc::new(audit));
         self
     }
 
@@ -115,6 +126,7 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/messages", post(messages))
         .route("/v1/receipts/{id}", get(receipt))
+        .route("/v1/audit", get(audit))
         .route("/v1/node", get(node_info))
         .route("/v1/agent", any(agent))
         .route("/v1/agent/{*rest}", any(agent))
@@ -162,6 +174,28 @@ async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> 
         Some(envelope) => Json(envelope).into_response(),
         None => error(StatusCode::NOT_FOUND, "not_found", "no such receipt"),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct AuditQuery {
+    /// Unix seconds.
+    #[serde(default)]
+    since: u64,
+    limit: Option<usize>,
+}
+
+/// The newest audit entries (at most 500), oldest first, with totals over them.
+async fn audit(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<AuditQuery>,
+) -> Response {
+    let Some(log) = state.audit.clone() else {
+        return Json(json!({ "entries": [], "summary": crate::audit::summary(&[]), "kept": false })).into_response();
+    };
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
+    let entries = tokio::task::spawn_blocking(move || log.read(q.since, limit)).await.unwrap_or_default();
+    let summary = crate::audit::summary(&entries);
+    Json(json!({ "entries": entries, "summary": summary, "kept": true })).into_response()
 }
 
 async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
@@ -287,15 +321,31 @@ impl Api {
     }
 }
 
-async fn chat_completions(state: State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
-    infer(state, headers, body, Api::Chat).await
+async fn chat_completions(
+    state: State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    infer(state, caller, headers, body, Api::Chat).await
 }
 
-async fn messages(state: State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
-    infer(state, headers, body, Api::Messages).await
+async fn messages(
+    state: State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    infer(state, caller, headers, body, Api::Messages).await
 }
 
-async fn infer(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Bytes, api: Api) -> Response {
+async fn infer(
+    State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    body: Bytes,
+    api: Api,
+) -> Response {
     let Ok(parsed) = serde_json::from_slice::<Value>(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is not JSON");
     };
@@ -303,6 +353,16 @@ async fn infer(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Byt
     let mut draft = match Draft::new() {
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
+    draft.client = headers
+        .get(CLIENT_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(64).collect::<String>())
+        .filter(|v| !v.is_empty());
+    draft.api = match api {
+        Api::Chat => "chat",
+        Api::Messages => "messages",
     };
     // A cloud backend that fails is marked down and the request is routed again; each round
     // takes one backend out, so this ends.
@@ -374,6 +434,7 @@ async fn infer(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Byt
         Arc::new(std::sync::Mutex::new(draft)),
         state.receipt_key.clone(),
         state.receipts.clone(),
+        state.audit.clone(),
     )
 }
 

@@ -89,6 +89,12 @@ impl Devices {
         self.list.read().expect("devices lock").iter().any(|d| d.key == key)
     }
 
+    /// The name [key] is pinned under.
+    pub fn name_of(&self, key: &[u8]) -> Option<String> {
+        let key = URL_SAFE_NO_PAD.encode(key);
+        self.list.read().expect("devices lock").iter().find(|d| d.key == key).map(|d| d.name.clone())
+    }
+
     /// Pins [key] under [name]; returns the name it got. A key paired before keeps one entry
     /// (renamed); a name in use by another key gets a number.
     pub fn add(&self, name: &str, key: &[u8]) -> Result<String, String> {

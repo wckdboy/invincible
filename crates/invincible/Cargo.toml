@@ -30,6 +30,7 @@ toml_edit.workspace = true
 regex.workspace = true
 futures-util.workspace = true
 ed25519-dalek.workspace = true
+chrono.workspace = true
 
 [lints]
 workspace = true

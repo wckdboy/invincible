@@ -1,5 +1,6 @@
 //! The Invincible node: configuration, engines, the local API, remote access for paired devices.
 
+pub mod audit;
 pub mod cloud;
 pub mod config;
 pub mod devices;

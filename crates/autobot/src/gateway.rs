@@ -74,6 +74,7 @@ impl Gateway {
         }
         let mut request =
             self.client.post(format!("{}/chat/completions", self.url)).bearer_auth(&self.token).json(&body);
+        request = request.header(invincible::server::CLIENT_HEADER, "autobot-agent");
         if self.private {
             request = request.header("invincible-private", "1");
         }
