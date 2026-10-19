@@ -300,15 +300,26 @@ fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(
                 let last = state.runs.get(&s.id);
                 let next =
                     When::parse(&s.when).ok().and_then(|w| w.next(last.map(|r| local(r.at)), local(s.created), now));
+                let recipe = s.name.as_ref().map(|n| {
+                    format!(
+                        "recipe \"{n}\" from {} · tools: {} · ",
+                        s.origin.as_deref().unwrap_or("the app").trim_start_matches("device:"),
+                        s.tools.as_ref().map_or("all".to_owned(), |t| t.join(", "))
+                    )
+                });
                 println!(
-                    "{}  [{}]  {}{}\n    next: {}",
+                    "{}  [{}]  {}{}{}{}\n    next: {}",
                     s.id,
                     s.when,
+                    recipe.unwrap_or_default(),
                     s.task,
                     if s.telegram { "  → Telegram" } else { "" },
+                    if s.enabled { "" } else { "  (off)" },
                     next.map_or("-".to_owned(), |t| t.format("%a %Y-%m-%d %H:%M").to_string())
                 );
-                if let Some(run) = last {
+                if let Some(run) = last.filter(|r| r.result == "running") {
+                    println!("    running since {}", local(run.at).format("%Y-%m-%d %H:%M"));
+                } else if let Some(run) = last {
                     let line = run.result.lines().next().unwrap_or_default();
                     println!(
                         "    last: {} {} {}",

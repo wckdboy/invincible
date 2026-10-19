@@ -493,11 +493,21 @@ pub fn cron_command(home: &Path, args: &str) -> String {
                     .as_i64()
                     .map(|t| crate::cron::local(t).format("%a %H:%M").to_string())
                     .unwrap_or("-".into());
+                // A recipe from the phone goes by its name.
+                let what = s["name"].as_str().map_or_else(
+                    || s["task"].as_str().unwrap_or("").to_owned(),
+                    |name| {
+                        format!(
+                            "{name} (from {})",
+                            s["origin"].as_str().unwrap_or("the app").trim_start_matches("device:")
+                        )
+                    },
+                );
+                let off = if s["enabled"] == false { " (off)" } else { "" };
                 format!(
-                    "{} [{}] {} (next {next})",
+                    "{} [{}] {what}{off} (next {next})",
                     s["id"].as_str().unwrap_or("?"),
-                    s["when"].as_str().unwrap_or("?"),
-                    s["task"].as_str().unwrap_or("")
+                    s["when"].as_str().unwrap_or("?")
                 )
             })
             .collect();
