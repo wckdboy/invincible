@@ -504,6 +504,7 @@ async fn the_lead_hands_work_to_its_team_in_parallel() {
                 instructions: Some("Never change files.".into()),
                 tools: vec!["files-read".into()],
                 model: Some("qwen3-0.6b".into()),
+                telegram_token_file: None,
             },
         ),
         (
@@ -513,6 +514,7 @@ async fn the_lead_hands_work_to_its_team_in_parallel() {
                 instructions: None,
                 tools: vec!["terminal".into()],
                 model: None,
+                telegram_token_file: None,
             },
         ),
     ]);
@@ -601,6 +603,7 @@ async fn a_members_actions_ask_the_owner_and_it_cannot_delegate() {
             instructions: None,
             tools: vec!["terminal".into()],
             model: None,
+            telegram_token_file: None,
         },
     )]);
     lead.team = std::sync::Arc::new(autobot::team::Team::from_config(&roles, &Default::default()).unwrap());
@@ -637,6 +640,7 @@ fn a_team_config_is_checked() {
                 instructions: None,
                 tools: tools.iter().map(|t| (*t).to_owned()).collect(),
                 model: None,
+                telegram_token_file: None,
             },
         )]);
         autobot::team::Team::from_config(&roles, &Default::default()).is_err()
