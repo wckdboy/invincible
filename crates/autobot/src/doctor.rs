@@ -178,6 +178,15 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
 }
 
 async fn finish(mut checks: Vec<Check>, config: &Config, home: &Path) -> Vec<Check> {
+    if config.discord.enabled {
+        match discord(config, home).await {
+            Ok(name) => {
+                let users = crate::discord::Users::load(home).map(|u| u.allowed.len()).unwrap_or(0);
+                checks.push(ok(format!("Discord bot {name} ({users} allowed users)")));
+            }
+            Err(e) => checks.push(bad(format!("Discord: {e}"))),
+        }
+    }
     if config.telegram.enabled {
         match telegram(config, home).await {
             Ok(name) => {
@@ -201,6 +210,14 @@ async fn finish(mut checks: Vec<Check>, config: &Config, home: &Path) -> Vec<Che
         }
     }
     checks
+}
+
+async fn discord(config: &Config, home: &Path) -> Result<String, String> {
+    let token = config.discord.token(home)?;
+    let network = crate::network()?;
+    let client = invincible::egress::client(&network)?;
+    let me = crate::discord::Bot::new(client, &config.discord.api(), &token, network)?.me().await?;
+    Ok(me["username"].as_str().unwrap_or("?").to_owned())
 }
 
 async fn telegram(config: &Config, home: &Path) -> Result<String, String> {

@@ -57,6 +57,8 @@ pub fn tools_for(groups: &[String]) -> Vec<String> {
 pub struct TurnContext {
     pub session: String,
     pub telegram_chat: Option<i64>,
+    /// The Discord channel it came from (answers to a scheduled task go back there).
+    pub discord_channel: Option<String>,
     /// The team member doing this turn; None for the main agent.
     pub agent: Option<String>,
     /// The board task it works on, when it is one ([crate::board]).
@@ -764,10 +766,11 @@ fn schedule(home: &Path, when: &str, task: &str, name: Option<&str>) -> Result<S
     let mut schedules = crate::cron::Schedules::load(home)?;
     let origin = Some(format!("agent:{}", turn.session));
     let id = schedules.add_for(when, task, false, origin, turn.telegram_chat)?;
-    if let Some(name) = name
-        && let Some(s) = schedules.schedules.iter_mut().find(|s| s.id == id)
-    {
-        s.name = Some(name.trim().chars().take(120).collect());
+    if let Some(s) = schedules.schedules.iter_mut().find(|s| s.id == id) {
+        if let Some(name) = name {
+            s.name = Some(name.trim().chars().take(120).collect());
+        }
+        s.discord = turn.discord_channel.clone();
     }
     schedules.save(home)?;
     let s = schedules.schedules.iter().find(|s| s.id == id).ok_or("lost the schedule")?;
@@ -775,7 +778,11 @@ fn schedule(home: &Path, when: &str, task: &str, name: Option<&str>) -> Result<S
         .ok()
         .and_then(|w| w.next(None, crate::cron::local(s.created), chrono::Local::now()))
         .map_or("-".to_owned(), |t| t.format("%a %Y-%m-%d %H:%M").to_string());
-    let reply = if turn.telegram_chat.is_some() { "; its answer comes to this chat" } else { "" };
+    let reply = if turn.telegram_chat.is_some() || turn.discord_channel.is_some() {
+        "; its answer comes to this chat"
+    } else {
+        ""
+    };
     Ok(format!("scheduled {id} ({}), next run {next}{reply}", s.when))
 }
 

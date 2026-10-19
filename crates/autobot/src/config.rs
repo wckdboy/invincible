@@ -45,6 +45,8 @@ pub struct Config {
     /// MCP servers whose tools the agent can use ([crate::mcp]).
     #[serde(default)]
     pub mcp: std::collections::BTreeMap<String, crate::mcp::ServerConfig>,
+    #[serde(default)]
+    pub discord: crate::discord::DiscordConfig,
     /// Webhooks that start tasks ([crate::hooks]).
     #[serde(default)]
     pub hooks: crate::hooks::HooksConfig,

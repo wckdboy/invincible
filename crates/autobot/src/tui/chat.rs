@@ -726,7 +726,14 @@ impl Chat {
             "/init" => return Ok(Some(Next::Send(crate::commands::INIT.to_owned()))),
             "/compact" => {
                 println!("{}", style::gray("summarizing…"));
-                let folded = self.agent.compact_now(&mut self.session, &|_| {}).await?;
+                let confirmed = arg == "yes" || self.grants.iter().any(|a| matches!(a, Action::Cloud(_)));
+                let folded = match self.agent.compact_now(&mut self.session, confirmed, &|_| {}).await {
+                    Ok(folded) => folded,
+                    Err(crate::gateway::GatewayError::Confirm(why)) => {
+                        return Err(format!("{why}: `/compact yes` sends the conversation to it to summarize"));
+                    }
+                    Err(e) => return Err(e.to_string()),
+                };
                 if folded == 0 {
                     println!("{}", style::gray("nothing to fold yet"));
                 } else {

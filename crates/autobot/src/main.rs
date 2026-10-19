@@ -90,6 +90,11 @@ enum Command {
         #[command(subcommand)]
         action: TelegramAction,
     },
+    /// Discord access: approve a pairing code, list or remove users.
+    Discord {
+        #[command(subcommand)]
+        action: DiscordAction,
+    },
     /// Run the gateway and the agent in the background (launchd on macOS, systemd on Linux).
     Service {
         #[command(subcommand)]
@@ -217,6 +222,16 @@ enum TelegramAction {
     Users,
     /// Remove an account's access, by its numeric id.
     Revoke { id: i64 },
+}
+
+#[derive(Subcommand)]
+enum DiscordAction {
+    /// Let in the Discord account that was given this code.
+    Approve { code: String },
+    /// List who may use the bot, and who asked.
+    Users,
+    /// Remove an account's access, by its id.
+    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -386,6 +401,35 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 TelegramAction::Revoke { id } => {
                     if !users.revoke(id) {
+                        return Err(format!("{id} is not an allowed user"));
+                    }
+                    users.save(&home)?;
+                    println!("removed {id}");
+                }
+            }
+            Ok(())
+        }
+        Command::Discord { action } => {
+            let mut users = autobot::discord::Users::load(&home)?;
+            match action {
+                DiscordAction::Approve { code } => {
+                    let user = users.approve(&code)?;
+                    users.save(&home)?;
+                    println!("{} ({}) can now use the agent on Discord", user.name, user.id);
+                }
+                DiscordAction::Users => {
+                    for u in &users.allowed {
+                        println!("{}  {}", u.id, u.name);
+                    }
+                    if users.allowed.is_empty() {
+                        println!("nobody yet: message the bot, then approve the code it gives you");
+                    }
+                    for p in &users.pending {
+                        println!("waiting: {}  {} ({})", p.code, p.user.name, p.user.id);
+                    }
+                }
+                DiscordAction::Revoke { id } => {
+                    if !users.revoke(&id) {
                         return Err(format!("{id} is not an allowed user"));
                     }
                     users.save(&home)?;
@@ -813,6 +857,18 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
             None => std::future::pending::<()>().await,
         }
     };
+    let discord = async {
+        if !config.discord.enabled {
+            return std::future::pending::<()>().await;
+        }
+        match discord_bot(config, &home).await {
+            Ok(bot) => autobot::discord::serve(bot, agent.clone(), home.clone()).await,
+            Err(e) => {
+                tracing::error!("Discord is off: {e}");
+                std::future::pending::<()>().await
+            }
+        }
+    };
     let hooks = async {
         let Some(listen) = config.hooks.listen.filter(|_| !config.hooks.hooks.is_empty()) else {
             return std::future::pending::<()>().await;
@@ -861,8 +917,23 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         () = telegram => Ok(()),
         () = schedules => Ok(()),
         () = hooks => Ok(()),
+        () = discord => Ok(()),
         () = shutdown() => Ok(()),
     }
+}
+
+async fn discord_bot(config: &Config, home: &std::path::Path) -> Result<autobot::discord::Bot, String> {
+    let network = autobot::network()?;
+    let client = invincible::egress::client(&network)
+        .map_err(|e| format!("Discord needs the network: {e}; set [node] network in the gateway's config"))?;
+    let bot = autobot::discord::Bot::new(client, &config.discord.api(), &config.discord.token(home)?, network.clone())?;
+    let me = bot.me().await?;
+    tracing::info!(
+        "Discord bot {} answering (network: {})",
+        me["username"].as_str().unwrap_or("?"),
+        invincible::egress::route(&network)
+    );
+    Ok(bot)
 }
 
 async fn telegram_bot(config: &Config, home: &std::path::Path) -> Result<(telegram::Bot, Arc<telegram::Bots>), String> {

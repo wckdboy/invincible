@@ -242,6 +242,18 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   conversation sent per call grows with its context), `/approvals`, `/private`, `/tools`,
   `/context`, `/diff`, `/undo`, `/status`, `/new`, `/fork`, `/sessions`, `/resume`, `/memory`,
   `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
+  `/init` has the agent write (or improve) the project's `AGENTS.md`; `/compact` folds the
+  conversation so far into a summary, keeping the last turn; `/ps` shows background processes
+  (`/ps 2` its output, `/ps stop 2`).
+- **Your own commands:** a Markdown file is a slash command: `.autobot/commands/review.md` in the
+  project (or `~/.autobot/commands/`) is `/review`, its text the prompt, `$ARGUMENTS` (or `$1`…`$9`)
+  what you type after it; a subdirectory makes a prefix (`git/pr.md` is `/git:pr`), and a
+  `description:` in front matter shows in `/help`. Commands in `.claude/commands` work as they
+  are, so a project's Claude Code commands come along. `/commands` lists them; tab completes them.
+- **Servers and watchers:** the agent starts what keeps running (`npm run dev`, `cargo watch`, a
+  test database) with `terminal` and `background: true`, then reads its new output, waits for it
+  or stops it with the `process` tool; stopping takes its whole process group. They end with the
+  session.
 - **Big jobs:** coding turns get at least 100 steps; an `explorer` team member takes read-only
   research (where is this used, how does that work) in a fresh context and answers with
   file:line references, so the main conversation keeps what it found and not every file it
@@ -257,7 +269,8 @@ The same agent as on the phone, for a machine that is always on. It is written i
 ([`crates/autobot`](crates/autobot)) and uses the gateway on the same machine as its only model
 provider, so the gateway's rules hold for every agent turn: routing, redaction, receipts.
 
-- **Tools:** `terminal` (a shell command in the working directory, with a timeout), `read_file`,
+- **Tools:** `terminal` (a shell command in the working directory, with a timeout, or left
+  running in the background; `process` reads, waits for or stops it), `read_file`,
   `write_file`, `edit_file` (replace an exact piece of a file), `list_dir`, `web_fetch` (a page as
   text, through the gateway: under the node's network mode, so offline means no fetch and Tor
   carries it; HTTPS only; receipted and in the audit log; it asks first, and unattended runs may
@@ -294,6 +307,18 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users
   may need to install). Without a sandbox they are refused, not run unconfined.
   `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off.
+- **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
+  container instead of on the host: one per working directory (`autobot-<hash>`), made on first
+  use and kept, with the working directory mounted at the same path, so file tools and commands
+  see the same files while whatever a command installs or breaks stays in the container
+  (`docker rm -f` it to start over). `autobot doctor` checks it.
+
+  ```toml
+  [agent.docker]
+  image = "rust:1.91"      # any image with sh
+  network = "bridge"       # or "none"
+  args = ["--memory", "4g"]
+  ```
 - **Private by default:** agent turns carry `invincible-private`, so the router keeps them on local
   models; tool results carry your files and command output. With `[gateway] private = false` the
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
@@ -392,6 +417,33 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
   that was asked can answer. Telegram's servers see bot chats, which are not end-to-end
   encrypted. The private channel is the Autobot app, paired with the gateway over Noise.
+- **Discord:** with `[discord] enabled = true` and a bot token in `~/.autobot/discord.token`,
+  `autobot serve` answers direct messages, and in a server channel the messages that mention the
+  bot or reply to it. The bot connects out to Discord's gateway (no public address; under the
+  node's network mode, Tor included). Strangers get a one-time code (`autobot discord approve
+  <code>`; `autobot discord users`, `revoke`), approvals are buttons only the person asked can
+  press, progress is one message edited as the agent works, and a message sent while it works
+  steers it. A task scheduled from Discord answers there. Discord's servers see bot messages.
+- **Webhooks:** something outside starts a task: GitHub, a monitor, a form, a script.
+  `autobot hooks new github` makes a secret; then
+
+  ```toml
+  [hooks]
+  listen = "127.0.0.1:7794"     # behind a reverse proxy or tunnel for the outside to reach
+  [hooks.github]
+  task = "A GitHub event arrived. Tell me what happened; for a failed CI run, find why."
+  telegram = true               # or discord = true: the answer to your allowed users
+  tools = ["files-read", "web"] # optional
+  ```
+
+  `POST /hooks/github` must be signed like GitHub signs (`X-Hub-Signature-256`, an HMAC of the
+  body with the secret) or carry `Authorization: Bearer <secret>`. The body reaches the agent
+  fenced as data, never as instructions, and the task runs like a scheduled one (allowlisted
+  commands and writes in the working directory only); one run per hook at a time.
+  `autobot hooks` lists them with their last runs.
+- **Cloud models with nobody to ask:** a scheduled task, a hook or board work that would go to a
+  cloud model that keeps prompts is refused, since nobody can confirm it; `allow = ["cloud"]` in
+  `[approvals]` says yes ahead of time.
 - **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
   device can therefore start turns, watch their events (tool runs, receipts, approval questions,

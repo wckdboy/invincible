@@ -188,14 +188,14 @@ impl Users {
 }
 
 /// 8 characters from an alphabet without look-alikes (no 0/O, 1/I/L), shown as `ABCD-EFGH`.
-fn new_code() -> Result<String, String> {
+pub(crate) fn new_code() -> Result<String, String> {
     const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
     let bytes = invincible::token::random::<8>()?;
     let chars: String = bytes.iter().map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char).collect();
     Ok(format!("{}-{}", &chars[..4], &chars[4..]))
 }
 
-fn normalize(code: &str) -> String {
+pub(crate) fn normalize(code: &str) -> String {
     code.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()).collect()
 }
 

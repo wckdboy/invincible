@@ -277,6 +277,9 @@ pub struct Schedule {
     /// The Telegram chat that asked for it: its answers go there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify: Option<i64>,
+    /// The Discord channel that asked for it: its answers go there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discord: Option<String>,
 }
 
 fn yes() -> bool {
@@ -426,6 +429,7 @@ impl Schedules {
             origin,
             enabled: true,
             notify,
+            discord: None,
         });
         Ok(id)
     }
@@ -476,6 +480,7 @@ impl Schedules {
             origin,
             enabled: spec.enabled,
             notify: None,
+            discord: None,
         });
         Ok(id)
     }
@@ -641,13 +646,16 @@ pub fn start(
         {
             tracing::warn!("cron: {e}");
         }
+        let text = format!(
+            "⏰ {}\n\n{}{}",
+            schedule.name.as_deref().unwrap_or(&schedule.task),
+            if result.ok { "" } else { "✗ " },
+            result.result
+        );
+        if let Some(channel) = &schedule.discord {
+            crate::discord::notify(channel, &text).await;
+        }
         if let Some(bot) = telegram {
-            let text = format!(
-                "⏰ {}\n\n{}{}",
-                schedule.name.as_deref().unwrap_or(&schedule.task),
-                if result.ok { "" } else { "✗ " },
-                result.result
-            );
             // The chat that asked for it, else (with `telegram`) every allowed user.
             let allowed = crate::telegram::Users::load(&home).map(|u| u.allowed).unwrap_or_default();
             let chats: Vec<i64> = match schedule.notify {

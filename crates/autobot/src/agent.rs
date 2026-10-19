@@ -199,8 +199,9 @@ impl Agent {
                     .push(json!({ "role": "user", "content": format!("(The owner adds, while you work:) {text}") }))?;
             }
             let mut messages = vec![Value::Null];
+            // Again after a cloud model is confirmed: the summary goes to the same model.
             if steps == 1 {
-                self.compact(session, events).await;
+                self.compact(session, confirmed, events).await;
             }
             let mut system = self.system_prompt();
             if let Some(summary) = session.summary() {
@@ -506,22 +507,23 @@ impl Agent {
     /// Summarizes what left the window, so it is not simply forgotten. On the gateway like any
     /// call (private turns stay local), with its receipt; when it fails, the old part is dropped
     /// as before.
-    async fn compact(&self, session: &mut Session, events: &(dyn Fn(Event) + Send + Sync)) {
+    async fn compact(&self, session: &mut Session, confirmed: bool, events: &(dyn Fn(Event) + Send + Sync)) {
         let Some((previous, pending)) = session.compaction() else { return };
-        if let Err(e) = self.summarize(session, previous, &pending, None, events).await {
+        if let Err(e) = self.summarize(session, previous, &pending, None, confirmed, events).await {
             tracing::warn!("conversation not summarized: {e}");
         }
     }
 
     /// Folds everything but the last turn into the summary now (`/compact`); how many messages
-    /// it folded.
+    /// it folded. [confirmed]: the owner said yes to a cloud model that keeps prompts.
     pub async fn compact_now(
         &self,
         session: &mut Session,
+        confirmed: bool,
         events: &(dyn Fn(Event) + Send + Sync),
-    ) -> Result<usize, String> {
+    ) -> Result<usize, GatewayError> {
         let Some((previous, pending, cut)) = session.compaction_all() else { return Ok(0) };
-        self.summarize(session, previous, &pending, Some(cut), events).await?;
+        self.summarize(session, previous, &pending, Some(cut), confirmed, events).await?;
         Ok(pending.len())
     }
 
@@ -531,8 +533,9 @@ impl Agent {
         previous: Option<String>,
         pending: &[Value],
         upto: Option<usize>,
+        confirmed: bool,
         events: &(dyn Fn(Event) + Send + Sync),
-    ) -> Result<(), String> {
+    ) -> Result<(), GatewayError> {
         let mut transcript = String::new();
         if let Some(previous) = &previous {
             transcript.push_str("Summary so far:\n");
@@ -551,7 +554,7 @@ impl Agent {
             json!({ "role": "system", "content": "You summarize an agent's conversation for its own later use. Keep: what the owner asked for, decisions, facts learned, file and path names, commands that worked, and what is still open. At most 200 words, plain text, no preamble." }),
             json!({ "role": "user", "content": transcript.chars().take(24_000).collect::<String>() }),
         ];
-        match self.gateway.chat(&ask, &json!([]), false).await {
+        match self.gateway.chat(&ask, &json!([]), confirmed).await {
             Ok(reply) => {
                 if let Some(id) = &reply.request_id {
                     let decision = reply.decision.as_ref();
@@ -563,14 +566,15 @@ impl Agent {
                 }
                 let text = reply.message["content"].as_str().unwrap_or_default().trim().to_owned();
                 if text.is_empty() {
-                    return Err("the model gave no summary".to_owned());
+                    return Err(GatewayError::Failed("the model gave no summary".to_owned()));
                 }
                 match upto {
                     Some(upto) => session.add_summary_upto(&text, upto),
                     None => session.add_summary(&text),
                 }
+                .map_err(GatewayError::Failed)
             }
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(e),
         }
     }
 

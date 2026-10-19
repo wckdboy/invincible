@@ -10,6 +10,7 @@ pub mod commands;
 pub mod config;
 pub mod cron;
 pub mod diff;
+pub mod discord;
 pub mod docker;
 pub mod doctor;
 pub mod eval;
