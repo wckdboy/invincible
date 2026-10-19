@@ -9,7 +9,7 @@ use std::time::Duration;
 use autobot::agent::Agent;
 use autobot::config::{ApprovalConfig, ApprovalMode};
 use autobot::gateway::Gateway;
-use autobot::telegram::{Bot, Users, serve};
+use autobot::telegram::{Bot, Bots, Users, serve};
 use autobot::tools::Tools;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -30,8 +30,8 @@ async fn bot_api(
     Path((bot, method)): Path<(String, String)>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    assert_eq!(bot, "botTOKEN");
     if method == "getUpdates" {
+        assert_eq!(bot, "botTOKEN", "only the main bot polls");
         for _ in 0..20 {
             let next = t.lock().unwrap().updates.pop_front();
             if let Some(update) = next {
@@ -45,7 +45,10 @@ async fn bot_api(
     t.next_id += 1;
     let id = t.next_id;
     if method != "sendChatAction" {
-        t.calls.push((method, body.clone()));
+        // Which bot sent it.
+        let mut body = body.clone();
+        body["_bot"] = json!(bot);
+        t.calls.push((method, body));
     }
     Json(json!({ "ok": true, "result": { "message_id": id, "chat": body["chat_id"], "text": body["text"] } }))
 }
@@ -119,7 +122,8 @@ async fn pairing_then_a_task_with_an_approval_by_button() {
         team: Default::default(),
     });
     let bot = Bot::new(reqwest::Client::new(), &api, "TOKEN").unwrap();
-    tokio::spawn(serve(bot, agent, home.clone()));
+    let bots = Arc::new(Bots { username: "test_bot".into(), members: Default::default() });
+    tokio::spawn(serve(bot, bots, agent, home.clone()));
 
     // A stranger gets a code, and nothing else.
     telegram.lock().unwrap().updates.push_back(message(1, 7, "hello?"));
@@ -154,5 +158,97 @@ async fn pairing_then_a_task_with_an_approval_by_button() {
     assert!(calls.iter().any(|(m, b)| m == "answerCallbackQuery" && b["text"] == "Allowed"));
     assert!(calls.iter().any(|(m, b)| m == "sendMessage" && b["text"] == "› run: echo from-the-tool"));
     assert!(calls.iter().any(|(m, b)| m == "editMessageText" && b["text"].as_str().unwrap().ends_with("→ Allowed")));
+    std::fs::remove_dir_all(home).unwrap();
+}
+
+fn group_message(update: i64, from: i64, text: &str) -> Value {
+    json!({ "update_id": update, "message": {
+        "message_id": update,
+        "from": { "id": from, "first_name": "Ann", "username": "ann" },
+        "chat": { "id": -1001, "type": "supergroup", "title": "Team" },
+        "text": text,
+    } })
+}
+
+#[tokio::test]
+async fn a_team_works_in_a_group_each_member_on_its_own_bot() {
+    let home = std::env::temp_dir().join(format!("autobot-tg-team-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let mut users = Users::load(&home).unwrap();
+    users.code_for(&autobot::telegram::User { id: 7, name: "@ann".into() }).unwrap();
+    let code = users.pending[0].code.clone();
+    users.approve(&code).unwrap();
+    users.save(&home).unwrap();
+
+    let gateway_answers = Arc::new(Mutex::new(VecDeque::from([
+        json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": "c1", "type": "function",
+            "function": { "name": "delegate", "arguments": "{\"agent\":\"researcher\",\"goal\":\"Find the status\"}" } }] }),
+        json!({ "role": "assistant", "content": "Status: kernel in progress." }),
+        json!({ "role": "assistant", "content": "The kernel is in progress." }),
+    ])));
+    let gateway_url = listen(
+        axum::Router::new()
+            .route(
+                "/v1/chat/completions",
+                axum::routing::post(|State(a): State<Arc<Mutex<VecDeque<Value>>>>| async move {
+                    let message = a.lock().unwrap().pop_front().unwrap();
+                    Json(json!({ "choices": [{ "message": message }] }))
+                }),
+            )
+            .with_state(gateway_answers),
+    )
+    .await;
+    let telegram: Shared = Arc::default();
+    let api =
+        listen(axum::Router::new().route("/{bot}/{method}", axum::routing::post(bot_api)).with_state(telegram.clone()))
+            .await;
+    let roles = std::collections::BTreeMap::from([(
+        "researcher".to_owned(),
+        autobot::team::RoleConfig {
+            description: "Reads and reports".into(),
+            instructions: None,
+            tools: vec!["files-read".into()],
+            model: None,
+            telegram_token_file: None,
+        },
+    )]);
+    let agent = Arc::new(Agent {
+        gateway: Gateway::new(&format!("{gateway_url}/v1"), "t", "auto", true).unwrap(),
+        tools: Tools::new(home.join("work"), Duration::from_secs(5)).with_home(home.clone()),
+        approvals: ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() },
+        max_steps: 5,
+        team: Arc::new(autobot::team::Team::from_config(&roles, &Default::default()).unwrap()),
+    });
+    let bot = Bot::new(reqwest::Client::new(), &api, "TOKEN").unwrap();
+    let members = std::collections::HashMap::from([(
+        "researcher".to_owned(),
+        Bot::new(reqwest::Client::new(), &api, "MEMBER").unwrap(),
+    )]);
+    let bots = Arc::new(Bots { username: "test_bot".into(), members });
+    tokio::spawn(serve(bot, bots, agent, home.clone()));
+
+    // Not addressed to the bot: ignored. A stranger in the group: ignored too, no code.
+    telegram.lock().unwrap().updates.push_back(group_message(1, 7, "lunch at noon?"));
+    telegram.lock().unwrap().updates.push_back(group_message(2, 9, "@test_bot let me in"));
+    // Addressed: the lead hands it to the researcher, who posts as its own bot.
+    telegram.lock().unwrap().updates.push_back(group_message(3, 7, "@test_bot what is the status?"));
+    let done = sent(&telegram, |m, b| {
+        m == "sendMessage" && b["text"].as_str().unwrap().starts_with("The kernel is in progress.")
+    })
+    .await;
+    assert_eq!(done["_bot"], "botTOKEN");
+    assert_eq!(done["chat_id"], -1001);
+    let calls = telegram.lock().unwrap().calls.clone();
+    let by = |bot: &str| -> Vec<String> {
+        calls
+            .iter()
+            .filter(|(m, b)| m == "sendMessage" && b["_bot"] == bot)
+            .map(|(_, b)| b["text"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(by("botMEMBER"), ["› ← Find the status", "→ Status: kernel in progress."]);
+    assert!(by("botTOKEN").iter().all(|t| !t.contains("lunch") && !t.contains("approve")), "{:?}", by("botTOKEN"));
+    assert_eq!(by("botTOKEN").len(), 1, "only the lead's answer: {:?}", by("botTOKEN"));
     std::fs::remove_dir_all(home).unwrap();
 }

@@ -205,12 +205,23 @@ struct Chat {
     grants: HashSet<Action>,
 }
 
-/// Approvals waiting for a button, by number.
+/// Approvals waiting for a button, by number: the user who may press it, and where the answer goes.
 type Waiting = Arc<Mutex<HashMap<u64, (i64, oneshot::Sender<Answer>)>>>;
+
+/// The bots the agent speaks through: its own, and optionally one per team member, so in a
+/// group the members show up as bots of their own. Telegram bots never see each other's
+/// messages, so members are handed work inside the agent; their bots only post.
+pub struct Bots {
+    /// The main bot's username (without `@`), to tell when a group message is for it.
+    pub username: String,
+    pub members: HashMap<String, Bot>,
+}
 
 struct ChatApprover {
     bot: Bot,
     chat: i64,
+    /// Who may press the buttons: the user who asked (in a group, not everyone in it).
+    user: i64,
     waiting: Waiting,
 }
 
@@ -223,7 +234,7 @@ impl Approver for ChatApprover {
         Box::pin(async move {
             let id = u64::from_le_bytes(invincible::token::random::<8>().unwrap_or_default());
             let (tx, rx) = oneshot::channel();
-            self.waiting.lock().expect("waiting").insert(id, (self.chat, tx));
+            self.waiting.lock().expect("waiting").insert(id, (self.user, tx));
             let keyboard = json!({ "inline_keyboard": [[
                 { "text": "Allow", "callback_data": format!("{id}:once") },
                 { "text": "Always (this chat)", "callback_data": format!("{id}:always") },
@@ -251,7 +262,7 @@ fn cut_line(text: &str) -> String {
 }
 
 /// Answers messages until the process stops.
-pub async fn serve(bot: Bot, agent: Arc<Agent>, home: PathBuf) {
+pub async fn serve(bot: Bot, bots: Arc<Bots>, agent: Arc<Agent>, home: PathBuf) {
     let chats: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<Chat>>>>> = Arc::default();
     let waiting: Waiting = Arc::default();
     let mut offset = 0;
@@ -274,11 +285,11 @@ pub async fn serve(bot: Bot, agent: Arc<Agent>, home: PathBuf) {
             if let Some(query) = update.get("callback_query") {
                 answer_button(&bot, query, &waiting).await;
             } else if let Some(message) = update.get("message") {
-                let (bot, agent, home, chats, waiting) =
-                    (bot.clone(), agent.clone(), home.clone(), chats.clone(), waiting.clone());
+                let (bot, bots, agent, home, chats, waiting) =
+                    (bot.clone(), bots.clone(), agent.clone(), home.clone(), chats.clone(), waiting.clone());
                 let message = message.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle(&bot, &agent, &home, &chats, &waiting, &message).await {
+                    if let Err(e) = handle(&bot, &bots, &agent, &home, &chats, &waiting, &message).await {
                         tracing::warn!("telegram: {e}");
                     }
                 });
@@ -297,11 +308,11 @@ async fn answer_button(bot: &Bot, query: &Value, waiting: &Waiting) {
         "deny" => Some(Answer::Deny),
         _ => None,
     };
-    // Only the chat the question went to can answer it (private chats: chat id = user id).
+    // Only the user who was asked can answer (in a group, not whoever else is in it).
     let sender = id.parse::<u64>().ok().and_then(|id| {
         let mut waiting = waiting.lock().expect("waiting");
         match waiting.get(&id) {
-            Some((chat, _)) if *chat == from => waiting.remove(&id).map(|(_, tx)| tx),
+            Some((user, _)) if *user == from => waiting.remove(&id).map(|(_, tx)| tx),
             _ => None,
         }
     });
@@ -335,13 +346,16 @@ async fn answer_button(bot: &Bot, query: &Value, waiting: &Waiting) {
 
 async fn handle(
     bot: &Bot,
+    bots: &Bots,
     agent: &Arc<Agent>,
     home: &Path,
     chats: &Mutex<HashMap<i64, Arc<tokio::sync::Mutex<Chat>>>>,
     waiting: &Waiting,
     message: &Value,
 ) -> Result<(), String> {
-    if message["chat"]["type"] != "private" {
+    let kind = message["chat"]["type"].as_str().unwrap_or_default();
+    let group = matches!(kind, "group" | "supergroup");
+    if kind != "private" && !group {
         return Ok(());
     }
     let chat_id = message["chat"]["id"].as_i64().ok_or("a message without a chat")?;
@@ -357,6 +371,20 @@ async fn handle(
         .unwrap_or_default(),
     };
     let mut users = Users::load(home)?;
+    // In a group: only allowed users, and only messages for this bot (an @mention, a reply to
+    // it, or a command); strangers there get no pairing code.
+    if group && !users.allows(user.id) {
+        return Ok(());
+    }
+    let mention = format!("@{}", bots.username);
+    let raw = message["text"].as_str().unwrap_or_default();
+    if group {
+        let replied = message["reply_to_message"]["from"]["username"].as_str() == Some(bots.username.as_str());
+        if !(raw.contains(&mention) || replied || raw.starts_with('/')) {
+            return Ok(());
+        }
+    }
+    let cleaned = raw.replace(&mention, "");
     if !users.allows(user.id) {
         let code = users.code_for(&user)?;
         users.save(home)?;
@@ -371,7 +399,7 @@ async fn handle(
         .await?;
         return Ok(());
     }
-    let Some(text) = message["text"].as_str().map(str::trim).filter(|t| !t.is_empty()) else {
+    let Some(text) = Some(cleaned.trim()).filter(|t| !t.is_empty()) else {
         bot.send(chat_id, "Only text messages for now.").await?;
         return Ok(());
     };
@@ -380,7 +408,9 @@ async fn handle(
         match chats.get(&chat_id) {
             Some(chat) => chat.clone(),
             None => {
-                let session = Session::open(&home.join("sessions"), &format!("telegram-{}", chat_id.unsigned_abs()))?;
+                let name =
+                    if group { format!("telegram-g{}", chat_id.unsigned_abs()) } else { format!("telegram-{chat_id}") };
+                let session = Session::open(&home.join("sessions"), &name)?;
                 let chat = Arc::new(tokio::sync::Mutex::new(Chat { session, grants: HashSet::new() }));
                 chats.insert(chat_id, chat.clone());
                 chat
@@ -428,15 +458,36 @@ async fn handle(
         _ => {}
     }
 
-    // Tool progress goes out as short messages, in order, from one task.
-    let (progress, mut lines) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // Tool progress goes out as short messages, in order, from one task; a member with a bot
+    // of its own posts its lines itself.
+    let (progress, mut lines) = tokio::sync::mpsc::unbounded_channel::<(Option<String>, String)>();
     let sender = {
         let bot = bot.clone();
+        let members: HashMap<String, Bot> = bots.members.clone();
         tokio::spawn(async move {
-            while let Some(line) = lines.recv().await {
-                let _ = bot.send(chat_id, &line).await;
+            while let Some((member, line)) = lines.recv().await {
+                match member.as_ref().and_then(|m| members.get(m)) {
+                    Some(own) if own.send(chat_id, &line).await.is_ok() => {}
+                    _ => {
+                        let line = match &member {
+                            Some(m) => format!("[{m}] {line}"),
+                            None => line,
+                        };
+                        let _ = bot.send(chat_id, &line).await;
+                    }
+                }
             }
         })
+    };
+    // `[coder] run: …` from a member: (Some("coder"), "run: …").
+    let split = |text: &str| -> (Option<String>, String) {
+        if let Some(rest) = text.strip_prefix('[')
+            && let Some((name, line)) = rest.split_once("] ")
+            && agent.team.get(name).is_some()
+        {
+            return (Some(name.to_owned()), line.to_owned());
+        }
+        (None, text.to_owned())
     };
     let typing = {
         let bot = bot.clone();
@@ -450,10 +501,15 @@ async fn handle(
     let last_route = Mutex::new(None::<String>);
     let events = |event: Event| match event {
         Event::Tool(what) => {
-            let _ = progress.send(format!("› {}", cut_line(what)));
+            let (member, line) = split(what);
+            let _ = progress.send((member, format!("› {}", cut_line(&line))));
         }
         Event::Refused(why) => {
-            let _ = progress.send(format!("✗ {}", cut_line(why)));
+            let (member, line) = split(why);
+            let _ = progress.send((member, format!("✗ {}", cut_line(&line))));
+        }
+        Event::Member { name, text } => {
+            let _ = progress.send((Some(name.to_owned()), cut_line(&format!("→ {text}"))));
         }
         Event::Receipt { id, model, tier } => {
             *last_route.lock().expect("route") = Some(format!(
@@ -464,7 +520,7 @@ async fn handle(
             ));
         }
     };
-    let approver = ChatApprover { bot: bot.clone(), chat: chat_id, waiting: waiting.clone() };
+    let approver = ChatApprover { bot: bot.clone(), chat: chat_id, user: user.id, waiting: waiting.clone() };
     let Chat { session, grants } = &mut *chat;
     let context = crate::tools::TurnContext { session: session.id.clone(), telegram_chat: Some(chat_id), agent: None };
     let result = crate::tools::TURN.scope(context, agent.turn(session, text, &approver, grants, &events)).await;

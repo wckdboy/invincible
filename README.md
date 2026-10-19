@@ -240,6 +240,13 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   whatever channel you use, they never get more than the agent may do, and their receipts are
   part of the turn's.
 
+  **In a Telegram group,** add the bot and talk to it with an @mention or a reply (only users you
+  approved; the rest of the group is ignored, and only the person who asked can press an approval
+  button). Give a member a bot of its own (`telegram_token_file = "coder.token"`, a token from
+  @BotFather; add that bot to the group too) and it posts its own progress and answers there, so
+  the team shows up as bots working together. Telegram bots never see each other's messages, so
+  the hand-offs happen inside the agent; the members' bots only post.
+
   ```toml
   [agents.researcher]
   description = "Reads files and logs, reports facts with paths"

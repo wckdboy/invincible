@@ -30,6 +30,8 @@ pub enum Event<'a> {
     Refused(&'a str),
     /// A model call finished; its receipt can be fetched from the gateway.
     Receipt { id: &'a str, model: Option<&'a str>, tier: Option<&'a str> },
+    /// A team member finished the task it was handed: its answer to the lead.
+    Member { name: &'a str, text: &'a str },
 }
 
 pub struct Outcome {
@@ -194,12 +196,8 @@ impl Agent {
         };
         let mut task = format!("Goal: {goal}");
         if let Some(context) = context {
-            task.push_str(&format!(
-                "
-
-Context:
-{context}"
-            ));
+            task.push_str("\n\nContext:\n");
+            task.push_str(context);
         }
         // Its tool progress shows under its name.
         let label = role.name.clone();
@@ -215,15 +213,15 @@ Context:
         let mut grants = HashSet::new();
         let run = member.turn_inner(&mut session, &task, approver, &mut grants, &tagged);
         match crate::tools::TURN.scope(context, run).await {
-            Ok(outcome) => (
-                format!(
-                    "{} answered:
-{}",
-                    role.name, outcome.text
-                ),
-                outcome.receipts,
-            ),
-            Err(e) => (format!("{} could not finish: {e}", role.name), Vec::new()),
+            Ok(outcome) => {
+                events(Event::Member { name: &role.name, text: &outcome.text });
+                (format!("{} answered:\n{}", role.name, outcome.text), outcome.receipts)
+            }
+            Err(e) => {
+                let text = format!("could not finish: {e}");
+                events(Event::Member { name: &role.name, text: &text });
+                (format!("{} {text}", role.name), Vec::new())
+            }
         }
     }
 

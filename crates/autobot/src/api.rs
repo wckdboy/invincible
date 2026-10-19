@@ -207,6 +207,7 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
                     Event::Receipt { id, model, tier } => {
                         json!({ "type": "receipt", "id": id, "model": model, "tier": tier })
                     }
+                    Event::Member { name, text } => json!({ "type": "member", "agent": name, "text": text }),
                 });
             }
         };

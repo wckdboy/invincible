@@ -53,6 +53,7 @@ has a `type`:
 | `refused` | `text` | A tool call was refused, by policy or by the owner |
 | `receipt` | `id`, `model`, `tier` | A model call finished; its signed receipt is at `GET /v1/receipts/{id}` |
 | `approval` | `id`, `text`, `action` | The agent waits for the owner: answer with `POST /v1/agent/approvals/{id}` |
+| `member` | `agent`, `text` | A team member finished the task it was handed; `text` is its answer to the lead |
 | `answer` | `text`, `receipts` | The turn's answer; the last event |
 | `error` | `text` | The turn failed; the last event |
 

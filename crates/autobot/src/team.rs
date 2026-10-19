@@ -17,6 +17,7 @@
 //! description = "Changes code and runs it"
 //! tools = ["files-read", "files-write", "terminal"]
 //! model = "qwen3.5-4b"               # optional: a model id or `auto` (default: the main agent's)
+//! telegram_token_file = "coder.token" # optional: its own Telegram bot, to post in a group
 //!
 //! [team]
 //! max_parallel = 2                   # members working at once (what the local model can serve)
@@ -39,6 +40,10 @@ pub struct RoleConfig {
     pub tools: Vec<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// A Telegram bot of its own (a file holding its token, relative to `$AUTOBOT_HOME`): in a
+    /// group with the main bot, it posts its own progress and answers.
+    #[serde(default)]
+    pub telegram_token_file: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

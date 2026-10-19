@@ -384,6 +384,7 @@ fn print_event(event: Event) {
                 &id[..id.len().min(8)]
             )
         }
+        Event::Member { name, text } => eprintln!("\x1b[2m[{name}] → {}\x1b[0m", text.replace('\n', " ")),
     }
 }
 
@@ -499,7 +500,7 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
 
     let bot = if config.telegram.enabled {
         match telegram_bot(config, &home).await {
-            Ok(bot) => Some(bot),
+            Ok(bots) => Some(bots),
             Err(e) => {
                 // The agent API and schedules keep running; Telegram waits for a fix and a restart.
                 tracing::error!("Telegram is off: {e}");
@@ -511,11 +512,11 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
     };
     let telegram = async {
         match bot.clone() {
-            Some(bot) => telegram::serve(bot, agent.clone(), home.clone()).await,
+            Some((bot, bots)) => telegram::serve(bot, bots, agent.clone(), home.clone()).await,
             None => std::future::pending::<()>().await,
         }
     };
-    let schedules = autobot::cron::scheduler(agent.clone(), home.clone(), bot.clone());
+    let schedules = autobot::cron::scheduler(agent.clone(), home.clone(), bot.as_ref().map(|(bot, _)| bot.clone()));
     tokio::select! {
         () = api => Ok(()),
         () = telegram => Ok(()),
@@ -524,18 +525,36 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
     }
 }
 
-async fn telegram_bot(config: &Config, home: &std::path::Path) -> Result<telegram::Bot, String> {
+async fn telegram_bot(config: &Config, home: &std::path::Path) -> Result<(telegram::Bot, Arc<telegram::Bots>), String> {
     let network = autobot::network()?;
     let client = invincible::egress::client(&network)
         .map_err(|e| format!("Telegram needs the network: {e}; set [node] network in the gateway's config"))?;
-    let bot = telegram::Bot::new(client, &config.telegram.api(), &config.telegram.token(home)?)?;
+    let bot = telegram::Bot::new(client.clone(), &config.telegram.api(), &config.telegram.token(home)?)?;
     let me = bot.me().await?;
-    tracing::info!(
-        "Telegram bot @{} answering (network: {})",
-        me["username"].as_str().unwrap_or("?"),
-        invincible::egress::route(&network)
-    );
-    Ok(bot)
+    let username = me["username"].as_str().unwrap_or_default().to_owned();
+    tracing::info!("Telegram bot @{username} answering (network: {})", invincible::egress::route(&network));
+    // Team members with bots of their own: they post; a broken one is skipped (the main bot
+    // posts for it).
+    let mut members = std::collections::HashMap::new();
+    for (name, role) in &config.agents {
+        let Some(file) = &role.telegram_token_file else { continue };
+        let path = if file.is_absolute() { file.clone() } else { home.join(file) };
+        let member = std::fs::read_to_string(&path)
+            .map_err(|e| format!("{}: {e}", path.display()))
+            .and_then(|token| telegram::Bot::new(client.clone(), &config.telegram.api(), token.trim()));
+        let checked = match member {
+            Ok(member) => member.me().await.map(|me| (member, me)),
+            Err(e) => Err(e),
+        };
+        match checked {
+            Ok((member, me)) => {
+                tracing::info!("team member {name} posts as @{}", me["username"].as_str().unwrap_or("?"));
+                members.insert(name.clone(), member);
+            }
+            Err(e) => tracing::warn!("team member {name}: its Telegram bot is off: {e}"),
+        }
+    }
+    Ok((bot, Arc::new(telegram::Bots { username, members })))
 }
 
 async fn shutdown() {
