@@ -37,6 +37,13 @@ pub enum Action {
         text: String,
         submit: bool,
     },
+    /// Call a Home Assistant service ([crate::homeassistant]): `light.turn_on`, on which
+    /// entities, with what else (JSON, empty for nothing).
+    Home {
+        service: String,
+        entities: String,
+        data: String,
+    },
 }
 
 impl Action {
@@ -50,6 +57,7 @@ impl Action {
             Self::Fetch(_) => "fetch",
             Self::Mcp { .. } => "mcp",
             Self::Type { .. } => "type",
+            Self::Home { .. } => "home",
         }
     }
 
@@ -71,6 +79,16 @@ impl Action {
                     (false, false) => format!("type \"{text}\" into {field} on {page}"),
                     (false, true) => format!("type \"{text}\" into {field} on {page}, and send it"),
                 }
+            }
+            Self::Home { service, entities, data } => {
+                let mut line = format!("home: {service}");
+                if !entities.is_empty() {
+                    line.push_str(&format!(" {entities}"));
+                }
+                if !data.is_empty() {
+                    line.push_str(&format!(" {}", data.chars().take(200).collect::<String>()));
+                }
+                line
             }
         }
     }
@@ -142,6 +160,16 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
     {
         return Verdict::Run;
     }
+    // `home:light.turn_on` allows that service, `home:light.*` the domain's, whatever entity.
+    if let Action::Home { service, .. } = action
+        && config
+            .allow
+            .iter()
+            .filter_map(|a| a.trim().strip_prefix("home:"))
+            .any(|a| a == service || a.strip_suffix(".*").is_some_and(|d| service.split('.').next() == Some(d)))
+    {
+        return Verdict::Run;
+    }
     // A URL allowlist entry (`https://docs.rs`) covers that site: the URL is it, or under it.
     if let Action::Fetch(url) = action
         && config
@@ -195,6 +223,26 @@ mod tests {
         c.allow.push("cloud".into());
         assert_eq!(check(&c, &cloud), Verdict::Run);
         assert!(!allowlisted(&c.allow, "cloud"), "not a command");
+    }
+
+    #[test]
+    fn home_services_are_allowlisted_by_name_or_domain() {
+        let home = |service: &str| Action::Home {
+            service: service.into(),
+            entities: "light.kitchen".into(),
+            data: String::new(),
+        };
+        let mut c = config(ApprovalMode::Allowlist);
+        assert!(matches!(check(&c, &home("light.turn_on")), Verdict::Refuse(_)));
+        assert_eq!(check(&config(ApprovalMode::Ask), &home("light.turn_on")), Verdict::Ask);
+        c.allow.push("home:light.*".into());
+        c.allow.push("home:switch.toggle".into());
+        assert_eq!(check(&c, &home("light.turn_off")), Verdict::Run);
+        assert_eq!(check(&c, &home("switch.toggle")), Verdict::Run);
+        assert!(matches!(check(&c, &home("switch.turn_on")), Verdict::Refuse(_)));
+        assert!(matches!(check(&c, &home("lightx.turn_on")), Verdict::Refuse(_)));
+        assert_eq!(home("light.turn_on").describe(), "home: light.turn_on light.kitchen");
+        assert_eq!(home("x.y").kind(), "home");
     }
 
     #[test]

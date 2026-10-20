@@ -273,6 +273,42 @@ async fn finish(mut checks: Vec<Check>, config: &Config, home: &Path) -> Vec<Che
             Err(e) => bad(format!("Matrix: {e}")),
         });
     }
+    if config.whatsapp.enabled {
+        checks.push(match whatsapp(config, home).await {
+            Ok(number) => {
+                let users = crate::pairing::allowed(home, "whatsapp").len();
+                ok(format!("WhatsApp {number} through the Cloud API ({users} allowed users)"))
+            }
+            Err(e) => bad(format!("WhatsApp: {e}")),
+        });
+        if config.hooks.listen.is_none() {
+            checks.push(bad("WhatsApp: its webhook is on the hooks listener: set [hooks] listen".to_owned()));
+        } else {
+            checks.push(warn(format!(
+                "WhatsApp needs a public HTTPS URL to the hooks listener (a tunnel or a proxy): https://<host>{}",
+                if config.bot.name.as_deref().is_none_or(|n| n == crate::bots::DEFAULT) {
+                    "/hooks/whatsapp".to_owned()
+                } else {
+                    format!("/hooks/{}/whatsapp", config.bot.name.as_deref().unwrap_or_default())
+                }
+            )));
+        }
+    }
+    if config.homeassistant.url.is_some() {
+        let checked = async {
+            let ha = crate::homeassistant::Home::from_config(&config.homeassistant, home)?.ok_or("no url")?;
+            let about = ha.about().await?;
+            let seen = ha.list(None, None).await?.lines().filter(|l| l.contains(": ")).count();
+            Ok::<_, String>(format!("{about} at {}: {seen} entities for the home tool", ha.url()))
+        };
+        checks.push(match checked.await {
+            Ok(line) => ok(line),
+            Err(e) => bad(format!("Home Assistant: {e}")),
+        });
+        if crate::hooks::secret_path(home, "homeassistant").is_file() {
+            checks.push(ok("Home Assistant's conversation agent can reach this bot (hook secret homeassistant)"));
+        }
+    }
     if config.telegram.enabled {
         match telegram(config, home).await {
             Ok(name) => {
@@ -366,6 +402,9 @@ pub async fn readiness(config: &Config, home: &Path) -> Vec<Check> {
     let agent_addr = invincible::watchdog::local(config.serve.listen);
     if invincible::watchdog::healthy(agent_addr, std::time::Duration::from_secs(3)) {
         checks.push(ok(format!("agent API answers on {agent_addr}")));
+        if let Some(check) = live_bots(config, agent_addr).await {
+            checks.push(check);
+        }
     } else {
         checks.push(warn(format!("the agent API does not answer on {agent_addr} (`autobot serve`, or the service)")));
     }
@@ -403,6 +442,48 @@ pub async fn readiness(config: &Config, home: &Path) -> Vec<Check> {
         }
     }
     checks
+}
+
+/// How the bots `autobot serve` runs are doing: running, and those that are not though enabled.
+async fn live_bots(config: &Config, at: std::net::SocketAddr) -> Option<Check> {
+    let token = config.gateway.token().ok()?;
+    let reply = reqwest::Client::new()
+        .get(format!("http://{at}/v1/agent/bots"))
+        .bearer_auth(token)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    let list: serde_json::Value = reply.json().await.ok()?;
+    let bots = list["bots"].as_array()?;
+    let running: Vec<&str> =
+        bots.iter().filter(|b| b["status"] == "running").filter_map(|b| b["name"].as_str()).collect();
+    let broken: Vec<String> = bots
+        .iter()
+        .filter(|b| b["enabled"] == true && b["status"] != "running")
+        .map(|b| format!("{} ({})", b["name"].as_str().unwrap_or("?"), b["error"].as_str().unwrap_or("not running")))
+        .collect();
+    let down: Vec<String> = bots
+        .iter()
+        .flat_map(|b| {
+            let name = b["name"].as_str().unwrap_or("?").to_owned();
+            b["channels"].as_array().cloned().unwrap_or_default().into_iter().filter(|c| c["status"] == "down").map(
+                move |c| {
+                    format!(
+                        "{name}'s {} ({})",
+                        c["kind"].as_str().unwrap_or("?"),
+                        c["error"].as_str().unwrap_or("down")
+                    )
+                },
+            )
+        })
+        .collect();
+    let line = format!("bots running: {} (changes to their config apply as they are saved)", running.join(", "));
+    Some(match (broken.is_empty(), down.is_empty()) {
+        (true, true) => ok(line),
+        (false, _) => bad(format!("{line}; not running: {}", broken.join("; "))),
+        (true, false) => warn(format!("{line}; down: {}", down.join("; "))),
+    })
 }
 
 fn service_check(s: &crate::service::Status) -> Check {
@@ -478,6 +559,26 @@ async fn discord(config: &Config, home: &Path) -> Result<String, String> {
     let client = invincible::egress::client(&network)?;
     let me = crate::discord::Bot::new(client, &config.discord.api(), &token, network)?.me().await?;
     Ok(me["username"].as_str().unwrap_or("?").to_owned())
+}
+
+async fn whatsapp(config: &Config, home: &Path) -> Result<String, String> {
+    let w = &config.whatsapp;
+    w.app_secret(home)?;
+    w.verify_token(home)?;
+    #[cfg(unix)]
+    for file in crate::whatsapp::WhatsAppConfig::files(home) {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::metadata(&file).is_ok_and(|m| m.permissions().mode() & 0o077 != 0) {
+            return Err(format!("{} can be read by others: `chmod 600 {}`", file.display(), file.display()));
+        }
+    }
+    let api = w.api();
+    let http = if api.starts_with("https://") {
+        invincible::egress::client(&crate::network()?)?
+    } else {
+        reqwest::Client::new()
+    };
+    crate::whatsapp::Client::new(http, &api, &w.phone_number_id, &w.access_token(home)?)?.me().await
 }
 
 async fn telegram(config: &Config, home: &Path) -> Result<String, String> {

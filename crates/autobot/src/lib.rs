@@ -20,6 +20,7 @@ pub mod email;
 pub mod eval;
 pub mod gateway;
 pub mod heartbeat;
+pub mod homeassistant;
 pub mod hooks;
 pub mod identity;
 pub mod images;
@@ -52,6 +53,7 @@ pub mod tools;
 pub mod trajectory;
 pub mod tui;
 pub mod voice;
+pub mod whatsapp;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -96,6 +98,12 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
     }
     if let Some(ssh) = &config.agent.ssh {
         tools = tools.with_ssh(ssh.clone());
+    }
+    // Home Assistant, when it is set up; a token that does not work leaves the tool out.
+    match homeassistant::Home::from_config(&config.homeassistant, home) {
+        Ok(Some(ha)) => tools = tools.with_home_assistant(ha),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("no home tool: {e}"),
     }
     if let Some(groups) = &config.agent.tools {
         if let Some(unknown) = groups.iter().find(|g| !tools::GROUPS.iter().any(|(n, _)| n == g)) {

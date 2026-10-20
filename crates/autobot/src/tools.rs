@@ -31,6 +31,8 @@ pub struct Tools {
     browser: bool,
     /// Commands and files on another machine ([crate::ssh]).
     ssh: Option<std::sync::Arc<crate::ssh::Ssh>>,
+    /// Home Assistant, for the `home` tool ([crate::homeassistant]).
+    ha: Option<std::sync::Arc<crate::homeassistant::Home>>,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -44,6 +46,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("memory", &["remember", "search_sessions", "create_skill", "improve_skill", "update_user_profile"]),
     ("terminal", &["terminal", "process", "execute_code"]),
     ("plan", &["todo"]),
+    ("home", &["home"]),
 ];
 
 /// The tool names [groups] allow.
@@ -181,6 +184,8 @@ pub enum Call {
         language: crate::script::Language,
         code: String,
     },
+    /// Home Assistant ([crate::homeassistant]).
+    Home(crate::homeassistant::HomeCall),
 }
 
 impl Tools {
@@ -196,7 +201,19 @@ impl Tools {
             docker: None,
             browser: false,
             ssh: None,
+            ha: None,
         }
+    }
+
+    /// With the `home` tool on [ha].
+    pub fn with_home_assistant(mut self, ha: crate::homeassistant::Home) -> Self {
+        self.ha = Some(std::sync::Arc::new(ha));
+        self
+    }
+
+    /// The Home Assistant the `home` tool reaches, if any.
+    pub fn home_assistant(&self) -> Option<&crate::homeassistant::Home> {
+        self.ha.as_deref()
     }
 
     /// Commands and files on another machine ([crate::ssh]).
@@ -368,6 +385,11 @@ impl Tools {
             && let Some(list) = tools.as_array_mut()
         {
             list.push(crate::browser::definition());
+        }
+        if self.ha.is_some()
+            && let Some(list) = tools.as_array_mut()
+        {
+            list.push(crate::homeassistant::definition());
         }
         if let Some(list) = tools.as_array_mut() {
             list.retain(|t| self.offered(t["function"]["name"].as_str().unwrap_or_default()));
@@ -588,6 +610,7 @@ impl Tools {
             "search_sessions" if self.home.is_some() => Call::SearchSessions { query: text("query")? },
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
             "browser" if self.browser => Call::Browser(crate::browser::Act::parse(&args)?),
+            "home" if self.ha.is_some() => Call::Home(crate::homeassistant::HomeCall::parse(&args)?),
             "execute_code" => Call::ExecuteCode {
                 language: crate::script::Language::parse(
                     args.get("language").and_then(Value::as_str).unwrap_or_default(),
@@ -627,6 +650,8 @@ impl Tools {
                 }
             }
             Call::Fetch { url } => Some(Action::Fetch(url.clone())),
+            // Reading the house asks nothing; changing it does.
+            Call::Home(call) => call.action(),
             Call::WriteFile { path, content } => Some(Action::Write {
                 path: path.clone(),
                 bytes: content.len(),
@@ -719,6 +744,10 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
             Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
+            Call::Home(call) => match &self.ha {
+                Some(ha) => call.run(ha).await,
+                None => Err("Home Assistant is not set up here ([homeassistant] url)".to_owned()),
+            },
             Call::ExecuteCode { .. } => Err("execute_code runs in the agent".to_owned()),
             Call::Browser(act) => {
                 let shots = self.home.as_ref().map_or_else(std::env::temp_dir, |h| h.join("attachments"));

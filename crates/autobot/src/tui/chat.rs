@@ -163,6 +163,10 @@ fn question(action: &Action, workdir: &Path) -> (String, String) {
         Action::Mcp { tool, arguments } => {
             ("Use this tool?", format!("{tool} {}", style::gray(&arguments.chars().take(400).collect::<String>())))
         }
+        Action::Home { service, entities, data } => (
+            "Change this in the house?",
+            format!("{} {entities} {}", style::code(service), style::gray(&data.chars().take(300).collect::<String>())),
+        ),
         Action::Type { page, field, text, submit } => {
             let page = style::underline(page);
             match (text.is_empty(), submit) {

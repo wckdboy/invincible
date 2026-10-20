@@ -2,7 +2,8 @@
 //! so paired devices can run turns and answer approvals on this machine.
 //!
 //! With several bots ([crate::bots]), every path takes `?bot=<name>` (the default bot without
-//! it); `GET /v1/agent/bots` lists them, and approvals say which bot asks.
+//! it); `GET /v1/agent/bots` lists them, and approvals say which bot asks. Served with a
+//! [Fleet], the bots are the ones running now: started and stopped while the API runs.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -23,16 +24,20 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::agent::{Agent, Event};
 use crate::approval::{Action, Answer, Approver};
-use crate::bots::Runtime;
+use crate::bots::{Fleet, Runtime};
 use crate::session::Session;
 
 /// How long a question waits for an answer.
 const APPROVAL_WAIT: Duration = Duration::from_secs(10 * 60);
+/// How long a turn's stream stays open after its answer for what the nudge kept.
+const NUDGE_WAIT: Duration = Duration::from_secs(30);
 
 pub struct ApiState {
     token: String,
-    /// The bots, the default one first.
-    bots: Vec<Arc<BotApi>>,
+    /// The bots, the default one first: as served now, with a [Fleet].
+    bots: Mutex<Vec<Arc<BotApi>>>,
+    /// The bots `autobot serve` runs, when it is serving them.
+    fleet: Option<Arc<Fleet>>,
     waiting: Waiting,
     /// `$AUTOBOT_HOME`, when serving its bots: the ones not running are listed from there.
     root: Option<std::path::PathBuf>,
@@ -101,11 +106,53 @@ impl ApiState {
         let runtime = Runtime::standalone(crate::bots::DEFAULT, &home, agent);
         Self {
             token,
-            bots: vec![BotApi::new(runtime, info)],
+            bots: Mutex::new(vec![BotApi::new(runtime, info)]),
+            fleet: None,
             waiting: Arc::default(),
             root: None,
             failed: Vec::new(),
             prices: None,
+        }
+    }
+
+    /// The bots [fleet] runs, as it runs them now (`autobot serve`).
+    pub fn for_fleet(token: String, fleet: Arc<Fleet>) -> Self {
+        let root = Some(fleet.root().to_owned());
+        Self {
+            token,
+            bots: Mutex::default(),
+            fleet: Some(fleet),
+            waiting: Arc::default(),
+            root,
+            failed: Vec::new(),
+            prices: None,
+        }
+    }
+
+    /// The bots served now, the default one first. With a [Fleet], a bot keeps its open
+    /// conversations while it runs; one started again starts afresh.
+    fn bots(&self) -> Vec<Arc<BotApi>> {
+        let mut bots = self.bots.lock().expect("bots");
+        let Some(fleet) = &self.fleet else { return bots.clone() };
+        let next: Vec<Arc<BotApi>> = fleet
+            .runtimes()
+            .into_iter()
+            .map(|r| {
+                bots.iter().find(|b| Arc::ptr_eq(&b.runtime, &r)).cloned().unwrap_or_else(|| {
+                    let info = info_of(&r);
+                    BotApi::new(r, info)
+                })
+            })
+            .collect();
+        *bots = next.clone();
+        next
+    }
+
+    /// Bots that could not start, and why.
+    fn failed(&self) -> Vec<(String, String)> {
+        match &self.fleet {
+            Some(fleet) => fleet.failed(),
+            None => self.failed.clone(),
         }
     }
 
@@ -118,7 +165,7 @@ impl ApiState {
         failed: Vec<(String, String)>,
     ) -> Self {
         let bots = runtimes.iter().map(|r| BotApi::new(r.clone(), info_of(r))).collect();
-        Self { token, bots, waiting: Arc::default(), root, failed, prices: None }
+        Self { token, bots: Mutex::new(bots), fleet: None, waiting: Arc::default(), root, failed, prices: None }
     }
 
     /// With these prices, for costs in `/usage` and `/insights`, instead of each bot's `[prices]`.
@@ -132,7 +179,7 @@ impl ApiState {
     }
 
     fn named(&self, name: &str) -> Option<Arc<BotApi>> {
-        self.bots.iter().find(|b| b.runtime.name == name).cloned()
+        self.bots().into_iter().find(|b| b.runtime.name == name)
     }
 
     /// The bot whose conversation [id] is: the first one holding it.
@@ -140,12 +187,9 @@ impl ApiState {
         if !valid(id) {
             return None;
         }
-        self.bots
-            .iter()
-            .find(|b| {
-                b.sessions_dir().join(format!("{id}.jsonl")).is_file() || b.open.lock().expect("open").contains_key(id)
-            })
-            .cloned()
+        self.bots().into_iter().find(|b| {
+            b.sessions_dir().join(format!("{id}.jsonl")).is_file() || b.open.lock().expect("open").contains_key(id)
+        })
     }
 }
 
@@ -189,7 +233,7 @@ impl FromRequestParts<Arc<ApiState>> for Bot {
         if let Some(owner) = session.and_then(|id| state.owner(id)) {
             return Ok(Bot(owner, false));
         }
-        state.bots.first().cloned().map(|b| Bot(b, true)).ok_or_else(|| unknown_bot(""))
+        state.bots().first().cloned().map(|b| Bot(b, true)).ok_or_else(|| unknown_bot(""))
     }
 }
 
@@ -212,6 +256,7 @@ fn configured_account(def: &crate::bots::Def, kind: &str) -> String {
     let c = &def.config;
     match kind {
         "email" => c.email.address.clone(),
+        "whatsapp" => c.whatsapp.phone_number_id.clone(),
         "signal" => c.signal.account.clone(),
         "matrix" => c.matrix.homeserver.clone(),
         _ => String::new(),
@@ -312,6 +357,9 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/bots", get(bots))
         .route("/v1/agent/bots/{name}/enable", post(enable_bot))
         .route("/v1/agent/bots/{name}/disable", post(disable_bot))
+        .route("/v1/agent/bots/reload", post(reload_bots))
+        .route("/v1/agent/openai/v1/models", get(openai_models))
+        .route("/v1/agent/openai/v1/chat/completions", post(openai_chat))
         .route("/v1/agent/sessions", get(sessions))
         .route("/v1/agent/sessions/{id}", get(history))
         .route("/v1/agent/sessions/{id}/turns", post(turn))
@@ -381,7 +429,7 @@ async fn info(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot) -> Json<Valu
     // The model may have changed (`/model`).
     info["model"] = json!(bot.agent().gateway.model());
     info["bot"] = json!(bot.runtime.name);
-    info["bots"] = json!(state.bots.iter().map(|b| b.runtime.name.clone()).collect::<Vec<_>>());
+    info["bots"] = json!(state.bots().iter().map(|b| b.runtime.name.clone()).collect::<Vec<_>>());
     Json(info)
 }
 
@@ -390,10 +438,11 @@ async fn bots(State(state): State<Arc<ApiState>>) -> Json<Value> {
     let defs = state.root.as_deref().and_then(|root| crate::bots::load_all(root).ok());
     let mut list: Vec<Value> = Vec::new();
     let mut named: Vec<String> = Vec::new();
+    let all_failed = state.failed();
     if let Some((defs, problems)) = &defs {
         for def in defs {
             let bot = state.named(&def.name);
-            let failed = state.failed.iter().find(|(n, _)| *n == def.name).map(|(_, e)| e.as_str());
+            let failed = all_failed.iter().find(|(n, _)| *n == def.name).map(|(_, e)| e.as_str());
             list.push(bot_item(Some(def), bot.as_deref(), failed));
             named.push(def.name.clone());
         }
@@ -406,7 +455,7 @@ async fn bots(State(state): State<Arc<ApiState>>) -> Json<Value> {
         }
     }
     // Bots served here whose directory is not under a root (tests, embedded uses).
-    for bot in &state.bots {
+    for bot in &state.bots() {
         if !named.contains(&bot.runtime.name) {
             list.push(bot_item(None, Some(bot), None));
         }
@@ -414,8 +463,8 @@ async fn bots(State(state): State<Arc<ApiState>>) -> Json<Value> {
     Json(json!({ "bots": list }))
 }
 
-/// `POST /v1/agent/bots/{name}/enable` and `…/disable`: kept in its config; `autobot serve`
-/// starts or stops it when it restarts.
+/// `POST /v1/agent/bots/{name}/enable` and `…/disable`: kept in its config, and with
+/// `autobot serve` started or stopped at once.
 async fn enable_bot(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {
     set_bot(&state, &name, true)
 }
@@ -435,10 +484,62 @@ fn set_bot(state: &ApiState, name: &str, enabled: bool) -> Response {
     if crate::bots::load(root, name).is_err() {
         return unknown_bot(name);
     }
-    match crate::bots::set_enabled(root, name, enabled) {
-        Ok(()) => Json(json!({ "ok": true, "enabled": enabled, "restart": true })).into_response(),
-        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    if let Err(e) = crate::bots::set_enabled(root, name, enabled) {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e);
     }
+    let Some(fleet) = &state.fleet else {
+        return Json(json!({ "ok": true, "enabled": enabled, "restart": true })).into_response();
+    };
+    let reloaded = fleet.reload();
+    let status = match (&reloaded, state.named(name).is_some()) {
+        (_, true) => "running",
+        (Ok(done), false) if done.failed.iter().any(|(n, _)| n == name) => "error",
+        _ => "stopped",
+    };
+    let mut answer = json!({ "ok": true, "enabled": enabled, "restart": false, "status": status });
+    match reloaded {
+        Ok(done) => {
+            if let Some((_, e)) = done.failed.iter().find(|(n, _)| n == name) {
+                answer["error"] = json!(e);
+            }
+        }
+        Err(e) => answer["error"] = json!(e),
+    }
+    Json(answer).into_response()
+}
+
+/// `POST /v1/agent/bots/reload`: the running bots brought in line with their configuration now
+/// (`autobot serve` also does it on its own when the files change).
+async fn reload_bots(State(state): State<Arc<ApiState>>) -> Response {
+    let Some(fleet) = &state.fleet else {
+        return error(StatusCode::CONFLICT, "not_configurable", "this agent has no bot configuration to reload");
+    };
+    match fleet.reload() {
+        Ok(done) => {
+            let mut answer = done.to_json();
+            answer["running"] = json!(fleet.runtimes().iter().map(|r| r.name.clone()).collect::<Vec<_>>());
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_config", &e),
+    }
+}
+
+/// `GET /v1/agent/openai/v1/models`: the bots, for an OpenAI-compatible client to pick
+/// (Home Assistant's conversation agent, [crate::homeassistant]).
+async fn openai_models(State(state): State<Arc<ApiState>>) -> Response {
+    let names: Vec<String> = state.bots().iter().map(|b| b.runtime.name.clone()).collect();
+    crate::homeassistant::models(&names)
+}
+
+/// `POST /v1/agent/openai/v1/chat/completions`: a turn of the bot `model` names (`?bot=`, or the
+/// default one), in the OpenAI shape.
+async fn openai_chat(State(state): State<Arc<ApiState>>, Bot(bot, chosen): Bot, body: Bytes) -> Response {
+    let model = serde_json::from_slice::<Value>(&body).ok().and_then(|b| b["model"].as_str().map(str::to_owned));
+    let bot = match model.and_then(|m| state.named(&m)) {
+        Some(named) if chosen => named,
+        _ => bot,
+    };
+    crate::homeassistant::conversation(bot.runtime.clone(), &body).await
 }
 
 /// `GET /v1/agent/sessions`: every bot's conversations, newest first; `?bot=` only one's.
@@ -448,7 +549,7 @@ async fn sessions(State(state): State<Arc<ApiState>>, query: Query<HashMap<Strin
             Some(bot) => vec![bot],
             None => return unknown_bot(name),
         },
-        None => state.bots.clone(),
+        None => state.bots(),
     };
     let mut list: Vec<(u64, Value)> = Vec::new();
     for bot in &bots {
@@ -624,6 +725,7 @@ fn stream_turn(
         None => bot.agent(),
     };
     let waiting = state.waiting.clone();
+    let runtime = bot.runtime.clone();
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
         let approver = ApiApprover { events: tx.clone(), waiting, session: id.clone(), bot: bot.runtime.name.clone() };
@@ -653,7 +755,18 @@ fn stream_turn(
             Ok(outcome) => json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts }),
             Err(e) => json!({ "type": "error", "text": e }),
         };
+        let messages = guard.session.messages.clone();
+        drop(guard);
         let _ = tx.send(last);
+        // The nudge, when it is time: the conversation is free again; what it kept follows the
+        // answer as `kept` events before the stream ends.
+        if let Some(nudge) = runtime.nudge(agent, messages)
+            && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
+        {
+            for line in kept {
+                let _ = tx.send(json!({ "type": "kept", "text": line }));
+            }
+        }
     });
 
     let stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -984,6 +1097,9 @@ pub fn describe(action: &Action) -> Value {
         Action::Mcp { tool, arguments } => json!({ "kind": "mcp", "tool": tool, "arguments": arguments }),
         Action::Type { page, field, text, submit } => {
             json!({ "kind": "type", "page": page, "field": field, "text": text, "submit": submit })
+        }
+        Action::Home { service, entities, data } => {
+            json!({ "kind": "home", "service": service, "entities": entities, "data": data })
         }
     }
 }
