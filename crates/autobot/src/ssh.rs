@@ -310,7 +310,9 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert!(args.contains(&"BatchMode=yes".to_owned()) && args.contains(&"ControlMaster=auto".to_owned()));
+        assert!(args.contains(&"BatchMode=yes".to_owned()));
+        // Windows' OpenSSH shares no connections.
+        assert_eq!(args.contains(&"ControlMaster=auto".to_owned()), cfg!(unix));
         let at = args.iter().position(|a| a == "--").unwrap();
         assert_eq!(&args[at + 1..], ["me@box", "cd '/w' && exec sh -c 'ls'"]);
         let config: Ssh = toml::from_str("host = \"me@box\"\nworkdir = \"/srv/w\"\nport = 2222").unwrap();

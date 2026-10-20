@@ -187,7 +187,7 @@ fn collect_files(base: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
         } else if kind.is_file()
             && let Ok(rel) = path.strip_prefix(base)
         {
-            out.push(rel.display().to_string());
+            out.push(crate::slash(rel));
         }
     }
 }

@@ -170,7 +170,7 @@ fn walk(home: &Path, rel: &Path, secrets: bool, also_skip: &[PathBuf], found: &m
     for name in entries {
         let rel = rel.join(&name);
         let path = home.join(&rel);
-        let shown = rel.to_string_lossy().into_owned();
+        let shown = crate::slash(&rel);
         let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
         let exclude = |why: &str, found: &mut Contents| {
             let path = if meta.is_dir() { format!("{shown}/") } else { shown.clone() };
@@ -315,7 +315,7 @@ pub fn write(home: &Path, out: &Path, secrets: bool, also_skip: &[PathBuf]) -> R
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => return Err(format!("{}: {e}", path.display())),
             };
-            let name = rel.to_string_lossy().into_owned();
+            let name = crate::slash(rel);
             let mode = mode_of(&meta);
             // As much as it had when opened (a log or a conversation may grow meanwhile).
             let size = meta.len();
@@ -458,8 +458,7 @@ pub fn plan(archive: &Path, home: &Path, also_skip: &[PathBuf]) -> Result<(Manif
         (Vec::new(), Vec::new())
     };
     let mut plan = Plan { kept, ..Plan::default() };
-    let ours: BTreeMap<String, PathBuf> =
-        ours.into_iter().map(|rel| (rel.to_string_lossy().into_owned(), home.join(rel))).collect();
+    let ours: BTreeMap<String, PathBuf> = ours.into_iter().map(|rel| (crate::slash(&rel), home.join(rel))).collect();
     for entry in &manifest.files {
         match ours.get(&entry.path) {
             None => plan.added.push(entry.path.clone()),

@@ -1017,6 +1017,8 @@ impl Tools {
                 if !err.is_empty() {
                     text.push_str(&String::from_utf8_lossy(&err));
                 }
+                // Windows programs end lines with \r\n: the same text as anywhere else.
+                let text = text.replace("\r\n", "\n");
                 let code = status.code().map_or("killed by a signal".to_owned(), |c| format!("exit code {c}"));
                 Ok(format!("{text}{}[{code}]", if text.is_empty() || text.ends_with('\n') { "" } else { "\n" }))
             }
@@ -1496,7 +1498,8 @@ mod tests {
         let (tools, dir) = tools();
         assert_eq!(tools.resolve("a/b.txt"), dir.join("a/b.txt"));
         assert_eq!(tools.resolve("a/../b.txt"), dir.join("b.txt"));
-        assert_eq!(tools.resolve("/etc/hosts"), std::path::PathBuf::from("/etc/hosts"));
+        let absolute = if cfg!(windows) { r"C:\Windows\win.ini" } else { "/etc/hosts" };
+        assert_eq!(tools.resolve(absolute), std::path::PathBuf::from(absolute));
     }
 
     // Symbolic links and Unix paths.
@@ -1578,15 +1581,16 @@ mod tests {
     async fn unattended_commands_write_only_in_the_working_directory() {
         let (tools, dir) = tools();
         let outside = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
             .map(std::path::PathBuf::from)
             .unwrap()
             .join(format!(".autobot-sandbox-test-{}", rand()));
         let confined = tools.clone().with_sandbox(crate::sandbox::Mode::Unattended).unattended();
         let command = format!("echo in > inside.txt; echo out > {}; echo done", outside.display());
         let out = confined.run(&Call::Terminal { command: command.clone() }).await;
-        if out.contains("bwrap") {
-            // No usable sandbox here (not installed, or user namespaces disallowed): refused or
-            // failed, never run unconfined.
+        if out.contains("bwrap") || out.contains("no sandbox") {
+            // No usable sandbox here (not installed, user namespaces disallowed, Windows):
+            // refused or failed, never run unconfined.
             assert!(!dir.join("inside.txt").exists());
             return;
         }
@@ -1603,9 +1607,14 @@ mod tests {
     #[tokio::test]
     async fn terminal_reports_output_and_exit_code() {
         let (tools, dir) = tools();
-        let out = tools.run(&Call::Terminal { command: "echo hi; echo oops >&2; exit 3".into() }).await;
+        let (both, here) = if cfg!(windows) {
+            ("echo hi; [Console]::Error.WriteLine('oops'); exit 3", "(Get-Location).Path")
+        } else {
+            ("echo hi; echo oops >&2; exit 3", "pwd")
+        };
+        let out = tools.run(&Call::Terminal { command: both.into() }).await;
         assert_eq!(out, "hi\noops\n[exit code 3]");
-        let out = tools.run(&Call::Terminal { command: "pwd".into() }).await;
+        let out = tools.run(&Call::Terminal { command: here.into() }).await;
         assert!(out.starts_with(dir.to_str().unwrap()), "{out}");
         let tools = Tools::new(dir, Duration::from_millis(200));
         let out = tools.run(&Call::Terminal { command: "sleep 5".into() }).await;

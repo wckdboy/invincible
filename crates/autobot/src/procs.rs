@@ -115,7 +115,7 @@ pub fn start(
             };
             let text = String::from_utf8_lossy(&pending[..valid]).into_owned();
             pending.drain(..valid);
-            shared.lock().expect("proc").push(&text);
+            shared.lock().expect("proc").push(&text.replace("\r\n", "\n"));
         }
     };
     {
@@ -285,7 +285,9 @@ mod tests {
         // `echo` and `sleep` mean the same in PowerShell.
         let cmd = crate::shell::command("echo started; sleep 30");
         let id = start("sleeper", cmd, &dir, None).unwrap();
-        let out = output(id, Duration::from_millis(300)).await.unwrap();
+        // PowerShell takes a moment to start.
+        let wait = if cfg!(windows) { Duration::from_secs(5) } else { Duration::from_millis(300) };
+        let out = output(id, wait).await.unwrap();
         assert!(out.contains("started"), "{out}");
         assert!(out.contains("running"), "{out}");
         assert!(list().contains("sleeper"));

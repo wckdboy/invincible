@@ -162,7 +162,7 @@ fn reveal(text: &str) -> String {
 
 fn shown(workdir: &Path, path: &Path) -> String {
     if let Ok(rel) = path.strip_prefix(workdir) {
-        return rel.display().to_string();
+        return crate::slash(rel);
     }
     // Above it: as many `../` as it takes.
     let mut up = PathBuf::new();
@@ -170,7 +170,7 @@ fn shown(workdir: &Path, path: &Path) -> String {
     while let Some(parent) = base.parent() {
         up.push("..");
         if let Ok(rel) = path.strip_prefix(parent) {
-            return up.join(rel).display().to_string();
+            return crate::slash(&up.join(rel));
         }
         base = parent;
     }

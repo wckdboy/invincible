@@ -17,7 +17,7 @@ fn walker(path: &Path) -> ignore::Walk {
 }
 
 fn relative(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root).unwrap_or(path).display().to_string()
+    crate::slash(path.strip_prefix(root).unwrap_or(path))
 }
 
 /// Lines matching [pattern] in the files under [path] (or [path] itself), `path:line: text`.

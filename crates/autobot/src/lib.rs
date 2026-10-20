@@ -220,6 +220,17 @@ pub fn find_program(name: &str) -> Option<PathBuf> {
     find_on_path(name)
 }
 
+/// A relative path written with `/` on every system (Windows writes `\\`): how paths in the
+/// working directory, a skill or the home are shown to the model and kept in files that move
+/// between machines (backups). Absolute paths are left as the system writes them.
+pub fn slash(path: &Path) -> String {
+    if cfg!(windows) && path.is_relative() {
+        path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+    } else {
+        path.display().to_string()
+    }
+}
+
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = Path::new(name);
     if path.components().count() > 1 {

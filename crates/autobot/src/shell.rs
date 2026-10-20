@@ -10,8 +10,9 @@ pub fn name() -> &'static str {
 /// What runs [command] here, through [name]'s shell.
 pub fn command(command: &str) -> tokio::process::Command {
     let mut child = tokio::process::Command::new(program());
+    // Plain text for the model: no colors from pwsh.
     #[cfg(windows)]
-    child.args(["-NoProfile", "-NonInteractive", "-Command"]);
+    child.env("NO_COLOR", "1").args(["-NoProfile", "-NonInteractive", "-Command"]);
     #[cfg(not(windows))]
     child.arg("-c");
     child.arg(command);
@@ -22,7 +23,7 @@ pub fn command(command: &str) -> tokio::process::Command {
 pub fn std_command(command: &str) -> std::process::Command {
     let mut child = std::process::Command::new(program());
     #[cfg(windows)]
-    child.args(["-NoProfile", "-NonInteractive", "-Command"]);
+    child.env("NO_COLOR", "1").args(["-NoProfile", "-NonInteractive", "-Command"]);
     #[cfg(not(windows))]
     child.arg("-c");
     child.arg(command);
