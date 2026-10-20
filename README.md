@@ -421,18 +421,24 @@ menu:
 opened, with the same gateway, model, receipts and memory:
 
 - **What you see:** the answer and its reasoning stream into the thread; each tool call is a
-  card with what it does, and an edit shows as Zed's own diff before it is made.
+  card with what it does, an edit shows as Zed's own diff before it is made, and the agent's
+  task list is Zed's plan.
 - **Approvals:** what your approval mode asks about becomes Zed's permission prompt: allow once,
   always allow (for the session), or reject. The modes are the approval modes (`ask`, `edits`,
-  `allowlist`, `trust`), switched from Zed's mode menu.
-- **Files through the editor:** reads and edits go through Zed's open buffers (unsaved changes
-  included), so the agent's edits land in the editor and its undo. Commands still run as the
-  agent runs them (on this machine, or in its container or over SSH when so configured).
+  `allowlist`, `trust`), switched from Zed's mode menu; the model is picked there too, from
+  the gateway's models.
+- **Files and commands through the editor:** reads and edits go through Zed's open buffers
+  (unsaved changes included), so the agent's edits land in the editor and its undo. Commands
+  run in Zed's terminal, shown in the tool call, when they run on this machine (in its
+  container, the sandbox or over SSH they run there, as configured).
+- **MCP servers:** the servers configured in Zed (stdio and HTTP) add their tools beside
+  Autobot's own `[mcp]` servers.
+- **Commands:** `/help`, `/context`, `/recall …`, `/retry`, `/compact`, `/usage`, `/status` and
+  the rest, your own commands and your skills (`/<skill> what for`) are in Zed's `/` menu.
+- **Voice:** a spoken prompt is transcribed with the node's speech-to-text (`[voice]`), when
+  it has one.
 - **Sessions:** each thread is an Autobot conversation (`acp-…` in `~/.autobot/sessions`); Zed
   can load one again, and the stop button cancels the turn where it is.
-
-Not yet: MCP servers Zed passes to the agent (Autobot's own `[mcp]` servers work), Zed's terminal
-panel for commands, and audio in prompts.
 
 ## The Autobot Agent
 

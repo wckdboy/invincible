@@ -137,7 +137,7 @@ pub fn definitions(media: &NodeMedia) -> Vec<Value> {
 }
 
 /// The extension for [mime].
-fn extension(mime: &str) -> &'static str {
+pub(crate) fn extension(mime: &str) -> &'static str {
     match mime.split(';').next().unwrap_or_default().trim() {
         "audio/mpeg" | "audio/mp3" => "mp3",
         "audio/ogg" | "audio/opus" => "ogg",

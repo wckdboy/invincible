@@ -1,6 +1,7 @@
 //! `autobot acp` driven by a scripted Agent Client Protocol client (as Zed drives it), against a
 //! stand-in gateway with scripted answers: sessions, streamed answers, tool calls with diffs,
-//! permission requests answered both ways, files through the editor, modes, cancel and load.
+//! permission requests answered both ways, files through the editor, modes, cancel and load;
+//! then the editor's terminals, its MCP servers and the slash commands.
 
 mod support;
 
@@ -106,6 +107,8 @@ struct Editor {
     asked: Vec<Value>,
     /// Errors about lines that were not requests.
     errors: Vec<Value>,
+    /// The terminals it opened (run at once, here): what each printed and its exit code.
+    terminals: HashMap<String, (String, i32)>,
 }
 
 impl Editor {
@@ -136,6 +139,7 @@ impl Editor {
             updates: Vec::new(),
             asked: Vec::new(),
             errors: Vec::new(),
+            terminals: HashMap::new(),
         }
     }
 
@@ -196,6 +200,29 @@ impl Editor {
                             self.buffers.insert(path, params["content"].as_str().unwrap().to_owned());
                             json!({})
                         }
+                        "terminal/create" => {
+                            let args: Vec<&str> =
+                                params["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+                            let out = std::process::Command::new(params["command"].as_str().unwrap())
+                                .args(&args)
+                                .current_dir(params["cwd"].as_str().unwrap())
+                                .output()
+                                .unwrap();
+                            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+                            text.push_str(&String::from_utf8_lossy(&out.stderr));
+                            let id = format!("term-{}", self.terminals.len() + 1);
+                            self.terminals.insert(id.clone(), (text, out.status.code().unwrap_or(-1)));
+                            json!({ "terminalId": id })
+                        }
+                        "terminal/wait_for_exit" => {
+                            let (_, code) = &self.terminals[params["terminalId"].as_str().unwrap()];
+                            json!({ "exitCode": code, "signal": null })
+                        }
+                        "terminal/output" => {
+                            let (text, code) = &self.terminals[params["terminalId"].as_str().unwrap()];
+                            json!({ "output": text, "truncated": false, "exitStatus": { "exitCode": code, "signal": null } })
+                        }
+                        "terminal/release" | "terminal/kill" => json!({}),
                         other => panic!("the agent asked for {other}"),
                     };
                     self.write(&json!({ "jsonrpc": "2.0", "id": message["id"], "result": result })).await;
@@ -437,5 +464,94 @@ async fn an_editor_runs_sessions_with_approvals_its_own_files_modes_and_cancel()
     let status = tokio::time::timeout(Duration::from_secs(10), again.child.wait()).await.unwrap().unwrap();
     assert!(status.success(), "{status}");
     let _ = TOKEN;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_editor_lends_its_terminal_and_mcp_servers_and_has_commands() {
+    let (homes, project, dir) = setup("terminal");
+    let script: Shared = Arc::default();
+    let url = gateway(script.clone()).await;
+    homes.agent_config(&url, support::free_port(), true);
+    let mut editor = Editor::start(&homes, &dir.join("acp.log"));
+    let init =
+        editor.request("initialize", json!({ "protocolVersion": 1, "clientCapabilities": { "terminal": true } })).await;
+    assert_eq!(init["result"]["protocolVersion"], 1, "{init}");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_server.py");
+    let new = editor
+        .request(
+            "session/new",
+            json!({ "cwd": project, "mcpServers": [
+                { "name": "calc", "command": "python3", "args": [fixture.display().to_string()], "env": [] },
+            ] }),
+        )
+        .await;
+    let session = new["result"]["sessionId"].as_str().unwrap().to_owned();
+    let options: Vec<&str> =
+        new["result"]["configOptions"].as_array().unwrap().iter().map(|o| o["id"].as_str().unwrap()).collect();
+    assert!(options.contains(&"mode"), "{new}");
+
+    // The commands are told once the session is open.
+    let request = editor.request("session/set_mode", json!({ "sessionId": session, "modeId": "ask" })).await;
+    assert!(request.get("result").is_some(), "{request}");
+    let commands = editor.updates_of(0, "available_commands_update");
+    let names: Vec<&str> =
+        commands[0]["availableCommands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"help") && names.contains(&"recall"), "{names:?}");
+
+    // 1. A command runs in the editor's terminal, shown in its call.
+    script.lock().unwrap().answers.extend([
+        (Duration::ZERO, call("t1", "terminal", json!({ "command": "echo from-the-terminal; exit 3" }))),
+        (Duration::ZERO, say("It said so.")),
+    ]);
+    let from = editor.updates.len();
+    let done = editor
+        .request("session/prompt", json!({ "sessionId": session, "prompt": [{ "type": "text", "text": "run it" }] }))
+        .await;
+    assert_eq!(done["result"]["stopReason"], "end_turn", "{done}");
+    assert_eq!(editor.terminals.len(), 1, "run in the editor's terminal");
+    let shown = editor.updates_of(from, "tool_call_update");
+    assert!(shown.iter().any(|u| u["content"][0]["type"] == "terminal"), "{shown:?}");
+    let sent = script.lock().unwrap().seen.last().unwrap().clone();
+    let result = sent["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "tool").unwrap().clone();
+    let result = result["content"].as_str().unwrap();
+    assert!(result.contains("from-the-terminal") && result.contains("exit code 3"), "{result}");
+
+    // 2. The editor's MCP server: its tools are offered, and one runs.
+    script.lock().unwrap().answers.extend([
+        (Duration::ZERO, call("m1", "calc__add", json!({ "a": 2, "b": 40 }))),
+        (Duration::ZERO, say("It is 42.")),
+    ]);
+    let done = editor
+        .request("session/prompt", json!({ "sessionId": session, "prompt": [{ "type": "text", "text": "2 + 40?" }] }))
+        .await;
+    assert_eq!(done["result"]["stopReason"], "end_turn", "{done}");
+    let seen = script.lock().unwrap().seen.clone();
+    let offered: Vec<String> = seen[seen.len() - 2]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(offered.contains(&"calc__add".to_owned()), "{offered:?}");
+    let result = seen.last().unwrap()["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "tool")
+        .unwrap()
+        .clone();
+    assert!(result["content"].as_str().unwrap().contains("42"), "{result}");
+
+    // 3. A slash command answered here, without a model call.
+    let calls = script.lock().unwrap().seen.len();
+    let from = editor.updates.len();
+    let done = editor
+        .request("session/prompt", json!({ "sessionId": session, "prompt": [{ "type": "text", "text": "/help" }] }))
+        .await;
+    assert_eq!(done["result"]["stopReason"], "end_turn", "{done}");
+    assert!(editor.text_since(from).contains("/recall"), "{}", editor.text_since(from));
+    assert_eq!(script.lock().unwrap().seen.len(), calls, "no model call");
     let _ = std::fs::remove_dir_all(dir);
 }

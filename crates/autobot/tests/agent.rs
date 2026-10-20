@@ -757,6 +757,7 @@ fn mcp_hub(only: Option<Vec<String>>) -> autobot::mcp::Hub {
             args: vec![script.display().to_string()],
             env: Default::default(),
             tools: only,
+            ..Default::default()
         },
     )]))
     .unwrap()
@@ -801,6 +802,7 @@ async fn mcp_results_errors_and_the_allowlist() {
             args: vec![],
             env: Default::default(),
             tools: None,
+            ..Default::default()
         },
     )]))
     .unwrap();

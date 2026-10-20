@@ -1,6 +1,6 @@
-//! MCP servers (Model Context Protocol, stdio transport): their tools become the agent's, named
-//! `<server>__<tool>`, each call approved like a command (an `mcp` action; unattended runs only
-//! with `mcp:<server>/<tool>` in the allowlist) and logged.
+//! MCP servers (Model Context Protocol, over stdio or Streamable HTTP): their tools become the
+//! agent's, named `<server>__<tool>`, each call approved like a command (an `mcp` action;
+//! unattended runs only with `mcp:<server>/<tool>` in the allowlist) and logged.
 //!
 //! ```toml
 //! [mcp.github]
@@ -8,10 +8,15 @@
 //! args = ["-y", "@modelcontextprotocol/server-github"]
 //! env = { GITHUB_TOKEN_FILE = "~/.autobot/github.token" }   # passed to the server
 //! tools = ["search_repositories", "get_issue"]              # optional: only these
+//!
+//! [mcp.docs]
+//! url = "https://mcp.example.com/mcp"                       # Streamable HTTP
+//! headers = { Authorization = "Bearer …" }
 //! ```
 //!
-//! A server is started on first use and kept running; one that fails to start is reported in
-//! the tool's result, and the rest of the agent goes on.
+//! A server is started (or connected to) on first use and kept; one that fails is reported in
+//! the tool's result, and the rest of the agent goes on. An HTTP server is reached under the
+//! node's network mode: HTTPS, or plain HTTP on this machine.
 
 use std::collections::{BTreeMap, HashMap};
 use std::process::Stdio;
@@ -23,14 +28,25 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
-#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+/// The protocol version asked for.
+const PROTOCOL: &str = "2025-06-18";
+
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
+    /// The program of a server over stdio.
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// The address of a server over Streamable HTTP, instead of a command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Headers sent to it with every request.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
     /// Only these of its tools (default: all).
     #[serde(default)]
     pub tools: Option<Vec<String>>,
@@ -55,46 +71,147 @@ impl Tool {
 /// How long one request may take.
 const TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The line to one server (one per server: its size does not matter).
+#[allow(clippy::large_enum_variant)]
+enum Line {
+    Stdio {
+        stdin: tokio::process::ChildStdin,
+        stdout: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+        _child: tokio::process::Child,
+    },
+    Http {
+        client: reqwest::Client,
+        url: String,
+        headers: BTreeMap<String, String>,
+        /// The server's `Mcp-Session-Id`, once it gave one.
+        session: Option<String>,
+        initialized: bool,
+    },
+}
+
 struct Running {
-    stdin: tokio::process::ChildStdin,
-    stdout: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    line: Line,
     next_id: u64,
     tools: Vec<Tool>,
-    _child: tokio::process::Child,
 }
 
 impl Running {
     async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
         self.next_id += 1;
         let id = self.next_id;
-        let line = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string();
-        self.stdin.write_all(format!("{line}\n").as_bytes()).await.map_err(|e| e.to_string())?;
-        self.stdin.flush().await.map_err(|e| e.to_string())?;
-        let read = async {
-            loop {
-                let Some(line) = self.stdout.next_line().await.map_err(|e| e.to_string())? else {
-                    return Err("the server closed its output".to_owned());
-                };
-                let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
-                // Notifications and other ids are not ours.
-                if message["id"] != json!(id) {
-                    continue;
+        let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        let answer = async {
+            match &mut self.line {
+                Line::Stdio { stdin, stdout, .. } => {
+                    stdin.write_all(format!("{message}\n").as_bytes()).await.map_err(|e| e.to_string())?;
+                    stdin.flush().await.map_err(|e| e.to_string())?;
+                    loop {
+                        let Some(line) = stdout.next_line().await.map_err(|e| e.to_string())? else {
+                            return Err("the server closed its output".to_owned());
+                        };
+                        let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+                        // Notifications and other ids are not ours.
+                        if message["id"] == json!(id) {
+                            return Ok(message);
+                        }
+                    }
                 }
-                if let Some(error) = message.get("error") {
-                    return Err(error["message"].as_str().unwrap_or("error").to_owned());
-                }
-                return Ok(message["result"].clone());
+                line @ Line::Http { .. } => post(line, &message, Some(id)).await,
             }
         };
-        tokio::time::timeout(TIMEOUT, read)
+        let message = tokio::time::timeout(TIMEOUT, answer)
             .await
-            .map_err(|_| format!("{method}: no answer in {}s", TIMEOUT.as_secs()))?
+            .map_err(|_| format!("{method}: no answer in {}s", TIMEOUT.as_secs()))??;
+        if let Some(error) = message.get("error") {
+            return Err(error["message"].as_str().unwrap_or("error").to_owned());
+        }
+        Ok(message["result"].clone())
     }
 
     async fn notify(&mut self, method: &str) -> Result<(), String> {
-        let line = json!({ "jsonrpc": "2.0", "method": method }).to_string();
-        self.stdin.write_all(format!("{line}\n").as_bytes()).await.map_err(|e| e.to_string())
+        let message = json!({ "jsonrpc": "2.0", "method": method });
+        match &mut self.line {
+            Line::Stdio { stdin, .. } => {
+                stdin.write_all(format!("{message}\n").as_bytes()).await.map_err(|e| e.to_string())
+            }
+            line @ Line::Http { .. } => {
+                let sent = tokio::time::timeout(TIMEOUT, post(line, &message, None)).await;
+                if let Line::Http { initialized, .. } = line {
+                    *initialized = true;
+                }
+                sent.map_err(|_| format!("{method}: no answer in {}s", TIMEOUT.as_secs()))?.map(drop)
+            }
+        }
     }
+}
+
+/// Posts [message] to an HTTP server: the answer with [id] (JSON, or an event of the stream it
+/// opens), or nothing for a notification.
+async fn post(line: &mut Line, message: &Value, id: Option<u64>) -> Result<Value, String> {
+    let Line::Http { client, url, headers, session, initialized } = line else {
+        return Err("not an HTTP server".to_owned());
+    };
+    let mut request = client
+        .post(url.as_str())
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .body(message.to_string());
+    for (name, value) in headers.iter() {
+        request = request.header(name.as_str(), value.as_str());
+    }
+    if let Some(session) = session.as_deref() {
+        request = request.header("mcp-session-id", session);
+    }
+    if *initialized {
+        request = request.header("mcp-protocol-version", PROTOCOL);
+    }
+    let response = request.send().await.map_err(|e| e.without_url().to_string())?;
+    let status = response.status();
+    if let Some(given) = response.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) {
+        *session = Some(given.to_owned());
+    }
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {}", text.chars().take(200).collect::<String>()));
+    }
+    let Some(id) = id else { return Ok(Value::Null) };
+    let streamed = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|t| t.starts_with("text/event-stream"));
+    let ours = |message: &Value| message["id"] == json!(id) && message.get("method").is_none();
+    if !streamed {
+        let body: Value = response.json().await.map_err(|e| format!("not JSON: {}", e.without_url()))?;
+        // One answer, or a batch with ours in it.
+        let found = match body {
+            Value::Array(list) => list.into_iter().find(ours),
+            one => Some(one).filter(ours),
+        };
+        return found.ok_or_else(|| "the server answered something else".to_owned());
+    }
+    // Server-sent events: `data:` lines, an empty line ending each event.
+    use futures_util::StreamExt as _;
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.without_url().to_string())?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
+        while let Some(end) = buffer.find("\n\n") {
+            let event: String = buffer.drain(..end + 2).collect();
+            let data: Vec<&str> = event
+                .lines()
+                .filter_map(|l| l.strip_prefix("data:"))
+                .map(|d| d.strip_prefix(' ').unwrap_or(d))
+                .collect();
+            if let Ok(message) = serde_json::from_str::<Value>(&data.join("\n"))
+                && ours(&message)
+            {
+                return Ok(message);
+            }
+        }
+    }
+    Err("the server closed the stream without an answer".to_owned())
 }
 
 /// The configured servers, started when first needed.
@@ -115,6 +232,16 @@ impl Hub {
         if let Some(bad) = configs.keys().find(|n| !crate::team::valid_name(n) || n.contains("__")) {
             return Err(format!("[mcp.{bad}]: a server name is letters, digits, - and _"));
         }
+        for (name, config) in &configs {
+            match (&config.url, config.command.is_empty()) {
+                (Some(_), false) => return Err(format!("[mcp.{name}]: a command or a url, not both")),
+                (None, true) => return Err(format!("[mcp.{name}]: a command (stdio) or a url (HTTP)")),
+                (Some(url), true) => {
+                    invincible::egress::check(url).map_err(|e| format!("[mcp.{name}] url: {e}"))?;
+                }
+                (None, false) => {}
+            }
+        }
         Ok(Self { configs, running: Mutex::default() })
     }
 
@@ -122,12 +249,27 @@ impl Hub {
         self.configs.is_empty()
     }
 
-    async fn server(&self, name: &str) -> Result<Arc<Mutex<Running>>, String> {
-        let mut running = self.running.lock().await;
-        if let Some(server) = running.get(name) {
-            return Ok(server.clone());
+    /// The servers, by name.
+    pub fn names(&self) -> Vec<&str> {
+        self.configs.keys().map(String::as_str).collect()
+    }
+
+    async fn connect(name: &str, config: &ServerConfig) -> Result<Line, String> {
+        if let Some(url) = &config.url {
+            let parsed = invincible::egress::check(url)?;
+            let client = if crate::net::loopback(parsed.host_str().unwrap_or_default()) {
+                invincible::egress::local().build().map_err(|e| e.to_string())?
+            } else {
+                invincible::egress::client(&crate::network()?)?
+            };
+            return Ok(Line::Http {
+                client,
+                url: url.clone(),
+                headers: config.headers.clone(),
+                session: None,
+                initialized: false,
+            });
         }
-        let config = self.configs.get(name).ok_or(format!("no MCP server {name:?}"))?;
         let mut command = tokio::process::Command::new(crate::config::expand(std::path::Path::new(&config.command)));
         command
             .args(&config.args)
@@ -141,15 +283,25 @@ impl Hub {
         let mut child = command.spawn().map_err(|e| format!("MCP server {name}: {}: {e}", config.command))?;
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?).lines();
-        let mut server = Running { stdin, stdout, next_id: 0, tools: Vec::new(), _child: child };
+        Ok(Line::Stdio { stdin, stdout, _child: child })
+    }
+
+    async fn server(&self, name: &str) -> Result<Arc<Mutex<Running>>, String> {
+        let mut running = self.running.lock().await;
+        if let Some(server) = running.get(name) {
+            return Ok(server.clone());
+        }
+        let config = self.configs.get(name).ok_or(format!("no MCP server {name:?}"))?;
+        let line = Self::connect(name, config).await?;
+        let mut server = Running { line, next_id: 0, tools: Vec::new() };
         server
             .request(
                 "initialize",
-                json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "autobot", "version": invincible::version::VERSION } }),
+                json!({ "protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": { "name": "autobot", "version": invincible::version::VERSION } }),
             )
             .await
             .map_err(|e| format!("MCP server {name}: initialize: {e}"))?;
-        server.notify("notifications/initialized").await?;
+        server.notify("notifications/initialized").await.map_err(|e| format!("MCP server {name}: {e}"))?;
         let listed = server.request("tools/list", json!({})).await.map_err(|e| format!("MCP server {name}: {e}"))?;
         server.tools = listed["tools"]
             .as_array()
@@ -215,5 +367,27 @@ impl Hub {
             .collect();
         let text = if text.is_empty() { result.to_string() } else { text.join("\n") };
         if result["isError"] == true { Err(text) } else { Ok(text) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Hub, ServerConfig};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn a_server_is_a_command_or_an_address() {
+        let hub = |config: ServerConfig| Hub::new(BTreeMap::from([("s".to_owned(), config)]));
+        assert!(hub(ServerConfig { command: "x".into(), ..Default::default() }).is_ok());
+        assert!(hub(ServerConfig { url: Some("https://mcp.example.com/mcp".into()), ..Default::default() }).is_ok());
+        assert!(hub(ServerConfig { url: Some("http://127.0.0.1:9/mcp".into()), ..Default::default() }).is_ok());
+        assert!(hub(ServerConfig::default()).unwrap_err().contains("a command (stdio) or a url"));
+        let both = ServerConfig { command: "x".into(), url: Some("https://a.example".into()), ..Default::default() };
+        assert!(hub(both).unwrap_err().contains("not both"));
+        let plain = ServerConfig { url: Some("http://mcp.example.com/mcp".into()), ..Default::default() };
+        assert!(hub(plain).unwrap_err().contains("only HTTPS"));
+        let parsed: ServerConfig =
+            toml::from_str("url = \"https://a.example/mcp\"\nheaders = { X-Key = \"k\" }").unwrap();
+        assert_eq!(parsed.headers["X-Key"], "k");
     }
 }

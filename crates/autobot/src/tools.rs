@@ -52,6 +52,20 @@ pub type FilesFuture<'a, T> =
 pub trait Files: Send + Sync {
     fn read<'a>(&'a self, path: &'a Path) -> FilesFuture<'a, String>;
     fn write<'a>(&'a self, path: &'a Path, text: &'a str) -> FilesFuture<'a, ()>;
+
+    /// Runs the `terminal` tool's [command] (`sh -c`) in [cwd] there (an editor's terminal),
+    /// stopped after [timeout], keeping the last [limit] bytes of what it printed. Asked only
+    /// when commands run on this machine unconfined (not in a container, the sandbox or over
+    /// SSH).
+    fn terminal<'a>(
+        &'a self,
+        _command: &'a str,
+        _cwd: &'a Path,
+        _timeout: Duration,
+        _limit: usize,
+    ) -> FilesFuture<'a, String> {
+        Box::pin(async { None })
+    }
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -753,6 +767,14 @@ impl Tools {
     pub async fn run(&self, call: &Call) -> String {
         if let Some(files) = &self.files
             && let Some(result) = through(files.as_ref(), call).await
+        {
+            return cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit);
+        }
+        if let (Call::Terminal { command }, Some(files)) = (call, &self.files)
+            && self.ssh.is_none()
+            && self.docker.is_none()
+            && !self.confined
+            && let Some(result) = files.terminal(command, &self.workdir, self.timeout, self.limit).await
         {
             return cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit);
         }
