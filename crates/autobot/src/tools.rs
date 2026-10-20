@@ -1615,7 +1615,9 @@ mod tests {
         let out = tools.run(&Call::Terminal { command: both.into() }).await;
         assert_eq!(out, "hi\noops\n[exit code 3]");
         let out = tools.run(&Call::Terminal { command: here.into() }).await;
-        assert!(out.starts_with(dir.to_str().unwrap()), "{out}");
+        // The same directory, however it is spelled (Windows' short 8.3 names).
+        let said = std::path::Path::new(out.lines().next().unwrap_or_default());
+        assert_eq!(said.canonicalize().ok(), dir.canonicalize().ok(), "{out}");
         let tools = Tools::new(dir, Duration::from_millis(200));
         let out = tools.run(&Call::Terminal { command: "sleep 5".into() }).await;
         assert!(out.contains("stopped after"), "{out}");

@@ -961,7 +961,7 @@ mod tests {
         let home = tmp("contents");
         sample(&home);
         let found = contents(&home, false, &[]).unwrap();
-        let files: Vec<String> = found.files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let files: Vec<String> = found.files.iter().map(|p| crate::slash(p)).collect();
         assert!(files.contains(&"config.toml".to_owned()));
         assert!(files.contains(&"sessions/.recall/ab.txt".to_owned()));
         assert!(files.contains(&"bots/ops/bot.toml".to_owned()));
