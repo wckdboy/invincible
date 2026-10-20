@@ -155,6 +155,47 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Back up the autobot home to one archive: config, personas, skills, conversations, memory,
+    /// the recall index, who may use the bots. Secrets only with --include-secrets.
+    Backup {
+        /// Where to write it [default: ./autobot-backup-<time>.tar.gz].
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// The tokens, passwords and keys too (keep the file as safe as they are).
+        #[arg(long)]
+        include_secrets: bool,
+    },
+    /// Restore the autobot home from a backup: checked first, what changes shown, asked; the
+    /// home as it was is kept beside it.
+    Restore {
+        file: PathBuf,
+        /// Only check it and say what would change.
+        #[arg(long)]
+        dry_run: bool,
+        /// Without asking.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Health alerts to the owner (`[alerts]`): where they go and the latest; `test` sends one.
+    Alerts {
+        #[command(subcommand)]
+        action: Option<AlertsAction>,
+    },
+    /// The services' logs: the last lines, or as they come with --follow.
+    Logs {
+        /// agent (`autobot serve`), gateway, or update.
+        #[arg(default_value = "agent")]
+        which: String,
+        /// How many lines.
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+        /// Keep printing what comes.
+        #[arg(short, long)]
+        follow: bool,
+        /// Only lines with this text (case does not matter).
+        #[arg(long)]
+        grep: Option<String>,
+    },
     /// The saved conversations: list them, or prune the old ones.
     Sessions {
         #[command(subcommand)]
@@ -294,6 +335,14 @@ enum Command {
         #[command(subcommand)]
         action: CronAction,
     },
+}
+
+#[derive(Subcommand)]
+enum AlertsAction {
+    /// Where alerts go, which, and the latest.
+    Status,
+    /// Send a test alert now, through the running `autobot serve`.
+    Test,
 }
 
 #[derive(Subcommand)]
@@ -986,6 +1035,51 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Backup { out, include_secrets } => {
+            let out = out.unwrap_or_else(|| PathBuf::from(autobot::backup::file_name(chrono::Local::now())));
+            let manifest = autobot::backup::write(&root, &out, include_secrets, &[])?;
+            for line in autobot::backup::summary(&out, &manifest) {
+                println!("{line}");
+            }
+            if !include_secrets && config.mcp.values().any(|server| !server.env.is_empty()) {
+                println!(
+                    "note: config.toml sets environment values for MCP servers; they are in the backup as written"
+                );
+            }
+            Ok(())
+        }
+        Command::Restore { file, dry_run, yes } => restore(&root, &file, dry_run, yes),
+        Command::Alerts { action: None | Some(AlertsAction::Status) } => {
+            let main = autobot::bots::load_default(&root)?;
+            for line in autobot::alerts::status(&root, &main.config.alerts) {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        Command::Alerts { action: Some(AlertsAction::Test) } => alerts_test(&root),
+        Command::Logs { which, lines, follow, grep } => {
+            let path = autobot::logs::path(&which, &root)?;
+            let grep = grep.as_deref();
+            let (last, mut pos) = match autobot::logs::tail(&path, lines, grep) {
+                Ok(found) => found,
+                Err(_) if follow => (Vec::new(), 0),
+                Err(e) => return Err(format!("{e} (is the service installed? `autobot service status`)")),
+            };
+            for line in last {
+                println!("{line}");
+            }
+            if !follow {
+                return Ok(());
+            }
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let (new, at) = autobot::logs::read_new(&path, pos)?;
+                pos = at;
+                for line in new.iter().filter(|l| autobot::logs::matches(l, grep)) {
+                    println!("{line}");
+                }
+            }
+        }
         Command::Sessions { action: None | Some(SessionsAction::List) } => {
             for (name, modified) in autobot::session::list(&home.join("sessions")) {
                 let ago = modified.elapsed().map(|d| d.as_secs()).unwrap_or(0);
@@ -1007,6 +1101,98 @@ fn run(mut cli: Cli) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// `autobot restore FILE`.
+fn restore(root: &std::path::Path, file: &std::path::Path, dry_run: bool, yes: bool) -> Result<(), String> {
+    let (manifest, plan) = autobot::backup::plan(file, root)?;
+    println!(
+        "{}: {} file(s) from {}, made {} by autobot {}; every checksum matches",
+        file.display(),
+        manifest.files.len(),
+        manifest.home,
+        manifest.created.get(..16).unwrap_or(&manifest.created).replace('T', " "),
+        manifest.version
+    );
+    let show = |what: &str, list: &[String]| {
+        if list.is_empty() {
+            return;
+        }
+        println!("{what} ({}):", list.len());
+        for path in list.iter().take(20) {
+            println!("  {path}");
+        }
+        if list.len() > 20 {
+            println!("  … and {} more", list.len() - 20);
+        }
+    };
+    show("new", &plan.added);
+    show("changed", &plan.changed);
+    show("gone after the restore (not in the backup)", &plan.removed);
+    if !plan.kept.is_empty() {
+        println!("kept as they are (not in the backup): {}", plan.kept.join(", "));
+    }
+    if plan.is_empty() {
+        println!("{} already matches it: nothing to do", root.display());
+        return Ok(());
+    }
+    if dry_run {
+        println!("dry run: nothing changed");
+        return Ok(());
+    }
+    if !yes {
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return Err("not restored: run again with --yes".to_owned());
+        }
+        let mut prompt = setup::Prompt::new(std::io::stdin().lock());
+        if !prompt.yes(&format!("Restore {} from it?", root.display()), false)? {
+            return Err("not restored".to_owned());
+        }
+    }
+    let running = live_bots(root).is_some();
+    match autobot::backup::restore(file, root)? {
+        Some(previous) => {
+            println!("restored {}; the home as it was is {} (move it back to undo)", root.display(), previous.display())
+        }
+        None => println!("restored {}", root.display()),
+    }
+    if running {
+        println!("`autobot serve` is running: `autobot service restart` starts it on the restored home");
+    }
+    Ok(())
+}
+
+/// `autobot alerts test`: through the running `autobot serve`, which has the channels.
+fn alerts_test(root: &std::path::Path) -> Result<(), String> {
+    let main = autobot::bots::load_default(root)?;
+    let token = main.config.gateway.token()?;
+    let url = format!("http://{}/v1/agent/alerts/test", main.config.serve.listen);
+    let reply: serde_json::Value = runtime()?.block_on(async {
+        let reply = reqwest::Client::new()
+            .post(url)
+            .bearer_auth(token)
+            .json(&serde_json::json!({}))
+            .timeout(std::time::Duration::from_secs(90))
+            .send()
+            .await
+            .map_err(|_| "`autobot serve` is not running here: alerts go through it".to_owned())?;
+        reply.json().await.map_err(|e| e.to_string())
+    })?;
+    if let Some(e) = reply["error"]["message"].as_str() {
+        return Err(e.to_owned());
+    }
+    let mut failed = false;
+    for sent in reply["sent"].as_array().into_iter().flatten() {
+        let to = sent["to"].as_str().unwrap_or("?");
+        match sent["error"].as_str() {
+            None => println!("sent to {to}"),
+            Some(e) => {
+                failed = true;
+                println!("not sent to {to}: {e}");
+            }
+        }
+    }
+    if failed { Err("some alerts did not go".to_owned()) } else { Ok(()) }
 }
 
 fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(), String> {
@@ -1291,6 +1477,13 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         invincible::version::VERSION
     );
     invincible::watchdog::spawn("agent", listen, root.join("logs"));
+    // Health alerts to the owner, and scheduled backups.
+    let alert_bots = fleet.clone();
+    let mut background = autobot::alerts::start(&root, Arc::new(move || alert_bots.runtimes()));
+    if let Err(e) = main.config.backup.every() {
+        tracing::error!("{e}");
+    }
+    background.push(tokio::spawn(autobot::backup::scheduler(root.clone())));
     // All bots use the one gateway on this machine.
     let gateway = runtimes[0].agent().gateway.clone();
     drop(runtimes);
@@ -1344,10 +1537,11 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         () = watch_bots => {}
         () = shutdown() => {}
     }
-    for part in parts {
+    for part in parts.into_iter().chain(background) {
         part.abort();
     }
     fleet.stop();
+    autobot::alerts::stopped(&root);
     Ok(())
 }
 

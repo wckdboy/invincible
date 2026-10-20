@@ -196,7 +196,55 @@ it up again after a restart. Logs are in `~/.invincible/logs/` and `~/.autobot/l
 at 16 MiB with one old copy. `autobot service status` says whether each runs, starts at boot and
 how it last stopped; `autobot doctor` ends with a **24/7 readiness** section: the services, linger,
 whether the Mac sleeps (`sudo pmset -a sleep 0` keeps it awake), disk space, the gateway, the
-models, the agent API, clock sync and the update channel.
+models, the agent API, clock sync and the update channel. `autobot logs` prints the last lines
+of the agent's log (`gateway` or `update` for the others; `-n 200`, `--grep warn`, `--follow`).
+
+**Alerts.** While `autobot serve` runs, it tells you on a channel the bots already use when it
+was started again after a crash (it stopped without shutting down: a panic, the watchdog, a
+kill), the gateway has not answered for a minute, a model backend fails its health checks, the
+disk runs low, a scheduled task, the heartbeat or a scheduled backup fails, and when an update is
+available or was applied. A problem that goes away says so. The same alert goes at most once in
+`repeat`, at most `per_hour` go in an hour (the next one says how many were held back), and in
+quiet hours they wait and go together when those end. With no `to`, they go to the home channel
+(`/sethome`). A failed task's alert skips the place its own answer already went.
+
+```toml
+[alerts]                          # in ~/.autobot/config.toml
+to = ["telegram:123456", "email:me@example.org"]   # any channel address; [default: the home channel]
+events = ["crash", "gateway", "backend", "disk", "job", "backup", "update"]   # [default: all]
+quiet_hours = "23:00-07:00"
+repeat = "6h"
+per_hour = 10
+disk_free_gib = 2                 # 0: no disk alerts
+update_check = "1d"               # `invincible update --check` this often; "off"
+```
+
+`autobot alerts` says where they go and lists the latest (sent, held, or why not);
+`autobot alerts test` sends one now through the running service, whatever the limits say, and
+says how each address went.
+
+**Backups.** `autobot backup` writes the whole agent home to one `.tar.gz` (plain tar, so `tar
+tzf` lists it): the configuration, personas, skills, conversations, memory, the recall index,
+who may use the bots, every bot's own directory, and a `MANIFEST.json` with each file's size,
+mode and SHA-256. Secrets (`*.token`, `*.password`, `*.secret`, `*.key`, `*.pem`, `.env`,
+`secrets/`) stay out unless you add `--include-secrets`, and the summary lists the ones left
+out; logs, the working directory (`work/`), backups, downloaded speech models and links stay out
+always. The file is readable by you only. The gateway's own home (`~/.invincible`: its token,
+paired devices, receipts) is not in it.
+
+`autobot restore FILE` checks every file against the manifest before it touches anything, lists
+what is new, changed and gone, asks (`--yes` not to, `--dry-run` to stop there), builds the new
+home beside the old one and swaps it in. What the backup does not cover stays as it is: the
+secrets it left out, `work/`, the logs. The old home is kept as `~/.autobot.before-restore-<time>`;
+move it back to undo. Restart the service afterwards (`autobot service restart`).
+
+```toml
+[backup]                          # scheduled, while `autobot serve` runs
+every = "1d"                      # [default: off]
+keep = 7                          # the newest 7; older ones are removed
+dir = "~/backups"                 # [default: ~/.autobot/backups]
+secrets = false
+```
 
 ```sh
 autobot              # chat in the terminal

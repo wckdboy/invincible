@@ -141,8 +141,12 @@ impl Gateway {
     /// Keeps an eye on the gateway for a long-running agent: says when it goes away and when it
     /// is back. Every call reconnects anyway, so nothing else has to change when it restarts
     /// (an upgrade, a crash); turns in between fail with the gateway's error and can be retried.
+    /// Gone for a minute or more is an alert ([crate::alerts]); back, its clearing.
     pub async fn watch(&self, every: Duration) {
         let mut up = true;
+        let mut down_since: Option<std::time::Instant> = None;
+        // As if told: a clearing of what the last run sent, once it answers (nothing, if none).
+        let mut told = true;
         loop {
             let now = self.healthy().await;
             if now != up {
@@ -152,6 +156,29 @@ impl Gateway {
                     tracing::warn!("the gateway at {} does not answer; waiting for it", self.url);
                 }
                 up = now;
+            }
+            if now {
+                down_since = None;
+                if std::mem::take(&mut told) {
+                    crate::alerts::raise(crate::alerts::Alert::cleared(
+                        crate::alerts::Kind::Gateway,
+                        "gateway",
+                        format!("The gateway at {} answers again.", self.url),
+                    ));
+                }
+            } else {
+                let since = *down_since.get_or_insert_with(std::time::Instant::now);
+                if !told && since.elapsed() >= Duration::from_secs(60) {
+                    told = true;
+                    crate::alerts::raise(crate::alerts::Alert::new(
+                        crate::alerts::Kind::Gateway,
+                        "gateway",
+                        format!(
+                            "The gateway at {} has not answered for a minute: the bots cannot reach a model.",
+                            self.url
+                        ),
+                    ));
+                }
             }
             tokio::time::sleep(every).await;
         }

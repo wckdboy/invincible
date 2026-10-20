@@ -345,3 +345,32 @@ async fn the_api_lists_bots_enables_them_and_routes_turns() {
     assert_eq!(get("/v1/agent/usage?bot=nope").await["error"]["code"], "unknown_bot");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn alerts_go_where_they_are_set_through_the_bot_with_that_channel() {
+    let root = temp("alerts");
+    let (main_home, ops_home) = (root.join("main"), root.join("ops"));
+    let none = "http://127.0.0.1:9";
+    let main = Runtime::standalone("main", &main_home, Arc::new(agent(none, &main_home, None)));
+    let ops = Runtime::standalone("ops", &ops_home, Arc::new(agent(none, &ops_home, None)));
+    let (telegram, slack) = (Recorder::new("telegram"), Recorder::new("slack"));
+    main.register(telegram.clone());
+    ops.register(slack.clone());
+    let bots = vec![main.clone(), ops.clone()];
+
+    // Nothing set: the default bot's home channel, else nowhere.
+    let defaults = autobot::alerts::AlertsConfig::default();
+    assert!(autobot::alerts::targets(&defaults, &bots).is_empty());
+    main.set_home_channel("telegram:42").unwrap();
+    assert_eq!(autobot::alerts::targets(&defaults, &bots), vec!["telegram:42".to_owned()]);
+
+    let config: autobot::alerts::AlertsConfig = toml::from_str("to = [\"slack:C1\", \"telegram:7\"]").unwrap();
+    let to = autobot::alerts::targets(&config, &bots);
+    let sent = autobot::alerts::send(&bots, &to, "⚠️ The disk is low.").await;
+    assert!(sent.iter().all(|(_, r)| r.is_ok()), "{sent:?}");
+    assert_eq!(*slack.sent.lock().unwrap(), vec![("C1".to_owned(), "⚠️ The disk is low.".to_owned())]);
+    assert_eq!(*telegram.sent.lock().unwrap(), vec![("7".to_owned(), "⚠️ The disk is low.".to_owned())]);
+    let bad = autobot::alerts::send(&bots, &["pager".to_owned()], "x").await;
+    assert!(bad[0].1.is_err());
+    std::fs::remove_dir_all(root).unwrap();
+}

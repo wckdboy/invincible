@@ -81,6 +81,12 @@ pub struct Config {
     /// Home Assistant: the `home` tool ([crate::homeassistant]).
     #[serde(default)]
     pub homeassistant: crate::homeassistant::HomeAssistantConfig,
+    /// Health alerts to the owner ([crate::alerts]); read from `config.toml`.
+    #[serde(default)]
+    pub alerts: crate::alerts::AlertsConfig,
+    /// Scheduled backups ([crate::backup]); read from `config.toml`.
+    #[serde(default)]
+    pub backup: crate::backup::BackupConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
