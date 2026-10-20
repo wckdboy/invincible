@@ -30,7 +30,8 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 |---|---|---|
 | `GET /v1/agent` | | `{"name", "model", "workdir", "approvals": "ask"\|"edits"\|"allowlist"\|"trust", "private": bool, "bot", "bots": [names]}`: about the bot `?bot=` names (the default one without it) |
 | `GET /v1/agent/bots` | | `{"bots": [...]}`: every bot on the machine, running or not ([Bots](#bots)) |
-| `POST /v1/agent/bots/{name}/enable`, `POST /v1/agent/bots/{name}/disable` | | `{"ok": true}`, kept in the bot's config; `autobot serve` starts or stops it when it restarts. `404` (`unknown_bot`) |
+| `POST /v1/agent/bots/{name}/enable`, `POST /v1/agent/bots/{name}/disable` | | `{"ok": true, "enabled", "restart": false, "status": "running"\|"stopped"\|"error", "error"?}`: kept in the bot's config, and `autobot serve` starts or stops it at once (`restart: true` and no `status` from an agent that cannot). `404` (`unknown_bot`) |
+| `POST /v1/agent/bots/reload` | `{}` | `{"started", "stopped", "restarted", "persona", "failed": [{"name", "error"}], "running"}` (names): the running bots brought in line with their configuration now, as `autobot serve` does on its own within seconds of a change. `persona`: bots whose `SOUL.md` changed (read at every turn; nothing restarts). `409` (`not_configurable`) without bots to reload, `400` (`invalid_config`) when `config.toml` does not load |
 | `GET /v1/agent/sessions?bot=` | | `{"sessions": [{"id", "modified", "bot"}]}`: every bot's conversations (only `bot`'s with it), newest first; `modified` in Unix seconds |
 | `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape; a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
 | `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn) and `"bot"` | An event stream (below); `400` for an unknown personality. `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
@@ -57,6 +58,8 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `POST /v1/agent/personality` | `{"name"}` (`"none"` or null for none) | `{"active"}`: the personality for every turn from now on; `400` for an unknown one |
 | `GET /v1/agent/profile` | | `{"entries": [...], "text"}`: what the agent keeps about how the owner works (`USER.md`) |
 | `GET /v1/agent/usage?session=&bot=` | | `{"today": totals, "session"?: totals, "bot"}` from the bot's turn log (the default bot's without `bot`): `totals` is `{"turns", "calls", "cloud_calls", "input", "output", "cached", "cloud_tokens", "seconds", "cost", "unpriced"}` (`cost` in dollars for the models with a `[prices]` entry; `unpriced`: cloud models without one) |
+| `POST /v1/agent/openai/v1/chat/completions?bot=` | an OpenAI chat request | An OpenAI `chat.completion` (or, with `"stream": true`, its chunks and `[DONE]`): the last user message is a turn of the bot `model` names (else `?bot=`, else the default one) in its conversation `homeassistant-<user>`. For Home Assistant's conversation agent; nobody can approve, so its turns follow the unattended rules |
+| `GET /v1/agent/openai/v1/models` | | `{"object": "list", "data": [{"id"}]}`: the running bots |
 | `GET /v1/agent/insights?days=&bot=` | | What the bot did over the last `days` (default 7), with `"bot"`: `{"days", "turns", "seconds", "calls", "tokens", "cost", "unpriced", "local_share": {"calls", "tokens"}, "tools": [{"name", "count"}], "projects": [{"name", "count"}], "models": [{"model", "calls", "tokens", "cloud"}], "failures": {"errors", "stopped", "tool_errors", "refused"}}` |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
@@ -81,20 +84,25 @@ code `unknown_bot`. A node from before bots answers `404` on `/v1/agent/bots`: o
 | `enabled` | Whether `autobot serve` runs it |
 | `status` | `running`, `stopped` (disabled, or not started), or `error` (it could not start; `error` says why) |
 | `error`? | Why it could not start |
-| `channels` | `[{"kind", "account", "status", "error"?}]`: `kind` is `telegram`, `discord`, `slack`, `email`, `signal`, `matrix` or `api`; `account` what it is reached as (`@mybot`, `@U0BOT`, `bot@example.org`, `+15551234567`); `status` `connected`, `connecting` or `down` |
+| `channels` | `[{"kind", "account", "status", "error"?}]`: `kind` is `telegram`, `discord`, `slack`, `email`, `signal`, `matrix`, `whatsapp` or `api`; `account` what it is reached as (`@mybot`, `@U0BOT`, `bot@example.org`, `+15551234567`, `+1 555-0100`); `status` `connected`, `connecting` or `down` |
 | `sessions` | How many conversations it has |
 | `last_active` | When its newest conversation changed (Unix seconds), or null |
 | `queue` | Messages sent to running turns, not yet taken in |
 
 Running bots also carry `description`, `default`, `running` (turns now), `turns`, `uptime` (seconds),
-`waiting` (questions), `home_channel` and `last_error` (`{"at", "text"}` or null).
+`waiting` (questions), `home_channel`, `last_error` (`{"at", "text"}` or null) and `homeassistant`
+(the address its `home` tool reaches, or null).
+
+The list is of the bots running now: `autobot serve` starts, stops and restarts bots as their
+configuration changes, and a restarted bot starts with no questions waiting in its chats.
 
 ## Addresses
 
 Where a schedule's answers (`to`), a hook's (`to`) or the bot's notices (its home channel,
 `/sethome`) go: `platform:where`. `telegram:<chat id>`, `discord:<channel id>`,
 `slack:<channel id or #name>` (`slack:C123/<thread ts>` for a thread), `email:<address>` (or the
-thread a conversation is in), `signal:<number>`, `matrix:<room id>`. A schedule with none of `to`,
+thread a conversation is in), `signal:<number>`, `matrix:<room id>`, `whatsapp:<number, digits
+only>` (delivered only within 24 hours of that person's last message). A schedule with none of `to`,
 `telegram` or a chat that asked for it answers to the home channel; a phone's recipe never does
 (the phone collects its runs).
 
@@ -110,8 +118,9 @@ has a `type`:
 | `receipt` | `id`, `model`, `tier` | A model call finished; its signed receipt is at `GET /v1/receipts/{id}` |
 | `approval` | `id`, `text`, `action` | The agent waits for the owner: answer with `POST /v1/agent/approvals/{id}` |
 | `member` | `agent`, `text` | A team member finished the task it was handed; `text` is its answer to the lead |
-| `answer` | `text`, `receipts` | The turn's answer; the last event |
+| `answer` | `text`, `receipts` | The turn's answer; the last event of the turn |
 | `error` | `text` | The turn failed; the last event |
+| `kept` | `text` | After `answer`, when the turn was at a nudge: what the agent kept on its own (`profile: …`, `memory: …`), one event each. The stream stays open for it at most 30 seconds; the conversation is free for the next turn already |
 
 An `approval` from a team member also has `agent` (its name), and its `text` starts with
 `[<name>] `; `tool` and `refused` texts from a member start the same way.
@@ -126,7 +135,11 @@ An `approval` from a team member also has `agent` (its name), and its `text` sta
 {"kind": "fetch", "url": "https://docs.rs/serde"}
 {"kind": "mcp", "tool": "github/get_issue", "arguments": "{\"number\": 7}"}
 {"kind": "type", "page": "https://example.org/login", "field": "element #user", "text": "me", "submit": false}
+{"kind": "home", "service": "light.turn_on", "entities": "light.kitchen", "data": "{\"brightness_pct\":40}"}
 ```
+
+`home` is a Home Assistant service call (`data`: its other fields as JSON, `""` for none).
+`[approvals] allow` entries `home:<domain>.<service>` and `home:<domain>.*` let one run unasked.
 
 `type` is the browser typing into a page (`text` empty and `submit` true: submitting its form).
 Navigating the browser to a new site asks as a `fetch` of the site's origin.
