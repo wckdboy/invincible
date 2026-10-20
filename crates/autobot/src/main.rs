@@ -887,8 +887,10 @@ fn run(mut cli: Cli) -> Result<(), String> {
             let only = tools.map(|groups| autobot::tools::tools_for(&groups));
             let (outcomes, tiers) = runtime()?.block_on(async {
                 // Which models are on this machine and which in the cloud, for the history.
+                // Only for the history: a gateway slow to list them does not hold up the run.
+                let listed = tokio::time::timeout(std::time::Duration::from_secs(5), agent.gateway.model_info()).await;
                 let tiers: std::collections::BTreeMap<String, String> =
-                    agent.gateway.model_info().await.unwrap_or_default().into_iter().map(|m| (m.id, m.tier)).collect();
+                    listed.ok().and_then(Result::ok).unwrap_or_default().into_iter().map(|m| (m.id, m.tier)).collect();
                 let mut outcomes = Vec::new();
                 for model in &models {
                     eprintln!("{model}: {} tasks", list.len());
@@ -915,7 +917,8 @@ fn run(mut cli: Cli) -> Result<(), String> {
                 Ok::<_, String>((outcomes, tiers))
             })?;
             print!("{}", autobot::eval::report(&outcomes, &models));
-            if !no_record && !outcomes.is_empty() {
+            // Kept unless the agent never got to work (the gateway refused, or was not there).
+            if !no_record && outcomes.iter().any(|o| !o.error) {
                 let stem =
                     tasks.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tasks".to_owned());
                 let run = invincible::eval::Run {
@@ -924,7 +927,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
                         Some(tag) => format!("{stem}#{tag}"),
                         None => stem,
                     },
-                    digest: invincible::eval::digest(list.iter().map(|t| t.id.as_str())),
+                    digest: invincible::eval::digest(&text, &list.iter().map(|t| t.id.as_str()).collect::<Vec<_>>()),
                     tasks: list.len(),
                     kind: "agent".to_owned(),
                     version: invincible::version::VERSION.to_owned(),
@@ -941,6 +944,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
                                 passed: mine.iter().filter(|o| o.pass).count(),
                                 total: mine.len(),
                                 median_ms: seconds.get(seconds.len() / 2).map(|s| (s * 1000.0) as u64),
+                                errors: mine.iter().filter(|o| o.error).count(),
                             }
                         })
                         .collect(),

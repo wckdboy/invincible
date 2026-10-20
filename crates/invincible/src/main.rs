@@ -690,7 +690,10 @@ fn run(cli: Cli) -> Result<(), String> {
                 path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tasks".to_owned())
             };
             if history {
-                let suite = tasks.as_deref().map(suite_of);
+                let suite = tasks.as_deref().map(|path| match &tag {
+                    Some(tag) => format!("{}#{tag}", suite_of(path)),
+                    None => suite_of(path),
+                });
                 println!("{}", invincible::eval::history_report(&invincible::eval::history(&home), suite.as_deref()));
                 return Ok(());
             }
@@ -715,6 +718,8 @@ fn run(cli: Cli) -> Result<(), String> {
                     let listed: serde_json::Value = client
                         .get(format!("{base}/models"))
                         .bearer_auth(&token)
+                        // Only for the history: a gateway slow to list them does not hold up the run.
+                        .timeout(std::time::Duration::from_secs(5))
                         .send()
                         .await
                         .ok()?
@@ -762,7 +767,7 @@ fn run(cli: Cli) -> Result<(), String> {
                         Some(tag) => format!("{}#{tag}", suite_of(&tasks)),
                         None => suite_of(&tasks),
                     },
-                    digest: invincible::eval::digest(list.iter().map(|t| t.id.as_str())),
+                    digest: invincible::eval::digest(&text, &list.iter().map(|t| t.id.as_str()).collect::<Vec<_>>()),
                     tasks: list.len(),
                     kind: "answers".to_owned(),
                     version: invincible::version::VERSION.to_owned(),

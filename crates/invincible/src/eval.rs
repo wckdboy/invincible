@@ -371,7 +371,8 @@ pub struct Run {
     pub at: String,
     /// The task file's name, without its extension (`projects`).
     pub suite: String,
-    /// The tasks' ids, hashed: runs of the same tasks compare; a changed file starts anew.
+    /// The tasks as written, hashed ([digest]): runs of the same tasks compare; a task that
+    /// changed starts anew.
     pub digest: String,
     pub tasks: usize,
     /// `answers` (`invincible eval`) or `agent` (`autobot eval`).
@@ -396,15 +397,22 @@ pub struct ModelRun {
     pub total: usize,
     #[serde(default)]
     pub median_ms: Option<u64>,
+    /// Tasks it gave no answer to (refused, unreachable, failed): it is left out of the gap then.
+    #[serde(default)]
+    pub errors: usize,
 }
 
-/// The digest of a suite: its task ids, in order.
-pub fn digest<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
+/// The digest of the tasks [ids] in the task file [text]: each one as written (its prompt,
+/// checks, files, limits), in the file's order, as JSON with sorted keys, one per line.
+pub fn digest(text: &str, ids: &[&str]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    for id in ids {
-        hasher.update(id.as_bytes());
-        hasher.update(b"\n");
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let Ok(task) = serde_json::from_str::<Value>(line) else { continue };
+        if task["id"].as_str().is_some_and(|id| ids.contains(&id)) {
+            hasher.update(task.to_string().as_bytes());
+            hasher.update(b"\n");
+        }
     }
     crate::token::hex(&hasher.finalize()[..6])
 }
@@ -419,6 +427,7 @@ pub fn model_run(model: &str, tier: Option<String>, outcomes: &[Outcome]) -> Mod
         passed: outcomes.iter().filter(|o| o.pass).count(),
         total: outcomes.len(),
         median_ms: latencies.get(latencies.len() / 2).map(|ms| *ms as u64),
+        errors: outcomes.iter().filter(|o| o.error.is_some()).count(),
     }
 }
 
@@ -456,11 +465,14 @@ fn rate(m: &ModelRun) -> f64 {
     if m.total == 0 { 0.0 } else { m.passed as f64 / m.total as f64 }
 }
 
-/// The best model on this machine and the best in the cloud in [run], when it had both: the
-/// gap is the second's pass rate less the first's.
+/// The best model on this machine and the best in the cloud in [run], when it had both (that
+/// answered every task): the gap is the second's pass rate less the first's.
 pub fn gap(run: &Run) -> Option<(&ModelRun, &ModelRun)> {
     let best = |tier: &str| {
-        run.models.iter().filter(|m| m.tier.as_deref() == Some(tier)).max_by(|a, b| rate(a).total_cmp(&rate(b)))
+        run.models
+            .iter()
+            .filter(|m| m.tier.as_deref() == Some(tier) && m.errors == 0)
+            .max_by(|a, b| rate(a).total_cmp(&rate(b)))
     };
     Some((best("node")?, best("cloud")?))
 }
@@ -469,7 +481,13 @@ pub fn gap(run: &Run) -> Option<(&ModelRun, &ModelRun)> {
 /// gap between the best local and the best cloud model; [suite] for one suite only.
 pub fn history_report(runs: &[Run], suite: Option<&str>) -> String {
     let mut groups: BTreeMap<(&str, &str, &str), Vec<&Run>> = BTreeMap::new();
-    for run in runs.iter().filter(|r| suite.is_none_or(|s| r.suite == s)) {
+    // A file's runs include those of some of its tasks (`name#tag`), unless a tag is asked for.
+    let wanted = |r: &Run| {
+        suite.is_none_or(|s| {
+            r.suite == s || (!s.contains('#') && r.suite.strip_prefix(s).is_some_and(|t| t.starts_with('#')))
+        })
+    };
+    for run in runs.iter().filter(|r| wanted(r)) {
         groups.entry((run.kind.as_str(), run.suite.as_str(), run.digest.as_str())).or_default().push(run);
     }
     if groups.is_empty() {
@@ -490,7 +508,8 @@ pub fn history_report(runs: &[Run], suite: Option<&str>) -> String {
                 .iter()
                 .map(|m| {
                     let tier = m.tier.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
-                    format!("{}{tier} {}/{}", m.model, m.passed, m.total)
+                    let errors = if m.errors > 0 { format!(" ({} unanswered)", m.errors) } else { String::new() };
+                    format!("{}{tier} {}/{}{errors}", m.model, m.passed, m.total)
                 })
                 .collect();
             let gap = gap(run)
@@ -593,6 +612,9 @@ mod tests {
         assert!(text.contains("t              local 1/2 · cloud 2/2"), "{text}");
         assert!(text.contains("b: local ✗, cloud ✓"), "{text}");
     }
+
+    const TASKS: &str = "{\"id\": \"a\", \"prompt\": \"2 + 2?\", \"checks\": []}\n{\"id\": \"b\", \"prompt\": \"3 + 3?\", \"checks\": []}";
+
     #[test]
     fn history_keeps_runs_and_the_gap() {
         let home = std::env::temp_dir().join(format!("invincible-eval-history-{}", std::process::id()));
@@ -603,11 +625,12 @@ mod tests {
             passed,
             total: 50,
             median_ms: Some(200),
+            errors: 0,
         };
         let run = |at: &str, local: usize| Run {
             at: at.into(),
             suite: "projects".into(),
-            digest: digest(["a", "b"]),
+            digest: digest(TASKS, &["a", "b"]),
             tasks: 50,
             kind: "answers".into(),
             version: "0.0.18".into(),
@@ -619,7 +642,7 @@ mod tests {
         record(&home, &run("2026-10-20T10:00:00+02:00", 35)).unwrap();
         // A changed suite is a suite of its own.
         let mut other = run("2026-10-21T10:00:00+02:00", 1);
-        other.digest = digest(["a"]);
+        other.digest = digest(TASKS, &["a"]);
         record(&home, &other).unwrap();
         let runs = history(&home);
         assert_eq!(runs.len(), 3);
@@ -632,6 +655,22 @@ mod tests {
         assert!(text.contains("auto 40/50") && !text.contains("auto ["), "{text}");
         assert_eq!(text.matches("projects (50 tasks").count(), 2, "two suites by digest: {text}");
         assert_eq!(history_report(&runs, Some("seed")), "no runs of seed yet");
+        // A task that changed (same id) is a suite of its own; a comment or another task is not.
+        let edited = TASKS.replace("2 + 2?", "2 + 3?");
+        assert_ne!(digest(&edited, &["a", "b"]), digest(TASKS, &["a", "b"]));
+        let more = format!("# a comment\n{TASKS}\n{{\"id\": \"c\", \"prompt\": \"x\"}}");
+        assert_eq!(digest(&more, &["a", "b"]), digest(TASKS, &["a", "b"]));
+        // Tagged runs come with their file's, unless a tag is asked for.
+        let mut tagged = run("2026-10-23T10:00:00+02:00", 30);
+        tagged.suite = "projects#rust".into();
+        let with = [runs.clone(), vec![tagged]].concat();
+        assert!(history_report(&with, Some("projects")).contains("projects#rust"));
+        assert!(!history_report(&with, Some("projects#rust")).contains("projects (50"));
+        // A cloud model that did not answer is no side of a gap.
+        let mut refused = run("2026-10-24T10:00:00+02:00", 30);
+        refused.models[1].errors = 50;
+        assert!(gap(&refused).is_none());
+        assert!(history_report(&[refused], None).contains("(50 unanswered)"));
         // Without a model of both kinds: no gap.
         let mut local_only = run("2026-10-22T10:00:00+02:00", 30);
         local_only.models.remove(1);

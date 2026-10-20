@@ -87,6 +87,8 @@ pub struct Outcome {
     pub tools: Vec<String>,
     pub steps: usize,
     pub seconds: f64,
+    /// The agent never got to work it (the gateway refused or was not there).
+    pub error: bool,
     /// The run's turn as a trajectory ([crate::trajectory]), marked with the task and whether it
     /// passed.
     #[serde(skip)]
@@ -138,6 +140,7 @@ pub async fn run(
     let _ = std::fs::remove_dir_all(&dir);
     let work = dir.join("work");
     let mut failures = Vec::new();
+    let mut error = false;
     for (path, content) in &task.files {
         let file = work.join(path);
         if let Some(parent) = file.parent() {
@@ -176,6 +179,7 @@ pub async fn run(
         Ok(outcome) => outcome.text,
         Err(e) => {
             failures.push(format!("the turn failed: {e}"));
+            error = true;
             String::new()
         }
     };
@@ -210,6 +214,7 @@ pub async fn run(
         tools: if called.is_empty() { tools } else { called },
         steps,
         seconds: started.elapsed().as_secs_f64(),
+        error,
         trajectories,
     }
 }
@@ -225,6 +230,7 @@ impl Outcome {
             tools: Vec::new(),
             steps: 0,
             seconds: 0.0,
+            error: true,
             trajectories: Vec::new(),
         }
     }
