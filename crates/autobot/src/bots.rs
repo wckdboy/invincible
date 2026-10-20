@@ -19,6 +19,10 @@
 //!
 //! Each bot runs in tasks of its own: a bot whose model is slow, or whose channel fails, does not
 //! hold up another; a part that stops is started again.
+//!
+//! Bots are live ([Fleet]): `autobot serve` watches `config.toml` and `bots/`, and a bot added,
+//! enabled, disabled, removed or edited starts, stops or restarts on its own, the others
+//! untouched. `autobot bots …` and `POST /v1/agent/bots/{name}/enable` ask for it at once.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -37,7 +41,8 @@ use crate::config::Config;
 pub const DEFAULT: &str = "default";
 
 /// Sections of `config.toml` a bot does not inherit: its channels, hooks and the API are its own.
-const OWN: &[&str] = &["telegram", "discord", "slack", "email", "signal", "matrix", "hooks", "serve", "bot"];
+const OWN: &[&str] =
+    &["telegram", "discord", "slack", "email", "signal", "matrix", "whatsapp", "hooks", "serve", "bot"];
 
 /// `[bot]`: about this bot.
 #[derive(Clone, Debug, Deserialize)]
@@ -108,6 +113,7 @@ impl Def {
             ("email", c.email.enabled),
             ("signal", c.signal.enabled),
             ("matrix", c.matrix.enabled),
+            ("whatsapp", c.whatsapp.enabled),
         ]
         .into_iter()
         .filter(|(_, on)| *on)
@@ -145,6 +151,9 @@ impl Def {
             && let Ok(token) = c.matrix.token(&self.home)
         {
             accounts.push(("matrix", hash(&token)));
+        }
+        if c.whatsapp.enabled && !c.whatsapp.phone_number_id.is_empty() {
+            accounts.push(("whatsapp", hash(&c.whatsapp.phone_number_id)));
         }
         accounts
     }
@@ -275,7 +284,12 @@ pub struct Runtime {
     running: AtomicUsize,
     last_error: Mutex<Option<(i64, String)>>,
     peers: Mutex<Vec<Weak<Runtime>>>,
+    /// When its last nudge started, and whether one runs now ([Runtime::nudge]).
+    nudged: Mutex<(Option<Instant>, bool)>,
 }
+
+/// The least time between two of a bot's nudges, whatever channel its turns come from.
+pub const NUDGE_GAP: Duration = Duration::from_secs(60);
 
 impl Runtime {
     pub fn new(def: &Def, agent: Agent) -> Arc<Self> {
@@ -295,6 +309,7 @@ impl Runtime {
             running: AtomicUsize::new(0),
             last_error: Mutex::default(),
             peers: Mutex::default(),
+            nudged: Mutex::default(),
         })
     }
 
@@ -368,6 +383,44 @@ impl Runtime {
 
     pub fn uptime(&self) -> Duration {
         self.started.elapsed()
+    }
+
+    /// After a turn of [agent] in a conversation now [messages]: the nudge ([Agent::nudge]) in
+    /// the background, when it is that conversation's time and the bot has not nudged in the
+    /// last [NUDGE_GAP] (one at a time per bot, from every channel and the API). What it kept,
+    /// once it is done; None when no nudge runs.
+    pub fn nudge(
+        self: &Arc<Self>,
+        agent: Arc<Agent>,
+        messages: Vec<Value>,
+    ) -> Option<tokio::task::JoinHandle<Vec<String>>> {
+        if !agent.nudge_due(&messages) {
+            return None;
+        }
+        {
+            let mut nudged = self.nudged.lock().expect("nudged");
+            if nudged.1 || nudged.0.is_some_and(|at| at.elapsed() < NUDGE_GAP) {
+                tracing::debug!(bot = %self.name, "a nudge is due, but one ran lately");
+                return None;
+            }
+            *nudged = (Some(Instant::now()), true);
+        }
+        let runtime = self.clone();
+        Some(tokio::spawn(async move {
+            // Done however it ends.
+            struct Done(Arc<Runtime>);
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    self.0.nudged.lock().expect("nudged").1 = false;
+                }
+            }
+            let _done = Done(runtime.clone());
+            let kept = agent.nudge(&messages, &|_| {}).await;
+            for line in &kept {
+                tracing::info!(bot = %runtime.name, "kept {line}");
+            }
+            kept
+        }))
     }
 
     /// Where scheduled results and notices go when nothing else is said (`/sethome`).
@@ -447,6 +500,7 @@ impl Runtime {
             "turns": self.turns.load(Ordering::Relaxed),
             "uptime": self.uptime().as_secs(),
             "last_error": last.map(|(at, text)| json!({ "at": at, "text": text })),
+            "homeassistant": agent.tools.home_assistant().map(|h| h.url().to_owned()),
         })
     }
 
@@ -481,6 +535,11 @@ impl Runtime {
         ];
         if let Some(home) = s["home_channel"].as_str() {
             lines.push(format!("home: {home}"));
+        }
+        match (s["homeassistant"].as_str(), &self.config.homeassistant.url) {
+            (Some(url), _) => lines.push(format!("home assistant: {url} ✓")),
+            (None, Some(url)) => lines.push(format!("home assistant: {url} ✗ (no token it can use; autobot doctor)")),
+            (None, None) => {}
         }
         match s["last_error"].as_object() {
             Some(e) => lines.push(format!(
@@ -544,7 +603,10 @@ where
         let mut backoff = Duration::from_secs(1);
         loop {
             let started = Instant::now();
-            match tokio::spawn(make()).await {
+            // Its own task, so a panic is caught; stopped with this one (a bot that is stopped
+            // or reloaded lets go of its channel connections).
+            let mut task = Aborting(tokio::spawn(make()));
+            match (&mut task.0).await {
                 Ok(Ok(())) => tracing::warn!(bot = %runtime.name, "{part} stopped; starting it again"),
                 Ok(Err(e)) => {
                     tracing::error!(bot = %runtime.name, "{part} is off: {e}");
@@ -566,18 +628,28 @@ where
     })
 }
 
+/// A task that is stopped when this is dropped.
+struct Aborting<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for Aborting<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Starts every part of [runtime] its configuration turns on, each in tasks of its own: its
 /// channels, schedules, board and heartbeat. Hooks are served apart ([crate::hooks::app]).
 pub fn start(runtime: &Arc<Runtime>) -> Vec<tokio::task::JoinHandle<()>> {
     type Part = fn(Arc<Runtime>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>;
     let c = &runtime.config;
-    let channels: [(&'static str, bool, Part); 6] = [
+    let channels: [(&'static str, bool, Part); 7] = [
         ("telegram", c.telegram.enabled, |r| Box::pin(crate::telegram::run(r))),
         ("discord", c.discord.enabled, |r| Box::pin(crate::discord::run(r))),
         ("slack", c.slack.enabled, |r| Box::pin(crate::slack::run(r))),
         ("email", c.email.enabled, |r| Box::pin(crate::email::run(r))),
         ("signal", c.signal.enabled, |r| Box::pin(crate::signal::run(r))),
         ("matrix", c.matrix.enabled, |r| Box::pin(crate::matrix::run(r))),
+        ("whatsapp", c.whatsapp.enabled, |r| Box::pin(crate::whatsapp::run(r))),
     ];
     let mut parts = Vec::new();
     for (name, on, part) in channels {
@@ -618,6 +690,294 @@ pub fn start(runtime: &Arc<Runtime>) -> Vec<tokio::task::JoinHandle<()>> {
         Err(e) => tracing::error!(bot = %runtime.name, "{e}"),
     }
     parts
+}
+
+/// Finds a running bot by name; None: the default one.
+pub trait Find: Send + Sync {
+    fn find(&self, name: Option<&str>) -> Option<Arc<Runtime>>;
+}
+
+impl Find for Vec<Arc<Runtime>> {
+    fn find(&self, name: Option<&str>) -> Option<Arc<Runtime>> {
+        match name {
+            Some(name) => self.iter().find(|r| r.name == name).cloned(),
+            None => self.iter().find(|r| r.default).or(self.first()).cloned(),
+        }
+    }
+}
+
+/// The bots [root] has that `autobot serve` runs: the enabled ones, a channel whose account an
+/// earlier bot has already turned off.
+pub fn plan(root: &Path) -> Result<(Vec<Def>, Problems), String> {
+    let (mut defs, problems) = load_all(root)?;
+    defs.retain(Def::enabled);
+    for (bot, platform, first) in shared_accounts(&defs) {
+        tracing::error!("bot {bot}: its {platform} account is {first}'s too; {bot}'s {platform} stays off");
+        if let Some(def) = defs.iter_mut().find(|d| d.name == bot) {
+            let c = &mut def.config;
+            match platform {
+                "telegram" => c.telegram.enabled = false,
+                "discord" => c.discord.enabled = false,
+                "slack" => c.slack.enabled = false,
+                "email" => c.email.enabled = false,
+                "signal" => c.signal.enabled = false,
+                "whatsapp" => c.whatsapp.enabled = false,
+                _ => c.matrix.enabled = false,
+            }
+        }
+    }
+    Ok((defs, problems))
+}
+
+fn hash_file(hasher: &mut impl std::hash::Hasher, path: &Path) {
+    use std::hash::Hash;
+    path.hash(hasher);
+    std::fs::read(path).ok().hash(hasher);
+}
+
+/// The secrets in [dir] a bot's channels and tools read: `*.token`, `*.password`, `*.secret`.
+fn secrets(dir: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["token", "password", "secret"].contains(&e))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// What [def] runs as: `config.toml`, its own config file, its secrets, and which of its
+/// channels are on. When this changes, the bot starts again.
+fn stamp(def: &Def) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hash_file(&mut hasher, &def.root.join("config.toml"));
+    hash_file(&mut hasher, &def.file());
+    for secret in secrets(&def.home) {
+        hash_file(&mut hasher, &secret);
+    }
+    def.channels().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Everything [Fleet::watch] looks at: a change here is worth a [Fleet::reload].
+fn fingerprint(root: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hash_file(&mut hasher, &root.join("config.toml"));
+    hash_file(&mut hasher, &root.join("SOUL.md"));
+    for secret in secrets(root) {
+        hash_file(&mut hasher, &secret);
+    }
+    let mut homes: Vec<PathBuf> =
+        std::fs::read_dir(dir(root)).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    homes.sort();
+    for home in homes {
+        home.hash(&mut hasher);
+        hash_file(&mut hasher, &home.join("bot.toml"));
+        hash_file(&mut hasher, &home.join("SOUL.md"));
+        for secret in secrets(&home) {
+            hash_file(&mut hasher, &secret);
+        }
+    }
+    hasher.finish()
+}
+
+/// Makes a bot's agent from its configuration.
+pub type MakeAgent = Box<dyn Fn(&Def) -> Result<Agent, String> + Send + Sync>;
+
+/// The bots `autobot serve` runs, kept as the configuration says while it runs: a bot added or
+/// enabled starts, one disabled or removed stops (its channels let go), one whose configuration
+/// changed starts again; the others are not touched.
+pub struct Fleet {
+    root: PathBuf,
+    make: MakeAgent,
+    state: Mutex<FleetState>,
+}
+
+#[derive(Default)]
+struct FleetState {
+    running: Vec<Running>,
+    /// Bots that could not start, and why.
+    failed: Vec<(String, String)>,
+    /// Each bot's SOUL.md, to say when it changed.
+    souls: BTreeMap<String, Option<String>>,
+    /// The configuration's [fingerprint] when it was last reloaded.
+    seen: Option<u64>,
+}
+
+struct Running {
+    runtime: Arc<Runtime>,
+    parts: Vec<tokio::task::JoinHandle<()>>,
+    stamp: u64,
+}
+
+impl Running {
+    fn stop(self) {
+        for part in &self.parts {
+            part.abort();
+        }
+        tracing::info!(bot = %self.runtime.name, "stopped");
+    }
+}
+
+/// What a [Fleet::reload] changed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Reload {
+    pub started: Vec<String>,
+    pub stopped: Vec<String>,
+    pub restarted: Vec<String>,
+    /// Bots whose SOUL.md changed: it is read at every turn, so nothing restarts.
+    pub persona: Vec<String>,
+    /// Bots that could not start, and why.
+    pub failed: Vec<(String, String)>,
+}
+
+impl Reload {
+    /// Nothing changed (bots that still cannot start do not count).
+    pub fn is_empty(&self) -> bool {
+        self.started.is_empty() && self.stopped.is_empty() && self.restarted.is_empty() && self.persona.is_empty()
+    }
+
+    pub fn to_json(&self) -> Value {
+        json!({
+            "started": self.started,
+            "stopped": self.stopped,
+            "restarted": self.restarted,
+            "persona": self.persona,
+            "failed": self.failed.iter().map(|(n, e)| json!({ "name": n, "error": e })).collect::<Vec<_>>(),
+        })
+    }
+}
+
+impl Fleet {
+    /// Nothing runs until the first [Fleet::reload].
+    pub fn new(root: &Path, make: MakeAgent) -> Arc<Self> {
+        Arc::new(Self { root: root.to_owned(), make, state: Mutex::default() })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The bots running now, the default one first.
+    pub fn runtimes(&self) -> Vec<Arc<Runtime>> {
+        self.state.lock().expect("fleet").running.iter().map(|r| r.runtime.clone()).collect()
+    }
+
+    pub fn failed(&self) -> Vec<(String, String)> {
+        self.state.lock().expect("fleet").failed.clone()
+    }
+
+    /// Brings the running bots in line with the configuration on disk (in a tokio runtime).
+    pub fn reload(&self) -> Result<Reload, String> {
+        // One reload at a time: the watcher's, the API's.
+        let mut state = self.state.lock().expect("fleet");
+        state.seen = Some(fingerprint(&self.root));
+        let (defs, problems) = plan(&self.root)?;
+        let mut done = Reload::default();
+        let mut kept: Vec<Running> = Vec::new();
+        for running in std::mem::take(&mut state.running) {
+            let name = running.runtime.name.clone();
+            match defs.iter().find(|d| d.name == name) {
+                Some(def) if stamp(def) == running.stamp => kept.push(running),
+                Some(_) => {
+                    running.stop();
+                    done.restarted.push(name);
+                }
+                None => {
+                    running.stop();
+                    done.stopped.push(name);
+                }
+            }
+        }
+        let mut next = Vec::new();
+        for def in &defs {
+            if let Some(at) = kept.iter().position(|r| r.runtime.name == def.name) {
+                next.push(kept.remove(at));
+                continue;
+            }
+            match (self.make)(def) {
+                Ok(agent) => {
+                    let runtime = Runtime::new(def, agent);
+                    let parts = start(&runtime);
+                    tracing::info!(bot = %def.name, "running");
+                    next.push(Running { runtime, parts, stamp: stamp(def) });
+                    if !done.restarted.contains(&def.name) {
+                        done.started.push(def.name.clone());
+                    }
+                }
+                // One bot that cannot start does not keep the others from it.
+                Err(e) => {
+                    tracing::error!("bot {} is off: {e}", def.name);
+                    if done.restarted.contains(&def.name) {
+                        done.restarted.retain(|n| n != &def.name);
+                        done.stopped.push(def.name.clone());
+                    }
+                    done.failed.push((def.name.clone(), e));
+                }
+            }
+        }
+        for (name, problem) in problems {
+            tracing::error!("bot {name} is off: {problem}");
+        }
+        for def in &defs {
+            let soul = def.soul();
+            let before = state.souls.insert(def.name.clone(), soul.clone());
+            if before.is_some_and(|b| b != soul) && !done.restarted.contains(&def.name) {
+                done.persona.push(def.name.clone());
+            }
+        }
+        let all: Vec<Arc<Runtime>> = next.iter().map(|r| r.runtime.clone()).collect();
+        Runtime::link_peers(&all);
+        state.running = next;
+        state.failed = done.failed.clone();
+        Ok(done)
+    }
+
+    /// Watches the configuration every [every] and reloads once a change has settled (an
+    /// editor's several writes, a directory being copied in).
+    pub async fn watch(self: Arc<Self>, every: Duration) {
+        loop {
+            tokio::time::sleep(every).await;
+            let mut now = fingerprint(&self.root);
+            let seen = self.state.lock().expect("fleet").seen;
+            if seen.is_none_or(|seen| seen == now) {
+                continue;
+            }
+            loop {
+                tokio::time::sleep(every.min(Duration::from_millis(500))).await;
+                let again = fingerprint(&self.root);
+                if again == now {
+                    break;
+                }
+                now = again;
+            }
+            match self.reload() {
+                Ok(done) if !done.is_empty() => tracing::info!("bots reloaded: {}", done.to_json()),
+                Ok(_) => {}
+                Err(e) => tracing::error!("bots not reloaded: {e}"),
+            }
+        }
+    }
+
+    /// Stops every bot.
+    pub fn stop(&self) {
+        for running in std::mem::take(&mut self.state.lock().expect("fleet").running) {
+            running.stop();
+        }
+    }
+}
+
+impl Find for Fleet {
+    fn find(&self, name: Option<&str>) -> Option<Arc<Runtime>> {
+        self.runtimes().find(name)
+    }
 }
 
 /// What `autobot bots add` writes.

@@ -19,14 +19,14 @@
 //! or with `Authorization: Bearer <secret>`. The body is data for the task, never instructions:
 //! the prompt says so, and the run cannot do more than a scheduled task can.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
-use axum::extract::{Path as UrlPath, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::routing::post;
+use axum::extract::{Path as UrlPath, Query, State};
+use axum::http::{HeaderMap, Method, StatusCode};
+use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -69,6 +69,11 @@ pub struct Hook {
 }
 
 pub fn valid_name(name: &str) -> bool {
+    !RESERVED.contains(&name) && usable(name)
+}
+
+/// A name a secret can be made for: a hook's, or `homeassistant` (its conversation endpoint).
+fn usable(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
@@ -95,7 +100,7 @@ pub fn secret_path(home: &Path, name: &str) -> PathBuf {
 
 /// Makes a new random secret for [name]; the secret.
 pub fn new_secret(home: &Path, name: &str) -> Result<String, String> {
-    if !valid_name(name) {
+    if !usable(name) || name == "whatsapp" {
         return Err(format!("{name:?} is not a hook name (letters, digits, - and _)"));
     }
     let mut bytes = [0u8; 24];
@@ -128,8 +133,14 @@ fn hmac(key: &[u8], body: &[u8]) -> [u8; 32] {
     outer.into()
 }
 
-fn same(a: &[u8], b: &[u8]) -> bool {
+/// Whether [a] and [b] are the same, in time that does not depend on where they differ.
+pub fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Whether [body] carries a valid `X-Hub-Signature-256` made with [secret] (GitHub, Meta).
+pub fn signed(secret: &str, headers: &HeaderMap, body: &[u8]) -> bool {
+    headers.contains_key("x-hub-signature-256") && verify(secret, headers, body)
 }
 
 /// Whether the request knows [secret]: a GitHub-style signature of the body, or the bearer.
@@ -208,56 +219,191 @@ pub fn last_run(home: &Path, name: &str) -> Option<HookRun> {
     text.lines().rev().find_map(|l| serde_json::from_str(l).ok())
 }
 
+/// Hook names that are not hooks: the paths of what else the listener serves.
+pub const RESERVED: &[&str] = &["whatsapp", "homeassistant"];
+
 struct HookState {
-    runtime: Arc<crate::bots::Runtime>,
-    hooks: BTreeMap<String, Hook>,
+    bots: Arc<dyn crate::bots::Find>,
+    /// `bot/hook` names whose task runs now.
     running: Mutex<std::collections::HashSet<String>>,
 }
 
-/// [runtime]'s hooks, at `POST <prefix>/<name>`: `/hooks` for the default bot, `/hooks/<bot>`
-/// for the others, so one listener serves them all.
-pub fn app(runtime: Arc<crate::bots::Runtime>, hooks: BTreeMap<String, Hook>, prefix: &str) -> axum::Router {
-    let state = Arc::new(HookState { runtime, hooks, running: Mutex::default() });
+/// The hooks listener, for every bot that runs (looked up at each request, so bots started
+/// while it runs are served too): a hook at `POST /hooks/<name>` for the default bot and
+/// `/hooks/<bot>/<name>` for another; WhatsApp's webhook at `/hooks/whatsapp`
+/// (`/hooks/<bot>/whatsapp`, [crate::whatsapp]); Home Assistant's conversation agent at
+/// `/hooks/homeassistant/v1/chat/completions` ([crate::homeassistant]).
+pub fn app(bots: Arc<dyn crate::bots::Find>) -> axum::Router {
+    let state = Arc::new(HookState { bots, running: Mutex::default() });
     axum::Router::new()
-        .route(&format!("{prefix}/{{name}}"), post(receive))
+        .route("/hooks/{name}", get(receive_default).post(receive_default))
+        .route("/hooks/{bot}/{name}", get(receive_bot).post(receive_bot))
+        .route("/hooks/homeassistant/v1/models", get(models_default))
+        .route("/hooks/homeassistant/v1/chat/completions", post(conversation_default))
+        .route("/hooks/{bot}/homeassistant/v1/models", get(models_bot))
+        .route("/hooks/{bot}/homeassistant/v1/chat/completions", post(conversation_bot))
         .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
         .with_state(state)
 }
 
-async fn receive(
+type Reply = (StatusCode, axum::response::Response);
+
+fn refuse(code: StatusCode, why: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (code, axum::Json(json!({ "error": why }))).into_response()
+}
+
+async fn receive_default(
     State(state): State<Arc<HookState>>,
     UrlPath(name): UrlPath<String>,
+    method: Method,
+    Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
     body: Bytes,
-) -> (StatusCode, axum::Json<serde_json::Value>) {
-    let refuse = |code: StatusCode, why: &str| (code, axum::Json(json!({ "error": why })));
-    let Some(hook) = state.hooks.get(&name).cloned() else {
+) -> axum::response::Response {
+    receive(state, None, name, method, query, headers, body).await
+}
+
+async fn receive_bot(
+    State(state): State<Arc<HookState>>,
+    UrlPath((bot, name)): UrlPath<(String, String)>,
+    method: Method,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    receive(state, Some(bot), name, method, query, headers, body).await
+}
+
+/// Why a call to the Home Assistant conversation endpoint is refused: its API key must be the
+/// hook secret `homeassistant` (`autobot hooks new homeassistant`).
+fn conversation_refused(runtime: &crate::bots::Runtime, headers: &HeaderMap) -> Option<axum::response::Response> {
+    let path = secret_path(&runtime.home, "homeassistant");
+    let secret = std::fs::read_to_string(&path).map(|s| s.trim().to_owned()).unwrap_or_default();
+    if secret.len() < 16 {
+        return Some(refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no secret on this node: `autobot hooks new homeassistant`",
+        ));
+    }
+    let given = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or_default();
+    if !same(given.trim().as_bytes(), secret.as_bytes()) {
+        return Some(refuse(StatusCode::UNAUTHORIZED, "the API key is the homeassistant hook's secret"));
+    }
+    None
+}
+
+async fn conversation_default(
+    State(state): State<Arc<HookState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    conversation(state, None, headers, body).await
+}
+
+async fn conversation_bot(
+    State(state): State<Arc<HookState>>,
+    UrlPath(bot): UrlPath<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    conversation(state, Some(bot), headers, body).await
+}
+
+async fn conversation(
+    state: Arc<HookState>,
+    bot: Option<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    let Some(runtime) = state.bots.find(bot.as_deref()) else { return refuse(StatusCode::NOT_FOUND, "no such bot") };
+    if let Some(refused) = conversation_refused(&runtime, &headers) {
+        return refused;
+    }
+    crate::homeassistant::conversation(runtime, &body).await
+}
+
+async fn models_default(State(state): State<Arc<HookState>>, headers: HeaderMap) -> axum::response::Response {
+    models(state, None, headers)
+}
+
+async fn models_bot(
+    State(state): State<Arc<HookState>>,
+    UrlPath(bot): UrlPath<String>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    models(state, Some(bot), headers)
+}
+
+fn models(state: Arc<HookState>, bot: Option<String>, headers: HeaderMap) -> axum::response::Response {
+    let Some(runtime) = state.bots.find(bot.as_deref()) else { return refuse(StatusCode::NOT_FOUND, "no such bot") };
+    if let Some(refused) = conversation_refused(&runtime, &headers) {
+        return refused;
+    }
+    crate::homeassistant::models(std::slice::from_ref(&runtime.name))
+}
+
+async fn receive(
+    state: Arc<HookState>,
+    bot: Option<String>,
+    name: String,
+    method: Method,
+    query: HashMap<String, String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(runtime) = state.bots.find(bot.as_deref()) else { return refuse(StatusCode::NOT_FOUND, "no such bot") };
+    if name == "whatsapp" {
+        let (status, text) = crate::whatsapp::webhook(runtime, &method, &query, &headers, &body).await;
+        return (status, text).into_response();
+    }
+    if method != Method::POST {
+        return refuse(StatusCode::METHOD_NOT_ALLOWED, "hooks are called with POST");
+    }
+    let (status, reply) = hook(&state, runtime, name, &headers, &body);
+    (status, reply).into_response()
+}
+
+fn hook(
+    state: &Arc<HookState>,
+    runtime: Arc<crate::bots::Runtime>,
+    name: String,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Reply {
+    use axum::response::IntoResponse;
+    let refuse = |code: StatusCode, why: &str| (code, refuse(code, why));
+    let Some(hook) = runtime.config.hooks.hooks.get(&name).cloned() else {
         return refuse(StatusCode::NOT_FOUND, "no such hook");
     };
-    let home = state.runtime.home.clone();
+    let home = runtime.home.clone();
     let secret = match hook.secret(&home, &name) {
         Ok(secret) => secret,
         Err(e) => {
-            tracing::error!("hook {name}: {e}");
+            tracing::error!(bot = %runtime.name, "hook {name}: {e}");
             return refuse(StatusCode::SERVICE_UNAVAILABLE, "the hook has no secret on this node");
         }
     };
-    if !verify(&secret, &headers, &body) {
-        tracing::warn!("hook {name}: a request without a valid signature");
+    if !verify(&secret, headers, body) {
+        tracing::warn!(bot = %runtime.name, "hook {name}: a request without a valid signature");
         return refuse(StatusCode::UNAUTHORIZED, "bad signature");
     }
     // GitHub's first call when a hook is added: nothing to do.
     if headers.get("x-github-event").and_then(|v| v.to_str().ok()) == Some("ping") {
-        return (StatusCode::OK, axum::Json(json!({ "ok": true, "ping": true })));
+        return (StatusCode::OK, axum::Json(json!({ "ok": true, "ping": true })).into_response());
     }
-    if !state.running.lock().expect("running").insert(name.clone()) {
+    let key = format!("{}/{name}", runtime.name);
+    if !state.running.lock().expect("running").insert(key.clone()) {
         return refuse(StatusCode::TOO_MANY_REQUESTS, "this hook's last task is still running");
     }
-    let task = prompt(&hook, &name, &headers, &body);
-    let state2 = state.clone();
+    let task = prompt(&hook, &name, headers, body);
+    let state = state.clone();
     tokio::spawn(async move {
-        let state = state2;
-        let runtime = &state.runtime;
         tracing::info!(bot = %runtime.name, "hook {name}: running");
         let at = chrono::Local::now().timestamp();
         let schedule = crate::cron::Schedule {
@@ -288,9 +434,9 @@ async fn receive(
         if !hook.to.is_empty() || !(hook.discord || hook.telegram) {
             runtime.notify(&hook.to, &text).await;
         }
-        state.running.lock().expect("running").remove(&name);
+        state.running.lock().expect("running").remove(&key);
     });
-    (StatusCode::ACCEPTED, axum::Json(json!({ "ok": true, "started": true })))
+    (StatusCode::ACCEPTED, axum::Json(json!({ "ok": true, "started": true })).into_response())
 }
 
 #[cfg(test)]

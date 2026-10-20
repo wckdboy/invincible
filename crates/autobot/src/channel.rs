@@ -566,6 +566,8 @@ async fn handle_inner(
         }
     };
     runtime.turn_ended();
+    // What is worth keeping, in the background; nothing is said about it in the chat.
+    let _ = runtime.nudge(agent.clone(), guard.session.messages.clone());
     typing.abort();
     drop(lines);
     if let Some((tx, task)) = progress {
@@ -585,6 +587,33 @@ async fn handle_inner(
     };
     transport.answer(&chat, &reply).await?;
     Ok(())
+}
+
+/// One turn of [runtime] in its conversation [session], for a caller that is not a chat
+/// platform (Home Assistant's conversation agent): in turn with others there, asking [approver],
+/// with the nudge after it. Its answer.
+pub async fn converse(
+    runtime: &Arc<Runtime>,
+    session: &str,
+    text: &str,
+    approver: &dyn Approver,
+) -> Result<String, String> {
+    let slot = runtime.conversations.slot(&runtime.home, session)?;
+    let mut guard = slot.chat.lock().await;
+    let agent = runtime.agent();
+    let context = crate::tools::TurnContext {
+        session: session.to_owned(),
+        inbox: Some(slot.inbox.clone()),
+        ..Default::default()
+    };
+    runtime.turn_started();
+    let result = {
+        let Chat { session, grants } = &mut *guard;
+        crate::tools::TURN.scope(context, agent.turn(session, text, approver, grants, &|_| {})).await
+    };
+    runtime.turn_ended();
+    let _ = runtime.nudge(agent, guard.session.messages.clone());
+    result.map(|outcome| outcome.text)
 }
 
 type Lines = tokio::sync::mpsc::UnboundedSender<(Option<String>, String)>;

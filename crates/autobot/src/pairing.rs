@@ -17,7 +17,7 @@ pub const CODE_LIFETIME: u64 = 60 * 60;
 const MAX_PENDING: usize = 10;
 
 /// The platforms a bot can be reached on, as commands and addresses name them.
-pub const PLATFORMS: &[&str] = &["telegram", "discord", "slack", "email", "signal", "matrix"];
+pub const PLATFORMS: &[&str] = &["telegram", "discord", "slack", "email", "signal", "matrix", "whatsapp"];
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Users {

@@ -139,6 +139,14 @@ impl Agent {
         result
     }
 
+    /// Whether a conversation now [messages] is at a nudge: every [Options::nudge_every] turns,
+    /// for an agent with a home to keep things in.
+    pub fn nudge_due(&self, messages: &[Value]) -> bool {
+        let every = self.options.nudge_every;
+        let turns = messages.iter().filter(|m| crate::session::is_request(m)).count();
+        self.tools.home().is_some() && every > 0 && turns > 0 && turns.is_multiple_of(every)
+    }
+
     /// The short look back every [Options::nudge_every] turns: one cheap call over the recent
     /// conversation for durable facts about the owner and their work, kept in the profile
     /// (USER.md) and memory through the same checks as the tools (never secrets or personal data).
@@ -146,12 +154,12 @@ impl Agent {
     /// call fails, or nothing is worth keeping.
     pub async fn nudge(&self, messages: &[Value], events: &(dyn Fn(Event) + Send + Sync)) -> Vec<String> {
         let Some(home) = self.tools.home() else { return Vec::new() };
+        if !self.nudge_due(messages) {
+            return Vec::new();
+        }
         let every = self.options.nudge_every;
         let turns: Vec<usize> =
             messages.iter().enumerate().filter(|(_, m)| crate::session::is_request(m)).map(|(i, _)| i).collect();
-        if every == 0 || turns.is_empty() || !turns.len().is_multiple_of(every) {
-            return Vec::new();
-        }
         let from = turns[turns.len().saturating_sub(every)];
         let mut transcript = String::new();
         for m in &messages[from..] {

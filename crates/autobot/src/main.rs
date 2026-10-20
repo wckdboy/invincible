@@ -129,6 +129,17 @@ enum Command {
         #[command(subcommand)]
         action: AccessAction,
     },
+    /// WhatsApp access (the Business Cloud API): approve a pairing code, list or remove users.
+    Whatsapp {
+        #[command(subcommand)]
+        action: AccessAction,
+    },
+    /// Home Assistant for the `home` tool: set it up, or check it.
+    #[command(name = "homeassistant")]
+    HomeAssistant {
+        #[command(subcommand)]
+        action: Option<HomeAssistantAction>,
+    },
     /// Run the gateway and the agent in the background (launchd on macOS, systemd on Linux).
     Service {
         #[command(subcommand)]
@@ -322,6 +333,18 @@ enum TelegramAction {
     Users,
     /// Remove an account's access, by its numeric id.
     Revoke { id: i64 },
+}
+
+#[derive(Subcommand)]
+enum HomeAssistantAction {
+    /// Keep Home Assistant's address in the config and its long-lived access token (read from
+    /// stdin) in a file only you can read, then check them.
+    Setup {
+        /// http://homeassistant.local:8123
+        url: String,
+    },
+    /// Whether it answers, and how many entities the agent sees.
+    Check,
 }
 
 #[derive(Subcommand)]
@@ -583,6 +606,8 @@ fn run(mut cli: Cli) -> Result<(), String> {
         Command::Email { action } => access("email", action, &homes),
         Command::Signal { action } => access("signal", action, &homes),
         Command::Matrix { action } => access("matrix", action, &homes),
+        Command::Whatsapp { action } => access("whatsapp", action, &homes),
+        Command::HomeAssistant { action } => home_assistant(action.unwrap_or(HomeAssistantAction::Check), &def),
         Command::Doctor => {
             let (checks, ready) = runtime()?.block_on(async {
                 let checks = doctor::run(&config, &home).await;
@@ -1016,7 +1041,7 @@ fn print_event(event: Event) {
 
 /// Every enabled bot, each in tasks of its own, behind one agent API and one hooks listener.
 async fn serve(root: PathBuf) -> Result<(), String> {
-    use autobot::bots::{self, Runtime};
+    use autobot::bots;
     let main = bots::load_default(&root)?;
     let listen = main.config.serve.listen;
     if !listen.ip().is_loopback() {
@@ -1034,52 +1059,25 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
-    let (mut defs, problems) = bots::load_all(&root)?;
-    for (name, problem) in &problems {
-        tracing::error!("bot {name} is off: {problem}");
+    // The bots, live: started now, then kept as their configuration says while this runs.
+    let fleet = bots::Fleet::new(&root, Box::new(|def: &bots::Def| autobot::agent(&def.config, &def.home)));
+    let (all, _) = bots::load_all(&root)?;
+    for def in all.iter().filter(|d| !d.enabled()) {
+        tracing::info!("bot {} is disabled (`autobot bots enable {}`)", def.name, def.name);
     }
-    defs.retain(|d| {
-        if !d.enabled() {
-            tracing::info!("bot {} is disabled (`autobot bots enable {}`)", d.name, d.name);
-        }
-        d.enabled()
-    });
-    // A channel account belongs to one bot: a second one on it keeps that channel off.
-    for (bot, platform, first) in bots::shared_accounts(&defs) {
-        tracing::error!("bot {bot}: its {platform} account is {first}'s too; {bot}'s {platform} stays off");
-        if let Some(def) = defs.iter_mut().find(|d| d.name == bot) {
-            match platform {
-                "telegram" => def.config.telegram.enabled = false,
-                "discord" => def.config.discord.enabled = false,
-                "slack" => def.config.slack.enabled = false,
-                "email" => def.config.email.enabled = false,
-                "signal" => def.config.signal.enabled = false,
-                _ => def.config.matrix.enabled = false,
-            }
-        }
-    }
-    let mut runtimes: Vec<Arc<Runtime>> = Vec::new();
-    let mut failed: Vec<(String, String)> = Vec::new();
-    for def in &defs {
-        match autobot::agent(&def.config, &def.home) {
-            Ok(agent) => runtimes.push(Runtime::new(def, agent)),
-            // One bot that cannot start does not keep the others from it.
-            Err(e) => {
-                tracing::error!("bot {} is off: {e}", def.name);
-                failed.push((def.name.clone(), e));
-            }
-        }
-    }
+    fleet.reload()?;
+    let runtimes = fleet.runtimes();
     if runtimes.is_empty() {
         return Err("no bot can run (see above)".to_owned());
     }
-    Runtime::link_peers(&runtimes);
     let names: Vec<&str> = runtimes.iter().map(|r| r.name.as_str()).collect();
-    tracing::info!("serving {} bot(s): {}", runtimes.len(), names.join(", "));
+    tracing::info!(
+        "serving {} bot(s): {}; bots added or changed are picked up as they are",
+        runtimes.len(),
+        names.join(", ")
+    );
 
-    // Each bot's costs by its own `[prices]` (inherited from config.toml unless it sets them).
-    let state =
-        Arc::new(autobot::api::ApiState::for_bots(main.config.gateway.token()?, &runtimes, Some(root.clone()), failed));
+    let state = Arc::new(autobot::api::ApiState::for_fleet(main.config.gateway.token()?, fleet.clone()));
     let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("listen on {listen}: {e}"))?;
     tracing::info!(
         "agent API on http://{listen} ({}; paired apps reach it through the gateway)",
@@ -1088,61 +1086,61 @@ async fn serve(root: PathBuf) -> Result<(), String> {
     invincible::watchdog::spawn("agent", listen, root.join("logs"));
     // All bots use the one gateway on this machine.
     let gateway = runtimes[0].agent().gateway.clone();
+    drop(runtimes);
     let watch_gateway = async move { gateway.watch(std::time::Duration::from_secs(15)).await };
     let api = async move {
         if let Err(e) = axum::serve(listener, autobot::api::app(state)).await {
             tracing::error!("agent API: {e}");
         }
     };
+    let watch_bots = fleet.clone().watch(std::time::Duration::from_secs(2));
 
-    // Each bot's channels, schedules, board and heartbeat.
+    // Hooks (and WhatsApp's webhook, Home Assistant's conversation agent): on every address a
+    // bot's `[hooks] listen` names, each serving every running bot; the default bot's at
+    // /hooks/<name>, another's at /hooks/<bot>/<name>.
     let mut parts = Vec::new();
-    for runtime in &runtimes {
-        parts.extend(bots::start(runtime));
-    }
-
-    // Hooks: one listener per address; the default bot's at /hooks/<name>, another's at
-    // /hooks/<bot>/<name>.
-    let mut listeners: std::collections::BTreeMap<std::net::SocketAddr, axum::Router> = Default::default();
-    let fallback = runtimes.iter().find_map(|r| r.config.hooks.listen);
-    for runtime in &runtimes {
-        let hooks = &runtime.config.hooks;
-        if hooks.hooks.is_empty() {
-            continue;
-        }
-        let Some(at) = hooks.listen.or(fallback) else {
-            tracing::error!(bot = %runtime.name, "[hooks] without listen: its hooks are off");
-            continue;
-        };
+    let addresses: std::collections::BTreeSet<std::net::SocketAddr> =
+        all.iter().filter_map(|d| d.config.hooks.listen).collect();
+    for def in all.iter().filter(|d| d.enabled()) {
+        let hooks = &def.config.hooks;
         if let Some(bad) = hooks.hooks.keys().find(|n| !autobot::hooks::valid_name(n)) {
-            tracing::error!(bot = %runtime.name, "[hooks.{bad}]: not a hook name (letters, digits, - and _); hooks are off");
-            continue;
+            tracing::error!(bot = %def.name, "[hooks.{bad}]: not a hook name (letters, digits, - and _; not whatsapp or homeassistant)");
         }
-        let prefix = if runtime.default { "/hooks".to_owned() } else { format!("/hooks/{}", runtime.name) };
-        let names: Vec<&String> = hooks.hooks.keys().collect();
-        tracing::info!(bot = %runtime.name, "webhooks on http://{at}{prefix}/<name> ({names:?})");
-        let app = autobot::hooks::app(runtime.clone(), hooks.hooks.clone(), &prefix);
-        let merged = listeners.remove(&at).map_or(app.clone(), |r| r.merge(app));
-        listeners.insert(at, merged);
+        if def.config.whatsapp.enabled && addresses.is_empty() {
+            tracing::error!(bot = %def.name, "WhatsApp's webhook needs the hooks listener: set [hooks] listen");
+        }
+        if let Some(at) = hooks.listen.or(addresses.first().copied())
+            && !hooks.hooks.is_empty()
+        {
+            let prefix = if def.default { "/hooks".to_owned() } else { format!("/hooks/{}", def.name) };
+            let names: Vec<&String> = hooks.hooks.keys().collect();
+            tracing::info!(bot = %def.name, "webhooks on http://{at}{prefix}/<name> ({names:?})");
+        }
     }
-    for (at, app) in listeners {
+    let find: Arc<dyn bots::Find> = fleet.clone();
+    for at in addresses {
         match tokio::net::TcpListener::bind(at).await {
-            Ok(listener) => parts.push(tokio::spawn(async move {
-                if let Err(e) = axum::serve(listener, app).await {
-                    tracing::error!("hooks: {e}");
-                }
-            })),
+            Ok(listener) => {
+                let app = autobot::hooks::app(find.clone());
+                parts.push(tokio::spawn(async move {
+                    if let Err(e) = axum::serve(listener, app).await {
+                        tracing::error!("hooks: {e}");
+                    }
+                }))
+            }
             Err(e) => tracing::error!("hooks: listen on {at}: {e}"),
         }
     }
     tokio::select! {
         () = api => {}
         () = watch_gateway => {}
+        () = watch_bots => {}
         () = shutdown() => {}
     }
     for part in parts {
         part.abort();
     }
+    fleet.stop();
     Ok(())
 }
 
@@ -1236,6 +1234,83 @@ fn live_bots(root: &std::path::Path) -> Option<Vec<serde_json::Value>> {
         let value: serde_json::Value = reply.json().await.ok()?;
         value["bots"].as_array().cloned()
     })
+}
+
+/// Asks the running `autobot serve` to bring its bots in line with the configuration now (it
+/// would within seconds on its own); what it did, None when it is not running.
+fn reload_live(root: &std::path::Path) -> Option<serde_json::Value> {
+    let main = autobot::bots::load_default(root).ok()?;
+    let token = main.config.gateway.token().ok()?;
+    let url = format!("http://{}/v1/agent/bots/reload", main.config.serve.listen);
+    runtime().ok()?.block_on(async {
+        let reply = reqwest::Client::new()
+            .post(url)
+            .bearer_auth(token)
+            .json(&serde_json::json!({}))
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .ok()?;
+        reply.status().is_success().then_some(())?;
+        reply.json().await.ok()
+    })
+}
+
+/// What the running `autobot serve` did about [name] after a change.
+fn live_note(root: &std::path::Path, name: &str) -> String {
+    let Some(done) = reload_live(root) else {
+        return "`autobot serve` is not running here: it takes this in when it starts".to_owned();
+    };
+    let named = |key: &str| done[key].as_array().is_some_and(|l| l.iter().any(|n| n == name));
+    if let Some(e) = done["failed"].as_array().and_then(|l| l.iter().find(|f| f["name"] == name)) {
+        return format!("`autobot serve` could not start it: {}", e["error"].as_str().unwrap_or("?"));
+    }
+    if named("started") {
+        "`autobot serve` runs it now".to_owned()
+    } else if named("restarted") {
+        "`autobot serve` restarted it with this".to_owned()
+    } else if named("stopped") {
+        "`autobot serve` stopped it".to_owned()
+    } else if named("running") {
+        "`autobot serve` runs it".to_owned()
+    } else {
+        "`autobot serve` does not run it".to_owned()
+    }
+}
+
+/// `autobot homeassistant setup <url>` and `check`.
+fn home_assistant(action: HomeAssistantAction, def: &autobot::bots::Def) -> Result<(), String> {
+    use autobot::homeassistant::Home;
+    if let HomeAssistantAction::Setup { url } = &action {
+        Home::new(url, "-", None)?;
+        let tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+        if tty {
+            eprintln!("A long-lived access token: Home Assistant, your profile, Security, Create token.");
+            eprint!("token: ");
+        }
+        let mut token = String::new();
+        std::io::stdin().read_line(&mut token).map_err(|e| format!("stdin: {e}"))?;
+        let token = token.trim();
+        if token.is_empty() {
+            return Err("no token given".to_owned());
+        }
+        let path = def.home.join("homeassistant.token");
+        invincible::fsutil::replace_private(&path, &format!("{token}\n"))?;
+        setup::set(&def.file(), "homeassistant", "url", toml_edit::value(url.trim_end_matches('/')))?;
+        println!("kept the address in {} and the token in {} (0600)", def.file().display(), path.display());
+    }
+    let def = autobot::bots::load(&def.root, &def.name)?;
+    let Some(home) = Home::from_config(&def.config.homeassistant, &def.home)? else {
+        return Err(
+            "Home Assistant is not set up: `autobot homeassistant setup http://homeassistant.local:8123`".to_owned()
+        );
+    };
+    let (about, entities) = runtime()?.block_on(async { (home.about().await, home.list(None, None).await) });
+    let about = about?;
+    let count = entities.map(|e| e.lines().filter(|l| !l.starts_with('…')).count()).unwrap_or(0);
+    println!("{about} at {}: the agent sees {count} entities", home.url());
+    println!("changes ask first; allowlist services for unattended runs: [approvals] allow = [\"home:light.*\"]");
+    Ok(())
 }
 
 fn bots(action: BotsAction, root: &std::path::Path) -> Result<(), String> {
@@ -1382,9 +1457,7 @@ fn bots(action: BotsAction, root: &std::path::Path) -> Result<(), String> {
             println!("added {name} in {}", dir.display());
             println!("  persona: {} (who it is: its job, its tone, what it never does)", dir.join("SOUL.md").display());
             println!("  config:  {}", dir.join("bot.toml").display());
-            println!(
-                "restart `autobot serve` (or the service) to run it; `autobot --bot {name} chat` talks to it here"
-            );
+            println!("{}; `autobot --bot {name} chat` talks to it here", live_note(root, &name));
             Ok(())
         }
         BotsAction::Show { name } => {
@@ -1405,22 +1478,26 @@ fn bots(action: BotsAction, root: &std::path::Path) -> Result<(), String> {
             }
             // Say now when the edit does not load.
             bots::load(root, &name)?;
-            println!("saved; restart `autobot serve` for it to take effect");
+            println!(
+                "saved; {}",
+                if soul { "its persona applies from its next message".to_owned() } else { live_note(root, &name) }
+            );
             Ok(())
         }
         BotsAction::Remove { name } => {
             let to = bots::remove(root, &name)?;
             println!("removed {name}: its directory is now {} (move it back to restore it)", to.display());
+            println!("{}", live_note(root, &name));
             Ok(())
         }
         BotsAction::Enable { name } => {
             bots::set_enabled(root, &name, true)?;
-            println!("{name} is enabled; restart `autobot serve` to run it");
+            println!("{name} is enabled; {}", live_note(root, &name));
             Ok(())
         }
         BotsAction::Disable { name } => {
             bots::set_enabled(root, &name, false)?;
-            println!("{name} is disabled; restart `autobot serve` to stop it");
+            println!("{name} is disabled; {}", live_note(root, &name));
             Ok(())
         }
     }

@@ -21,7 +21,7 @@ use serde::Deserialize;
 /// [telegram]
 /// enabled = true                     # token in $AUTOBOT_HOME/telegram.token
 ///
-/// [slack]                            # also [discord], [email], [signal], [matrix]
+/// [slack]                            # also [discord], [email], [signal], [matrix], [whatsapp]
 /// enabled = true                     # tokens in $AUTOBOT_HOME/slack-app.token and slack-bot.token
 ///
 /// [serve]
@@ -76,6 +76,11 @@ pub struct Config {
     /// Speech-to-text for voice messages ([crate::voice]).
     #[serde(default)]
     pub voice: crate::voice::VoiceConfig,
+    #[serde(default)]
+    pub whatsapp: crate::whatsapp::WhatsAppConfig,
+    /// Home Assistant: the `home` tool ([crate::homeassistant]).
+    #[serde(default)]
+    pub homeassistant: crate::homeassistant::HomeAssistantConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

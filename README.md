@@ -28,7 +28,7 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
-| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included), tools, approvals, a team, schedules, webhooks, Telegram and Discord |
+| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code run on local models; the comparison with a frontier model is still to do |
@@ -461,10 +461,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **How you work:** `~/.autobot/USER.md` is the agent's short profile of you (preferences, your
   tools, how you want answers), at most 2000 characters, kept with `update_user_profile`: one
   small change at a time (add, replace, remove), shown to you as a diff, checked like memory.
-  Every eighth turn of a conversation in the terminal (`[agent] nudge_every`, 0 for never), a
-  short extra call, as private as the turns, looks back for what is worth keeping, and a faint
-  line says what it kept (`↳ kept profile: …`). `autobot profile` (or `/profile`) shows it; edit
-  the file as you like.
+  Every eighth turn of a conversation (`[agent] nudge_every`, 0 for never), in the terminal, in
+  a chat on any platform and through the API, a short extra call, as private as the turns, looks
+  back for what is worth keeping. It runs in the background, at most one a minute per bot. In the
+  terminal a faint line says what it kept (`↳ kept profile: …`), and the API's turn stream ends
+  with a `kept` event; a chat gets no message about it (the serve log has a line).
+  `autobot profile` (or `/profile`) shows it; edit the file as you like.
 - **Skills:** how-to notes for the agent in `~/.autobot/skills/`, in the
   [agentskills.io](https://agentskills.io) format: a directory per skill with a `SKILL.md`
   (front matter with `name`, `description` and optionally `allowed-tools`, shown but never
@@ -618,6 +620,14 @@ autobot bots disable ops          # enable; remove (moved to ~/.autobot/bots-rem
 autobot --bot ops chat            # any command for one bot: cron, memory, skills, sessions …
 ```
 
+**Live.** `autobot serve` watches `config.toml` and `~/.autobot/bots/`. A bot added or enabled
+starts, one disabled or removed stops and lets go of its channels, and one whose `bot.toml` (or
+`config.toml`, or a token file) changed starts again, within a few seconds and without touching
+the others. `SOUL.md` is read at every turn, so a new persona applies from the next message.
+`autobot bots add|enable|disable|remove|edit` and the API's enable and disable ask for it at
+once and say what happened. A restarted bot's questions waiting in its chats lapse (answer
+again). `[serve]` and `[hooks] listen` addresses still need a restart.
+
 **Channels.** Each is a section in the bot's config, its token in the bot's directory. A token
 belongs to one bot: a second bot with the same one keeps that channel off. Strangers get a
 one-time code in a direct message and nothing else until you run `autobot <platform> approve
@@ -636,6 +646,7 @@ written `!status`: Slack keeps `/` for its own commands).
 | Email | `[email] enabled = true`, `address`, `imap = "host:993"`, `smtp = "host:465"`, `allow = ["me@x.org"]`, password in `email.password` | IMAP IDLE (or polling) and SMTP, TLS or STARTTLS; a thread is a conversation, replies quote. Only `allow`ed senders that pass SPF, DKIM or DMARC; approval by a reply that keeps the code in the subject; auto-replies and lists are never answered |
 | Signal | `[signal] enabled = true`, `account = "+1555…"` | Through signal-cli's daemon (started for you, or `url = "http://127.0.0.1:7583"`); link or register the number with signal-cli first; direct messages |
 | Matrix | `[matrix] enabled = true`, `homeserver`, access token in `matrix.token` | `/sync` long poll; direct rooms, mentions elsewhere; unencrypted rooms only |
+| WhatsApp | `[whatsapp] enabled = true`, `phone_number_id`; `whatsapp.token`, `whatsapp-app.secret`, `whatsapp-verify.token` | The Business Cloud API, off by default. Needs a public HTTPS URL to the hooks listener (below); direct messages; approvals by reply buttons |
 
 **One conversation everywhere.** `autobot identities link telegram:123 slack:U456 email:me@x.org`
 makes them one person (the first one linked is `owner`): a direct conversation with them is the
@@ -654,8 +665,51 @@ to a local speech-to-text server in the OpenAI shape (whisper.cpp's server, fast
 install whisper.cpp (`whisper-cli`) and ffmpeg, with a model at `~/.autobot/whisper/ggml-base.bin`.
 The gateway has no speech-to-text of its own yet.
 
-The agent API lists the bots (`GET /v1/agent/bots`), turns them on and off, and takes `?bot=` on
-every path ([spec/agent.md](spec/agent.md)).
+**WhatsApp.** It is the one channel that needs the outside to reach this machine: Meta calls a
+webhook. In Meta's developer console make an app with the WhatsApp product, a business number
+and a system user's access token. Then, in the bot's directory (each file 0600):
+`whatsapp.token` (the access token), `whatsapp-app.secret` (the app secret, which signs every
+call: `X-Hub-Signature-256`, checked), `whatsapp-verify.token` (any string you choose), and
+
+```toml
+[whatsapp]
+enabled = true
+phone_number_id = "123456789012345"   # WhatsApp Manager, API setup: the id, not the number
+[hooks]
+listen = "127.0.0.1:7794"
+```
+
+Expose the hooks listener over HTTPS (`cloudflared tunnel --url http://127.0.0.1:7794`,
+`tailscale funnel 7794`, or a reverse proxy) and give Meta `https://<host>/hooks/whatsapp`
+(another bot's: `/hooks/<bot>/whatsapp`) with your verify token, subscribed to `messages`.
+Pairing is as everywhere (`autobot whatsapp approve <code>`). WhatsApp takes free-form messages
+only within 24 hours of the person's last one, so a home channel on WhatsApp gets notices only
+then. Meta sees the messages.
+
+**Home Assistant.** As tools: `autobot homeassistant setup http://homeassistant.local:8123`
+reads a long-lived access token (your profile in Home Assistant, Security) from stdin, keeps it
+in `homeassistant.token` (0600; the bot's own directory, else `~/.autobot`) and the address in
+the config. The agent's `home` tool then lists entities and their states, reads one, lists the
+services, and calls one; reading asks nothing, a call asks first (an approval of kind `home`).
+For schedules and other runs with nobody to ask, allowlist services: `[approvals] allow =
+["home:light.*", "home:climate.set_temperature"]`. `[homeassistant] entities = ["light.*"]`
+limits what the agent sees and changes. Home Assistant is reached directly on your network.
+`autobot homeassistant` checks it.
+
+As a channel, Home Assistant's conversation agent (Assist, voice) can talk to a bot through an
+OpenAI-compatible endpoint, for an integration that takes a base URL (for example Extended
+OpenAI Conversation): `autobot hooks new homeassistant` makes its API key, and the base URL is
+`http://<this machine>:7794/hooks/homeassistant/v1` on the hooks listener (another bot's:
+`/hooks/<bot>/homeassistant/v1`). On this machine the agent API serves it too, at
+`/v1/agent/openai/v1` with the gateway's token (`model` names the bot). Its turns follow the
+unattended rules: what is allowlisted runs, the rest is refused.
+
+`autobot doctor` checks WhatsApp (its secrets, the number, the hooks listener) and Home Assistant
+(the token, how many entities the agent sees), and lists the bots `autobot serve` runs with any
+channel that is down; `/status` in a chat says whether the `home` tool works.
+
+The agent API lists the bots (`GET /v1/agent/bots`), turns them on and off, reloads them, and
+takes `?bot=` on every path ([spec/agent.md](spec/agent.md)).
 
 ## v0 milestone
 

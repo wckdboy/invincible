@@ -82,6 +82,24 @@ const HTML: Style = Style {
     quote: |line| format!("<blockquote>{line}</blockquote>"),
 };
 
+const WHATSAPP: Style = Style {
+    bold: ("*", "*"),
+    italic: ("_", "_"),
+    strike: ("~", "~"),
+    code: ("`", "`"),
+    link: |text, url| if text == url || text.is_empty() { url.to_owned() } else { format!("{text} ({url})") },
+    escape: same,
+    heading: |text| format!("*{text}*"),
+    bullet: "• ",
+    fence: |_, body| format!("```\n{body}\n```"),
+    quote: |line| format!("> {line}"),
+};
+
+/// WhatsApp's formatting: `*bold*`, `_italic_`, `~strike~`, code; links as `text (url)`.
+pub fn to_whatsapp(markdown: &str) -> String {
+    render(markdown, &WHATSAPP)
+}
+
 /// Plain text: no markup left, links as `text (url)`.
 pub fn to_plain(markdown: &str) -> String {
     render(markdown, &PLAIN)
@@ -275,6 +293,14 @@ mod tests {
         assert_eq!(
             out,
             "*Done*\n\nI changed *two* files, see <https://x.org/pr/1|the PR> and `src/main.rs`.\n\n• one_thing _now_\n• ~old~ &lt;new&gt;\n\n```\nlet a = b &amp;&amp; c;\n```\n> quoted"
+        );
+    }
+
+    #[test]
+    fn whatsapp_formatting() {
+        assert_eq!(
+            to_whatsapp(SAMPLE),
+            "*Done*\n\nI changed *two* files, see the PR (https://x.org/pr/1) and `src/main.rs`.\n\n• one_thing _now_\n• ~old~ <new>\n\n```\nlet a = b && c;\n```\n> quoted"
         );
     }
 
