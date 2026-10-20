@@ -112,6 +112,27 @@ pub async fn download(
     Ok(Audio { bytes: bytes.to_vec(), mime: mime.to_owned(), name: name.to_owned() })
 }
 
+/// Whether speech can become text here: a server, or whisper.cpp with its model and ffmpeg.
+pub fn available(config: &VoiceConfig, home: &Path) -> bool {
+    if !config.enabled {
+        return false;
+    }
+    if config.url.is_some() {
+        return true;
+    }
+    let command = match &config.command {
+        // A bare name is looked up on PATH, as running it does.
+        Some(command) if command.components().count() == 1 => {
+            command.to_str().is_some_and(|name| crate::find_on_path(name).is_some())
+        }
+        Some(command) => crate::config::expand(command).is_file(),
+        None => ["whisper-cli", "whisper-cpp", "whisper"].iter().any(|n| crate::find_on_path(n).is_some()),
+    };
+    let model =
+        config.model_file.as_deref().map(crate::config::expand).unwrap_or_else(|| home.join("whisper/ggml-base.bin"));
+    command && model.is_file() && crate::find_on_path("ffmpeg").is_some()
+}
+
 /// The text spoken in [audio].
 pub async fn transcribe(config: &VoiceConfig, home: &Path, audio: Audio) -> Result<String, String> {
     if !config.enabled {

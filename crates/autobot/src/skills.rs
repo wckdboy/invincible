@@ -147,6 +147,15 @@ pub fn body(home: &Path, name: &str) -> Result<String, String> {
     Ok(rest.trim().to_owned())
 }
 
+/// The request that runs skill [name] for [task] (`/<skill> what for`).
+pub fn request(home: &Path, name: &str, task: &str) -> Result<String, String> {
+    let body = body(home, name)?;
+    let task = if task.is_empty() { "Do what the skill describes, here." } else { task };
+    Ok(format!(
+        "Use the skill {name} for this. Its instructions:\n\n{body}\n\n(read_skill with file reads its other files.)\n\nTask: {task}"
+    ))
+}
+
 /// [file] under [base], when it stays there (no `..`, not absolute, no links out).
 fn inside(base: &Path, file: &str) -> Option<PathBuf> {
     let rel = Path::new(file);

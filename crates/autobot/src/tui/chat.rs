@@ -104,7 +104,7 @@ const COMMANDS: &[(&str, &str)] = &[
 ];
 
 /// What `/context` lists: the instruction files in play, and what else goes with every call.
-fn context_rows(agent: &crate::agent::Agent, home: &Path, session: &str) -> Vec<(String, String)> {
+pub(crate) fn context_rows(agent: &crate::agent::Agent, home: &Path, session: &str) -> Vec<(String, String)> {
     let mut rows = Vec::new();
     let workdir = agent.tools.workdir();
     let files: Vec<String> = agent.tools.context_files().iter().map(crate::context::File::label).collect();
@@ -1986,11 +1986,8 @@ impl Chat {
     fn run_skill(&self, name: &str, task: &str) -> Result<Next, String> {
         let skill = crate::skills::find(&self.home, name).ok_or(format!("there is no skill {name:?} (/skills)"))?;
         let body = crate::skills::body(&self.home, name)?;
-        let task = if task.is_empty() { "Do what the skill describes, here." } else { task };
         say(&style::gray(&format!("  └ skill {} ({} characters)", skill.name, body.len())));
-        Ok(Next::Send(format!(
-            "Use the skill {name} for this. Its instructions:\n\n{body}\n\n(read_skill with file reads its other files.)\n\nTask: {task}"
-        )))
+        Ok(Next::Send(crate::skills::request(&self.home, name, task)?))
     }
 
     /// A proposal waiting for the owner, with what an improvement changes.

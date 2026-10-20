@@ -757,6 +757,7 @@ fn mcp_hub(only: Option<Vec<String>>) -> autobot::mcp::Hub {
             args: vec![script.display().to_string()],
             env: Default::default(),
             tools: only,
+            ..Default::default()
         },
     )]))
     .unwrap()
@@ -801,6 +802,7 @@ async fn mcp_results_errors_and_the_allowlist() {
             args: vec![],
             env: Default::default(),
             tools: None,
+            ..Default::default()
         },
     )]))
     .unwrap();
@@ -811,6 +813,83 @@ async fn mcp_results_errors_and_the_allowlist() {
     let call = |tool: &str| Action::Mcp { tool: tool.into(), arguments: "{}".into() };
     assert_eq!(check(&config, &call("calc/add")), Verdict::Run);
     assert!(matches!(check(&config, &call("calc/secret")), Verdict::Refuse(_)));
+}
+
+/// A strict MCP server over HTTP: the protocol version on every request after `initialize`
+/// (the `initialized` notification too), a session id, and a tool's answer streamed as an event
+/// cut inside a character and inside its `\r\n\r\n`.
+#[tokio::test]
+async fn an_mcp_server_over_http() {
+    use axum::body::{Body, Bytes};
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::{IntoResponse, Response};
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let log = seen.clone();
+    let app = axum::Router::new().route(
+        "/mcp",
+        axum::routing::post(move |headers: HeaderMap, body: Bytes| {
+            let log = log.clone();
+            async move {
+                let message: Value = serde_json::from_slice(&body).unwrap();
+                let method = message["method"].as_str().unwrap_or_default().to_owned();
+                log.lock().unwrap().push(method.clone());
+                if method != "initialize" {
+                    if headers.get("mcp-protocol-version").and_then(|v| v.to_str().ok()) != Some("2025-03-26") {
+                        return (StatusCode::BAD_REQUEST, format!("{method}: no MCP-Protocol-Version")).into_response();
+                    }
+                    if headers.get("mcp-session-id").and_then(|v| v.to_str().ok()) != Some("s1") {
+                        return (StatusCode::BAD_REQUEST, "no session").into_response();
+                    }
+                }
+                let id = message["id"].clone();
+                let answer = |result: Value| json!({ "jsonrpc": "2.0", "id": id, "result": result });
+                match method.as_str() {
+                    "initialize" => {
+                        let mut r = axum::Json(answer(json!({
+                            "protocolVersion": "2025-03-26", "capabilities": { "tools": {} },
+                            "serverInfo": { "name": "web", "version": "0" },
+                        })))
+                        .into_response();
+                        r.headers_mut().insert("mcp-session-id", "s1".parse().unwrap());
+                        r
+                    }
+                    "notifications/initialized" => StatusCode::ACCEPTED.into_response(),
+                    "tools/list" => axum::Json(answer(json!({ "tools": [
+                        { "name": "greet", "description": "Greets", "inputSchema": { "type": "object" } },
+                    ] })))
+                    .into_response(),
+                    _ => {
+                        let event = format!(
+                            "event: message\r\ndata: {}\r\n\r\n",
+                            answer(json!({ "content": [{ "type": "text", "text": "héllo" }] }))
+                        );
+                        let bytes = event.into_bytes();
+                        // Cut inside the é, and between the last \r and \n.
+                        let e = bytes.windows(2).position(|w| w == [0xc3, 0xa9]).unwrap() + 1;
+                        let end = bytes.len() - 1;
+                        let pieces: Vec<Result<Bytes, std::io::Error>> = vec![
+                            Ok(Bytes::copy_from_slice(&bytes[..e])),
+                            Ok(Bytes::copy_from_slice(&bytes[e..end])),
+                            Ok(Bytes::copy_from_slice(&bytes[end..])),
+                        ];
+                        let mut r = Response::new(Body::from_stream(futures_util::stream::iter(pieces)));
+                        r.headers_mut().insert("content-type", "text/event-stream".parse().unwrap());
+                        r
+                    }
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let hub = autobot::mcp::Hub::new(std::collections::BTreeMap::from([(
+        "web".to_owned(),
+        autobot::mcp::ServerConfig { url: Some(url), ..Default::default() },
+    )]))
+    .unwrap();
+    assert_eq!(hub.call("web", "greet", json!({})).await.unwrap(), "héllo");
+    assert_eq!(*seen.lock().unwrap(), ["initialize", "notifications/initialized", "tools/list", "tools/call"]);
 }
 
 #[tokio::test]

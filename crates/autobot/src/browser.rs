@@ -575,7 +575,15 @@ async fn act_on(b: &mut Browser, act: &Act, shots: &Path, limit: usize) -> Resul
     match act {
         Act::Navigate { url } => {
             b.navigate(url).await?;
-            let (now, title) = b.here().await?;
+            let mut where_now = b.here().await?;
+            // A loaded page can still say about:blank for a moment (a busy machine): asked
+            // again, a little while.
+            let until = tokio::time::Instant::now() + Duration::from_secs(5);
+            while where_now.0 == "about:blank" && url != "about:blank" && tokio::time::Instant::now() < until {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                where_now = b.here().await?;
+            }
+            let (now, title) = where_now;
             // Approvals go by where the page is: never the blank page it left.
             if now == "about:blank" && url != "about:blank" {
                 set_current(None);
