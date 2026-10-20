@@ -45,3 +45,25 @@ whitespace is trimmed.
 `--out results.json` writes, for each model, each task's `pass`, the checks that failed, the
 answer, latency in milliseconds and tokens, and the gateway's receipt id. The report prints the
 pass rate per model and per tag, the median latency, and the tasks where the models disagree.
+
+## History
+
+Every run is kept (unless `--no-record`) as one line of `$INVINCIBLE_HOME/evals/history.jsonl`:
+
+```json
+{"at": "2026-10-20T21:00:00+02:00", "suite": "projects", "digest": "3f9a1c2b7d01", "tasks": 50,
+ "kind": "answers", "version": "0.0.18",
+ "models": [{"model": "qwen3.5-4b", "tier": "node", "passed": 30, "total": 50, "median_ms": 200},
+            {"model": "deepseek", "tier": "cloud", "passed": 45, "total": 50, "median_ms": 900}]}
+```
+
+`suite` is the task file's name (`name#tag` when `--tag` chose some of its tasks); `digest` is
+the first 6 bytes of the SHA-256 of its task ids in order, one per line, so runs of the same tasks
+are compared and a changed file starts a history of its own. `tier` is what the gateway's
+`/v1/models` says (`node`, `cloud`; absent for a model it does not list, such as `auto`). `kind`
+is `answers` for `invincible eval` and `agent` for `autobot eval`, which keeps its runs in the
+same file.
+
+The gap of a run is the best cloud model's pass rate less the best node model's, in percentage
+points; a run without both has none. `invincible eval --history [FILE]` prints each suite's runs
+with every model's score and the gap, and how the gap moved from the first run to the last.

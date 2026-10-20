@@ -72,12 +72,20 @@ enum Command {
         action: CloudAction,
     },
     /// Run a task file against models the node serves, checking every answer by rule (spec/evals.md).
+    /// Each run is kept in $INVINCIBLE_HOME/evals/history.jsonl; `--history` shows them.
     Eval {
         /// The tasks (JSON Lines).
-        tasks: PathBuf,
+        #[arg(required_unless_present = "history")]
+        tasks: Option<PathBuf>,
         /// A model to run them on, by id or `auto`; repeat to compare.
-        #[arg(long = "model", required = true)]
+        #[arg(long = "model", required_unless_present = "history")]
         models: Vec<String>,
+        /// Show the runs kept so far (of the task file given, or all) and the local–cloud gap.
+        #[arg(long)]
+        history: bool,
+        /// Do not keep this run in the history.
+        #[arg(long)]
+        no_record: bool,
         /// Answer the router's "ask" for cloud models (they are refused otherwise).
         #[arg(long)]
         confirm: bool,
@@ -676,8 +684,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 Ok(())
             })
         }
-        Command::Eval { tasks, models, confirm, thinking, out, tag, config } => {
+        Command::Eval { tasks, models, history, no_record, confirm, thinking, out, tag, config } => {
             let home = config::home()?;
+            let suite_of = |path: &std::path::Path| {
+                path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tasks".to_owned())
+            };
+            if history {
+                let suite = tasks.as_deref().map(suite_of);
+                println!("{}", invincible::eval::history_report(&invincible::eval::history(&home), suite.as_deref()));
+                return Ok(());
+            }
+            let tasks = tasks.ok_or("a task file to run")?;
             let path = config.unwrap_or_else(|| home.join("config.toml"));
             let config = match fsutil::read_optional(&path)? {
                 Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?,
@@ -692,7 +709,30 @@ fn run(cli: Cli) -> Result<(), String> {
             let base = format!("http://{}/v1", config.listen);
             let client = invincible::egress::local().build().map_err(|e| e.to_string())?;
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
-            let results = runtime.block_on(async {
+            let (results, tiers) = runtime.block_on(async {
+                // Which models are on this machine and which in the cloud, for the history.
+                let tiers: std::collections::BTreeMap<String, String> = async {
+                    let listed: serde_json::Value = client
+                        .get(format!("{base}/models"))
+                        .bearer_auth(&token)
+                        .send()
+                        .await
+                        .ok()?
+                        .json()
+                        .await
+                        .ok()?;
+                    Some(
+                        listed["data"]
+                            .as_array()?
+                            .iter()
+                            .filter_map(|m| {
+                                Some((m["id"].as_str()?.to_owned(), m["invincible"]["tier"].as_str()?.to_owned()))
+                            })
+                            .collect(),
+                    )
+                }
+                .await
+                .unwrap_or_default();
                 let mut results = Vec::new();
                 for model in &models {
                     eprintln!("{model}: {} tasks", list.len());
@@ -710,9 +750,35 @@ fn run(cli: Cli) -> Result<(), String> {
                     .await;
                     results.push((model.clone(), outcomes));
                 }
-                results
+                (results, tiers)
             });
             println!("{}", invincible::eval::report(&list, &results));
+            // Kept unless nothing ran (the gateway was not there, say).
+            let answered = results.iter().flat_map(|(_, o)| o).any(|o| o.error.is_none());
+            if !no_record && answered {
+                let run = invincible::eval::Run {
+                    at: chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+                    suite: match &tag {
+                        Some(tag) => format!("{}#{tag}", suite_of(&tasks)),
+                        None => suite_of(&tasks),
+                    },
+                    digest: invincible::eval::digest(list.iter().map(|t| t.id.as_str())),
+                    tasks: list.len(),
+                    kind: "answers".to_owned(),
+                    version: invincible::version::VERSION.to_owned(),
+                    models: results
+                        .iter()
+                        .map(|(m, o)| invincible::eval::model_run(m, tiers.get(m).cloned(), o))
+                        .collect(),
+                };
+                match invincible::eval::record(&home, &run) {
+                    Ok(()) => eprintln!(
+                        "kept in {} (`invincible eval --history`)",
+                        invincible::eval::history_path(&home).display()
+                    ),
+                    Err(e) => eprintln!("not kept: {e}"),
+                }
+            }
             if let Some(out) = out {
                 let json: serde_json::Value = results
                     .iter()

@@ -230,6 +230,9 @@ enum Command {
         /// Append the passing runs here as trajectories (fine-tuning data; see `autobot trajectories`).
         #[arg(long)]
         trajectories: Option<std::path::PathBuf>,
+        /// Do not keep this run in the eval history (`invincible eval --history`).
+        #[arg(long)]
+        no_record: bool,
     },
     /// Finished turns kept as fine-tuning data ([agent] trajectories = true, or `eval
     /// --trajectories`): count them, or export them for training a local model.
@@ -870,7 +873,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Eval { tasks, models, cloud, tools, tag, out, trajectories } => {
+        Command::Eval { tasks, models, cloud, tools, tag, out, trajectories, no_record } => {
             let text = std::fs::read_to_string(&tasks).map_err(|e| format!("{}: {e}", tasks.display()))?;
             let mut list = autobot::eval::parse(&text).map_err(|e| format!("{}: {e}", tasks.display()))?;
             if let Some(tag) = &tag {
@@ -882,7 +885,10 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             let scratch = std::env::temp_dir().join(format!("autobot-eval-{}", std::process::id()));
             let only = tools.map(|groups| autobot::tools::tools_for(&groups));
-            let outcomes = runtime()?.block_on(async {
+            let (outcomes, tiers) = runtime()?.block_on(async {
+                // Which models are on this machine and which in the cloud, for the history.
+                let tiers: std::collections::BTreeMap<String, String> =
+                    agent.gateway.model_info().await.unwrap_or_default().into_iter().map(|m| (m.id, m.tier)).collect();
                 let mut outcomes = Vec::new();
                 for model in &models {
                     eprintln!("{model}: {} tasks", list.len());
@@ -906,9 +912,48 @@ fn run(mut cli: Cli) -> Result<(), String> {
                         outcomes.push(outcome);
                     }
                 }
-                Ok::<_, String>(outcomes)
+                Ok::<_, String>((outcomes, tiers))
             })?;
             print!("{}", autobot::eval::report(&outcomes, &models));
+            if !no_record && !outcomes.is_empty() {
+                let stem =
+                    tasks.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tasks".to_owned());
+                let run = invincible::eval::Run {
+                    at: chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+                    suite: match &tag {
+                        Some(tag) => format!("{stem}#{tag}"),
+                        None => stem,
+                    },
+                    digest: invincible::eval::digest(list.iter().map(|t| t.id.as_str())),
+                    tasks: list.len(),
+                    kind: "agent".to_owned(),
+                    version: invincible::version::VERSION.to_owned(),
+                    models: models
+                        .iter()
+                        .map(|model| {
+                            let mine: Vec<&autobot::eval::Outcome> =
+                                outcomes.iter().filter(|o| &o.model == model).collect();
+                            let mut seconds: Vec<f64> = mine.iter().map(|o| o.seconds).collect();
+                            seconds.sort_by(f64::total_cmp);
+                            invincible::eval::ModelRun {
+                                model: model.clone(),
+                                tier: tiers.get(model).cloned(),
+                                passed: mine.iter().filter(|o| o.pass).count(),
+                                total: mine.len(),
+                                median_ms: seconds.get(seconds.len() / 2).map(|s| (s * 1000.0) as u64),
+                            }
+                        })
+                        .collect(),
+                };
+                let kept = invincible::config::home().and_then(|home| {
+                    invincible::eval::record(&home, &run)?;
+                    Ok(invincible::eval::history_path(&home))
+                });
+                match kept {
+                    Ok(path) => eprintln!("kept in {} (`invincible eval --history`)", path.display()),
+                    Err(e) => eprintln!("not kept: {e}"),
+                }
+            }
             if let Some(file) = &trajectories {
                 let kept: usize = outcomes.iter().filter(|o| o.pass).map(|o| o.trajectories.len()).sum();
                 println!("{kept} passing runs appended to {}", file.display());
