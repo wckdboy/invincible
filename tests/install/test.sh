@@ -129,7 +129,7 @@ archives() { grep -c "tar.gz" "$T/server.log" || true; }
 
 # 1. Fresh.
 run || fail "fresh install"
-[ "$(version invincible)" = 0.0.1 ] && [ "$(version autobot)" = 0.0.1 ] || fail "fresh install: not 0.0.1"
+if [ "$(version invincible)" != 0.0.1 ] || [ "$(version autobot)" != 0.0.1 ]; then fail "fresh install: not 0.0.1"; fi
 contains "$T/out" "release signature verified (0.0.1)" "fresh"
 contains "$T/out" "next        autobot setup" "fresh: next step"
 contains "$INVINCIBLE_HOME/installed" "version=0.0.1" "fresh: record"
@@ -215,13 +215,13 @@ pass "a release signed with another key is refused"
 
 # 11. Uninstall keeps the data; --purge removes it.
 run --uninstall || fail "uninstall"
-[ ! -e "$PREFIX/bin/invincible" ] && [ ! -e "$PREFIX/bin/autobot" ] || fail "uninstall: binaries left"
+if [ -e "$PREFIX/bin/invincible" ] || [ -e "$PREFIX/bin/autobot" ]; then fail "uninstall: binaries left"; fi
 [ ! -e "$SERVICE_FILE" ] || fail "uninstall: services left"
 cmp -s "$INVINCIBLE_HOME/config.toml" "$T/gateway.before" || fail "uninstall: data removed"
 contains "$T/out" "kept" "uninstall"
 run --uninstall || fail "uninstall twice"
 run --uninstall --purge || fail "purge"
-[ ! -e "$INVINCIBLE_HOME" ] && [ ! -e "$AUTOBOT_HOME" ] || fail "purge: data left"
+if [ -e "$INVINCIBLE_HOME" ] || [ -e "$AUTOBOT_HOME" ]; then fail "purge: data left"; fi
 pass "uninstall keeps data; --purge removes it"
 
 # 12. After all that, a fresh install still works.

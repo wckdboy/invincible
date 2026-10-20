@@ -80,7 +80,7 @@ NO_SETUP="${INVINCIBLE_NO_SETUP:-0}"
 YES="${INVINCIBLE_YES:-0}"
 UNINSTALL=0
 PURGE=0
-need_value() { [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value (--help lists the options)"; }
+need_value() { if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value (--help lists the options)"; fi; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --version) need_value "$@"; WANT_VERSION="${2#v}"; shift 2 ;;
