@@ -11,6 +11,7 @@ pub mod browser;
 pub mod channel;
 pub mod commands;
 pub mod config;
+pub mod context;
 pub mod cron;
 pub mod diff;
 pub mod discord;

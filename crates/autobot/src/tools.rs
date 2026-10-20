@@ -1027,21 +1027,40 @@ impl Tools {
         }
     }
 
-    /// The project's instructions for agents in the working directory (`AGENTS.md`,
-    /// `CLAUDE.md`, `.autobot/AGENTS.md`), with their names; at most 24 KiB in all.
+    /// The project's instructions for agents ([crate::context]): the working directory's
+    /// `AGENTS.md`, `CLAUDE.md`, `HERMES.md` …, and its repository's above it; with their names, at
+    /// most 24 KiB in all. None on another machine (they are read there by the agent itself).
     pub fn project_notes(&self) -> Option<String> {
-        let mut out = String::new();
-        for name in ["AGENTS.md", "CLAUDE.md", ".autobot/AGENTS.md"] {
-            let Ok(text) = std::fs::read_to_string(self.workdir.join(name)) else { continue };
-            let text = text.trim();
-            if text.is_empty() || out.len() >= 24 * 1024 {
-                continue;
-            }
-            let room = 24 * 1024 - out.len();
-            let cut = &text[..floor(text, text.len().min(room))];
-            out.push_str(&format!("--- {name} ---\n{cut}\n"));
+        if self.ssh.is_some() {
+            return None;
         }
-        (!out.is_empty()).then_some(out)
+        crate::context::prompt(&self.context_files())
+    }
+
+    /// The context files the start takes ([crate::context::project]).
+    pub fn context_files(&self) -> Vec<crate::context::File> {
+        if self.ssh.is_some() {
+            return Vec::new();
+        }
+        crate::context::project(&self.workdir)
+    }
+
+    /// The nested context files [call] reaches that [session] has not had, as they go with its
+    /// result ([crate::context::nested]); empty for other calls.
+    pub fn nested_notes(&self, call: &Call, session: &str) -> String {
+        let path = match call {
+            Call::ReadFile { path, .. }
+            | Call::WriteFile { path, .. }
+            | Call::EditFile { path, .. }
+            | Call::ListDir { path }
+            | Call::Search { path, .. }
+            | Call::FindFiles { path, .. } => path,
+            _ => return String::new(),
+        };
+        if self.ssh.is_some() || !path.starts_with(&self.workdir) {
+            return String::new();
+        }
+        crate::context::hint(&crate::context::nested(&self.workdir, path, session))
     }
 
     /// The git branch, when the working directory is a repository.

@@ -1741,3 +1741,40 @@ async fn without_media_backends_there_are_no_media_tools() {
     let text = script.lock().unwrap().seen[0].1["tools"].to_string();
     assert!(!text.contains("\"speak\"") && !text.contains("generate_image"));
 }
+
+#[tokio::test]
+async fn context_files_from_the_start_and_a_nested_one_on_the_way() {
+    let (url, script) = gateway(vec![
+        call("read_file", json!({"path": "pkg/lib.rs"})),
+        call("read_file", json!({"path": "pkg/lib.rs"})),
+        say("Read it."),
+    ])
+    .await;
+    let dir = temp("context");
+    let work = dir.join("work");
+    std::fs::create_dir_all(work.join("pkg")).unwrap();
+    std::fs::write(work.join("AGENTS.md"), "Use tabs.").unwrap();
+    std::fs::write(work.join("HERMES.md"), "Answer in English.").unwrap();
+    std::fs::write(work.join("pkg/AGENTS.md"), "In pkg: run make check after changes.").unwrap();
+    std::fs::write(work.join("pkg/lib.rs"), "pub fn f() {}\n").unwrap();
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let mut session = Session::open(&dir.join("sessions"), "ctx").unwrap();
+    agent.turn(&mut session, "read pkg/lib.rs", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    let script = script.lock().unwrap();
+    let system = script.seen[0].1["messages"][0]["content"].as_str().unwrap().to_owned();
+    assert!(
+        system.contains("--- AGENTS.md ---\nUse tabs.") && system.contains("--- HERMES.md ---\nAnswer in English.")
+    );
+    assert!(!system.contains("make check"), "the nested one waits until a tool gets there");
+    let results: Vec<String> = script.seen[2].1["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "tool")
+        .map(|m| m["content"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(results[0].contains("pub fn f()") && results[0].contains("from pkg/AGENTS.md"), "{results:?}");
+    assert!(results[0].contains("run make check"));
+    assert!(!results[1].contains("make check"), "once per conversation");
+    assert_eq!(autobot::context::given("ctx"), [work.join("pkg/AGENTS.md")]);
+}

@@ -703,7 +703,10 @@ impl Agent {
         {
             tracing::warn!("no undo for {}: {e}", path.display());
         }
-        self.tools.run(&call).await
+        let result = self.tools.run(&call).await;
+        // A subdirectory's own instructions, the first time a tool gets there.
+        let notes = self.tools.nested_notes(&call, session);
+        if notes.is_empty() { result } else { format!("{result}{notes}") }
     }
 
     /// `speak` and `generate_image` ([crate::media]): made by the node, asked for first when the
