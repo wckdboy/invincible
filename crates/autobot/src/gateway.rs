@@ -18,6 +18,23 @@ pub struct Gateway {
     stream: bool,
 }
 
+/// A chat completion request, as the gateway takes it.
+#[derive(serde::Serialize)]
+struct Body<'a> {
+    model: &'a str,
+    messages: &'a [Value],
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a Value>,
+}
+
+#[derive(serde::Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
 /// Part of an answer as it streams in.
 #[derive(Debug)]
 pub enum Delta<'a> {
@@ -176,13 +193,14 @@ impl Gateway {
         confirmed: bool,
         on: &(dyn Fn(Delta) + Send + Sync),
     ) -> Result<Reply, GatewayError> {
-        let mut body = json!({ "model": self.model, "messages": messages, "stream": self.stream });
-        if self.stream {
-            body["stream_options"] = json!({ "include_usage": true });
-        }
-        if tools.as_array().is_some_and(|t| !t.is_empty()) {
-            body["tools"] = tools.clone();
-        }
+        // Serialized from what it borrows: no copy of the conversation and the tools per call.
+        let body = Body {
+            model: &self.model,
+            messages,
+            stream: self.stream,
+            stream_options: self.stream.then_some(StreamOptions { include_usage: true }),
+            tools: tools.as_array().filter(|t| !t.is_empty()).map(|_| tools),
+        };
         let mut request =
             self.client.post(format!("{}/chat/completions", self.url)).bearer_auth(&self.token).json(&body);
         request = request.header(invincible::server::CLIENT_HEADER, "autobot-agent");

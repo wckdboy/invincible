@@ -267,6 +267,18 @@ pub fn rss_kib(pid: u32) -> u64 {
     String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
 }
 
+/// Memory [pid]'s allocator holds for live objects, in KiB, where the system can say (macOS:
+/// `heap`). Resident memory there also counts what the allocator keeps after a free (macOS's
+/// malloc keeps a lot), so a leak shows here and not always there.
+pub fn live_heap_kib(pid: u32) -> Option<u64> {
+    let out = Command::new("heap").args(["-s", &pid.to_string()]).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // "All zones: 34518 nodes (5692608 bytes)"
+    let line = text.lines().find(|l| l.starts_with("All zones:") && l.contains(" bytes)"))?;
+    let bytes = line.rsplit('(').next()?.split(' ').next()?.parse::<u64>().ok()?;
+    Some(bytes / 1024)
+}
+
 /// Open file descriptors of [pid].
 pub fn fds(pid: u32) -> usize {
     let proc = PathBuf::from(format!("/proc/{pid}/fd"));

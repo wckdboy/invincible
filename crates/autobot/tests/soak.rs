@@ -24,18 +24,26 @@ fn env_secs(name: &str, default: u64) -> Duration {
 #[derive(Debug, Clone, Copy)]
 struct Held {
     rss_kib: u64,
+    /// Live objects on the heap, where the system says (macOS); resident memory elsewhere.
+    heap_kib: Option<u64>,
     fds: usize,
     tasks: u64,
     threads: usize,
 }
 
-async fn held(client: &reqwest::Client, agent: &str, pid: u32) -> Held {
+async fn held(client: &reqwest::Client, agent: &str, pid: u32, deep: bool) -> Held {
     let stats: Value =
         client.get(format!("{agent}/v1/agent/stats")).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap();
     if std::env::var_os("SOAK_VERBOSE").is_some() {
         println!("stats {stats} pid {pid}");
     }
-    Held { rss_kib: rss_kib(pid), fds: fds(pid), tasks: stats["tasks"].as_u64().unwrap(), threads: threads(pid) }
+    Held {
+        rss_kib: rss_kib(pid),
+        heap_kib: if deep { live_heap_kib(pid) } else { None },
+        fds: fds(pid),
+        tasks: stats["tasks"].as_u64().unwrap(),
+        threads: threads(pid),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -126,12 +134,12 @@ async fn two_bots_under_steady_traffic_and_gateway_restarts() {
             next_restart = Instant::now() + restart_every;
         }
         if warm.is_none() && started.elapsed() >= warm_at {
-            let now = held(&client, &agent, pid).await;
+            let now = held(&client, &agent, pid, true).await;
             println!("warm: {now:?}");
             warm = Some(now);
         }
         if started.elapsed().as_secs().is_multiple_of(10) {
-            let now = held(&client, &agent, pid).await;
+            let now = held(&client, &agent, pid, false).await;
             println!(
                 "{:>4}s {now:?} sent {} answered {} retried {}",
                 started.elapsed().as_secs(),
@@ -142,6 +150,7 @@ async fn two_bots_under_steady_traffic_and_gateway_restarts() {
             peak = Some(match peak {
                 Some(p) => Held {
                     rss_kib: p.rss_kib.max(now.rss_kib),
+                    heap_kib: None,
                     fds: p.fds.max(now.fds),
                     tasks: p.tasks.max(now.tasks),
                     threads: p.threads.max(now.threads),
@@ -156,13 +165,17 @@ async fn two_bots_under_steady_traffic_and_gateway_restarts() {
     }
     // Quiet again: what is left once the traffic has stopped.
     tokio::time::sleep(Duration::from_secs(2)).await;
-    let end = held(&client, &agent, pid).await;
+    let end = held(&client, &agent, pid, true).await;
     let warm = warm.expect("a warm sample");
     let (sent, answered) = (sent.load(Ordering::Relaxed), answered.load(Ordering::Relaxed));
     println!("end: {end:?}; {sent} sent, {answered} answered, {restarts} gateway restarts, peak {peak:?}");
     report("soak.messages", sent as f64, "messages");
     report("soak.rss_warm", warm.rss_kib as f64 / 1024.0, "MiB");
     report("soak.rss_end", end.rss_kib as f64 / 1024.0, "MiB");
+    if let (Some(w), Some(e)) = (warm.heap_kib, end.heap_kib) {
+        report("soak.heap_warm", w as f64 / 1024.0, "MiB");
+        report("soak.heap_end", e as f64 / 1024.0, "MiB");
+    }
     report("soak.fds_warm", warm.fds as f64, "fds");
     report("soak.fds_end", end.fds as f64, "fds");
     report("soak.tasks_warm", warm.tasks as f64, "tasks");
@@ -174,12 +187,15 @@ async fn two_bots_under_steady_traffic_and_gateway_restarts() {
     assert!(restarts >= 1 || total < restart_every, "the gateway was restarted");
     assert!(sent > 50, "steady traffic: only {sent} messages");
     // No growth once warm: memory within a quarter (and 8 MiB) of where it was, the rest about
-    // where they were (a pooled connection or two may come and go).
+    // where they were (a pooled connection or two may come and go). Memory is the live heap where
+    // the system tells it (macOS's allocator keeps freed pages resident), else resident memory.
+    let (warm_kib, end_kib) = match (warm.heap_kib, end.heap_kib) {
+        (Some(w), Some(e)) => (w, e),
+        _ => (warm.rss_kib, end.rss_kib),
+    };
     assert!(
-        end.rss_kib <= warm.rss_kib + (warm.rss_kib / 4).max(8 * 1024),
-        "memory grew: {} KiB warm, {} KiB at the end",
-        warm.rss_kib,
-        end.rss_kib
+        end_kib <= warm_kib + (warm_kib / 4).max(8 * 1024),
+        "memory grew: {warm_kib} KiB warm, {end_kib} KiB at the end"
     );
     assert!(end.fds <= warm.fds + 8, "file descriptors grew: {} warm, {} at the end", warm.fds, end.fds);
     assert!(end.tasks <= warm.tasks + 4, "tasks grew: {} warm, {} at the end", warm.tasks, end.tasks);

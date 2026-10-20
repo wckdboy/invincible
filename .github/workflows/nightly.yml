@@ -1,0 +1,34 @@
+# Every night (and on demand): the benchmarks (bench/run.sh, numbers in the run's summary) and the
+# soak test (two bots, steady traffic and gateway restarts, ten minutes), on Linux and macOS.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      soak_secs:
+        description: How long the soak test runs, in seconds
+        default: "600"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91
+      - uses: Swatinem/rust-cache@v2
+      - name: benchmarks
+        run: sh bench/run.sh
+      - name: soak
+        run: cargo test --release --locked -p autobot --test soak -- --ignored --nocapture
+        env:
+          SOAK_SECS: ${{ inputs.soak_secs || '600' }}

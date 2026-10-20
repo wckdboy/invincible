@@ -42,7 +42,20 @@ pub fn is_request(message: &Value) -> bool {
 /// ([crate::images::BUDGET_CHARS]) for each it carries.
 pub fn cost(message: &Value) -> usize {
     let images = message.get(crate::images::KEY).and_then(Value::as_array).map_or(0, Vec::len);
-    message.to_string().len() + images * crate::images::BUDGET_CHARS
+    // Its length as JSON, counted as it is written out rather than kept.
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    let _ = serde_json::to_writer(&mut count, message);
+    count.0 + images * crate::images::BUDGET_CHARS
 }
 
 impl Session {
