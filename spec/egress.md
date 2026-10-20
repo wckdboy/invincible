@@ -20,7 +20,7 @@ The node's `[node] network` and the app's global mode, encoded as text:
 | `socks5:<host>:<port>` | Through that SOCKS5 proxy |
 
 Decoding: the kind is what comes before the first `:`, and must be one of the four exactly (case
-matters). For `tor` and `socks5`, the port is what comes after the last `:` and must be a number
+matters). `offline` and `direct` take nothing after them (`direct:typo` is a mistake). For `tor` and `socks5`, the port is what comes after the last `:` and must be a number
 from 1 to 65535, and the host is what lies between, which must not be blank (an IPv6 address keeps
 its brackets: `socks5:[::1]:1080`). Anything else, including an empty value, decodes as `offline`:
 a mistake fails closed.
@@ -38,7 +38,9 @@ the app's own exception and is not in the vectors: on a node it is an ordinary p
 
 ## Decision
 
-Input: the encoded `network`, the request's `scheme` (`http` or `https`) and `host`, and
+Input: the encoded `network`, the request's `scheme` (`http` or `https`) and `host` (as the URL
+parser gives it, the host the connection then goes to: a parser that writes `127.1` as
+`127.0.0.1` decides on `127.0.0.1`), and
 `loopback_when_offline` (whether loopback is allowed while offline: an app setting; the node
 passes false, and reaches its own services on this machine, its engines and the agent, without
 this check). The first rule that applies decides:

@@ -212,6 +212,48 @@
       }
     },
     {
+      "name": "direct with anything after it is offline",
+      "input": {
+        "network": "direct:typo",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "direct with a trailing colon is offline",
+      "input": {
+        "network": "direct:",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "offline with anything after it is offline",
+      "input": {
+        "network": "offline:x",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
       "name": "offline blocks before anything, cleartext too",
       "input": {
         "network": "offline",

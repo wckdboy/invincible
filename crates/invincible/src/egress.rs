@@ -64,8 +64,12 @@ pub fn check(url: &str) -> Result<reqwest::Url, String> {
     if allowed(&parsed) { Ok(parsed) } else { Err(format!("{url}: only HTTPS (or HTTP to loopback) is allowed")) }
 }
 
-/// The route name for logs and receipts: `direct`, `tor`, `socks5`.
-pub fn route(mode: &NetworkMode) -> &'static str {
+/// The route a request to [host] takes, for logs and receipts: `direct`, `tor`, `socks5`
+/// (loopback is always direct: it skips the proxy).
+pub fn route(mode: &NetworkMode, host: &str) -> &'static str {
+    if invincible_policy::is_loopback(host) && !mode.is_offline() {
+        return "direct";
+    }
     match mode {
         NetworkMode::Offline => "offline",
         NetworkMode::Direct => "direct",
@@ -108,6 +112,14 @@ mod tests {
         assert!(local.status().is_success());
         // Anything else goes to the proxy, and fails there.
         assert!(client.get("https://example.com/").send().await.is_err());
+    }
+
+    #[test]
+    fn receipts_name_the_route_taken() {
+        let tor = NetworkMode::Tor { host: "127.0.0.1".into(), port: 9050 };
+        assert_eq!(super::route(&tor, "api.example.com"), "tor");
+        assert_eq!(super::route(&tor, "127.0.0.1"), "direct");
+        assert_eq!(super::route(&NetworkMode::Direct, "api.example.com"), "direct");
     }
 
     #[test]

@@ -29,7 +29,8 @@ impl NetworkMode {
             (!host.trim().is_empty()).then(|| (host.to_owned(), port))
         };
         match kind {
-            "direct" => Self::Direct,
+            // Nothing may follow: `direct:typo` is a mistake, and fails closed.
+            "direct" if !value.contains(':') => Self::Direct,
             "tor" => endpoint().map_or(Self::Offline, |(host, port)| Self::Tor { host, port }),
             "socks5" => endpoint().map_or(Self::Offline, |(host, port)| Self::Socks5 { host, port }),
             _ => Self::Offline,
@@ -74,9 +75,19 @@ mod tests {
 
     #[test]
     fn anything_malformed_is_offline() {
-        for value in
-            ["", "tor", "tor:", "tor:9050", "tor::9050", "tor:host:0", "socks5:host:65536", "socks5:host:x", "Direct"]
-        {
+        for value in [
+            "",
+            "tor",
+            "tor:",
+            "tor:9050",
+            "tor::9050",
+            "tor:host:0",
+            "socks5:host:65536",
+            "socks5:host:x",
+            "Direct",
+            "direct:",
+            "direct:x",
+        ] {
             assert_eq!(NetworkMode::decode(value), NetworkMode::Offline, "{value:?}");
         }
     }

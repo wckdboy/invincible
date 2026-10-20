@@ -289,8 +289,8 @@ async fn handle(
                 let bytes = serde_json::to_vec(&outgoing).expect("JSON serialises");
                 if cloud {
                     draft.attempts.push(Attempt {
+                        route: crate::egress::route(&state.node.network, &backend.host()),
                         host: backend.host(),
-                        route: crate::egress::route(&state.node.network),
                         sent: bytes.len() as u64,
                         received: received.clone(),
                         ok: true,

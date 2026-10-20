@@ -322,8 +322,8 @@ async fn fetch(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(body
     let received = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let result = crate::fetch::get(&client, url, received.clone()).await;
     draft.attempts.push(Attempt {
+        route: crate::egress::route(&state.node.network, &host),
         host,
-        route: crate::egress::route(&state.node.network),
         sent: url.len() as u64,
         received,
         ok: result.is_ok(),
@@ -541,8 +541,8 @@ async fn infer(
                 }
                 let received = Arc::new(std::sync::atomic::AtomicU64::new(0));
                 draft.attempts.push(Attempt {
+                    route: crate::egress::route(&state.node.network, &cloud.host()),
                     host: cloud.host(),
-                    route: crate::egress::route(&state.node.network),
                     sent: outgoing.len() as u64,
                     received: received.clone(),
                     ok: true,
