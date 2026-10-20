@@ -406,7 +406,9 @@ build_from_source() {
     else
         say "getting the source into $src"
         git clone --quiet "$REPO" "$src"
-        git -C "$src" checkout --quiet "$ref"
+        # Fetched by name: a branch, a tag, or any commit GitHub has (a pull request's too).
+        git -C "$src" fetch --quiet origin "$ref"
+        git -C "$src" checkout --quiet FETCH_HEAD
     fi
     say "building (a few minutes the first time)"
     # The workspace needs Rust 1.91 or newer.

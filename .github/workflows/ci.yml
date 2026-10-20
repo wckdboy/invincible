@@ -88,7 +88,7 @@ jobs:
         env:
           # This commit, not the latest release.
           INVINCIBLE_FROM_SOURCE: "1"
-          INVINCIBLE_REF: ${{ github.sha }}
+          INVINCIBLE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
       - run: |
           export PATH="$HOME/.local/bin:$PATH"
           invincible --version
@@ -115,7 +115,7 @@ jobs:
           curl -sf http://127.0.0.1:7792/healthz
           autobot service status
           # Again: converges; the services keep running (the binaries did not change).
-          INVINCIBLE_FROM_SOURCE=1 INVINCIBLE_REF=${{ github.sha }} sh install.sh --no-setup
+          INVINCIBLE_FROM_SOURCE=1 INVINCIBLE_REF=${{ github.event.pull_request.head.sha || github.sha }} sh install.sh --no-setup
           curl -sf http://127.0.0.1:7777/healthz
           autobot service status
           autobot doctor || true
