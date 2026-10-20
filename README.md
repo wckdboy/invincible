@@ -113,8 +113,10 @@ truth for everything both sides must agree on:
 - **Policy semantics:** routing and cascade decisions, data-policy labels, redaction rules, kill-switch
   behaviour.
 - **Conformance vectors:** input → expected output cases in plain JSON. Invincible's Rust tests and
-  Autobot's Kotlin tests both run them, so a rule change that only lands on one side fails CI on the
-  other.
+  Autobot's Kotlin tests both run them (Autobot copies them in with `scripts/sync-invincible-spec.sh`,
+  which records the commit they came from), so a rule change that only lands on one side fails CI on
+  the other. Autobot runs the pairing, Noise, receipt and redaction vectors; routing is decided on
+  the node alone (the app sends node requests to it), so only Invincible runs those.
 
 A privacy fix starts as a spec change with a new vector, and neither side is done until both pass it.
 
@@ -1219,7 +1221,6 @@ machine; `autobot` grew with the editor protocol, Home Assistant and WhatsApp.)
 ## Open questions
 
 - Region tier: trusted operators only, or a design that is safe with strangers' compute?
-- How Autobot consumes `spec/`: a git submodule, or vectors vendored by a sync script.
 
 ## License
 
