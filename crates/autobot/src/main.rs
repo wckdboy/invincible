@@ -294,8 +294,21 @@ enum Command {
 enum SkillsAction {
     /// List the skills and the proposals waiting.
     List,
-    /// Install skills from a git URL or a directory (one with a SKILL.md, or skill directories).
-    Install { source: String },
+    /// Find skills in the hub (skills.sh, the agentskills.io directory; else GitHub's
+    /// agent-skills topic).
+    Search {
+        query: Vec<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// Install skills: from the hub (a name, owner/repo/skill or owner/repo: shown first, installed
+    /// when you say yes), a git URL, or a directory.
+    Install {
+        source: String,
+        /// Install from the hub without asking (after reading it).
+        #[arg(long, short)]
+        yes: bool,
+    },
     /// Remove a skill.
     Remove { name: String },
     /// Keep a skill the agent proposed (or its improvement): it uses it from now on.
@@ -822,10 +835,19 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Skills { action: Some(SkillsAction::Search { query, limit }) } => {
+            runtime()?.block_on(autobot::manage::hub_search(&query.join(" "), limit))
+        }
+        Command::Skills { action: Some(SkillsAction::Install { source, yes }) }
+            if autobot::manage::from_hub(&source) =>
+        {
+            runtime()?.block_on(autobot::manage::hub_install(&home, &source, yes))
+        }
         Command::Skills { action } => {
             let action = match &action {
                 None | Some(SkillsAction::List) => None,
-                Some(SkillsAction::Install { source }) => Some(("install", source.as_str())),
+                Some(SkillsAction::Search { .. }) => None,
+                Some(SkillsAction::Install { source, .. }) => Some(("install", source.as_str())),
                 Some(SkillsAction::Remove { name }) => Some(("remove", name.as_str())),
                 Some(SkillsAction::Accept { name }) => Some(("accept", name.as_str())),
                 Some(SkillsAction::Reject { name }) => Some(("reject", name.as_str())),

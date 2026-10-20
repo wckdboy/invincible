@@ -22,6 +22,7 @@ pub mod gateway;
 pub mod heartbeat;
 pub mod homeassistant;
 pub mod hooks;
+pub mod hub;
 pub mod identity;
 pub mod images;
 pub mod insights;
