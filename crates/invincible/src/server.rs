@@ -465,10 +465,15 @@ async fn infer(
     let mut rounds = 0;
     let (decision, mut response) = loop {
         rounds += 1;
-        let models = match api {
+        let mut models: Vec<Model> = match api {
             Api::Chat => state.route_models(),
             Api::Messages => state.route_models().into_iter().filter(|m| m.tier == Tier::Node).collect(),
         };
+        // An automatic choice with images only considers models that may see them; a model
+        // asked for by name is kept, and refused below if it is known to be blind.
+        if !images.is_empty() && request.model == "auto" {
+            models.retain(|m| state.vision(&m.id) != Some(false));
+        }
         let input = RouteInput { request: request.clone(), node: state.node.clone(), models };
         let decision = decide(&input);
         // A model known not to take images is not sent them: it would fail, or answer blind.

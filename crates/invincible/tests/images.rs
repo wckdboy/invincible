@@ -218,3 +218,24 @@ async fn requests_with_several_big_images_are_taken_up_to_the_limit() {
     assert_eq!(node.engine.lock().unwrap().len(), 1);
     let _ = std::fs::remove_dir_all(&node.home);
 }
+
+#[tokio::test]
+async fn an_automatic_choice_with_images_goes_to_a_model_that_sees() {
+    let node = node("auto").await;
+    let response = send(&node.url, &with_image("auto", "what is this?", &data_url(&png()))).await;
+    assert_eq!(response.status(), 200);
+    let id = response.headers()[REQUEST_ID_HEADER].to_str().unwrap().to_owned();
+    let _ = response.text().await.unwrap();
+    let envelope: Value = reqwest::Client::new()
+        .get(format!("{}/v1/receipts/{id}", node.url))
+        .bearer_auth("t")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    // "blind" comes first among the node's models; with an image, auto passes it over.
+    assert_eq!(envelope["receipt"]["decision"]["model"], "eyes", "{envelope}");
+    let _ = std::fs::remove_dir_all(&node.home);
+}
