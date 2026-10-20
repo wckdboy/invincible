@@ -69,6 +69,9 @@ pub enum Event<'a> {
     Reasoning(&'a str),
     /// What a write or an edit changes, as a unified diff: before it is approved.
     Diff(&'a str),
+    /// The same change whole, right after its [Event::Diff]: the file, its text before (empty
+    /// when it is new) and after (for an editor that shows changes itself, [crate::acp]).
+    Change { path: &'a std::path::Path, before: &'a str, after: &'a str },
     /// What a tool handed back to the model.
     Output { name: &'a str, text: &'a str },
     /// Tokens one model call used: input (of which cached), output.
@@ -678,6 +681,9 @@ impl Agent {
         }
         if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
             events(Event::Diff(&diff));
+            if let Some((path, before, after)) = self.tools.change(&call) {
+                events(Event::Change { path: &path, before: &before, after: &after });
+            }
         }
         if let Some(action) = self.tools.action(&call) {
             if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {

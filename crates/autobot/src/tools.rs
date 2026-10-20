@@ -37,6 +37,21 @@ pub struct Tools {
     ha: Option<std::sync::Arc<crate::homeassistant::Home>>,
     /// What speech and image backends the node has ([crate::media]).
     media: crate::media::Cache,
+    /// Files read and written through someone else: an editor that holds them open
+    /// ([crate::acp]).
+    files: Option<std::sync::Arc<dyn Files>>,
+}
+
+/// A future a [Files] hands back.
+pub type FilesFuture<'a, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<Result<T, String>>> + Send + 'a>>;
+
+/// Where the file tools read and write when not on the disk directly: an editor's open buffers
+/// ([crate::acp], over the Agent Client Protocol). None from a method: not handled there (the
+/// disk then).
+pub trait Files: Send + Sync {
+    fn read<'a>(&'a self, path: &'a Path) -> FilesFuture<'a, String>;
+    fn write<'a>(&'a self, path: &'a Path, text: &'a str) -> FilesFuture<'a, ()>;
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -223,12 +238,19 @@ impl Tools {
             ssh: None,
             ha: None,
             media: Default::default(),
+            files: None,
         }
     }
 
     /// What the node can make, asked at most once a minute ([crate::media]).
     pub fn media(&self) -> &crate::media::Cache {
         &self.media
+    }
+
+    /// The file tools through [files] (an editor's buffers) where it handles them.
+    pub fn with_files(mut self, files: std::sync::Arc<dyn Files>) -> Self {
+        self.files = Some(files);
+        self
     }
 
     /// With the `home` tool on [ha].
@@ -729,6 +751,11 @@ impl Tools {
     }
 
     pub async fn run(&self, call: &Call) -> String {
+        if let Some(files) = &self.files
+            && let Some(result) = through(files.as_ref(), call).await
+        {
+            return cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit);
+        }
         if let Some(ssh) = &self.ssh
             && let Some(result) = self.remote(ssh, call).await
         {
@@ -839,6 +866,29 @@ impl Tools {
             },
         };
         cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit)
+    }
+
+    /// What a write or an edit changes: the file, its text before (empty when it is new) and
+    /// after, as it is here or on the machine commands run on; None for other calls, and for an
+    /// edit that would not apply.
+    pub fn change(&self, call: &Call) -> Option<(PathBuf, String, String)> {
+        let now = |path: &Path| match &self.ssh {
+            Some(ssh) => ssh.read_now(path),
+            None => std::fs::read_to_string(path).ok(),
+        };
+        match call {
+            Call::WriteFile { path, content } => Some((path.clone(), now(path).unwrap_or_default(), content.clone())),
+            Call::EditFile { path, old, new, all } => {
+                let text = now(path)?;
+                let found = text.matches(old.as_str()).count();
+                if old.is_empty() || found == 0 || (found > 1 && !all) {
+                    return None;
+                }
+                let after = text.replace(old.as_str(), new);
+                Some((path.clone(), text, after))
+            }
+            _ => None,
+        }
     }
 
     /// The file tools on the machine [ssh] reaches; None for the calls that run here anyway.
@@ -989,24 +1039,8 @@ impl Tools {
             }
             _ => {}
         }
-        // What is there now: here, or on the machine commands run on.
-        let now = |path: &Path| match &self.ssh {
-            Some(ssh) => ssh.read_now(path),
-            None => std::fs::read_to_string(path).ok(),
-        };
-        let (path, after, before) = match call {
-            Call::WriteFile { path, content } => (path, content.clone(), now(path).unwrap_or_default()),
-            Call::EditFile { path, old, new, all } => {
-                let text = now(path)?;
-                let found = text.matches(old.as_str()).count();
-                if old.is_empty() || found == 0 || (found > 1 && !all) {
-                    return None;
-                }
-                (path, text.replace(old.as_str(), new), text)
-            }
-            _ => return None,
-        };
-        let label = path.strip_prefix(&self.workdir).unwrap_or(path).display().to_string();
+        let (path, before, after) = self.change(call)?;
+        let label = path.strip_prefix(&self.workdir).unwrap_or(&path).display().to_string();
         Some(crate::diff::unified(&before, &after, &label))
     }
 
@@ -1197,6 +1231,31 @@ fn cancel_schedule(home: &Path, id: &str) -> Result<String, String> {
     schedules.remove(id);
     schedules.save(home)?;
     Ok(format!("cancelled {id}"))
+}
+
+/// The file tools through [files], where it takes them; None for the rest.
+async fn through(files: &dyn Files, call: &Call) -> Option<Result<String, String>> {
+    match call {
+        Call::ReadFile { path, offset, limit } => {
+            Some(files.read(path).await?.map(|text| lines(&text, *offset, *limit)))
+        }
+        Call::WriteFile { path, content } => Some(
+            files.write(path, content).await?.map(|()| format!("wrote {} bytes to {}", content.len(), path.display())),
+        ),
+        Call::EditFile { path, old, new, all } => {
+            let before = match files.read(path).await? {
+                Ok(before) => before,
+                Err(e) => return Some(Err(e)),
+            };
+            let (after, found) = match edited(&before, old, new, *all, path) {
+                Ok(done) => done,
+                Err(e) => return Some(Err(e)),
+            };
+            let n = if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") };
+            Some(files.write(path, &after).await?.map(|()| format!("replaced {n} in {}", path.display())))
+        }
+        _ => None,
+    }
 }
 
 async fn read(path: &Path) -> Result<String, String> {

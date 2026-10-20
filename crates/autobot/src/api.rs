@@ -55,7 +55,8 @@ pub struct ApiState {
 pub struct BotApi {
     runtime: Arc<Runtime>,
     info: Value,
-    open: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Open>>>>,
+    /// Conversations in memory, with when each was last asked for.
+    open: Mutex<HashMap<String, (Shared, std::time::Instant)>>,
     /// Messages for a session's running turn (`…/steer`).
     inboxes: Mutex<HashMap<String, crate::tools::Inbox>>,
 }
@@ -63,6 +64,9 @@ pub struct BotApi {
 /// The questions turns are waiting on, by id: where to send the answer, and the question as
 /// `GET /v1/agent/approvals` lists it.
 type Waiting = Arc<Mutex<HashMap<String, (oneshot::Sender<Answer>, Value)>>>;
+
+/// A conversation open in memory, shared by the requests on it.
+type Shared = Arc<tokio::sync::Mutex<Open>>;
 
 /// A conversation and what the owner said "always" to in it.
 struct Open {
@@ -98,16 +102,27 @@ impl BotApi {
 
     fn open(&self, id: &str) -> Result<Arc<tokio::sync::Mutex<Open>>, String> {
         let mut open = self.open.lock().expect("open sessions");
-        if let Some(session) = open.get(id) {
+        let now = std::time::Instant::now();
+        if let Some((session, used)) = open.get_mut(id) {
+            *used = now;
             return Ok(session.clone());
         }
-        if open.len() >= MAX_OPEN {
-            // Idle: nobody holds it (a running turn holds its own).
-            open.retain(|_, session| Arc::strong_count(session) > 1);
+        // Full: the idle one asked for longest ago goes (nobody holds it: a running turn holds
+        // its own).
+        while open.len() >= MAX_OPEN {
+            let oldest = open
+                .iter()
+                .filter(|(_, (session, _))| Arc::strong_count(session) == 1)
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(id, _)| id.clone());
+            match oldest {
+                Some(id) => open.remove(&id),
+                None => break,
+            };
         }
         let session = Session::open(&self.sessions_dir(), id)?;
         let entry = Arc::new(tokio::sync::Mutex::new(Open { session, grants: HashSet::new() }));
-        open.insert(id.to_owned(), entry.clone());
+        open.insert(id.to_owned(), (entry.clone(), now));
         Ok(entry)
     }
 }
@@ -399,8 +414,18 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/profile", get(profile))
         .route("/v1/agent/usage", get(usage))
         .route("/v1/agent/insights", get(insights))
+        .route("/v1/agent/stats", get(stats))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     health.merge(guarded).with_state(state)
+}
+
+/// What the process holds now, for monitoring and the soak test: tasks on its runtime, and
+/// conversations kept open per bot.
+async fn stats(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    let tasks = tokio::runtime::Handle::current().metrics().num_alive_tasks();
+    let open: usize = state.bots().iter().map(|b| b.open.lock().expect("open sessions").len()).sum();
+    let waiting = state.waiting.lock().expect("waiting").len();
+    Json(json!({ "tasks": tasks, "open_sessions": open, "waiting": waiting }))
 }
 
 async fn require_token(State(state): State<Arc<ApiState>>, request: Request, next: Next) -> Response {
@@ -750,6 +775,7 @@ fn stream_turn(
                     Event::Text(_)
                     | Event::Reasoning(_)
                     | Event::Diff(_)
+                    | Event::Change { .. }
                     | Event::Output { .. }
                     | Event::Usage { .. } => return,
                     Event::Tool(text) => json!({ "type": "tool", "text": text }),

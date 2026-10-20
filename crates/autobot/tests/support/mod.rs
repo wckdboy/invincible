@@ -166,7 +166,11 @@ pub fn free_port() -> u16 {
 /// A built binary of this workspace: `autobot`, or `invincible` beside it (built by `cargo
 /// build`, which `bench/run.sh` does first).
 pub fn binary(name: &str) -> PathBuf {
-    let autobot = PathBuf::from(env!("CARGO_BIN_EXE_autobot"));
+    // BENCH_BIN_DIR: other builds (an older release, one with symbols for profiling).
+    let autobot = match std::env::var_os("BENCH_BIN_DIR") {
+        Some(dir) => PathBuf::from(dir).join("autobot"),
+        None => PathBuf::from(env!("CARGO_BIN_EXE_autobot")),
+    };
     let path = if name == "autobot" { autobot } else { autobot.with_file_name(name) };
     assert!(path.is_file(), "{} is not built: run `cargo build --release` first (bench/run.sh does)", path.display());
     path
