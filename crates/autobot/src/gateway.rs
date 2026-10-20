@@ -18,6 +18,23 @@ pub struct Gateway {
     stream: bool,
 }
 
+/// A chat completion request, as the gateway takes it.
+#[derive(serde::Serialize)]
+struct Body<'a> {
+    model: &'a str,
+    messages: &'a [Value],
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a Value>,
+}
+
+#[derive(serde::Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
 /// Part of an answer as it streams in.
 #[derive(Debug)]
 pub enum Delta<'a> {
@@ -96,9 +113,12 @@ impl Gateway {
         if parsed.scheme() != "http" && parsed.scheme() != "https" {
             return Err(format!("{url}: not an HTTP URL"));
         }
+        // Plain HTTP (the gateway on this machine) needs no trust roots, and loading the
+        // system's takes most of the agent's start (~100 ms on macOS).
         let client = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_secs(10))
+            .tls_built_in_root_certs(parsed.scheme() == "https")
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -173,13 +193,14 @@ impl Gateway {
         confirmed: bool,
         on: &(dyn Fn(Delta) + Send + Sync),
     ) -> Result<Reply, GatewayError> {
-        let mut body = json!({ "model": self.model, "messages": messages, "stream": self.stream });
-        if self.stream {
-            body["stream_options"] = json!({ "include_usage": true });
-        }
-        if tools.as_array().is_some_and(|t| !t.is_empty()) {
-            body["tools"] = tools.clone();
-        }
+        // Serialized from what it borrows: no copy of the conversation and the tools per call.
+        let body = Body {
+            model: &self.model,
+            messages,
+            stream: self.stream,
+            stream_options: self.stream.then_some(StreamOptions { include_usage: true }),
+            tools: tools.as_array().filter(|t| !t.is_empty()).map(|_| tools),
+        };
         let mut request =
             self.client.post(format!("{}/chat/completions", self.url)).bearer_auth(&self.token).json(&body);
         request = request.header(invincible::server::CLIENT_HEADER, "autobot-agent");
@@ -374,14 +395,9 @@ async fn read_stream(
     let mut assembled = Assembled::default();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("the gateway's answer stopped: {e}"))?;
-        pending.extend_from_slice(&chunk);
-        while let Some(end) = pending.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = pending.drain(..=end).collect();
-            let line = String::from_utf8_lossy(&line);
-            if assembled.line(line.trim(), on)? {
-                let usage = assembled.usage.take();
-                return Ok((assembled.message(), usage));
-            }
+        if assembled.feed(&mut pending, &chunk, on)? {
+            let usage = assembled.usage.take();
+            return Ok((assembled.message(), usage));
         }
     }
     let rest = String::from_utf8_lossy(&pending).into_owned();
@@ -389,6 +405,9 @@ async fn read_stream(
     let usage = assembled.usage.take();
     Ok((assembled.message(), usage))
 }
+
+/// How far past the tool calls so far a streamed call's index may point.
+const MAX_CALL_GAP: usize = 64;
 
 #[derive(Default)]
 struct Assembled {
@@ -399,6 +418,28 @@ struct Assembled {
 }
 
 impl Assembled {
+    /// Takes in a [chunk] of the stream, [pending] holding a line not yet whole; true at its end.
+    fn feed(
+        &mut self,
+        pending: &mut Vec<u8>,
+        chunk: &[u8],
+        on: &(dyn Fn(Delta) + Send + Sync),
+    ) -> Result<bool, String> {
+        pending.extend_from_slice(chunk);
+        // Every whole line in what came, then what is left moved to the front once.
+        let mut start = 0;
+        while let Some(end) = pending[start..].iter().position(|b| *b == b'\n') {
+            let line = String::from_utf8_lossy(&pending[start..start + end]);
+            start += end + 1;
+            if self.line(line.trim(), on)? {
+                pending.clear();
+                return Ok(true);
+            }
+        }
+        pending.drain(..start);
+        Ok(false)
+    }
+
     /// Takes in one line of the stream; true at its end.
     fn line(&mut self, line: &str, on: &(dyn Fn(Delta) + Send + Sync)) -> Result<bool, String> {
         let Some(data) = line.strip_prefix("data:").map(str::trim) else { return Ok(false) };
@@ -439,6 +480,10 @@ impl Assembled {
                     }
                 },
             };
+            // A server's index is not trusted with memory: far past the calls so far, it is noise.
+            if index > self.calls.len() + MAX_CALL_GAP {
+                continue;
+            }
             while self.calls.len() <= index {
                 self.calls.push(Default::default());
             }
@@ -533,5 +578,102 @@ mod tests {
         assert_eq!(calls[2]["id"], "c");
         assert_eq!(calls[2]["function"]["name"], "search");
         assert_eq!(calls[2]["function"]["arguments"], r#"{"pattern":"q"}"#);
+    }
+
+    /// A stream of random text, reasoning and tool-call pieces, as a server sends it.
+    fn stream(g: &mut invincible::testgen::Gen) -> Vec<u8> {
+        let mut out = String::new();
+        for _ in 0..g.below(12) {
+            let delta = match g.below(4) {
+                0 => serde_json::json!({ "content": g.text(10) }),
+                1 => serde_json::json!({ "reasoning_content": g.text(10) }),
+                2 => {
+                    let name = *g.pick(&["read_file", "list_dir", ""]);
+                    serde_json::json!({ "tool_calls": [{
+                        "index": g.below(3), "id": format!("c{}", g.below(3)),
+                        "function": { "name": name, "arguments": g.text(8) },
+                    }] })
+                }
+                _ => serde_json::json!({}),
+            };
+            let line = serde_json::json!({ "choices": [{ "index": 0, "delta": delta }] });
+            out.push_str(&format!("data: {line}\n"));
+            if g.one_in(2) {
+                out.push('\n');
+            }
+            if g.one_in(8) {
+                out.push_str(": keep-alive\n\n");
+            }
+            if g.one_in(10) {
+                out.push_str("\r\n");
+            }
+        }
+        if g.one_in(2) {
+            out.push_str("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}\n\n");
+        }
+        out.push_str("data: [DONE]\n\n");
+        out.into_bytes()
+    }
+
+    /// The message [parts] of a stream make, and the text handed on as it came.
+    fn assemble(parts: &[&[u8]]) -> (Option<serde_json::Value>, String) {
+        let seen = std::sync::Mutex::new(String::new());
+        let on = |d: Delta| {
+            if let Delta::Text(t) = d {
+                seen.lock().unwrap().push_str(t);
+            }
+        };
+        let mut a = Assembled::default();
+        let mut pending = Vec::new();
+        for part in parts {
+            match a.feed(&mut pending, part, &on) {
+                Ok(true) => return (Some(a.message()), seen.into_inner().unwrap()),
+                Ok(false) => {}
+                Err(e) => panic!("{e}"),
+            }
+        }
+        (None, seen.into_inner().unwrap())
+    }
+
+    #[test]
+    fn a_stream_assembles_the_same_however_it_is_cut() {
+        invincible::testgen::cases("sse", |g| {
+            let bytes = stream(g);
+            let (whole, text) = assemble(&[&bytes]);
+            let whole = whole.expect("the stream ends at [DONE]");
+            assert_eq!(whole["content"].as_str().unwrap(), text, "streamed text is the answer's");
+            let (cut, cut_text) = assemble(&g.split(&bytes));
+            assert_eq!(cut, Some(whole));
+            assert_eq!(cut_text, text);
+        });
+    }
+
+    #[test]
+    fn garbage_in_a_stream_is_skipped_not_fatal() {
+        let pieces = [
+            "data: ",
+            "{",
+            "}",
+            "\n",
+            "[DONE]",
+            "\"choices\"",
+            "\"delta\":",
+            "null",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":99999999999}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":2000}]}}]}\n",
+        ];
+        invincible::testgen::cases("sse garbage", |g| {
+            let mut bytes = g.assemble(&pieces, 20).into_bytes();
+            bytes.extend(g.bytes(40));
+            let on = |_: Delta| {};
+            let mut a = Assembled::default();
+            let mut pending = Vec::new();
+            for part in g.split(&bytes) {
+                if !matches!(a.feed(&mut pending, part, &on), Ok(false)) {
+                    break;
+                }
+            }
+            let _ = a.message();
+        });
     }
 }

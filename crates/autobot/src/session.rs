@@ -1,7 +1,6 @@
 //! Conversations, one JSONL file each under `$AUTOBOT_HOME/sessions`: one message per line, in
 //! the OpenAI chat shape, appended as they happen so a crash loses at most the line in flight.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -43,7 +42,20 @@ pub fn is_request(message: &Value) -> bool {
 /// ([crate::images::BUDGET_CHARS]) for each it carries.
 pub fn cost(message: &Value) -> usize {
     let images = message.get(crate::images::KEY).and_then(Value::as_array).map_or(0, Vec::len);
-    message.to_string().len() + images * crate::images::BUDGET_CHARS
+    // Its length as JSON, counted as it is written out rather than kept.
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    let _ = serde_json::to_writer(&mut count, message);
+    count.0 + images * crate::images::BUDGET_CHARS
 }
 
 impl Session {
@@ -66,15 +78,9 @@ impl Session {
     }
 
     pub fn push(&mut self, message: Value) -> Result<(), String> {
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?;
-        writeln!(file, "{message}").map_err(|e| format!("{}: {e}", self.path.display()))?;
+        // Serialized whole and written at once (formatting a value straight into the file is a
+        // system call per piece).
+        invincible::fsutil::append_private(&self.path, &message.to_string())?;
         self.messages.push(message);
         Ok(())
     }
@@ -188,13 +194,7 @@ impl Session {
             Some(Err(_)) => entry["before_hex"] = hex(before.unwrap_or_default()).into(),
             None => {}
         }
-        let file = dir.join(format!("{id}.undo"));
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut out = options.open(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        writeln!(out, "{entry}").map_err(|e| format!("{}: {e}", file.display()))
+        invincible::fsutil::append_private(&dir.join(format!("{id}.undo")), &entry.to_string())
     }
 
     /// Keeps only the first [n] messages, on disk too.
@@ -224,9 +224,37 @@ impl Session {
         Ok(())
     }
 
-    /// Where the recent part starts: at most [WINDOW] messages and [CHAR_BUDGET] characters,
-    /// beginning at a user message so no tool result is cut off from the call it answers.
+    /// Where the recent part starts. What left the budget is summarized in batches
+    /// ([Session::compaction]): until enough has left to be worth a model call, the window keeps
+    /// it (going over the budget by at most an eighth), so nothing is out of both.
     fn window_start(&self) -> usize {
+        let start = self.budget_start();
+        if self.due(start) { start } else { self.after_summary().unwrap_or(start).min(start) }
+    }
+
+    /// The first user message the latest summary does not cover.
+    fn after_summary(&self) -> Option<usize> {
+        (self.covered().min(self.messages.len())..self.messages.len()).find(|&i| self.messages[i]["role"] == "user")
+    }
+
+    /// Whether what left the window since the last summary, [start] being where the budget
+    /// starts it, is enough to summarize now: an eighth of the budget, or a quarter of [WINDOW]
+    /// messages.
+    fn due(&self, start: usize) -> bool {
+        let covered = self.covered().min(start);
+        let gone = self.messages[covered..start].iter().filter(|m| !is_summary(m));
+        let (mut count, mut chars) = (0, 0);
+        for m in gone {
+            count += 1;
+            chars += cost(m);
+        }
+        count > 0 && (chars >= self.budget / 8 || count >= WINDOW / 4)
+    }
+
+    /// Where the recent part starts by the budget alone: at most [WINDOW] messages and
+    /// [CHAR_BUDGET] characters, beginning at a user message so no tool result is cut off from
+    /// the call it answers.
+    fn budget_start(&self) -> usize {
         let mut used = 0;
         let mut from = self.messages.len();
         for (i, m) in self.messages.iter().enumerate().rev() {
@@ -259,9 +287,13 @@ impl Session {
     }
 
     /// Messages that left the window since the last summary: the previous summary (if any) and
-    /// those messages, to be summarized together; None when there are none.
+    /// those messages, to be summarized together; None when there are none, or too few yet to be
+    /// worth a model call (the window still holds them).
     pub fn compaction(&self) -> Option<(Option<String>, Vec<Value>)> {
-        let start = self.window_start();
+        let start = self.budget_start();
+        if !self.due(start) {
+            return None;
+        }
         let last = self.messages.iter().rev().find(|m| is_summary(m));
         let covered = last.and_then(|m| m["upto"].as_u64()).unwrap_or(0) as usize;
         let pending: Vec<Value> =
@@ -271,7 +303,7 @@ impl Session {
 
     /// Keeps [text] as the summary of everything before the window.
     pub fn add_summary(&mut self, text: &str) -> Result<(), String> {
-        let upto = self.window_start();
+        let upto = self.budget_start();
         self.add_summary_upto(text, upto)
     }
 
@@ -400,7 +432,8 @@ mod tests {
         s.messages.push(json!({"role": "tool", "content": "last"}));
         let window = s.window();
         assert_eq!(window[0]["role"], "user");
-        assert!(window.len() <= WINDOW);
+        // A few over, until enough left for a summary.
+        assert!(window.len() <= WINDOW + WINDOW / 4);
     }
 
     #[test]
@@ -501,6 +534,39 @@ mod tests {
         let again = Session::open(&dir, "c").unwrap();
         assert_eq!(again.summary(), Some("The owner asked for tasks 0 to 4."));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_little_over_the_budget_waits_in_the_window_for_a_summary() {
+        let dir = std::env::temp_dir().join(format!("autobot-batch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut s = Session::open(&dir, "b").unwrap();
+        s.budget = 16 * 1024;
+        // A summary of everything so far, then turns of about 1 KiB each.
+        for i in 0..20 {
+            s.push(json!({"role": "user", "content": format!("turn {i}")})).unwrap();
+            s.push(json!({"role": "assistant", "content": "x".repeat(1000)})).unwrap();
+        }
+        assert!(s.compaction().is_some());
+        s.add_summary("the first turns").unwrap();
+        assert!(s.compaction().is_none());
+        // One more turn pushes one out of the budget: too little for a model call, so the window
+        // keeps it rather than lose it.
+        s.push(json!({"role": "user", "content": "one more"})).unwrap();
+        s.push(json!({"role": "assistant", "content": "y".repeat(1000)})).unwrap();
+        assert!(s.compaction().is_none());
+        let first = s.window()[0]["content"].as_str().unwrap().to_owned();
+        let covered = s.covered();
+        assert_eq!(s.messages[covered]["content"], first.as_str(), "the window starts where the summary ends");
+        // A few more, and what left is summarized in one call.
+        for i in 0..3 {
+            s.push(json!({"role": "user", "content": format!("later {i}")})).unwrap();
+            s.push(json!({"role": "assistant", "content": "z".repeat(1000)})).unwrap();
+        }
+        let (previous, pending) = s.compaction().unwrap();
+        assert_eq!(previous.as_deref(), Some("the first turns"));
+        assert!(pending.len() >= 4 && pending[0]["content"] == first.as_str(), "{pending:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

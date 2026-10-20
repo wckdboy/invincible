@@ -690,7 +690,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             let token = token::load_or_create(&home.join("token"))?;
             let base = format!("http://{}/v1", config.listen);
-            let client = reqwest::Client::builder().no_proxy().build().map_err(|e| e.to_string())?;
+            let client = invincible::egress::local().build().map_err(|e| e.to_string())?;
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
             let results = runtime.block_on(async {
                 let mut results = Vec::new();
@@ -1130,7 +1130,9 @@ fn admin(config: Option<PathBuf>, method: reqwest::Method, path: &str) -> Result
     let token = token::load_or_create(&home.join("token"))?;
     let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
     runtime.block_on(async {
-        let response = reqwest::Client::new()
+        let response = invincible::egress::local()
+            .build()
+            .map_err(|e| e.to_string())?
             .request(method, format!("http://{}{path}", config.listen))
             .bearer_auth(token)
             .send()

@@ -866,10 +866,17 @@ impl Vault {
     /// Replaces every occurrence of a known value (longest first, no overlaps).
     fn replace(&mut self, text: &str) -> String {
         let guards = Guards::new(text);
+        let mut lower: Option<String> = None;
         let mut hits: Vec<(usize, usize, usize)> = Vec::new();
         for (i, (_, e)) in self.entries.iter().enumerate() {
             for form in &e.forms {
-                let found: Vec<(usize, usize)> = if e.kind == Kind::Email {
+                let found: Vec<(usize, usize)> = if e.kind == Kind::Email && form.is_ascii() {
+                    // Any case: ASCII lowercasing keeps every byte where it was, so the offsets
+                    // hold in [text] (no pattern compiled for each address and each text).
+                    let lower = lower.get_or_insert_with(|| text.to_ascii_lowercase());
+                    let form = form.to_ascii_lowercase();
+                    lower.match_indices(form.as_str()).map(|(at, f)| (at, at + f.len())).collect()
+                } else if e.kind == Kind::Email {
                     let pattern =
                         RegexBuilder::new(&regex::escape(form)).case_insensitive(true).build().expect("escaped");
                     pattern.find_iter(text).map(|m| (m.start(), m.end())).collect()
@@ -895,10 +902,14 @@ impl Vault {
         if !by_digits.is_empty() {
             for m in DIGIT_RUN.find_iter(text) {
                 let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
-                if let Some(&i) = by_digits.get(digits.as_str())
-                    && bounded(text, m.start(), m.end())
-                {
-                    hits.push((m.start(), m.end(), i));
+                if let Some(&i) = by_digits.get(digits.as_str()) {
+                    // A `+` the value was found without stays in the text (it would not come
+                    // back: the value is restored as it was found).
+                    let plus = m.as_str().starts_with('+') && !self.entries[i].1.value.starts_with('+');
+                    let start = m.start() + usize::from(plus);
+                    if bounded(text, start, m.end()) {
+                        hits.push((start, m.end(), i));
+                    }
                 }
             }
         }
@@ -1219,5 +1230,105 @@ mod tests {
                 .as_bytes(),
         );
         assert!(String::from_utf8_lossy(&out).contains("[EM"));
+    }
+
+    fn content_of(sse: &[u8]) -> String {
+        String::from_utf8_lossy(sse)
+            .lines()
+            .filter_map(|l| l.strip_prefix("data: "))
+            .filter(|d| *d != "[DONE]")
+            .filter_map(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+            .map(|v| v["choices"][0]["delta"]["content"].as_str().unwrap_or("").to_owned())
+            .collect()
+    }
+
+    const PIECES: &[&str] = &[
+        "bob@posteo.de",
+        "Bob@Posteo.DE",
+        "+44 20 7946 0958",
+        "DE89 3704 0044 0532 0130 00",
+        "[EMAIL_1]",
+        "[PHONE_1]",
+        "[PERSON_1]",
+        "[",
+        "]",
+        "[EM",
+        "AIL_",
+        "1]",
+        " ",
+        "\n",
+        "Zork Blax",
+        "%5BEMAIL_1%5D",
+        "\"",
+        "\\",
+        "é",
+        "🙂",
+    ];
+
+    #[test]
+    fn redaction_is_undone_exactly_for_any_text() {
+        crate::testgen::cases("redact/restore", |g| {
+            let text = g.assemble(PIECES, 24);
+            let mut vault = Vault::default();
+            let redacted = vault.redact(&text);
+            let restored = vault.restore(&redacted);
+            // An address is one whatever its case, and comes back as it was first written.
+            if text.contains("Bob@Posteo.DE") {
+                assert_eq!(restored.to_ascii_lowercase(), text.to_ascii_lowercase(), "redacted as {redacted:?}");
+            } else {
+                assert_eq!(restored, text, "redacted as {redacted:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_stream_restores_the_same_however_it_is_cut() {
+        crate::testgen::cases("stream restore", |g| {
+            let make = || {
+                let mut vault = Vault::default();
+                for known in ["bob@posteo.de", "call +44 20 7946 0958"] {
+                    vault.redact(known);
+                }
+                vault
+            };
+            let vault = make();
+            let deltas: Vec<String> = (0..g.below(8)).map(|_| g.assemble(PIECES, 5)).collect();
+            let mut sse = Vec::new();
+            for d in &deltas {
+                sse.extend(
+                    format!("data: {}\n\n", json!({ "choices": [{ "index": 0, "delta": { "content": d } }] })).bytes(),
+                );
+            }
+            sse.extend(b"data: [DONE]\n\n");
+            let whole = {
+                let mut r = StreamRestorer::new(make());
+                let mut out = r.push(&sse);
+                out.extend(r.finish());
+                content_of(&out)
+            };
+            assert_eq!(whole, vault.restore(&deltas.concat()));
+            let mut r = StreamRestorer::new(make());
+            let mut out = Vec::new();
+            for part in g.split(&sse) {
+                out.extend(r.push(part));
+            }
+            out.extend(r.finish());
+            assert_eq!(content_of(&out), whole);
+        });
+    }
+
+    #[test]
+    fn any_request_body_is_redacted_without_panicking() {
+        crate::testgen::cases("redact_request", |g| {
+            let content = g.assemble(PIECES, 30);
+            let mut body = if g.one_in(2) {
+                json!({ "messages": [{ "role": "user", "content": content }] })
+            } else {
+                json!({ "messages": [{ "role": "user", "content": [{ "type": "text", "text": content }, { "type": "image_url" }] }], "system": g.text(20) })
+            };
+            let vault = redact_request(&mut body);
+
+            restore_response(&vault, &mut json!({ "choices": [{ "message": { "content": body.to_string() } }] }));
+        });
     }
 }

@@ -515,3 +515,25 @@ async fn retry_personalities_profile_usage_and_insights() {
     assert_eq!(insights["turns"], 2);
     assert_eq!(insights["local_share"]["calls"], 1.0);
 }
+
+#[tokio::test]
+async fn idle_conversations_are_let_go_past_a_limit_and_stats_say_so() {
+    let answers = (0..80).map(|i| json!({ "role": "assistant", "content": format!("answer {i}") })).collect();
+    let (_, agent, dir) = stack("open", answers, Duration::ZERO).await;
+    let client = reqwest::Client::new();
+    for i in 0..70 {
+        let url = format!("{agent}/v1/agent/sessions/s{i}/turns");
+        let events = turn(&client, &url, "hi", async |_: &Value| {}).await;
+        assert_eq!(events.last().unwrap()["type"], "answer");
+    }
+    let get = async |path: &str| -> Value {
+        client.get(format!("{agent}{path}")).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap()
+    };
+    let stats = get("/v1/agent/stats").await;
+    assert_eq!(stats["open_sessions"], 64, "{stats}");
+    assert!(stats["tasks"].as_u64().is_some());
+    // One let go is read again from disk, as it was.
+    let history = get("/v1/agent/sessions/s0").await;
+    assert_eq!(history["messages"][1]["content"], "answer 0", "{history}");
+    let _ = std::fs::remove_dir_all(dir);
+}

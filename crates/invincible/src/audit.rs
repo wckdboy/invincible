@@ -4,7 +4,7 @@
 //! --verify` checks. It never holds prompt or answer text.
 
 use std::collections::BTreeMap;
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -86,15 +86,7 @@ impl AuditLog {
             entry["client"] = json!(client);
         }
         let line = entry.to_string();
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?;
-        writeln!(file, "{line}").map_err(|e| format!("{}: {e}", self.path.display()))?;
+        crate::fsutil::append_private(&self.path, &line)?;
         *last = Some(hash(&line));
         Ok(())
     }

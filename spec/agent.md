@@ -60,6 +60,7 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/usage?session=&bot=` | | `{"today": totals, "session"?: totals, "bot"}` from the bot's turn log (the default bot's without `bot`): `totals` is `{"turns", "calls", "cloud_calls", "input", "output", "cached", "cloud_tokens", "seconds", "cost", "unpriced"}` (`cost` in dollars for the models with a `[prices]` entry; `unpriced`: cloud models without one) |
 | `POST /v1/agent/openai/v1/chat/completions?bot=` | an OpenAI chat request | An OpenAI `chat.completion` (or, with `"stream": true`, its chunks and `[DONE]`): the last user message is a turn of the bot `model` names (else `?bot=`, else the default one) in its conversation `homeassistant-<user>`. For Home Assistant's conversation agent; nobody can approve, so its turns follow the unattended rules |
 | `GET /v1/agent/openai/v1/models` | | `{"object": "list", "data": [{"id"}]}`: the running bots |
+| `GET /v1/agent/stats` | | `{"tasks", "open_sessions", "waiting"}`: what the process holds now (tasks on its runtime, conversations kept in memory, every bot's; questions waiting), for monitoring. At most 64 idle conversations per bot stay in memory; past that the one used longest ago is let go (it is on disk), and with it what the owner said "always" to in it |
 | `GET /v1/agent/insights?days=&bot=` | | What the bot did over the last `days` (default 7), with `"bot"`: `{"days", "turns", "seconds", "calls", "tokens", "cost", "unpriced", "local_share": {"calls", "tokens"}, "tools": [{"name", "count"}], "projects": [{"name", "count"}], "models": [{"model", "calls", "tokens", "cloud"}], "failures": {"errors", "stopped", "tool_errors", "refused"}}` |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
@@ -210,3 +211,20 @@ A turn that used `speak` or `generate_image` keeps the file in `$AUTOBOT_HOME/at
 the tool's result (in the `tool` events and the conversation) says where. Chat platforms get it
 after the answer: Telegram as a voice message or a photo, Discord as an attachment, the others as
 a line with the path.
+
+## Editors: the Agent Client Protocol
+
+`autobot acp` speaks [ACP](https://agentclientprotocol.com) version 1 on standard input and
+output (JSON-RPC 2.0, one message per line; its log goes to standard error), so an editor can
+use the agent directly, without the API above. How Autobot fills the protocol in:
+
+| ACP | Autobot |
+|---|---|
+| `initialize` | `loadSession: true`; prompts take text, images and embedded files; no MCP transports; no authentication |
+| `session/new` `{cwd}` | A conversation `acp-<12 hex>` coding in `cwd` (absolute), as `autobot code` there; its `modes` are the approval modes `ask`, `edits`, `allowlist`, `trust`, the configured one current |
+| `session/load` | The conversation told again as `user_message_chunk`, `agent_message_chunk`, `tool_call` and `tool_call_update`, then `{}` with its modes |
+| `session/prompt` | One turn: `agent_message_chunk` as the answer streams (the whole answer at the end when it did not), `agent_thought_chunk` for reasoning, and per tool a `tool_call` (an edit with `content: [{type: "diff", path, oldText, newText}]` before it is asked about) and its `tool_call_update` (`in_progress`, then `completed` or `failed` with the output); `stopReason` `end_turn`, `max_turn_requests` (the step budget) or `cancelled` |
+| `session/request_permission` | What the mode asks about, with `allow-once`, `allow-always` (this session) and `reject-once`; cancelled or unanswered is no |
+| `fs/read_text_file`, `fs/write_text_file` | `read_file`, `write_file` and `edit_file` go through the editor when it offers them |
+| `session/set_mode` | The approval mode, from the next turn |
+| `session/cancel` | The turn stops where it is; a tool call that was running may have partly run |

@@ -409,13 +409,26 @@ impl Editor {
     pub fn take_as(&mut self, keep: bool) -> (String, String) {
         self.search = None;
         let shown = std::mem::take(&mut self.text);
-        let mut sent = shown.clone();
         // Pastes are kept for the session, so a message brought back with ↑ sends them again.
-        for (label, text) in &self.pastes {
-            if let Some(i) = sent.find(label.as_str()) {
-                sent.replace_range(i..i + label.len(), text);
+        // One pass over what is shown: a paste that holds a label's text is not expanded again.
+        let mut sent = String::with_capacity(shown.len());
+        let mut rest = shown.as_str();
+        while let Some(i) = rest.find('[') {
+            sent.push_str(&rest[..i]);
+            rest = &rest[i..];
+            match self.pastes.iter().filter(|(label, _)| rest.starts_with(label.as_str())).max_by_key(|(l, _)| l.len())
+            {
+                Some((label, text)) => {
+                    sent.push_str(text);
+                    rest = &rest[label.len()..];
+                }
+                None => {
+                    sent.push('[');
+                    rest = &rest[1..];
+                }
             }
         }
+        sent.push_str(rest);
         self.cursor = 0;
         self.browsing = None;
         if keep && !shown.trim().is_empty() && self.history.last() != Some(&shown) {
@@ -701,6 +714,39 @@ mod tests {
         e.search_accept();
         assert!(e.searching().is_none());
         assert_eq!(e.text(), "cargo test -p parser", "enter keeps it to change or send");
+    }
+
+    #[test]
+    fn whatever_is_typed_and_pasted_is_sent_as_it_was() {
+        invincible::testgen::cases("paste", |g| {
+            let mut e = Editor::default();
+            let mut expected = String::new();
+            for _ in 0..g.below(6) {
+                if g.one_in(2) {
+                    // Typed: anything but a bracket (a label typed by hand is a label).
+                    let typed: String = g.text(20).chars().filter(|c| *c != '[').collect();
+                    e.insert(&typed);
+                    expected.push_str(&typed);
+                } else {
+                    // Pasted: short or long, any line ends, sometimes holding a label's text.
+                    let mut text =
+                        g.assemble(&["\r\n", "\n", "\r", "[pasted 6 lines]", "[pasted 6 lines #2]", "line"], 12);
+                    if g.one_in(3) {
+                        text.push_str(&"x".repeat(g.below(1200)));
+                    }
+                    // Short ones go in as they are: one holding a label's text is the owner's
+                    // ambiguity, as if typed (the long ones become labels themselves).
+                    if text.lines().count() <= 4 && text.chars().count() <= 800 {
+                        text = text.replace('[', "(");
+                    }
+                    e.paste(&text);
+                    expected.push_str(&text.replace("\r\n", "\n").replace('\r', "\n"));
+                }
+            }
+            let (shown, sent) = e.take();
+            assert_eq!(sent, expected, "shown as {shown:?}");
+            assert!(shown.chars().count() <= sent.chars().count() + 64 * 6, "labels are short");
+        });
     }
 
     #[test]

@@ -65,8 +65,9 @@ const HTML: Style = Style {
     strike: ("<s>", "</s>"),
     code: ("<code>", "</code>"),
     link: |text, url| {
-        let url = url.replace('"', "%22");
-        format!("<a href=\"{url}\">{}</a>", if text.is_empty() { html_escape(&url) } else { text.to_owned() })
+        // Escaped in the attribute too: Telegram refuses a message with a raw `<` or `&` there.
+        let url = html_escape(&url.replace('"', "%22"));
+        format!("<a href=\"{url}\">{}</a>", if text.is_empty() { url.clone() } else { text.to_owned() })
     },
     escape: html_escape,
     heading: |text| format!("<b>{text}</b>"),
@@ -258,18 +259,34 @@ pub fn split(text: &str, limit: usize) -> Vec<String> {
     let room = limit - 8;
     while rest.chars().count() > limit {
         let cut = rest.char_indices().nth(room).map_or(rest.len(), |(i, _)| i);
-        let at = rest[..cut].rfind('\n').filter(|&i| i > cut / 2).unwrap_or(cut);
+        let mut at = rest[..cut].rfind('\n').filter(|&i| i > cut / 2).unwrap_or(cut);
+        // Cut inside a line: not just before backticks, which would start the next part with
+        // what reads as a fence.
+        if at == cut && rest[at..].starts_with('`') {
+            // Back before the backticks, the space before them, and one character more.
+            let before = rest[..at].trim_end_matches('`').trim_end();
+            let back = before.len() - before.chars().next_back().map_or(0, char::len_utf8);
+            if back > cut / 2 {
+                at = back;
+            }
+        }
         let mut part = rest[..at].to_owned();
         let mut next = rest[at..].trim_start_matches('\n').to_owned();
         let open = part.lines().filter(|l| l.trim_start().starts_with("```")).count() % 2 == 1;
         if open {
-            let lang = part
+            let lang: String = part
                 .lines()
                 .rev()
                 .find(|l| l.trim_start().starts_with("```"))
-                .map(|l| l.trim_start().trim_start_matches('`').trim().to_owned())
+                .map(|l| {
+                    let info = l.trim_start().trim_start_matches('`').trim();
+                    info.chars().take_while(|c| c.is_alphanumeric() || "+-_.#".contains(*c)).take(20).collect()
+                })
                 .unwrap_or_default();
             part.push_str("\n```");
+            // The language only when the part took more than it adds back, so every round
+            // shortens what is left (a long info string otherwise grew it forever).
+            let lang = if at > lang.len() + 4 { lang } else { String::new() };
             next = format!("```{lang}\n{next}");
         }
         parts.push(part);
@@ -347,5 +364,116 @@ mod tests {
             assert_eq!(part.matches("```").count() % 2, 0, "balanced: {part}");
         }
         assert!(parts[1].starts_with("```sh\n"));
+    }
+
+    /// What answers are written with, to build hostile ones from.
+    const MARKDOWN: &[&str] = &[
+        "**",
+        "*",
+        "_",
+        "__",
+        "~~",
+        "`",
+        "```",
+        "```rust\n",
+        "\n```\n",
+        "# ",
+        "## ",
+        "- ",
+        "* ",
+        "1. ",
+        "> ",
+        "[",
+        "]",
+        "(",
+        ")",
+        "](",
+        "https://x.org/a?b=1&c=<2>",
+        "<",
+        ">",
+        "&",
+        "\"",
+        "\n",
+        "\n\n",
+        " ",
+        "é",
+        "🙂",
+        "|",
+        "\\",
+        "<b>",
+        "</b>",
+        "&amp;",
+    ];
+
+    /// [html] is what Telegram takes: only its tags, every other `<`, `>` and `&` escaped, and
+    /// every tag closed in order.
+    fn well_formed(html: &str) -> Result<(), String> {
+        let mut open: Vec<String> = Vec::new();
+        let mut rest = html;
+        while let Some(i) = rest.find(['<', '>', '&']) {
+            let at = &rest[i..];
+            if let Some(entity) = ["&amp;", "&lt;", "&gt;"].iter().find(|e| at.starts_with(**e)) {
+                rest = &at[entity.len()..];
+                continue;
+            }
+            if !at.starts_with('<') {
+                return Err(format!("a raw {:?} at {:?}", &at[..1], at.chars().take(30).collect::<String>()));
+            }
+            let end = at.find('>').ok_or_else(|| format!("an unclosed tag at {at:?}"))?;
+            let tag = &at[1..end];
+            if tag.contains('<') {
+                return Err(format!("a `<` inside a tag: {tag:?}"));
+            }
+            if let Some(name) = tag.strip_prefix('/') {
+                match open.pop() {
+                    Some(o) if o == name => {}
+                    other => return Err(format!("</{name}> closes {other:?}")),
+                }
+            } else {
+                let name = tag.split(' ').next().unwrap_or_default();
+                if !["b", "i", "s", "code", "pre", "a", "blockquote"].contains(&name) {
+                    return Err(format!("not a Telegram tag: <{tag}>"));
+                }
+                open.push(name.to_owned());
+            }
+            rest = &at[end + 1..];
+        }
+        if open.is_empty() { Ok(()) } else { Err(format!("left open: {open:?}")) }
+    }
+
+    #[test]
+    fn any_answer_converts_and_html_stays_well_formed() {
+        invincible::testgen::cases("markdown", |g| {
+            let text = g.assemble(MARKDOWN, 40);
+            let html = to_html(&text);
+            if let Err(e) = well_formed(&html) {
+                panic!("{e}\nfrom {text:?}\nto {html:?}");
+            }
+            let _ = (to_slack(&text), to_plain(&text), to_whatsapp(&text));
+        });
+    }
+
+    #[test]
+    fn any_answer_splits_under_the_limit_with_its_code_blocks_whole() {
+        invincible::testgen::cases("split", |g| {
+            let text = g.assemble(MARKDOWN, 200);
+            let limit = 16 + g.below(200);
+            let parts = split(&text, limit);
+            let fenced = |s: &str| s.lines().filter(|l| l.trim_start().starts_with("```")).count();
+            for part in &parts {
+                assert!(part.chars().count() <= limit, "{} > {limit}: {part:?}", part.chars().count());
+                // (Lines cut in the middle can make or break a fence; those are not checked.)
+                let short = text.lines().all(|l| l.chars().count() < (limit - 8) / 2);
+                if short && fenced(&text) % 2 == 0 {
+                    assert_eq!(fenced(part) % 2, 0, "a code block left open: {part:?} in {parts:?} from {text:?}");
+                }
+            }
+            // Nothing lost: every character but line breaks and the fences added comes through.
+            let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace() && *c != '`').collect::<String>();
+            let joined: String = parts.iter().map(|p| squeeze(p)).collect::<Vec<_>>().concat();
+            let squeezed = squeeze(&text);
+            let langs = joined.len() - joined.len().min(squeezed.len());
+            assert!(joined.len() >= squeezed.len() && langs <= parts.len() * 40, "{text:?} → {parts:?}");
+        });
     }
 }

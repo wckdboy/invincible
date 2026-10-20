@@ -15,7 +15,8 @@ clap.workspace = true
 libc = "0.2"
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+# Standard input and output, for `autobot acp`.
+tokio = { workspace = true, features = ["io-std"] }
 reqwest.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
@@ -43,6 +44,10 @@ base64.workspace = true
 # Images shown to the agent: decoded, downscaled and re-encoded before they are sent (only the
 # four formats terminals hand over; no rayon, no other codecs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+
+[dev-dependencies]
+# The benchmarks drive the terminal UI through a pseudo-terminal (the same crate, one more feature).
+rustix = { version = "1", features = ["pty", "termios"] }
 
 [lints]
 workspace = true

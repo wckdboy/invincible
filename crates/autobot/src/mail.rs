@@ -3,7 +3,19 @@
 //! Plain RFC 5322 and MIME: multipart, quoted-printable and base64, encoded words, UTF-8 and
 //! Latin-1. No other crate: what arrives is untrusted, so the parser is small and checked here.
 
+use std::sync::LazyLock;
+
 use base64::Engine as _;
+use regex::Regex;
+
+/// Compiled once, not for every header and message.
+static ENCODED_WORD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"=\?([^?]+)\?([bBqQ])\?([^?]*)\?=").expect("a valid pattern"));
+static MESSAGE_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^<>\s]+>").expect("a valid pattern"));
+static HTML_BREAK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<br\s*/?>|</p>|</div>|</li>").expect("a valid pattern"));
+static HTML_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<style.*?</style>|<script.*?</script>|<[^>]*>").expect("a valid pattern"));
 
 /// One message, read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -93,7 +105,7 @@ fn decode_charset(bytes: &[u8], charset: &str) -> String {
 
 /// `=?UTF-8?B?…?=` and `=?ISO-8859-1?Q?…?=` words decoded (RFC 2047).
 pub fn decode_words(text: &str) -> String {
-    let re = regex::Regex::new(r"=\?([^?]+)\?([bBqQ])\?([^?]*)\?=").expect("a valid pattern");
+    let re = &*ENCODED_WORD;
     let mut out = String::new();
     let mut last = 0;
     let mut previous_word = false;
@@ -166,8 +178,7 @@ pub fn address(value: &str) -> (String, String) {
 }
 
 fn ids(value: &str) -> Vec<String> {
-    let re = regex::Regex::new(r"<[^<>\s]+>").expect("a valid pattern");
-    re.find_iter(value).map(|m| m.as_str().to_owned()).collect()
+    MESSAGE_ID.find_iter(value).map(|m| m.as_str().to_owned()).collect()
 }
 
 /// A body part, decoded: its type, its disposition's file name, the bytes.
@@ -254,10 +265,8 @@ pub fn unquote(text: &str) -> String {
 
 /// Tags out of HTML, for a message with no plain-text part.
 fn html_text(html: &str) -> String {
-    let breaks = regex::Regex::new(r"(?i)<br\s*/?>|</p>|</div>|</li>").expect("a valid pattern");
-    let tags = regex::Regex::new(r"(?s)<style.*?</style>|<script.*?</script>|<[^>]*>").expect("a valid pattern");
-    let text = breaks.replace_all(html, "\n");
-    let text = tags.replace_all(&text, "");
+    let text = HTML_BREAK.replace_all(html, "\n");
+    let text = HTML_TAG.replace_all(&text, "");
     text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&amp;", "&")
 }
 
@@ -487,5 +496,90 @@ T2dnUw==\r\n\
         assert!(back.automatic, "the bot's own mail is marked, so no bot answers it");
         assert_eq!(reply_subject("Re: x"), "Re: x");
         assert_eq!(reply_subject("x"), "Re: x");
+    }
+
+    /// The syntax mail is made of, to build hostile messages from.
+    const MIME: &[&str] = &[
+        "\r\n",
+        "\n",
+        "\r\n\r\n",
+        "From: ",
+        "To: ",
+        "Subject: ",
+        "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
+        "Content-Type: multipart/alternative; boundary=b\r\n",
+        "Content-Type: text/plain; charset=iso-8859-1\r\n",
+        "Content-Type: text/html\r\n",
+        "Content-Type: audio/ogg; name=\"v.ogg\"\r\n",
+        "Content-Transfer-Encoding: base64\r\n",
+        "Content-Transfer-Encoding: quoted-printable\r\n",
+        "Content-Disposition: attachment; filename=\"x\"\r\n",
+        "--b\r\n",
+        "--b--\r\n",
+        "=?UTF-8?B?",
+        "=?ISO-8859-1?Q?",
+        "?=",
+        "=C3=A9",
+        "=\r\n",
+        "=",
+        "<a@b>",
+        "\"Ann\" <ann@example.com>",
+        "> quoted\r\n",
+        "On Monday Ann wrote:\r\n",
+        "<p>",
+        "<br>",
+        "<script>",
+        "</style>",
+        "\t",
+        " ",
+        "aGVsbG8=",
+    ];
+
+    #[test]
+    fn any_message_is_read_without_panicking() {
+        invincible::testgen::cases("mail parse", |g| {
+            let mut raw = g.assemble(MIME, 60).into_bytes();
+            if g.one_in(3) {
+                raw.extend(g.bytes(80));
+            }
+            let mail = parse(&raw);
+            let _ = (decode_words(&mail.subject), address(&mail.from), unquote(&mail.text));
+            // Nested parts are bounded: a deep message is read too.
+            let deep = "Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\n".repeat(50 + g.below(50));
+            let _ = parse(deep.as_bytes());
+        });
+    }
+
+    #[test]
+    fn what_is_written_reads_back() {
+        invincible::testgen::cases("mail round trip", |g| {
+            // Text a person writes (not a quote, a signature or a "wrote:" line, which a reply drops).
+            let words = ["Done", "é", "a=b", "x  ", "line", "€", "🙂", "\t", "-", "=", ".", "longer-word-here"];
+            let lines: Vec<String> = (0..1 + g.below(6))
+                .map(|_| {
+                    let n = 1 + g.below(30);
+                    (0..n).map(|_| *g.pick(&words)).collect::<Vec<_>>().join(" ")
+                })
+                .collect();
+            let text = lines.join("\n");
+            let subject: String = g.text(30).chars().filter(|c| !c.is_control()).collect();
+            let out = compose(&Outgoing {
+                from: "bot@example.org",
+                from_name: "Bot",
+                to: "ann@example.com",
+                subject: &subject,
+                text: &text,
+                in_reply_to: None,
+                references: &[],
+                message_id: "<m@example.org>",
+            });
+            assert!(out.lines().all(|l| l.len() <= 998), "a line over the SMTP limit");
+            let back = parse(out.as_bytes());
+            let trimmed: Vec<&str> = text.lines().map(str::trim_end).collect();
+            let got: Vec<&str> = back.text.lines().map(str::trim_end).collect();
+            assert_eq!(got.join("\n"), trimmed.join("\n").trim());
+            assert_eq!(back.subject.trim(), subject.trim());
+            assert_eq!(back.from, "bot@example.org");
+        });
     }
 }

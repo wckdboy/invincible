@@ -28,7 +28,7 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
-| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant |
+| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code run on local models; the comparison with a frontier model is still to do |
@@ -344,6 +344,44 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
 
+### In your editor: Zed and other ACP editors
+
+`autobot acp` is Autobot as an editor's agent, over the
+[Agent Client Protocol](https://agentclientprotocol.com) (version 1, on standard input and
+output). In Zed, add it to `settings.json` and pick **Autobot** in the agent panel's new-thread
+menu:
+
+```json
+{
+  "agent_servers": {
+    "Autobot": {
+      "type": "custom",
+      "command": "autobot",
+      "args": ["acp"],
+      "env": {}
+    }
+  }
+}
+```
+
+(Use the full path, `~/.local/bin/autobot`, if Zed does not find it on its `PATH`; add
+`"--bot", "ops"` to the args for another bot.) It works as `autobot code` does in the folder Zed
+opened, with the same gateway, model, receipts and memory:
+
+- **What you see:** the answer and its reasoning stream into the thread; each tool call is a
+  card with what it does, and an edit shows as Zed's own diff before it is made.
+- **Approvals:** what your approval mode asks about becomes Zed's permission prompt: allow once,
+  always allow (for the session), or reject. The modes are the approval modes (`ask`, `edits`,
+  `allowlist`, `trust`), switched from Zed's mode menu.
+- **Files through the editor:** reads and edits go through Zed's open buffers (unsaved changes
+  included), so the agent's edits land in the editor and its undo. Commands still run as the
+  agent runs them (on this machine, or in its container or over SSH when so configured).
+- **Sessions:** each thread is an Autobot conversation (`acp-…` in `~/.autobot/sessions`); Zed
+  can load one again, and the stop button cancels the turn where it is.
+
+Not yet: MCP servers Zed passes to the agent (Autobot's own `[mcp]` servers work), Zed's terminal
+panel for commands, and audio in prompts.
+
 ## The Autobot Agent
 
 The same agent as on the phone, for a machine that is always on. It is written in Rust
@@ -449,8 +487,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   work in progress rather than waiting for it to end.
 - **Sessions:** one JSONL file per conversation in `~/.autobot/sessions`. Each model call gets the
   recent part (at most about 12k tokens, so small local models keep room to think); what falls out
-  of it is summarized first, on the gateway like any call, and the summary leads the next prompt,
-  so a long conversation is condensed, not forgotten.
+  of it is summarized on the gateway like any call, and the summary leads the next prompt, so a
+  long conversation is condensed, not forgotten. It is summarized in batches, once an eighth of
+  that budget has fallen out (until then the recent part keeps it), so a long conversation costs
+  one summary call every few turns, not one every turn.
 - **Who it is:** `~/.autobot/SOUL.md` is the agent's character, in every conversation (tone,
   directness, how it disagrees). On top of it, a **personality**: four are built in (`concise`,
   `technical`, `teacher`, `creative`), and a Markdown file in `~/.autobot/personalities/` is one
@@ -1049,6 +1089,7 @@ each, ready for a trainer that reads OpenAI's chat format or ShareGPT's with Her
 | `crates/autobot` | The Autobot Agent: agent loop, tools, approvals, sessions, Telegram, setup, doctor, and the `autobot` command |
 | [`install.sh`](install.sh) | The installer for both; [`tests/install/`](tests/install/) runs it against a fake signed release |
 | [`evals/`](evals/) | Task files for `invincible eval` |
+| [`bench/`](bench/) | `bench/run.sh`: start-up, per-turn and gateway latency, memory and binary sizes, on stand-ins |
 
 ```sh
 cargo test --workspace                                  # includes every conformance vector
@@ -1057,7 +1098,34 @@ sh tests/install/test.sh                                # the installer, end to 
 cargo run -p invincible -- route input.json             # where would this request run?
 cargo run -p invincible -- serve --config path/to/config.toml   # run a node
 cargo run -p autobot -- doctor                          # check an agent install
+sh bench/run.sh                                         # the benchmarks, on a release build
+cargo test --release -p autobot --test soak -- --ignored --nocapture   # the soak test (SOAK_SECS)
 ```
+
+The parsers that read what comes from outside (model streams, receipts, redaction, email,
+Markdown for the chat platforms, pastes) have property tests over generated input
+(`INVINCIBLE_FUZZ_CASES=5000 cargo test` runs more cases; a failure names its
+`INVINCIBLE_FUZZ_SEED`). Every night CI runs the benchmarks and a ten-minute soak test: two bots
+under steady traffic with the gateway restarting, every message answered, and no growth in
+memory, file descriptors, tasks or threads.
+
+**Numbers** (an Apple M-series Mac, release builds, against stand-ins on loopback that answer at
+once; `bench/run.sh`, medians):
+
+| | 0.0.13 | now |
+| --- | ---: | ---: |
+| `autobot` start to the first composer frame | 105 ms | 6.3 ms |
+| `autobot run "…"`, one turn, the whole process | 107 ms | 6.7 ms |
+| Agent loop, per turn, in a 1000-turn conversation | 0.80 ms | 0.39 ms |
+| Model calls per turn, in a long conversation | 2.0 | 1.1 |
+| `autobot serve`, turns a second (16 at once) | 7,300 | 14,800 |
+| Gateway latency added, p50; to the first streamed token | 0.3 ms; 0.3 ms | 0.3 ms; 0.25 ms |
+| `invincible serve` memory, idle / after 1000 requests | 16.5 / 21.6 MiB | 9.9 / 15.9 MiB |
+| `autobot serve` (two bots) memory, idle / after 1000 turns | 16.9 / 26.0 MiB | 12.0 / 21.1 MiB |
+| Binary sizes, `invincible` / `autobot` | 6.4 / 11.3 MiB | 6.4 / 11.9 MiB |
+
+(Most of the start was loading the system's trust roots for a plain-HTTP connection to this
+machine; `autobot` grew with the editor protocol, Home Assistant and WhatsApp.)
 
 ## Principles
 

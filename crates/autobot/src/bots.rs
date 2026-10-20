@@ -398,9 +398,9 @@ impl Runtime {
     pub fn nudge(
         self: &Arc<Self>,
         agent: Arc<Agent>,
-        messages: Vec<Value>,
+        messages: &[Value],
     ) -> Option<tokio::task::JoinHandle<Vec<String>>> {
-        if !agent.nudge_due(&messages) {
+        if !agent.nudge_due(messages) {
             return None;
         }
         {
@@ -412,6 +412,8 @@ impl Runtime {
             *nudged = (Some(Instant::now()), true);
         }
         let runtime = self.clone();
+        // Copied only when one runs (not the whole conversation after every turn).
+        let messages = messages.to_vec();
         Some(tokio::spawn(async move {
             // Done however it ends.
             struct Done(Arc<Runtime>);
