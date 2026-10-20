@@ -213,6 +213,10 @@ pub struct AgentConfig {
     /// Commands and files on another machine ([crate::ssh]): `[agent.ssh] host = "me@box"`.
     #[serde(default)]
     pub ssh: Option<crate::ssh::Ssh>,
+    /// The model that summarizes earlier conversations for `search_sessions` and `/recall`: a
+    /// small, quick one is enough [default: the bot's own]; `off` for the matching messages only.
+    #[serde(default)]
+    pub recall_model: Option<String>,
     /// The `browser` tool, when a Chrome, Chromium, Edge or Brave is installed ([crate::browser]).
     #[serde(default = "yes")]
     pub browser: bool,
@@ -264,6 +268,7 @@ impl Default for AgentConfig {
             docker: None,
             nudge_every: nudge_every(),
             ssh: None,
+            recall_model: None,
             browser: true,
         }
     }

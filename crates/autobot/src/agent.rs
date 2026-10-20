@@ -41,6 +41,9 @@ pub struct Options {
     /// Who this bot is, when it is not the default one ([crate::bots]). Its `SOUL.md` is in its
     /// own home ([crate::personality]).
     pub persona: Option<Persona>,
+    /// The model that summarizes earlier conversations for `search_sessions` (None: the agent's
+    /// own; `off`: no summaries) ([crate::recall]).
+    pub recall_model: Option<String>,
 }
 
 /// A bot's name.
@@ -663,6 +666,11 @@ impl Agent {
         }
         if let crate::tools::Call::ExecuteCode { language, code } = &call {
             return self.execute(session, *language, code, approver, grants, events).await;
+        }
+        if let (crate::tools::Call::SearchSessions { query }, Some(home)) = (&call, self.tools.home()) {
+            return crate::tools::cut(
+                crate::recall::recall(self, &home.join("sessions"), query, session, events).await,
+            );
         }
         if let crate::tools::Call::Fetch { url } = &call {
             return match self.gateway.fetch(url).await {

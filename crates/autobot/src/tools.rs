@@ -367,7 +367,7 @@ impl Tools {
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "search_sessions",
-                "description": "Search earlier conversations for what was said or decided (keywords).",
+                "description": "Recall earlier conversations: what was said, decided or left open about something (keywords). Gives a short summary of each conversation that matches best, then the matching messages.",
                 "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] },
             }}));
             list.push(json!({ "type": "function", "function": {
@@ -789,12 +789,12 @@ impl Tools {
             },
             Call::SearchSessions { query } => match &self.home {
                 Some(home) => {
-                    let found = crate::session::search(&home.join("sessions"), query, 8, &turn_context().session);
-                    Ok(if found.is_empty() {
-                        "nothing found".to_owned()
-                    } else {
-                        found.iter().map(|(s, snippet)| format!("[{s}] {snippet}")).collect::<Vec<_>>().join("\n")
+                    let (dir, query, skip) = (home.join("sessions"), query.clone(), turn_context().session);
+                    tokio::task::spawn_blocking(move || {
+                        crate::recall::plain(&crate::recall::search(&dir, &query, 8, &skip))
                     })
+                    .await
+                    .map_err(|e| e.to_string())
                 }
                 None => Err("no conversations here".to_owned()),
             },

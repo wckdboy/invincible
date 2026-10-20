@@ -362,6 +362,7 @@ pub fn help(bot: &str) -> String {
          /board: the team's background work (/board answer <id> <text>)\n\
          /actions: what I ran lately, and who allowed it\n\
          /memory: what I remember (/memory forget <id>)\n\
+         /recall <what>: what earlier conversations said about it\n\
          /skills: your how-to notes\n\
          /bots: the bots on this machine"
     )
@@ -453,6 +454,13 @@ async fn handle_inner(
             }),
             "bots" | "sethome" => Some("Only the owner can do that.".to_owned()),
             "model" => Some(model_command(runtime, args, owner).await),
+            // Every conversation of the bot, so the owner's only.
+            "recall" if owner && args.trim().is_empty() => Some("/recall <what to look for>".to_owned()),
+            "recall" if owner => {
+                let dir = home.join("sessions");
+                Some(crate::recall::recall(&runtime.agent(), &dir, args.trim(), &session, &|_| {}).await)
+            }
+            "recall" => Some("Only the owner can do that.".to_owned()),
             "stop" => Some(match runtime.conversations.slots.lock().expect("slots").get(&session) {
                 Some(slot) if slot.chat.try_lock().is_err() => {
                     slot.stop.notify_waiters();

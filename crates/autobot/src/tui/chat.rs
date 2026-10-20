@@ -93,6 +93,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/copy", "copy the last answer (its Markdown) to the clipboard"),
     ("/image", "show the agent an image: /image <path> (or drag one in, ctrl+v, @shot.png)"),
     ("/memory", "what the agent remembered"),
+    ("/recall", "what earlier conversations said about something: /recall <what>"),
     ("/profile", "what the agent keeps about how you work (USER.md)"),
     ("/personality", "pick how it answers, or /personality <name> (none: SOUL.md only)"),
     ("/skills", "pick a skill to run; /skills accept|reject <name>; or /<skill> directly"),
@@ -1569,6 +1570,19 @@ impl Chat {
                 }
                 for c in all {
                     say(&format!("  {} {}", style::bold(&format!("/{:<10}", c.name)), style::gray(&c.description)));
+                }
+            }
+            "/recall" => {
+                if arg.is_empty() {
+                    return Err("/recall <what to look for>".to_owned());
+                }
+                say(&style::gray("looking back…"));
+                let dir = self.home.join("sessions");
+                let text = crate::recall::recall(&self.agent, &dir, arg, &self.session.id, &|_| {}).await;
+                term::print(&format!("{}\n", text.trim_end()));
+                if text != "nothing found" {
+                    say(&style::gray("  ─ goes with your next message"));
+                    self.shell.push_str(&format!("(I recalled earlier conversations about \"{arg}\":)\n{text}\n"));
                 }
             }
             "/clear" => term::clear(),

@@ -37,6 +37,7 @@ pub mod pairing;
 pub mod personality;
 pub mod procs;
 pub mod profile;
+pub mod recall;
 pub mod sandbox;
 pub mod script;
 pub mod search;
@@ -128,6 +129,7 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
             context_kib: config.agent.context_kib,
             nudge_every: config.agent.nudge_every,
             persona: persona(config),
+            recall_model: config.agent.recall_model.clone(),
             ..Default::default()
         },
     })

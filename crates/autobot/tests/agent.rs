@@ -1573,3 +1573,44 @@ print(len(hits.splitlines()), "TODOs in", len(files.splitlines()), "files; first
     let tools = tools.into_inner().unwrap();
     assert!(tools.iter().any(|t| t.starts_with("script → search")), "{tools:?}");
 }
+
+#[tokio::test]
+async fn search_sessions_recalls_earlier_conversations_with_a_cached_summary() {
+    let (url, script) = gateway(vec![
+        call("search_sessions", json!({"query": "billing database"})),
+        say("They chose Postgres 16 for billing; the migration was left open."),
+        say("Postgres 16, and the migration is still to do."),
+        // The second time, the summary comes from the cache: only the turn's two calls.
+        call("search_sessions", json!({"query": "database billing"})),
+        say("Postgres 16."),
+    ])
+    .await;
+    let dir = temp("recall");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    agent.options.recall_model = Some("small".into());
+    let mut earlier = Session::open(&dir.join("sessions"), "earlier").unwrap();
+    earlier.push(json!({"role": "user", "content": "Which database for the billing service?"})).unwrap();
+    earlier.push(json!({"role": "assistant", "content": "Postgres 16; the migration comes later."})).unwrap();
+    let owner = owner(Answer::Deny);
+    let mut now = Session::open(&dir.join("sessions"), "now").unwrap();
+    let outcome = agent.turn(&mut now, "What did we pick for billing?", &owner, &mut HashSet::new(), &quiet).await;
+    assert_eq!(outcome.unwrap().text, "Postgres 16, and the migration is still to do.");
+    {
+        let script = script.lock().unwrap();
+        let summary = &script.seen[1].1;
+        assert_eq!(summary["model"], "small", "the recall model");
+        assert!(summary["messages"][1]["content"].as_str().unwrap().contains("Postgres 16; the migration"));
+        let result = script.seen[2].1["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool").cloned();
+        let result = result.unwrap()["content"].as_str().unwrap().to_owned();
+        assert!(result.starts_with("[earlier · "), "{result}");
+        assert!(result.contains("They chose Postgres 16") && result.contains("user: Which database"), "{result}");
+    }
+    assert!(dir.join("sessions/.index/earlier.json").is_file());
+    assert_eq!(std::fs::read_dir(dir.join("sessions/.recall")).unwrap().count(), 1);
+    // In the same conversation (which is not searched), the same earlier one: from the cache.
+    agent.turn(&mut now, "And the database?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    let script = script.lock().unwrap();
+    assert_eq!(script.seen.len(), 5, "no second summary call");
+    assert!(script.seen[4].1.to_string().contains("They chose Postgres 16"));
+}

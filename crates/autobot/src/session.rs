@@ -305,45 +305,6 @@ fn unhex(text: &str) -> Option<Vec<u8>> {
     (0..text.len()).step_by(2).map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok()).collect()
 }
 
-/// Past conversations in [dir] that mention [query]'s words: (session, snippet), best first, at
-/// most [limit]. Plain word matching over the files: enough for one machine's history.
-pub fn search(dir: &Path, query: &str, limit: usize, skip: &str) -> Vec<(String, String)> {
-    let words: Vec<String> =
-        query.split_whitespace().map(str::to_lowercase).filter(|w| w.chars().count() > 2).collect();
-    if words.is_empty() {
-        return Vec::new();
-    }
-    let mut hits: Vec<(usize, String, String)> = Vec::new();
-    for (name, _) in list(dir) {
-        if name == skip {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(dir.join(format!("{name}.jsonl"))) else { continue };
-        for line in text.lines() {
-            let Ok(m) = serde_json::from_str::<Value>(line) else { continue };
-            let Some(content) = m["content"].as_str() else { continue };
-            if !matches!(m["role"].as_str(), Some("user" | "assistant")) && !is_summary(&m) {
-                continue;
-            }
-            let lower = content.to_lowercase();
-            let score = words.iter().filter(|w| lower.contains(w.as_str())).count();
-            if score > 0 {
-                let at = words.iter().filter_map(|w| lower.find(w.as_str())).min().unwrap_or(0);
-                let start = content.char_indices().map(|(i, _)| i).take_while(|i| *i + 120 <= at).last().unwrap_or(0);
-                let snippet: String = content[start..].chars().take(300).collect();
-                hits.push((
-                    score,
-                    name.clone(),
-                    format!("{}: {}", m["role"].as_str().unwrap_or("summary"), snippet.replace('\n', " ")),
-                ));
-            }
-        }
-    }
-    // Most words matched first; newer sessions first among equals (list is newest first).
-    hits.sort_by(|a, b| b.0.cmp(&a.0));
-    hits.into_iter().take(limit).map(|(_, name, snippet)| (name, snippet)).collect()
-}
-
 /// The sessions in [dir], newest first.
 pub fn list(dir: &Path) -> Vec<(String, std::time::SystemTime)> {
     let mut found: Vec<_> = std::fs::read_dir(dir)
@@ -475,13 +436,14 @@ mod tests {
         a.push(json!({"role": "assistant", "content": "Scheduled the nightly backup."})).unwrap();
         let mut b = Session::open(&dir, "b").unwrap();
         b.push(json!({"role": "user", "content": "What's the weather?"})).unwrap();
-        let found = super::search(&dir, "database backup", 5, "now");
-        assert_eq!(found[0].0, "a");
-        assert!(found[0].1.contains("/srv/backup"));
+        let search = crate::recall::search;
+        let found = search(&dir, "database backup", 5, "now");
+        assert_eq!(found[0].session, "a");
+        assert!(found[0].snippet.contains("/srv/backup"));
         // Tool output is not searched (it may be huge and is not what was said).
-        assert!(found.iter().all(|(_, s)| !s.starts_with("tool")));
-        assert!(super::search(&dir, "database", 5, "a").is_empty(), "the current conversation is skipped");
-        assert!(super::search(&dir, "xy", 5, "").is_empty(), "short words alone find nothing");
+        assert!(found.iter().all(|h| !h.snippet.starts_with("tool")));
+        assert!(search(&dir, "database", 5, "a").is_empty(), "the current conversation is skipped");
+        assert!(search(&dir, "xy", 5, "").is_empty(), "short words alone find nothing");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
