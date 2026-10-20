@@ -34,7 +34,7 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `POST /v1/agent/bots/reload` | `{}` | `{"started", "stopped", "restarted", "persona", "failed": [{"name", "error"}], "running"}` (names): the running bots brought in line with their configuration now, as `autobot serve` does on its own within seconds of a change. `persona`: bots whose `SOUL.md` changed (read at every turn; nothing restarts). `409` (`not_configurable`) without bots to reload, `400` (`invalid_config`) when `config.toml` does not load |
 | `GET /v1/agent/sessions?bot=` | | `{"sessions": [{"id", "modified", "bot"}]}`: every bot's conversations (only `bot`'s with it), newest first; `modified` in Unix seconds |
 | `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape; a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
-| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn) and `"bot"` | An event stream (below); `400` for an unknown personality. `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
+| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn), `"bot"` and `"images"` (below) | An event stream (below); `400` for an unknown personality, or images that are not taken (`model_cannot_see_images` when the model cannot see). `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
 | `POST /v1/agent/sessions/{id}/retry` | `{}` | An event stream, like a turn: the last turn leaves the conversation and its request (with its images) runs again; files it changed stay. `404` when there is no turn to retry, `409` while one runs |
 | `POST /v1/agent/sessions/{id}/fork` | `{"to"?, "at"?}` | `{"id", "messages"}`: a new conversation starting as this one did, up to message `at` (rounded to the end of that turn; all of it by default) |
 | `POST /v1/agent/sessions/{id}/steer` | `{"text": "..."}` | `{"ok": true}`: a message for the turn running in the session, taken in before the agent's next step; `409` (`no_turn`) when none is running |
@@ -120,7 +120,7 @@ has a `type`:
 | `approval` | `id`, `text`, `action` | The agent waits for the owner: answer with `POST /v1/agent/approvals/{id}` |
 | `member` | `agent`, `text` | A team member finished the task it was handed; `text` is its answer to the lead |
 | `answer` | `text`, `receipts` | The turn's answer; the last event of the turn |
-| `error` | `text` | The turn failed; the last event |
+| `error` | `text`, `code`? | The turn failed; the last event. `code` is `model_cannot_see_images` when the model the router picked refused the turn's images |
 | `kept` | `text` | After `answer`, when the turn was at a nudge: what the agent kept on its own (`profile: …`, `memory: …`), one event each. The stream stays open for it at most 30 seconds; the conversation is free for the next turn already |
 
 An `approval` from a team member also has `agent` (its name), and its `text` starts with
@@ -196,6 +196,31 @@ with `GET …/runs?after=<last run it has>`, so nothing is lost while it is away
 On this machine, `[agent] tools` keeps a bot to some groups and `[agent] disabled_tools` turns
 single tools off (`autobot tools`); a recipe's `tools` work within what is left.
 
+## Images in a turn
+
+A turn may carry images beside its text, as OpenAI-style parts:
+
+```json
+{"text": "what is on this label?", "images": [
+  {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,…"}}
+]}
+```
+
+- Each is a `data:` URL in base64 of a PNG, JPEG, WebP or GIF (by its bytes); at most **4** in a
+  turn and **10 MiB** each, decoded (the body as a whole at most 64 MiB, through the gateway
+  too). The text may be empty when there are images.
+- They are kept in `$AUTOBOT_HOME/attachments` (`sent-<time>-<random>.<ext>`, 0600), and the
+  conversation keeps a reference to each (`autobot_images` on the user message), as with an image
+  pasted in the terminal: it goes to the model with every call while its message is in the window,
+  scaled down to 1568 pixels on the longest side when larger.
+- When the gateway says the bot's model cannot see (`vision: false` in `/v1/models`; `auto`
+  when none of its models can), the turn is refused with `400` and the code
+  `model_cannot_see_images`, before anything runs. When that is only found out later (the router
+  picked a model that refused the images), the stream's last event is an `error` with that
+  `code`.
+- Anything else wrong (more than 4, too large, not an image, not a `data:` URL) is a `400`
+  (`invalid_request_error`) saying which.
+
 ## Recall
 
 `search_sessions` (and `/recall`) answer with, for each of the three conversations that match
@@ -209,8 +234,12 @@ The summary is a model call on the gateway (the bot's model, or `[agent] recall_
 
 A turn that used `speak` or `generate_image` keeps the file in `$AUTOBOT_HOME/attachments`, and
 the tool's result (in the `tool` events and the conversation) says where. Chat platforms get it
-after the answer: Telegram as a voice message or a photo, Discord as an attachment, the others as
-a line with the path.
+with the answer: Telegram as a voice message or a photo, Discord as an attachment, Slack as a file
+in the thread (the app needs `files:write`), Signal as an attachment, Matrix as uploaded media
+(`m.audio`, marked a voice message, and `m.image`), WhatsApp as an audio or image message
+(MP3, OGG, AAC, PNG or JPEG; WhatsApp takes no other type that way) and email attached to the
+answer (up to 18 MB in all; more goes in a mail of its own). A file a platform cannot take, or
+whose upload fails, is named with its path instead.
 
 ## Editors: the Agent Client Protocol
 

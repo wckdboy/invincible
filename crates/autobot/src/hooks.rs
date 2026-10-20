@@ -36,7 +36,7 @@ const BODY_LIMIT: usize = 512 * 1024;
 /// Most of a body shown to the model.
 const SHOWN: usize = 24 * 1024;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 pub struct HooksConfig {
     /// Where hooks are received (none: no listener).
     #[serde(default)]
@@ -45,7 +45,7 @@ pub struct HooksConfig {
     pub hooks: BTreeMap<String, Hook>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Hook {
     /// What to do when it is called: an instruction to the agent.

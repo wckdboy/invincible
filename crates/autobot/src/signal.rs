@@ -1,5 +1,6 @@
 //! Signal, through signal-cli's daemon (JSON-RPC over HTTP, events as a stream): direct
-//! messages, approvals by replying (`yes`, `always`, `no`), voice messages transcribed.
+//! messages, approvals by replying (`yes`, `always`, `no`), voice messages transcribed, speech
+//! and pictures the agent makes sent as attachments.
 //!
 //! ```toml
 //! [signal]
@@ -29,7 +30,7 @@ use crate::channel::{Asking, BoxFuture, Incoming, Progress, Question, Transport}
 /// Signal sends longer texts as an attachment; parts of this size read as messages.
 const MESSAGE_LIMIT: usize = 2000;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SignalConfig {
     #[serde(default)]
@@ -99,6 +100,22 @@ impl Client {
         let reply = self.call("send", params).await?;
         Ok(reply["timestamp"].as_u64().map(|t| t.to_string()))
     }
+
+    /// A file the turn made, as an attachment. It goes inline (a `data:` address) rather than
+    /// as a path, so a daemon in a container of its own takes it too.
+    pub async fn send_file(&self, chat: &str, file: &crate::media::Made) -> Result<(), String> {
+        let mut params = Self::to(chat);
+        params["attachments"] = json!([attachment(file)?]);
+        self.call("send", params).await.map(drop)
+    }
+}
+
+/// [file] as signal-cli takes an attachment inline: `data:<type>;filename=<name>;base64,<data>`.
+fn attachment(file: &crate::media::Made) -> Result<String, String> {
+    let bytes = file.bytes()?;
+    let name: String = file.name().chars().filter(|c| c.is_ascii_alphanumeric() || ".-_".contains(*c)).collect();
+    let mime = if file.mime.is_empty() { "application/octet-stream" } else { file.mime.as_str() };
+    Ok(format!("data:{mime};filename={name};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
 }
 
 /// Signal as [crate::channel] sees it.
@@ -129,6 +146,10 @@ impl Transport for Channel {
 
     fn send<'a>(&'a self, chat: &'a str, text: &'a str) -> BoxFuture<'a, Result<Option<String>, String>> {
         Box::pin(async move { self.client.send(chat, text).await })
+    }
+
+    fn send_file<'a>(&'a self, chat: &'a str, file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move { self.client.send_file(chat, file).await.map(|()| true) })
     }
 
     fn typing<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, ()> {

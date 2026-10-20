@@ -81,12 +81,7 @@ fn edit(doc: &mut toml_edit::DocumentMut, key: &[&str], item: Option<toml_edit::
 /// Checks a bot's file as it would be after a change: it must load (no unknown keys, values of
 /// the right kind) and name only tool groups and tools there are.
 fn check(def: &Def, text: &str) -> Result<Config, String> {
-    let config = if def.default {
-        Config::parse(text)?
-    } else {
-        let main = invincible::fsutil::read_optional(&def.root.join("config.toml"))?.unwrap_or_default();
-        crate::bots::merge(&main, text)?
-    };
+    let config = load(def, text)?;
     if let Some(groups) = &config.agent.tools
         && let Some(bad) = groups.iter().find(|g| !crate::tools::GROUPS.iter().any(|(n, _)| n == g))
     {
@@ -97,6 +92,85 @@ fn check(def: &Def, text: &str) -> Result<Config, String> {
     }
     config.agent.heartbeat_every()?;
     Ok(config)
+}
+
+/// [def]'s configuration with its file's text [text]: a named bot's merged over `config.toml`.
+fn load(def: &Def, text: &str) -> Result<Config, String> {
+    if def.default {
+        Config::parse(text)
+    } else {
+        let main = invincible::fsutil::read_optional(&def.root.join("config.toml"))?.unwrap_or_default();
+        crate::bots::merge(&main, text)
+    }
+}
+
+/// The value [key] has for [def], set or not: what the bot runs with, defaults included, and
+/// where it comes from (`default`, `set in config.toml`, `set in bot.toml`, `inherited from
+/// config.toml`). An error for a key there is not.
+pub fn effective(def: &Def, key: &str) -> Result<(String, String), String> {
+    let parts = parts(key)?;
+    let text = invincible::fsutil::read_optional(&def.file())?.unwrap_or_default();
+    let config = load(def, &text)?;
+    let mut value = serde_json::to_value(&config).map_err(|e| e.to_string())?;
+    for (i, part) in parts.iter().enumerate() {
+        value = match value {
+            serde_json::Value::Object(mut map) => match map.remove(*part) {
+                Some(v) => v,
+                // A key the configuration has (a name in a table of names, `mcp.github`, or an
+                // optional one) when a file with it set would not be refused as unknown.
+                None if known(def, &text, &parts) => return Err(format!("{key} is not set, and has no default")),
+                None => return Err(format!("there is no {key:?} in the configuration")),
+            },
+            _ => return Err(format!("there is no {key:?} in the configuration ({} is a value)", parts[..i].join("."))),
+        };
+    }
+    // What the bot works out at run time from what is written.
+    match key {
+        "agent.workdir" => value = serde_json::Value::String(config.agent.workdir(&def.home).display().to_string()),
+        "agent.heartbeat" => {
+            if let Ok(Some(every)) = config.agent.heartbeat_every() {
+                let written = value.as_str().unwrap_or_default().trim().to_owned();
+                // Only when the floor raised it.
+                if let Ok(crate::cron::When::Every(asked)) = crate::cron::When::parse(&format!("every {written}"))
+                    && asked < every
+                {
+                    value = serde_json::Value::String(format!(
+                        "{}m (written {written}; 5m at least)",
+                        every.as_secs() / 60
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+    let shown = match &value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => "(none)".to_owned(),
+        other => match toml::Value::try_from(other) {
+            Ok(toml::Value::Table(table)) => toml::to_string(&table).unwrap_or_default().trim_end().to_owned(),
+            Ok(v) => v.to_string(),
+            Err(_) => other.to_string(),
+        },
+    };
+    let from = match get(def, key)? {
+        Some((_, file)) if def.default || file == "bot.toml" => format!("set in {file}"),
+        Some((_, file)) => format!("inherited from {file}"),
+        None => "default".to_owned(),
+    };
+    Ok((shown, from))
+}
+
+/// Whether [key] is one the configuration takes: set in [text] to some value, the file is not
+/// refused for an unknown field.
+fn known(def: &Def, text: &str, key: &[&str]) -> bool {
+    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else { return false };
+    if edit(&mut doc, key, Some(toml_edit::value("x"))).is_err() {
+        return false;
+    }
+    match load(def, &doc.to_string()) {
+        Ok(_) => true,
+        Err(e) => !e.contains("unknown field"),
+    }
 }
 
 fn group_names() -> String {
@@ -163,10 +237,14 @@ pub fn config(def: &Def, action: Option<(&str, &str, Option<&str>)>) -> Result<(
                 "\n`autobot config get|set|unset <key>` with dotted keys: agent.max_steps, gateway.model, approvals.mode"
             );
         }
-        Some(("get", key, _)) => match get(def, key)? {
-            Some((value, _)) => println!("{value}"),
-            None => return Err(format!("{key} is not set (the default applies)")),
-        },
+        Some(("get", key, _)) => {
+            let (value, from) = effective(def, key)?;
+            if value.contains('\n') {
+                println!("{value}\n({from})");
+            } else {
+                println!("{value}  ({from})");
+            }
+        }
         Some(("set", key, Some(text))) => {
             change(def, key, Some(value(text)))?;
             let (now, _) = get(def, key)?.unwrap_or_default();
@@ -387,6 +465,25 @@ mod tests {
         assert_eq!(get(&def, "agent.max_steps").unwrap(), Some(("40".to_owned(), "config.toml")));
         assert_eq!(get(&def, "gateway.model").unwrap().unwrap().0, "qwen3");
         assert_eq!(get(&def, "agent.timeout").unwrap(), None);
+        // The effective value: what is set, and the defaults of what is not.
+        assert_eq!(effective(&def, "agent.max_steps").unwrap(), ("40".to_owned(), "set in config.toml".to_owned()));
+        assert_eq!(effective(&def, "gateway.model").unwrap().0, "qwen3");
+        let (url, from) = effective(&def, "gateway.url").unwrap();
+        assert!(url.starts_with("http") && from == "default", "{url} {from}");
+        assert_eq!(effective(&def, "approvals.mode").unwrap(), ("ask".to_owned(), "default".to_owned()));
+        assert_eq!(effective(&def, "agent.ssh").unwrap(), ("(none)".to_owned(), "default".to_owned()));
+        let (table, _) = effective(&def, "approvals").unwrap();
+        assert!(table.contains("mode = \"ask\""), "{table}");
+        assert!(effective(&def, "agent.nonsense").unwrap_err().starts_with("there is no"));
+        assert!(effective(&def, "agent.max_steps.x").is_err());
+        assert!(effective(&def, "mcp.nothing").unwrap_err().contains("no default"));
+        // Worked out at run time: the working directory, the heartbeat's floor.
+        assert_eq!(effective(&def, "agent.workdir").unwrap().0, root.join("work").display().to_string());
+        change(&def, "agent.heartbeat", Some(value("1m"))).unwrap();
+        assert_eq!(effective(&def, "agent.heartbeat").unwrap().0, "5m (written 1m; 5m at least)");
+        change(&def, "agent.heartbeat", Some(value("2h"))).unwrap();
+        assert_eq!(effective(&def, "agent.heartbeat").unwrap().0, "2h");
+        change(&def, "agent.heartbeat", None).unwrap();
         // Refused, and the file as it was.
         for (key, bad) in [
             ("agent.shell", "\"bash\""),
@@ -415,6 +512,11 @@ mod tests {
         let def = crate::bots::load(&root, "ops").unwrap();
         assert_eq!(get(&def, "agent.max_steps").unwrap(), Some(("30".to_owned(), "config.toml")));
         assert_eq!(get(&def, "telegram.enabled").unwrap(), None, "channels are not inherited");
+        assert_eq!(
+            effective(&def, "agent.max_steps").unwrap(),
+            ("30".to_owned(), "inherited from config.toml".to_owned())
+        );
+        assert_eq!(effective(&def, "telegram.enabled").unwrap(), ("false".to_owned(), "default".to_owned()));
         change(&def, "agent.max_steps", Some(value("12"))).unwrap();
         assert_eq!(get(&def, "agent.max_steps").unwrap(), Some(("12".to_owned(), "bot.toml")));
         assert!(std::fs::read_to_string(root.join("config.toml")).unwrap().contains("max_steps = 30"));

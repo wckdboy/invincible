@@ -296,7 +296,11 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   is none of those), from the repository's root down to the directory it works in, each text
   once. A subdirectory's own `AGENTS.md` (a package in a monorepo) comes with the first tool
   result that reaches that directory, once per conversation (a write or an edit there waits for
-  it). `/context` lists the files in
+  it), and a restart does not give it again (`sessions/<id>.context.json`). Every file is
+  scanned first: one with text that looks like a prompt injection (ignore the previous
+  instructions, keep this from the user, send the keys somewhere, a hidden comment with orders, invisible
+  characters) is quarantined, not dropped: the model gets it quoted as data under a note saying
+  what was found, and `/context` marks it. `/context` lists the files in
   play. In a git repository it works like a careful engineer (find, read, change
   in small edits, run the build and tests, never commit unless asked). `search` (regular
   expressions over the files, `.gitignore` respected) and `find_files` (globs) find code without a
@@ -525,9 +529,20 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   files (scripts marked) and its SKILL.md in full, and installs it only when you say yes
   (`--yes` after reading). Nothing in it runs: files are written plain, and a script is
   something the agent may ask to run like any command. The hub follows the node's network mode.
+  Every review carries a scan of the skill's files (scripts that download and run code, read
+  keys or send them away, delete beyond the skill, start themselves at login, open a shell to
+  somewhere; text in its Markdown that looks like a prompt injection) and its trust level:
+  `official` (Autobot's own, or the format's authors), `known publisher` (an organization
+  publishing skills for its own product), `community` (anyone else), `local` (from a path or a
+  git URL). With `--yes`, a skill the scan calls dangerous from anyone but an official source
+  needs `--force` too. An install is pinned (`.source`: repository, commit, the directory's tree,
+  a digest of its files): `autobot skills check` says which skills changed upstream and which you
+  edited here, `autobot skills update [name]` shows what an update changes (files added, removed
+  and changed, SKILL.md's diff, the scan) and replaces the skill when you say yes (an edited one
+  is left alone under `--yes`), and `autobot skills audit [name]` scans what is installed.
   `autobot skills install <git-url|path>`
   adds the skills in a repository or directory (regular files only, never over one you have),
-  `autobot skills` lists them, `autobot skills remove <name>`. The agent writes skills itself:
+  `autobot skills` lists them, `autobot skills uninstall <name>` (or `remove`). The agent writes skills itself:
   after a task that took many steps and worked, `create_skill`; when a skill it followed was
   wrong, `improve_skill`, shown to you as a diff. Neither is used until you keep it
   (`autobot skills accept <name>`, `/skills accept <name>` in the terminal or Telegram, or the
@@ -549,7 +564,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (`[agent] disabled_tools`), `autobot tools disable terminal` a whole group (`[agent] tools`),
   `enable` turns them back on.
 - **Configuration from the command line:** `autobot config` shows the bot's file;
-  `autobot config get agent.max_steps`, `autobot config set approvals.mode edits`,
+  `autobot config get agent.max_steps` shows the value the bot runs with, defaults included
+  (`24  (default)`, `40  (set in config.toml)`, `inherited from config.toml` for a named bot),
+  with what the bot works out from it (the working directory, the heartbeat's 5-minute floor);
+  `autobot config set approvals.mode edits` and
   `autobot config unset gateway.model` change one dotted key in `config.toml` (or a bot's
   `bot.toml`), with its comments kept. A change that would not load (an unknown key, a value of
   the wrong kind, a tool group that does not exist) is refused and the file stays as it was;
@@ -572,10 +590,16 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   run on the bot's model, or a smaller one with `[agent] recall_model = "qwen3.5-4b"` (`off`
   for the matching messages only), as private as the turns. `/recall <what>` does the same for
   you, in the terminal (the result goes with your next message) and, for the owner, in a chat.
+  On a node that runs for months, `autobot sessions prune --days 90` removes the conversations
+  untouched that long, with their undo logs and recall index (`--dry-run` says which first).
 - **Speech and pictures:** when the node has a speech or an image backend
   ([below](#speech-and-images-optional)), the agent has `speak` (text to an audio file) and
-  `generate_image`. On Telegram the speech goes as a voice message and a picture as a photo, on
-  Discord as an attachment; elsewhere the chat says where the file is (`~/.autobot/attachments`).
+  `generate_image`. They go with the answer in the platform's own way: a voice message and a photo
+  on Telegram, an attachment on Discord, Signal and email, a file in the thread on Slack (the app
+  needs `files:write`), uploaded media on Matrix (a voice message, a picture), an audio or image
+  message on WhatsApp (MP3, OGG, AAC, PNG, JPEG). An email answer carries up to 15 MiB of files;
+  when the mail server refuses that, the answer goes without them and the files follow one by
+  one. What a platform cannot take, the chat names with its path (`~/.autobot/attachments`).
   A backend on the node runs without asking; one off the machine is asked for first, like a cloud
   model, and then the text goes out redacted, with a receipt.
 - **A team of agents:** define members in `config.toml`, and the agent hands them work with its
@@ -674,7 +698,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
   device can therefore start turns, watch their events (tool runs, receipts, approval questions,
-  the answer) and answer approvals, all inside its Noise session. Nothing new is exposed: the
+  the answer) and answer approvals, all inside its Noise session. A turn may carry up to four
+  images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
+  that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
   agent is reachable only from this machine and from devices you paired.
 
 ## Bots and channels

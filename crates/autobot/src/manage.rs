@@ -179,20 +179,14 @@ pub async fn hub_search(query: &str, limit: usize) -> Result<(), String> {
 }
 
 /// `autobot skills install <name>` from the hub: fetched, shown, installed on a yes.
-pub async fn hub_install(home: &Path, id: &str, yes: bool) -> Result<(), String> {
+pub async fn hub_install(home: &Path, id: &str, yes: bool, force: bool) -> Result<(), String> {
     let hub = crate::hub::Hub::public()?;
     let fetched = hub.fetch(id, &std::env::temp_dir()).await?;
     println!("{}", crate::hub::review(&fetched));
-    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
-    if !yes {
-        if !terminal {
-            return Err(format!("not installed: read it at {}, then run again with --yes", fetched.url));
-        }
-        let mut prompt = crate::setup::Prompt::new(std::io::stdin().lock());
-        if !prompt.yes(&format!("install {} (instructions the agent will follow)", fetched.name), false)? {
-            println!("not installed");
-            return Ok(());
-        }
+    let question = format!("install {} (instructions the agent will follow)", fetched.name);
+    if !confirm(&fetched, &question, yes, force)? {
+        println!("not installed");
+        return Ok(());
     }
     let (installed, skipped) = crate::hub::install(home, &fetched)?;
     for name in &installed {
@@ -205,6 +199,172 @@ pub async fn hub_install(home: &Path, id: &str, yes: bool) -> Result<(), String>
         return Err("nothing installed".to_owned());
     }
     Ok(())
+}
+
+/// The owner's yes for [fetched]: asked at a terminal, or given with `--yes` (and, for what the
+/// scan calls dangerous, `--force`).
+fn confirm(fetched: &crate::hub::Fetched, question: &str, yes: bool, force: bool) -> Result<bool, String> {
+    if yes {
+        if fetched.needs_force() && !force {
+            return Err(format!(
+                "not done: the scan calls {} dangerous ({}); read it at {}, then add --force if you trust it",
+                fetched.name,
+                fetched.trust().label(),
+                fetched.url
+            ));
+        }
+        return Ok(true);
+    }
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        return Err(format!("not done: read it at {}, then run again with --yes", fetched.url));
+    }
+    let mut prompt = crate::setup::Prompt::new(std::io::stdin().lock());
+    prompt.yes(question, false)
+}
+
+/// `autobot skills check [name]`.
+pub async fn hub_check(home: &Path, name: Option<&str>) -> Result<(), String> {
+    let hub = crate::hub::Hub::public();
+    let checked = crate::hub::check(hub.as_ref().map_err(String::as_str), home, name).await?;
+    if checked.is_empty() {
+        println!("no skills yet");
+        return Ok(());
+    }
+    print!("{}", check_rows(&checked));
+    if checked.iter().any(|c| matches!(c.status, crate::hub::Status::Changed(_))) {
+        println!("\n`autobot skills update` shows what changes before it replaces anything");
+    }
+    Ok(())
+}
+
+/// What `skills check` prints: a skill a line.
+pub fn check_rows(checked: &[crate::hub::Checked]) -> String {
+    use crate::hub::Status;
+    let width = checked.iter().map(|c| c.name.chars().count()).max().unwrap_or(0);
+    let mut out = String::new();
+    for c in checked {
+        let status = match &c.status {
+            Status::Current => "up to date".to_owned(),
+            Status::Changed(rev) => format!("update available ({})", &rev[..rev.len().min(7)]),
+            Status::Gone => "gone from its source".to_owned(),
+            Status::Unpinned => "local (not from the hub)".to_owned(),
+            Status::Failed(why) => format!("could not check: {why}"),
+        };
+        let edited = match (c.modified, c.untracked) {
+            (_, true) => "; edits here unknown (installed before they were tracked)",
+            (true, false) => "; edited here",
+            _ => "",
+        };
+        let from =
+            c.source.as_ref().map(|s| format!("  {} @ {}", s.id, &s.rev[..s.rev.len().min(7)])).unwrap_or_default();
+        out.push_str(&format!("{:<width$}  {status}{edited}  [{}]{from}\n", c.name, c.trust.label()));
+    }
+    out
+}
+
+/// `autobot skills update [name] [--yes] [--force]`.
+pub async fn hub_update(home: &Path, name: Option<&str>, yes: bool, force: bool) -> Result<(), String> {
+    let hub = crate::hub::Hub::public();
+    let checked = crate::hub::check(hub.as_ref().map_err(String::as_str), home, name).await?;
+    let due: Vec<&crate::hub::Checked> =
+        checked.iter().filter(|c| matches!(c.status, crate::hub::Status::Changed(_))).collect();
+    if let Some(one) = name
+        && let Some(c) = checked.first()
+        && due.is_empty()
+    {
+        return match &c.status {
+            crate::hub::Status::Unpinned => Err(format!("{one} is not from the hub: nothing to update it from")),
+            crate::hub::Status::Failed(why) => Err(why.clone()),
+            crate::hub::Status::Gone => Err(format!("{one} is gone from its source")),
+            _ => {
+                println!("{one} is up to date");
+                Ok(())
+            }
+        };
+    }
+    // What could not be checked is said, and is not "up to date".
+    let unchecked: Vec<String> = checked
+        .iter()
+        .filter_map(|c| match &c.status {
+            crate::hub::Status::Failed(why) => Some(format!("{}: could not check: {why}", c.name)),
+            crate::hub::Status::Gone => Some(format!("{}: gone from its source", c.name)),
+            _ => None,
+        })
+        .collect();
+    for line in &unchecked {
+        println!("{line}");
+    }
+    if due.is_empty() {
+        if unchecked.is_empty() {
+            println!("every skill from the hub is up to date");
+            return Ok(());
+        }
+        return Err(format!("{} skills could not be updated", unchecked.len()));
+    }
+    let mut failed = Vec::new();
+    for c in due {
+        let Some(pin) = &c.source else { continue };
+        let result: Result<bool, String> = async {
+            let fetched = hub.as_ref().map_err(Clone::clone)?.fetch_pinned(pin, &std::env::temp_dir()).await?;
+            println!("{}", crate::hub::changes(home, &c.name, &fetched));
+            println!("{}", crate::hub::guard(&fetched));
+            if c.modified {
+                let what =
+                    if c.untracked { "may have been edited here" } else { "was edited here since it was installed" };
+                println!("  {} {what}: updating replaces those edits\n", c.name);
+                if yes && !force {
+                    println!("left {} alone (edited here; add --force, or update it without --yes)", c.name);
+                    return Ok(false);
+                }
+            }
+            if !confirm(&fetched, &format!("update {}", c.name), yes, force)? {
+                return Ok(false);
+            }
+            crate::hub::update(home, &c.name, &fetched)?;
+            Ok(true)
+        }
+        .await;
+        match result {
+            Ok(true) => println!("updated {}", c.name),
+            Ok(false) => println!("not updated: {}", c.name),
+            Err(e) => {
+                println!("{}: {e}", c.name);
+                failed.push(c.name.clone());
+            }
+        }
+    }
+    failed.extend(unchecked);
+    if failed.is_empty() { Ok(()) } else { Err(format!("not updated: {}", failed.join(", "))) }
+}
+
+/// `autobot skills audit [name]`.
+pub fn skills_audit(home: &Path, name: Option<&str>) -> Result<(), String> {
+    let out = audit_report(home, name)?;
+    print!("{out}");
+    Ok(())
+}
+
+/// What `skills audit` prints: each skill's trust level and findings.
+pub fn audit_report(home: &Path, name: Option<&str>) -> Result<String, String> {
+    let skills: Vec<crate::skills::Skill> =
+        crate::skills::list(home).into_iter().filter(|s| name.is_none_or(|n| s.name == n)).collect();
+    if let Some(name) = name
+        && skills.is_empty()
+    {
+        return Err(format!("there is no skill {name:?}"));
+    }
+    if skills.is_empty() {
+        return Ok("no skills yet\n".to_owned());
+    }
+    let mut out = String::new();
+    for skill in skills {
+        let pin = crate::hub::source(home, &skill.name);
+        let trust = crate::guard::Trust::of(pin.as_ref().map(|p| p.owner.as_str()));
+        let findings = crate::guard::audit(skill.dir().unwrap_or(&skill.path));
+        let from = pin.map(|p| format!("  {}", p.id)).unwrap_or_default();
+        out.push_str(&format!("{}{from}\n{}", skill.name, crate::guard::report(trust, &findings, 30)));
+    }
+    Ok(out)
 }
 
 /// `autobot usage [--session ID]`.

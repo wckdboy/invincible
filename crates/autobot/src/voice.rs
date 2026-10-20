@@ -23,7 +23,7 @@ use serde::Deserialize;
 /// The largest audio taken (a voice note of many minutes fits).
 pub const MAX_AUDIO: usize = 25 * 1024 * 1024;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct VoiceConfig {
     #[serde(default = "yes")]

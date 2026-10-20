@@ -220,7 +220,7 @@ impl Session {
         }
         let _ = std::fs::remove_file(self.undo_path());
         self.messages.clear();
-        crate::context::forget(&self.id);
+        crate::context::forget(self.path.parent(), &self.id);
         Ok(())
     }
 
@@ -353,6 +353,38 @@ pub fn list(dir: &Path) -> Vec<(String, std::time::SystemTime)> {
     found
 }
 
+/// Removes the conversations in [dir] untouched for [age] or longer, with the files kept beside
+/// each (`<id>.undo`, `<id>.context.json`, …); with [dry_run], only says which. The ones removed
+/// (or that would be), with their bytes.
+pub fn prune(dir: &Path, age: std::time::Duration, dry_run: bool) -> Result<Vec<(String, u64)>, String> {
+    let now = std::time::SystemTime::now();
+    let old: Vec<String> = list(dir)
+        .into_iter()
+        .filter(|(_, modified)| now.duration_since(*modified).is_ok_and(|d| d >= age))
+        .map(|(id, _)| id)
+        .collect();
+    let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(dir).into_iter().flatten().flatten().collect();
+    let mut out = Vec::new();
+    for id in old {
+        // A session id has no dots, so `<id>.` is its files and no other's.
+        let prefix = format!("{id}.");
+        let mine: Vec<&std::fs::DirEntry> =
+            entries.iter().filter(|e| e.file_name().to_string_lossy().starts_with(&prefix)).collect();
+        let bytes = mine.iter().filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum();
+        if !dry_run {
+            for entry in &mine {
+                let path = entry.path();
+                let removed = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+                removed.map_err(|e| format!("{}: {e}", path.display()))?;
+            }
+            // Its word index for recall ([crate::recall]).
+            let _ = std::fs::remove_file(dir.join(".index").join(format!("{id}.json")));
+        }
+        out.push((id, bytes));
+    }
+    Ok(out)
+}
+
 /// What the session [id] in [dir] is about: the first line of its first request (cut to [max]
 /// characters), read from the start of its file only.
 pub fn title(dir: &Path, id: &str, max: usize) -> Option<String> {
@@ -380,6 +412,41 @@ pub fn last_answer(messages: &[Value]) -> Option<&str> {
         .rev()
         .filter(|m| m["role"] == "assistant")
         .find_map(|m| m["content"].as_str().filter(|t| !t.trim().is_empty()))
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+
+    #[test]
+    fn old_conversations_go_with_their_files_and_new_ones_stay() {
+        let dir = std::env::temp_dir().join(format!("autobot-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join(".index")).unwrap();
+        for name in
+            ["old.jsonl", "old.undo", "old.context.json", "old_2.jsonl", "new.jsonl", "notes.txt", ".index/old.json"]
+        {
+            std::fs::write(dir.join(name), "{}\n").unwrap();
+        }
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 86400);
+        for name in ["old.jsonl", "old_2.jsonl"] {
+            std::fs::File::options().write(true).open(dir.join(name)).unwrap().set_modified(long_ago).unwrap();
+        }
+        let month = std::time::Duration::from_secs(30 * 86400);
+        let said = prune(&dir, month, true).unwrap();
+        let names: Vec<&str> = said.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names.len(), 2, "{said:?}");
+        assert!(names.contains(&"old") && names.contains(&"old_2"));
+        assert_eq!(said.iter().find(|(n, _)| n == "old").unwrap().1, 9, "with its files");
+        assert!(dir.join("old.jsonl").exists(), "a dry run removes nothing");
+        prune(&dir, month, false).unwrap();
+        let left: std::collections::BTreeSet<String> =
+            std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, [".index".to_owned(), "new.jsonl".to_owned(), "notes.txt".to_owned()].into());
+        assert!(!dir.join(".index/old.json").exists(), "its recall index goes too");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[cfg(test)]

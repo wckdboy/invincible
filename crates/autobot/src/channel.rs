@@ -97,6 +97,19 @@ pub trait Transport: Send + Sync {
             Ok(())
         })
     }
+    /// Sends an answer with the files the turn made; those it did not take with it, which go
+    /// after it one by one ([send_files]). By default, all of them (email attaches them).
+    fn answer_with<'a>(
+        &'a self,
+        chat: &'a str,
+        markdown: &'a str,
+        files: Vec<crate::media::Made>,
+    ) -> BoxFuture<'a, Result<Vec<crate::media::Made>, String>> {
+        Box::pin(async move {
+            self.answer(chat, markdown).await?;
+            Ok(files)
+        })
+    }
     fn edit<'a>(&'a self, _chat: &'a str, _id: &'a str, _text: &'a str) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async { Err("this platform does not edit messages".to_owned()) })
     }
@@ -600,13 +613,13 @@ async fn handle_inner(
             format!("✗ {e}")
         }
     };
-    transport.answer(&chat, &reply).await?;
-    send_files(transport.as_ref(), &chat, &outbox).await
+    let made = std::mem::take(&mut *outbox.lock().expect("outbox"));
+    let left = transport.answer_with(&chat, &reply, made).await?;
+    send_files(transport.as_ref(), &chat, left).await
 }
 
 /// The files a turn made, after its answer: as the platform takes them, else where they are.
-pub async fn send_files(transport: &dyn Transport, chat: &str, outbox: &crate::media::Outbox) -> Result<(), String> {
-    let made = std::mem::take(&mut *outbox.lock().expect("outbox"));
+pub async fn send_files(transport: &dyn Transport, chat: &str, made: Vec<crate::media::Made>) -> Result<(), String> {
     for file in made {
         match transport.send_file(chat, &file).await {
             Ok(true) => {}

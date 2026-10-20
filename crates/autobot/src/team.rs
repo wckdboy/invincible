@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoleConfig {
     /// What it is for: the main agent picks members by this.
@@ -46,7 +46,7 @@ pub struct RoleConfig {
     pub telegram_token_file: Option<std::path::PathBuf>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TeamConfig {
     #[serde(default = "two")]

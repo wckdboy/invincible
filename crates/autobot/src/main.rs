@@ -155,8 +155,11 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// List the saved conversations.
-    Sessions,
+    /// The saved conversations: list them, or prune the old ones.
+    Sessions {
+        #[command(subcommand)]
+        action: Option<SessionsAction>,
+    },
     /// What the agent remembered between conversations (`remember`): list, or forget one.
     Memory {
         /// The id of a fact to forget.
@@ -294,6 +297,21 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum SessionsAction {
+    /// List the saved conversations, newest first.
+    List,
+    /// Remove the conversations untouched for DAYS days or more (with their undo logs and the
+    /// rest kept beside them). They are gone for `recall` too.
+    Prune {
+        #[arg(long)]
+        days: u64,
+        /// Only say which would go.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum SkillsAction {
     /// List the skills and the proposals waiting.
     List,
@@ -311,8 +329,30 @@ enum SkillsAction {
         /// Install from the hub without asking (after reading it).
         #[arg(long, short)]
         yes: bool,
+        /// With --yes: install even what the scan calls dangerous (from anyone but an official
+        /// source).
+        #[arg(long)]
+        force: bool,
     },
+    /// Whether the skills from the hub (or one) changed where they are pinned, and whether they
+    /// were edited here.
+    Check { name: Option<String> },
+    /// Update skills from the hub (or one) that changed: each shown with what changes, replaced
+    /// when you say yes.
+    Update {
+        name: Option<String>,
+        /// Update without asking (after reading it); a skill edited here is left alone.
+        #[arg(long, short)]
+        yes: bool,
+        /// With --yes: update even what the scan calls dangerous, or was edited here.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Scan the installed skills (or one) for risky scripts and instructions, with where each
+    /// comes from (official, known publisher, community, local).
+    Audit { name: Option<String> },
     /// Remove a skill.
+    #[command(visible_alias = "uninstall")]
     Remove { name: String },
     /// Keep a skill the agent proposed (or its improvement): it uses it from now on.
     Accept { name: String },
@@ -332,7 +372,8 @@ enum ToolsAction {
 
 #[derive(Subcommand)]
 enum ConfigAction {
-    /// Print a key's value as written (a named bot's own, else the one it inherits).
+    /// Print a key's value as the bot runs with it, defaults included, and whether it is the
+    /// default, set in its file, or inherited from config.toml.
     Get { key: String },
     /// Set a key: VALUE is TOML (true, 24, ["ls"], "text") or else a plain string.
     Set { key: String, value: String },
@@ -850,15 +891,29 @@ fn run(mut cli: Cli) -> Result<(), String> {
         Command::Skills { action: Some(SkillsAction::Search { query, limit }) } => {
             runtime()?.block_on(autobot::manage::hub_search(&query.join(" "), limit))
         }
-        Command::Skills { action: Some(SkillsAction::Install { source, yes }) }
+        Command::Skills { action: Some(SkillsAction::Install { source, yes, force }) }
             if autobot::manage::from_hub(&source) =>
         {
-            runtime()?.block_on(autobot::manage::hub_install(&home, &source, yes))
+            runtime()?.block_on(autobot::manage::hub_install(&home, &source, yes, force))
+        }
+        Command::Skills { action: Some(SkillsAction::Check { name }) } => {
+            runtime()?.block_on(autobot::manage::hub_check(&home, name.as_deref()))
+        }
+        Command::Skills { action: Some(SkillsAction::Update { name, yes, force }) } => {
+            runtime()?.block_on(autobot::manage::hub_update(&home, name.as_deref(), yes, force))
+        }
+        Command::Skills { action: Some(SkillsAction::Audit { name }) } => {
+            autobot::manage::skills_audit(&home, name.as_deref())
         }
         Command::Skills { action } => {
             let action = match &action {
                 None | Some(SkillsAction::List) => None,
-                Some(SkillsAction::Search { .. }) => None,
+                Some(
+                    SkillsAction::Search { .. }
+                    | SkillsAction::Check { .. }
+                    | SkillsAction::Update { .. }
+                    | SkillsAction::Audit { .. },
+                ) => None,
                 Some(SkillsAction::Install { source, .. }) => Some(("install", source.as_str())),
                 Some(SkillsAction::Remove { name }) => Some(("remove", name.as_str())),
                 Some(SkillsAction::Accept { name }) => Some(("accept", name.as_str())),
@@ -931,11 +986,24 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Sessions => {
+        Command::Sessions { action: None | Some(SessionsAction::List) } => {
             for (name, modified) in autobot::session::list(&home.join("sessions")) {
                 let ago = modified.elapsed().map(|d| d.as_secs()).unwrap_or(0);
                 println!("{name}  {}", human(ago));
             }
+            Ok(())
+        }
+        Command::Sessions { action: Some(SessionsAction::Prune { days, dry_run }) } => {
+            if days == 0 {
+                return Err("--days 1 at least".to_owned());
+            }
+            let age = std::time::Duration::from_secs(days * 86400);
+            let gone = autobot::session::prune(&home.join("sessions"), age, dry_run)?;
+            let bytes: u64 = gone.iter().map(|(_, b)| b).sum();
+            for (name, _) in &gone {
+                println!("{}{name}", if dry_run { "would remove " } else { "removed " });
+            }
+            println!("{} conversations, {} KiB, untouched for {days} days or more", gone.len(), bytes.div_ceil(1024));
             Ok(())
         }
     }

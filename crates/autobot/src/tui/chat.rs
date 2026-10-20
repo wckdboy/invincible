@@ -107,12 +107,9 @@ const COMMANDS: &[(&str, &str)] = &[
 fn context_rows(agent: &crate::agent::Agent, home: &Path, session: &str) -> Vec<(String, String)> {
     let mut rows = Vec::new();
     let workdir = agent.tools.workdir();
-    let files: Vec<String> = agent.tools.context_files().iter().map(|f| f.shown.clone()).collect();
+    let files: Vec<String> = agent.tools.context_files().iter().map(crate::context::File::label).collect();
     rows.push(("project".to_owned(), if files.is_empty() { "no AGENTS.md".to_owned() } else { files.join(", ") }));
-    let nested: Vec<String> = crate::context::given(session)
-        .iter()
-        .map(|p| p.strip_prefix(workdir).map(|r| r.display().to_string()).unwrap_or_else(|_| p.display().to_string()))
-        .collect();
+    let nested = crate::context::given_labels(workdir, Some(&home.join("sessions")), session);
     if !nested.is_empty() {
         rows.push(("taken on the way".to_owned(), nested.join(", ")));
     }

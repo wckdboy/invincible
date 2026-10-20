@@ -63,7 +63,7 @@ pub struct Record {
 }
 
 /// A price per million tokens, in dollars: `[prices."deepseek-chat"] input = 0.27, output = 1.10`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Price {
     pub input: f64,
