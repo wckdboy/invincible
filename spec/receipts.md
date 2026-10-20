@@ -48,13 +48,17 @@ Both endpoints are on the loopback API (behind the token) and on the device API.
 | `data_policy` | when a model ran | that model's data policy (`owned` on the node) |
 | `tokens` | when the answer reported usage | `input` and `output` tokens |
 | `redactions` | when something was hidden | distinct values hidden per kind ([redaction.md](redaction.md)) |
+| `images` | when the request carried images | one `{"sha256", "bytes", "mime"}` per image, in order: the SHA-256 (hex) and size of its decoded bytes and its type; for an image given by link, the hash of the URL, `bytes` 0 and `mime` `url` |
 | `egress` | always | every attempt to reach a host off the node, in order; `[]` when nothing left |
 
 An egress entry has the host, the route (`direct`, `tor`, `socks5`), the request bytes sent, the
 answer bytes received, and `ok` (false for an attempt that failed and was routed elsewhere). A failed
 attempt is listed with its full request size, because it may have been sent before the failure.
 
-A receipt never contains prompt or answer text, values that were redacted, or timestamps.
+A receipt never contains prompt or answer text, image bytes, values that were redacted, or
+timestamps. Images are passed on as they came (redaction covers text only); a model known not to
+take images (`"vision": false` in `/v1/models`) is not sent them: the request is refused with
+`400 model_cannot_see_images`.
 
 ## Signature
 

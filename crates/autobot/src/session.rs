@@ -27,6 +27,13 @@ fn is_summary(message: &Value) -> bool {
     message["autobot"] == "summary"
 }
 
+/// What [message] takes of the budget: its characters, and about what an image costs
+/// ([crate::images::BUDGET_CHARS]) for each it carries.
+pub fn cost(message: &Value) -> usize {
+    let images = message.get(crate::images::KEY).and_then(Value::as_array).map_or(0, Vec::len);
+    message.to_string().len() + images * crate::images::BUDGET_CHARS
+}
+
 impl Session {
     /// The session [id] in [dir], with what it already holds.
     pub fn open(dir: &Path, id: &str) -> Result<Self, String> {
@@ -205,7 +212,7 @@ impl Session {
             if is_summary(m) {
                 continue;
             }
-            used += m.to_string().len();
+            used += cost(m);
             if used > self.budget || self.messages.len() - i > WINDOW.max(self.budget / 1024) {
                 break;
             }

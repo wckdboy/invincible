@@ -1,10 +1,14 @@
 //! The composer's text: several lines, a cursor, the usual editing keys (ctrl+a/e/w/u/k/y,
 //! words with alt), history on ↑/↓ at the first and last line, ctrl+r searching the history back
 //! as you type, and large pastes kept aside as `[pasted N lines]` until the message is sent.
+//! Attached images stand in the text as `[image 1: shot.png 1280×720]`; like a paste's label,
+//! backspace takes one whole.
 
 use std::path::Path;
 
 use unicode_width::UnicodeWidthChar;
+
+use crate::images::Attachment;
 
 /// Pastes longer than this many lines (or characters) are shown as one label.
 const PASTE_LINES: usize = 4;
@@ -21,6 +25,8 @@ pub struct Editor {
     draft: String,
     /// Labels standing in for pastes this session, and what they stand for.
     pastes: Vec<(String, String)>,
+    /// Labels standing in for images attached this session, and the images.
+    images: Vec<(String, Attachment)>,
     /// What ctrl+w/u/k took, for ctrl+y.
     killed: String,
     /// ctrl+r: searching the history.
@@ -102,9 +108,54 @@ impl Editor {
         self.pastes.push((label, text));
     }
 
-    /// The labels standing in for pastes (to show them quieter).
-    pub fn paste_labels(&self) -> impl Iterator<Item = &str> {
-        self.pastes.iter().map(|(label, _)| label.as_str())
+    /// The labels standing in for pastes and images (to show them quieter).
+    pub fn labels(&self) -> impl Iterator<Item = &str> {
+        self.pastes.iter().map(|(label, _)| label.as_str()).chain(self.images.iter().map(|(label, _)| label.as_str()))
+    }
+
+    /// Puts [image] in at the cursor, as its label (`[image N: name W×H]`, N counting this
+    /// session's images); the label.
+    pub fn attach(&mut self, image: Attachment) -> String {
+        let label = match self.images.iter().find(|(_, a)| *a == image) {
+            Some((label, _)) => label.clone(),
+            None => {
+                let label = image.label(self.images.len() + 1);
+                self.images.push((label.clone(), image));
+                label
+            }
+        };
+        let before = self.before();
+        let space = if before.is_empty() || before.ends_with(char::is_whitespace) { "" } else { " " };
+        self.insert(&format!("{space}{label} "));
+        label
+    }
+
+    /// The images [text] (as sent) names by their labels, in order, and the text with each label
+    /// as the model sees it: `[image 1: shot.png]`, numbered in this message.
+    pub fn images_in(&self, text: &str) -> (String, Vec<Attachment>) {
+        let mut found: Vec<(usize, &str, &Attachment)> = Vec::new();
+        for (label, image) in &self.images {
+            found.extend(text.match_indices(label.as_str()).map(|(i, _)| (i, label.as_str(), image)));
+        }
+        found.sort_by_key(|(i, ..)| *i);
+        let (mut out, mut images, mut at) = (String::new(), Vec::<Attachment>::new(), 0);
+        for (i, label, image) in found {
+            if i < at {
+                continue;
+            }
+            out.push_str(&text[at..i]);
+            let n = match images.iter().position(|a| a == image) {
+                Some(k) => k + 1,
+                None => {
+                    images.push(image.clone());
+                    images.len()
+                }
+            };
+            out.push_str(&image.marker(n));
+            at = i + label.len();
+        }
+        out.push_str(&text[at..]);
+        (out, images)
     }
 
     fn before(&self) -> &str {
@@ -163,8 +214,11 @@ impl Editor {
     }
 
     pub fn backspace(&mut self) {
-        // A paste's label goes whole.
-        if let Some(label) = self.pastes.iter().map(|(l, _)| l.clone()).find(|l| self.before().ends_with(l.as_str())) {
+        // A paste's or an image's label goes whole (with the space after an image's).
+        let before = self.before();
+        let image = self.images.iter().map(|(l, _)| format!("{l} ")).find(|l| before.ends_with(l.as_str()));
+        let label = self.labels().find(|l| before.ends_with(l)).map(str::to_owned).or(image);
+        if let Some(label) = label {
             let start = self.cursor - label.len();
             self.text.replace_range(start..self.cursor, "");
             self.cursor = start;
@@ -547,6 +601,46 @@ mod tests {
         e.paste(&big);
         e.backspace();
         assert_eq!(e.text(), "x ", "a label is deleted whole");
+    }
+
+    #[test]
+    fn images_are_tokens_until_sent() {
+        let shot = |name: &str| crate::images::Attachment {
+            path: format!("/tmp/{name}").into(),
+            name: name.into(),
+            sha256: name.repeat(4),
+            bytes: 10,
+            mime: "image/png".into(),
+            width: 1280,
+            height: 720,
+        };
+        let mut e = typed("what is");
+        assert_eq!(e.attach(shot("shot.png")), "[image 1: shot.png 1280×720]");
+        e.insert("and");
+        e.attach(shot("b.png"));
+        e.insert("vs ");
+        e.attach(shot("shot.png"));
+        assert_eq!(
+            e.text(),
+            "what is [image 1: shot.png 1280×720] and [image 2: b.png 1280×720] vs [image 1: shot.png 1280×720] "
+        );
+        let (shown, sent) = e.take();
+        assert_eq!(shown, sent, "pastes only are put back at take");
+        let (text, images) = e.images_in(&sent);
+        assert_eq!(text, "what is [image 1: shot.png] and [image 2: b.png] vs [image 1: shot.png] ");
+        assert_eq!(images, vec![shot("shot.png"), shot("b.png")]);
+        // Numbered in the message: the second image of the session alone is image 1 there.
+        assert_eq!(e.images_in("[image 2: b.png 1280×720]").0, "[image 1: b.png]");
+        assert_eq!(e.images_in("no images").1, vec![]);
+        // Backspace takes a token whole, with its space.
+        let mut e = typed("see ");
+        e.attach(shot("shot.png"));
+        e.backspace();
+        assert_eq!(e.text(), "see ");
+        e.attach(shot("shot.png"));
+        e.left();
+        e.backspace();
+        assert_eq!(e.text(), "see  ");
     }
 
     #[test]

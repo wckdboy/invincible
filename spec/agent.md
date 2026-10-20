@@ -25,7 +25,7 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 |---|---|---|
 | `GET /v1/agent` | | `{"name", "model", "workdir", "approvals": "ask"\|"allowlist"\|"trust", "private": bool}` |
 | `GET /v1/agent/sessions` | | `{"sessions": [{"id", "modified"}]}`, newest first; `modified` in Unix seconds |
-| `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape |
+| `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape; a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
 | `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}` | An event stream (below) |
 | `POST /v1/agent/sessions/{id}/fork` | `{"to"?, "at"?}` | `{"id", "messages"}`: a new conversation starting as this one did, up to message `at` (rounded to the end of that turn; all of it by default) |
 | `POST /v1/agent/sessions/{id}/steer` | `{"text": "..."}` | `{"ok": true}`: a message for the turn running in the session, taken in before the agent's next step; `409` (`no_turn`) when none is running |

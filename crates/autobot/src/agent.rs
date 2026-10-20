@@ -31,6 +31,8 @@ pub struct Agent {
 pub struct Options {
     /// KiB of recent conversation sent per call (default [crate::session::CHAR_BUDGET]).
     pub context_kib: Option<usize>,
+    /// Whether the model takes images (None: not known); images are not sent when it does not.
+    pub vision: Option<bool>,
 }
 
 /// What happens during a turn, for whoever is watching (a terminal, a chat).
@@ -82,16 +84,30 @@ impl Agent {
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> Result<Outcome, String> {
+        self.turn_with(session, text, &[], approver, grants, events).await
+    }
+
+    /// [Agent::turn] with [images] shown beside the owner's [text] ([crate::images]).
+    pub async fn turn_with(
+        &self,
+        session: &mut Session,
+        text: &str,
+        images: &[crate::images::Attachment],
+        approver: &dyn Approver,
+        grants: &mut HashSet<Action>,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> Result<Outcome, String> {
         // Tools that act later know which conversation (and Telegram chat) this turn is for.
         let outer = crate::tools::TURN.try_with(Clone::clone).ok().unwrap_or_default();
         let context = crate::tools::TurnContext { session: session.id.clone(), ..outer };
-        crate::tools::TURN.scope(context, self.turn_inner(session, text, approver, grants, events)).await
+        crate::tools::TURN.scope(context, self.turn_inner(session, text, images, approver, grants, events)).await
     }
 
     async fn turn_inner(
         &self,
         session: &mut Session,
         text: &str,
+        images: &[crate::images::Attachment],
         approver: &dyn Approver,
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
@@ -145,7 +161,7 @@ impl Agent {
         if let Some(kib) = self.options.context_kib {
             session.budget = kib.max(8) * 1024;
         }
-        session.push(json!({ "role": "user", "content": text }))?;
+        session.push(crate::images::message(text, images))?;
         let mut definitions = self.tools.definitions();
         if self.leads_team()
             && let Some(list) = definitions.as_array_mut()
@@ -225,7 +241,18 @@ impl Agent {
                 crate::gateway::Delta::Text(text) => events(Event::Text(text)),
                 crate::gateway::Delta::Reasoning(text) => events(Event::Reasoning(text)),
             };
-            let reply = match self.gateway.chat_with(&messages, &definitions, confirmed, &streamed).await {
+            // Images go as parts, read from their files now; the session and trajectories keep
+            // only their references.
+            // (Reading and scaling them is slow work: off the task that draws the terminal.)
+            let wire = if crate::images::any(&messages) {
+                let (owned, vision) = (messages.clone(), self.options.vision);
+                tokio::task::spawn_blocking(move || crate::images::expand(&owned, vision))
+                    .await
+                    .map_err(|e| format!("the images: {e}"))?
+            } else {
+                messages.clone()
+            };
+            let reply = match self.gateway.chat_with(&wire, &definitions, confirmed, &streamed).await {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
                     let action = Action::Cloud(why);
@@ -410,7 +437,7 @@ impl Agent {
             ..outer
         };
         let mut grants = HashSet::new();
-        let run = member.turn_inner(&mut session, task, approver, &mut grants, &tagged);
+        let run = member.turn_inner(&mut session, task, &[], approver, &mut grants, &tagged);
         crate::tools::TURN.scope(context, run).await
     }
 

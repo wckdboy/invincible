@@ -172,6 +172,9 @@ pub struct Draft {
     pub data_policy: Option<String>,
     pub redactions: BTreeMap<&'static str, usize>,
     pub attempts: Vec<Attempt>,
+    /// The images the request carried, by hash, size and type ([crate::media::Image]); never
+    /// their bytes.
+    pub images: Vec<Value>,
     /// For the audit log, not the receipt: who asked, the client they named, which API.
     pub caller: crate::audit::Caller,
     pub client: Option<String>,
@@ -187,6 +190,7 @@ impl Draft {
             data_policy: None,
             redactions: BTreeMap::new(),
             attempts: Vec::new(),
+            images: Vec::new(),
             caller: crate::audit::Caller::Local,
             client: None,
             api: "chat",
@@ -222,6 +226,9 @@ impl Draft {
         }
         if !self.redactions.is_empty() {
             receipt["redactions"] = json!(self.redactions);
+        }
+        if !self.images.is_empty() {
+            receipt["images"] = json!(self.images);
         }
         if let Some((input, output)) = usage(&self.tail) {
             receipt["tokens"] = json!({ "input": input, "output": output });

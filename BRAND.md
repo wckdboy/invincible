@@ -103,7 +103,9 @@ Both CLIs and the installer speak one grammar:
   A picker (`/model`, `/resume` alone) and the `/` and `@` lists sit under the composer: the
   chosen row marked `›` in the signal, the rest ash, a faint count and keys last. Searching what
   was sent (ctrl+r) turns the status line into `search: query` (the query bold) with its keys on
-  the right.
+  the right. What stands in for something in the composer is quieter than what is typed, in
+  ash: a folded paste `[pasted 120 lines]`, an image `[image 1: shot.png 1280×720]`; in the `@`
+  list an image file carries a faint `image` beside it.
 - The terminal is told, never shown: the window title `autobot · <project>` (the old one put
   back after), a notification (OSC 9, else the bell) only when a long turn ends or a question
   waits and the window is not in front, the clipboard by OSC 52.

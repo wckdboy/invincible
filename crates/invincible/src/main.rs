@@ -794,7 +794,8 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let mut supervisors = Vec::new();
     for model in &config.models {
         let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
-        let engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false);
+        let engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
+            .with_vision(model.vision(&config.engine));
         supervisors.push(engine::supervise(engine.clone(), Launch::llama_server(&config.engine, model, port, &logs)));
         engines.push(engine);
     }
@@ -816,7 +817,8 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
                 tracing::warn!(model = %c.id, "cloud backend disabled: {e}");
                 invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, None, c.context, policy).disabled()
             }
-        };
+        }
+        .with_vision(c.vision);
         cloud.push(model);
     }
     if !config.cloud.is_empty() && config.node.settings().network.is_offline() {

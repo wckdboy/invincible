@@ -105,6 +105,8 @@ fn builtin(name: &str) -> bool {
             | "compact"
             | "ps"
             | "commands"
+            | "copy"
+            | "image"
     )
 }
 

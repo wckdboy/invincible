@@ -10,6 +10,7 @@ pub mod engine;
 pub mod eval;
 pub mod fetch;
 pub mod fsutil;
+pub mod media;
 pub mod models;
 pub mod receipts;
 pub mod redact;

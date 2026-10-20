@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Request as HttpRequest, State};
+use axum::extract::{DefaultBodyLimit, Path, Request as HttpRequest, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -30,6 +30,9 @@ pub const DECISION_HEADER: &str = "invincible-decision";
 pub const CALLER_HEADER: &str = "invincible-caller";
 /// Names the program sending a request (`autobot-agent`), for the audit log.
 pub const CLIENT_HEADER: &str = "invincible-client";
+/// The largest inference request taken: room for a conversation with several images (a
+/// downscaled screenshot is a few hundred KiB in base64; providers take up to 20 MB each).
+pub const MAX_REQUEST: usize = 32 * 1024 * 1024;
 
 pub struct AppState {
     pub engines: Vec<Engine>,
@@ -115,6 +118,12 @@ impl AppState {
         node.chain(cloud).collect()
     }
 
+    /// Whether model [id] takes images (None: not known, or no such model).
+    pub fn vision(&self, id: &str) -> Option<bool> {
+        let engine = self.engines.iter().find(|e| e.id == id).map(|e| e.vision);
+        engine.or_else(|| self.cloud.iter().find(|c| c.id == id).map(|c| c.vision)).flatten()
+    }
+
     pub fn with_pairing(mut self, pairing: Arc<Pairing>) -> Self {
         self.pairing = Some(pairing);
         self
@@ -125,8 +134,8 @@ impl AppState {
 fn api() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/models", get(models))
-        .route("/v1/chat/completions", post(chat_completions))
-        .route("/v1/messages", post(messages))
+        .route("/v1/chat/completions", post(chat_completions).layer(DefaultBodyLimit::max(MAX_REQUEST)))
+        .route("/v1/messages", post(messages).layer(DefaultBodyLimit::max(MAX_REQUEST)))
         .route("/v1/receipts/{id}", get(receipt))
         .route("/v1/audit", get(audit))
         .route("/v1/node", get(node_info))
@@ -368,6 +377,7 @@ async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
                     "healthy": m.healthy,
                     "context": m.context,
                     "data_policy": data_policy_code(m.data_policy),
+                    "vision": state.vision(&m.id),
                 },
             })
         })
@@ -437,6 +447,9 @@ async fn infer(
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
+    // Images go on as they came; the receipt notes each by hash, size and type.
+    let images = crate::media::images(&parsed);
+    draft.images = images.iter().map(crate::media::Image::to_json).collect();
     draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
     draft.client = headers
         .get(CLIENT_HEADER)
@@ -458,6 +471,16 @@ async fn infer(
         };
         let input = RouteInput { request: request.clone(), node: state.node.clone(), models };
         let decision = decide(&input);
+        // A model known not to take images is not sent them: it would fail, or answer blind.
+        if let (Action::Run, Some(model)) = (&decision.action, &decision.model)
+            && !images.is_empty()
+            && state.vision(model) == Some(false)
+        {
+            let message = format!(
+                "{model} can't see images; ask for a model that can (`vision = true` in its config, or a projector, `mmproj`, for a local model)"
+            );
+            break (decision, error(StatusCode::BAD_REQUEST, "model_cannot_see_images", &message));
+        }
         let response = match (&decision.action, decision.tier) {
             (Action::Run, Some(Tier::Node)) => {
                 let engine =
@@ -538,8 +561,11 @@ fn route_request(headers: &HeaderMap, body: &Value) -> Request {
     }
 }
 
-/// Tokens the request needs: the messages at about four characters a token, plus the answer's
-/// limit when the client sets one. Rough, and errs high.
+/// Tokens one image counts for in [estimate_tokens] (a downscaled image is 1–2k).
+const IMAGE_TOKENS: u64 = 1_600;
+
+/// Tokens the request needs: the messages at about four characters a token, images at
+/// [IMAGE_TOKENS], plus the answer's limit when the client sets one. Rough, and errs high.
 fn estimate_tokens(body: &Value) -> u64 {
     let chars: usize = body
         .get("messages")
@@ -563,7 +589,8 @@ fn estimate_tokens(body: &Value) -> u64 {
         _ => 0,
     };
     let answer = ["max_completion_tokens", "max_tokens"].iter().find_map(|k| body.get(*k).and_then(Value::as_u64));
-    ((chars + system) as u64).div_ceil(4) + answer.unwrap_or(0)
+    let images = crate::media::images(body).len() as u64;
+    ((chars + system) as u64).div_ceil(4) + images * IMAGE_TOKENS + answer.unwrap_or(0)
 }
 
 /// Sends the request to the engine unchanged and streams its answer back unchanged (SSE included).
@@ -637,14 +664,17 @@ mod tests {
 
     #[test]
     fn estimates_text_and_parts_and_answer_limit() {
-        let body = json!({
+        let mut body = json!({
             "messages": [
                 { "role": "system", "content": "12345678" },
                 { "role": "user", "content": [{ "type": "text", "text": "abcd" }, { "type": "image_url" }] }
             ],
             "max_tokens": 100
         });
-        assert_eq!(estimate_tokens(&body), 3 + 100);
+        assert_eq!(estimate_tokens(&body), 3 + 100, "an image part without a URL is not an image");
+        body["messages"][1]["content"][1] =
+            json!({ "type": "image_url", "image_url": { "url": "data:image/png;base64,aGVsbG8=" } });
+        assert_eq!(estimate_tokens(&body), 3 + super::IMAGE_TOKENS + 100);
         assert_eq!(estimate_tokens(&json!({})), 0);
     }
 }

@@ -17,6 +17,7 @@ pub mod eval;
 pub mod gateway;
 pub mod heartbeat;
 pub mod hooks;
+pub mod images;
 pub mod mcp;
 pub mod memory;
 pub mod procs;
@@ -73,7 +74,7 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),
         mcp: std::sync::Arc::new(mcp::Hub::new(config.mcp.clone())?),
         trajectories: config.agent.trajectories.then(|| std::sync::Arc::new(trajectory::Recorder::dir(home))),
-        options: agent::Options { context_kib: config.agent.context_kib },
+        options: agent::Options { context_kib: config.agent.context_kib, vision: None },
     })
 }
 
@@ -103,12 +104,23 @@ pub fn use_model(
         Some(m) if m.is_cloud() => false,
         _ => config.gateway.private,
     });
+    agent.options.vision = vision(models, id);
     if config.agent.context_kib.is_none() {
         let kib = info.map_or(session::CHAR_BUDGET / 1024, gateway::ModelInfo::context_kib);
         agent.options.context_kib = Some(kib);
         agent.tools = agent.tools.clone().with_context(kib);
     }
     Ok(())
+}
+
+/// Whether model [id] of [models] takes images: as the gateway says; for `auto`, no when no
+/// model does, else not known (the router picks).
+pub fn vision(models: &[gateway::ModelInfo], id: &str) -> Option<bool> {
+    if id == "auto" {
+        let blind = !models.is_empty() && models.iter().all(|m| m.vision == Some(false));
+        return blind.then_some(false);
+    }
+    models.iter().find(|m| m.id == id).and_then(|m| m.vision)
 }
 
 /// The gateway's configuration file.

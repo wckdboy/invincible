@@ -146,7 +146,11 @@ pub fn suggest(text: &str, cursor: usize, commands: &[(String, String)], files: 
     let items: Vec<Item> = rank(query, files.iter().map(|f| (f.as_str(), "")))
         .into_iter()
         .take(50)
-        .map(|(path, _)| Item { text: format!("@{path}"), detail: String::new() })
+        .map(|(path, _)| {
+            // Images are shown to the model, not pasted in as text.
+            let image = crate::images::is_image(Path::new(path));
+            Item { text: format!("@{path}"), detail: if image { "image".into() } else { String::new() } }
+        })
         .collect();
     if items.is_empty() || (items.len() == 1 && items[0].text == before[start..]) {
         return None;
@@ -229,12 +233,17 @@ mod tests {
 
     #[test]
     fn an_at_word_lists_files() {
-        let files: Vec<String> =
-            ["Cargo.toml", "src/", "src/main.rs", "src/tui/mod.rs"].iter().map(|s| s.to_string()).collect();
+        let files: Vec<String> = ["Cargo.toml", "src/", "src/main.rs", "src/tui/mod.rs", "docs/Shot.PNG"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let p = suggest("look at @ma", 11, &[], Some(&files)).unwrap();
         assert_eq!(p.kind, Kind::Path);
         assert_eq!(p.range, 8..11);
         assert_eq!(p.items[0].text, "@src/main.rs");
+        assert_eq!(p.items[0].detail, "");
+        let shot = suggest("@sho", 4, &[], Some(&files)).unwrap();
+        assert_eq!((shot.items[0].text.as_str(), shot.items[0].detail.as_str()), ("@docs/Shot.PNG", "image"));
         assert!(suggest("look at @src/main.rs", 20, &[], Some(&files)).is_none(), "already whole");
         assert!(suggest("no at word", 10, &[], Some(&files)).is_none());
         assert!(suggest("@x", 2, &[], None).is_none(), "no files known yet");

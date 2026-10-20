@@ -1171,3 +1171,53 @@ async fn reads_in_one_reply_run_together_and_come_back_in_order() {
     assert_eq!(results[1], "b.txt:1: two\n");
     assert!(results[2].starts_with("hi"));
 }
+
+#[tokio::test]
+async fn images_go_as_parts_while_the_session_and_trajectories_keep_references() {
+    let (url, script) = gateway(vec![say("A gradient."), say("Still a gradient."), say("Gone."), say("Blind.")]).await;
+    let dir = temp("images");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let recorder = Arc::new(autobot::trajectory::Recorder::memory());
+    agent.trajectories = Some(recorder.clone());
+    let path = dir.join("shot.png");
+    let rgb = image::RgbImage::from_fn(48, 24, |x, y| image::Rgb([x as u8 * 5, y as u8 * 9, 120]));
+    rgb.save(&path).unwrap();
+    let shot = autobot::images::attach(&path).unwrap();
+    let mut session = Session::open(&dir.join("sessions"), "img").unwrap();
+    let owner = owner(Answer::Deny);
+    let text = "what is [image 1: shot.png]?";
+    let outcome = agent
+        .turn_with(&mut session, text, std::slice::from_ref(&shot), &owner, &mut HashSet::new(), &quiet)
+        .await
+        .unwrap();
+    assert_eq!(outcome.text, "A gradient.");
+    // A follow-up: the image is still in the window, and still on disk, so it goes again.
+    agent.turn(&mut session, "and now?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    std::fs::remove_file(&path).unwrap();
+    agent.turn(&mut session, "and now it is gone?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    agent.options.vision = Some(false);
+    std::fs::write(&path, b"").unwrap();
+    agent.turn(&mut session, "blind?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+
+    let script = script.lock().unwrap();
+    let user = |call: usize| script.seen[call].1["messages"][1].clone();
+    let first = user(0);
+    assert!(first.get("autobot_images").is_none(), "the reference stays home");
+    assert_eq!(first["content"][0], json!({ "type": "text", "text": text }));
+    let url = first["content"][1]["image_url"]["url"].as_str().unwrap();
+    assert!(url.starts_with("data:image/png;base64,iVBORw0KGgo"), "{}", &url[..40]);
+    assert_eq!(user(1)["content"][1], first["content"][1], "sent again while on disk");
+    assert_eq!(user(2)["content"], format!("{text}\n([image 1: shot.png] not sent: no longer on disk)"));
+    assert!(user(3)["content"].as_str().unwrap().ends_with("not sent: this model can't see images)"));
+
+    // On disk: the path, hash and size, never the bytes.
+    let file = std::fs::read_to_string(dir.join("sessions/img.jsonl")).unwrap();
+    let stored: Value = serde_json::from_str(file.lines().next().unwrap()).unwrap();
+    assert_eq!(stored["content"], text);
+    assert_eq!(stored["autobot_images"][0]["sha256"], shot.sha256);
+    assert_eq!(stored["autobot_images"][0]["path"], path.display().to_string());
+    assert!(!file.contains("base64,"));
+    let kept = recorder.take();
+    assert_eq!(kept.len(), 4);
+    assert!(!serde_json::to_string(&kept).unwrap().contains("base64,"), "trajectories keep references too");
+}

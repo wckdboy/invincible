@@ -58,6 +58,8 @@ pub struct ModelInfo {
     /// Its context, in tokens.
     pub context: Option<u64>,
     pub healthy: bool,
+    /// Whether it takes images (None: the gateway does not know).
+    pub vision: Option<bool>,
 }
 
 impl ModelInfo {
@@ -252,6 +254,7 @@ impl Gateway {
                     tier: m["invincible"]["tier"].as_str().unwrap_or("node").to_owned(),
                     context: m["invincible"]["context"].as_u64(),
                     healthy: m["invincible"]["healthy"].as_bool().unwrap_or(true),
+                    vision: m["invincible"]["vision"].as_bool(),
                 })
             })
             .collect())

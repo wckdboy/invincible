@@ -35,6 +35,10 @@ unicode-width = "0.2"
 # Discord's gateway is a websocket.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rustix = { version = "1", features = ["termios", "event", "stdio", "fs", "process"] }
+base64.workspace = true
+# Images shown to the agent: decoded, downscaled and re-encoded before they are sent (only the
+# four formats terminals hand over; no rayon, no other codecs).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
 [lints]
 workspace = true

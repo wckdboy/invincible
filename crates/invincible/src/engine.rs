@@ -26,6 +26,8 @@ pub struct Engine {
     pub context: Option<u64>,
     /// Where the engine's OpenAI-compatible API is, e.g. `http://127.0.0.1:41234`.
     pub base_url: String,
+    /// Whether it takes images (None: not known).
+    pub vision: Option<bool>,
     healthy: Arc<AtomicBool>,
 }
 
@@ -36,8 +38,15 @@ impl Engine {
             id: id.to_owned(),
             context,
             base_url: base_url.trim_end_matches('/').to_owned(),
+            vision: None,
             healthy: Arc::new(AtomicBool::new(healthy)),
         }
+    }
+
+    /// The same engine, taking images or not.
+    pub fn with_vision(mut self, vision: Option<bool>) -> Self {
+        self.vision = vision;
+        self
     }
 
     pub fn healthy(&self) -> bool {
@@ -75,6 +84,9 @@ impl Launch {
         ];
         if let Some(context) = model.context {
             args.extend(["--ctx-size".to_owned(), context.to_string()]);
+        }
+        if let Some(mmproj) = &model.mmproj {
+            args.extend(["--mmproj".to_owned(), mmproj.display().to_string()]);
         }
         args.extend(engine.extra_args.iter().cloned());
         Self { program: engine.llama_server.clone(), args, log: logs.join(format!("{}.log", model.id)) }

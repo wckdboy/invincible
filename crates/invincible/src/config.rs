@@ -73,6 +73,7 @@ impl Default for AgentLink {
 /// api_key_file = "keys/anthropic"            # relative to $INVINCIBLE_HOME; or api_key_env
 /// context = 200000
 /// data_policy = "retention:30"               # owned, no-retention, retention:<days>, trains, unknown
+/// vision = true                              # takes images (default: known for common models)
 /// ```
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,6 +90,9 @@ pub struct CloudConfig {
     pub context: Option<u64>,
     #[serde(default = "unknown_policy")]
     pub data_policy: String,
+    /// Whether it takes images; unset: guessed from the model's name ([crate::cloud::guess_vision]).
+    #[serde(default)]
+    pub vision: Option<bool>,
 }
 
 fn unknown_policy() -> String {
@@ -214,6 +218,29 @@ pub struct ModelConfig {
     /// Layers to offload to the GPU (`999`: all).
     #[serde(default = "all_layers")]
     pub gpu_layers: u32,
+    /// The model's multimodal projector (an `mmproj` GGUF): with it, the model sees images.
+    #[serde(default)]
+    pub mmproj: Option<PathBuf>,
+    /// Whether it takes images; unset: when it has an `mmproj`.
+    #[serde(default)]
+    pub vision: Option<bool>,
+}
+
+impl ModelConfig {
+    /// Whether the model takes images: as set, else with a projector yes; else no, unless the
+    /// engine's extra arguments may give it one (then unknown).
+    pub fn vision(&self, engine: &EngineConfig) -> Option<bool> {
+        if self.vision.is_some() {
+            return self.vision;
+        }
+        if self.mmproj.is_some() {
+            return Some(true);
+        }
+        if engine.extra_args.iter().any(|a| a.starts_with("--mmproj") || a == "-mm" || a == "-mmu") {
+            return None;
+        }
+        Some(false)
+    }
 }
 
 fn all_layers() -> u32 {
@@ -323,6 +350,20 @@ mod tests {
         let both =
             "[[cloud]]\nid = \"c\"\nbase_url = \"https://x.org/v1\"\napi_key_env = \"K\"\napi_key_file = \"k\"\n";
         assert!(Config::parse(both).unwrap_err().contains("not both"));
+    }
+
+    #[test]
+    fn vision_follows_the_projector_unless_set() {
+        let config = Config::parse(
+            "[[models]]\nid = \"a\"\npath = \"a.gguf\"\n[[models]]\nid = \"b\"\npath = \"b.gguf\"\nmmproj = \"b-mmproj.gguf\"\n[[models]]\nid = \"c\"\npath = \"c.gguf\"\nvision = true\n[[cloud]]\nid = \"d\"\nbase_url = \"https://x.org/v1\"\nvision = false\n",
+        )
+        .unwrap();
+        let seen: Vec<Option<bool>> = config.models.iter().map(|m| m.vision(&config.engine)).collect();
+        assert_eq!(seen, [Some(false), Some(true), Some(true)]);
+        assert_eq!(config.cloud[0].vision, Some(false));
+        let mut engine = config.engine.clone();
+        engine.extra_args = vec!["--mmproj".into(), "p.gguf".into()];
+        assert_eq!(config.models[0].vision(&engine), None, "the engine's own arguments may give it one");
     }
 
     #[test]

@@ -30,6 +30,8 @@ pub struct CloudModel {
     pub key: Option<String>,
     pub context: Option<u64>,
     pub data_policy: DataPolicy,
+    /// Whether it takes images (None: not known).
+    pub vision: Option<bool>,
     /// Unusable for good (no key): never healthy.
     pub disabled: bool,
     down_until: Mutex<Option<Instant>>,
@@ -51,9 +53,18 @@ impl CloudModel {
             key,
             context,
             data_policy,
+            vision: guess_vision(upstream_model),
             disabled: false,
             down_until: Mutex::new(None),
         }
+    }
+
+    /// The same model, taking images or not as configured (None keeps the guess).
+    pub fn with_vision(mut self, vision: Option<bool>) -> Self {
+        if vision.is_some() {
+            self.vision = vision;
+        }
+        self
     }
 
     pub fn disabled(mut self) -> Self {
@@ -68,6 +79,44 @@ impl CloudModel {
     pub fn mark_down(&self) {
         *self.down_until.lock().expect("cloud lock") = Some(Instant::now() + DOWN_FOR);
     }
+}
+
+/// Whether a provider's model [name] takes images, for the well-known families; None when it
+/// is not known (the config's `vision` says).
+pub fn guess_vision(name: &str) -> Option<bool> {
+    let name = name.to_ascii_lowercase();
+    let name = name.rsplit('/').next().unwrap_or(&name);
+    const SEES: &[&str] = &[
+        "claude-",
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-4-turbo",
+        "gpt-5",
+        "chatgpt-4o",
+        "o1",
+        "o3",
+        "o4",
+        "gemini",
+        "grok-4",
+        "grok-2-vision",
+        "pixtral",
+        "llava",
+        "qwen2.5-vl",
+        "qwen2-vl",
+        "qwen3-vl",
+        "llama-4",
+        "gemma-3",
+        "mistral-medium",
+        "mistral-small-3",
+    ];
+    const BLIND: &[&str] = &["deepseek-chat", "deepseek-reasoner", "deepseek-coder", "gpt-3.5", "o1-mini", "o3-mini"];
+    if BLIND.iter().any(|p| name.starts_with(p)) {
+        return Some(false);
+    }
+    if SEES.iter().any(|p| name.starts_with(p)) || name.contains("-vl") || name.contains("vision") {
+        return Some(true);
+    }
+    None
 }
 
 /// How a cloud call ended when it did not produce an answer to pass on.
@@ -286,7 +335,19 @@ pub fn set_egress(config: &std::path::Path, egress: &str) -> Result<(), String> 
 
 #[cfg(test)]
 mod config_tests {
-    use super::{Entry, add_to_config, preset, remove_from_config, set_egress};
+    use super::{Entry, add_to_config, guess_vision, preset, remove_from_config, set_egress};
+
+    #[test]
+    fn well_known_models_say_whether_they_see() {
+        for sees in ["claude-sonnet-5-5", "gpt-4o-mini", "gpt-5", "openai/gpt-4.1", "gemini-2.5-pro", "qwen2.5-vl-72b"]
+        {
+            assert_eq!(guess_vision(sees), Some(true), "{sees}");
+        }
+        for blind in ["deepseek-chat", "deepseek-reasoner", "o3-mini", "gpt-3.5-turbo"] {
+            assert_eq!(guess_vision(blind), Some(false), "{blind}");
+        }
+        assert_eq!(guess_vision("some-new-model"), None);
+    }
 
     #[test]
     fn cloud_models_are_added_and_removed_keeping_the_rest() {

@@ -28,7 +28,7 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
-| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal, tools, approvals, a team, schedules, webhooks, Telegram and Discord |
+| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included), tools, approvals, a team, schedules, webhooks, Telegram and Discord |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key ([latest](https://github.com/wckdboy/invincible/releases/latest)); fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code run on local models; the comparison with a frontier model is still to do |
@@ -254,6 +254,22 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   words; ctrl+l clears the screen; ctrl+z suspends; ctrl+c clears the composer, and twice on an
   empty one quits, as does ctrl+d. A long paste folds into `[pasted 120 lines]` and goes out in
   full. `/help` lists the keys too.
+- **Images:** show the agent a screenshot or a design. Drag the file into the terminal (it
+  pastes the path; one or more PNG, JPEG, WebP or GIF files, quoted, escaped or as `file://`
+  URLs, become images), paste one with ctrl+v (macOS: `pngpaste` if installed, else
+  `osascript`; Linux: `wl-paste` or `xclip`; kept in `~/.autobot/attachments`), type
+  `/image <path>`, or `@shot.png` for one in the project (the `@` list tags images). In the
+  composer an image is a token, `[image 1: shot.png 1280×720]`, that backspace deletes whole; it
+  goes out as an OpenAI-style image part beside your text, scaled down to 1568 px on its longest
+  side (PNG with transparency, JPEG otherwise) when bigger. Only a model that can see takes
+  them: `/model` lists them as the gateway reports (`vision` in `/v1/models`), and with one known
+  not to (a local model without a projector, `deepseek-chat`) the message is not sent: `✗ qwen3
+  can't see images; /model to pick one that can`, with your message back in the composer. The
+  conversation keeps each image's path, SHA-256 and size, never its bytes; while the message is
+  in the window the image goes with every call, read from its file, and when the file is gone or
+  changed a note goes instead (`[image 1: shot.png] not sent: no longer on disk`). `/resume`
+  shows the last requests with their images (`[image: shot.png]`, `· gone` when the file is
+  not there). Without a terminal, `/image <path>` attaches to the next line.
 - **The project:** its `AGENTS.md`, `CLAUDE.md` or `.autobot/AGENTS.md` become part of the
   agent's instructions; in a git repository it works like a careful engineer (find, read, change
   in small edits, run the build and tests, never commit unless asked). `search` (regular
@@ -269,6 +285,7 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   machine, and the conversation sent per call grows with its context), `/approvals`,
   `/private`, `/tools`, `/context`, `/diff`, `/undo`, `/status`, `/new`, `/fork`, `/sessions`,
   `/resume` (alone, the recent conversations with what each is about and when, to pick from),
+  `/image <path>` (show it an image),
   `/copy` (the last answer's Markdown onto the clipboard, through the terminal: OSC 52, passed
   through tmux), `/memory`, `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
   `/init` has the agent write (or improve) the project's `AGENTS.md`; `/compact` folds the
@@ -540,6 +557,15 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
 - Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff, and stopping the node stops its engines.
+- Images (OpenAI `image_url` parts, Messages `image` blocks) pass through to the model as they
+  came; a request may be up to 32 MiB. A local model sees images when it has its multimodal
+  projector: `mmproj = "/models/mmproj-….gguf"` in its `[[models]]` entry (passed to
+  `llama-server --mmproj`), or `vision = true` when the engine is given one otherwise. A cloud
+  model's `vision` is known for the common families (Claude, GPT-4o/4.1/5, o1/o3/o4, Gemini,
+  Pixtral, Qwen-VL; DeepSeek's chat models cannot) and can be set with `vision = true|false`.
+  `/v1/models` reports it (`"vision": true`, `false`, or `null` when not known), and a request
+  with images for a model known not to see them answers `400 model_cannot_see_images` instead of
+  being sent.
 
 ### Cloud backends (optional)
 
@@ -596,7 +622,8 @@ Every chat completion answers with `invincible-request-id`. Once the answer is c
 public key; paired devices receive it when they pair). It records the routing decision, tokens, what
 was redacted, and every attempt to reach a host off the node, with bytes sent and received. An empty
 `egress` list is a signed statement that nothing left the node. Receipts never contain prompt or
-answer text.
+answer text; images are listed by SHA-256, size and type (`"images": [{"sha256", "bytes",
+"mime"}]`), never their bytes, and redaction never touches them (it covers text only).
 
 ### Audit log
 

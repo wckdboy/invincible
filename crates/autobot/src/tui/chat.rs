@@ -3,7 +3,8 @@
 //! long pastes folded), a palette for `/` commands and `@` files, what the agent is doing with a
 //! spinner, approvals as a card that takes one key (or `e`, and what to do instead), and a
 //! status line. Esc stops a turn; typing while it works steers it; ctrl+r searches what was
-//! sent. `/model` and `/resume` alone open a picker. The window's title names the project, and a
+//! sent. `/model` and `/resume` alone open a picker. Images go with a message as tokens in the
+//! composer (`@shot.png`, a dragged-in path, `/image <path>`, ctrl+v) when the model can see them. The window's title names the project, and a
 //! long turn's end or a waiting question notifies. Without a terminal (a pipe, a script) it reads
 //! lines and prints plain text.
 
@@ -27,6 +28,7 @@ use crate::agent::Agent;
 use crate::approval::{Action, Answer, Approver};
 use crate::config::{ApprovalMode, Config};
 use crate::gateway::ModelInfo;
+use crate::images::{self, Attachment};
 use crate::session::Session;
 
 pub struct Options {
@@ -85,6 +87,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/sessions", "the saved conversations"),
     ("/resume", "pick a conversation to continue, or /resume <name>"),
     ("/copy", "copy the last answer (its Markdown) to the clipboard"),
+    ("/image", "show the agent an image: /image <path> (or drag one in, ctrl+v, @shot.png)"),
     ("/memory", "what the agent remembered"),
     ("/skills", "the owner's skills"),
     ("/team", "the team members it can delegate to"),
@@ -107,6 +110,7 @@ const KEYS: &[(&str, &str)] = &[
     ("ctrl+a ctrl+e", "start and end of the line"),
     ("ctrl+w ctrl+u ctrl+k", "delete a word back, to the start, to the end (ctrl+y puts it back)"),
     ("alt+b alt+f", "a word back and forward"),
+    ("ctrl+v", "attach the image on the clipboard"),
     ("ctrl+l", "clear the screen"),
     ("ctrl+z", "suspend (fg to come back)"),
 ];
@@ -118,6 +122,7 @@ const TIPS: &[&str] = &[
     "alt+enter (or ctrl+j) starts a new line; ↑ brings back what you sent",
     "long pastes fold into one line and go out in full",
     "/undo puts back what the last turn changed",
+    "drag an image in (or ctrl+v, or /image <path>) to show it to the agent",
 ];
 
 /// Asks in the terminal, one key: y, a (always, this session), n.
@@ -222,6 +227,8 @@ struct Chat {
     shell: String,
     /// `autobot code`: the model and approvals are remembered for next time.
     code: bool,
+    /// Images for the next message, attached without a composer (`/image` in line mode).
+    pending: Vec<Attachment>,
 }
 
 /// What a key asks for.
@@ -275,6 +282,10 @@ struct App {
     instead: Option<String>,
     /// A picker open (`/model`, `/resume`): the composer narrows it.
     picker: Option<Picker>,
+    /// Where relative paths pasted in are (where autobot started), and where clipboard images
+    /// are kept.
+    workdir: PathBuf,
+    attachments: PathBuf,
 }
 
 impl App {
@@ -317,6 +328,19 @@ impl App {
             queued: Vec::new(),
             instead: None,
             picker: None,
+            workdir: std::env::current_dir().unwrap_or_else(|_| workdir.to_owned()),
+            attachments: home.join("attachments"),
+        }
+    }
+
+    /// Attaches the image at [path] to the message being written, as a token; what went wrong
+    /// shows on the status line.
+    fn attach_image(&mut self, path: &Path) {
+        match images::attach(path) {
+            Ok(image) => {
+                self.editor.attach(image);
+            }
+            Err(e) => self.notice(&e),
         }
     }
 
@@ -438,7 +462,11 @@ impl App {
         let key = match key {
             Key::Key(key) if key.kind != KeyEventKind::Release => key,
             Key::Paste(text) if !asking || typing => {
-                self.editor.paste(&text);
+                // A dragged-in image arrives as its path: it is attached, not typed.
+                match images::pasted_paths(&text, &self.workdir).filter(|_| !typing) {
+                    Some(paths) => paths.iter().for_each(|path| self.attach_image(path)),
+                    None => self.editor.paste(&text),
+                }
                 self.suggest();
                 return Did::Nothing;
             }
@@ -652,6 +680,10 @@ impl App {
             KeyCode::Char('k') if ctrl => e.kill_to_end(),
             KeyCode::Char('y') if ctrl => e.yank(),
             KeyCode::Char('l') if ctrl => term::clear(),
+            KeyCode::Char('v') if ctrl => match images::from_clipboard(&self.attachments) {
+                Ok(path) => self.attach_image(&path),
+                Err(e) => self.notice(&e),
+            },
             KeyCode::Char('z') if ctrl => {
                 if let Some(t) = &self.terminal {
                     t.stop();
@@ -698,7 +730,7 @@ impl App {
                 style::faint(&truncate(hint, inner))
             } else {
                 let mut row = row.clone();
-                for label in self.editor.paste_labels() {
+                for label in self.editor.labels() {
                     row = row.replace(label, &style::gray(label));
                 }
                 row
@@ -878,7 +910,9 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
         models,
         shell: String::new(),
         code: false,
+        pending: Vec::new(),
     };
+    chat.agent.options.vision = crate::vision(&chat.models, chat.agent.gateway.model());
     if let Some(model) = &options.model {
         chat.choose_model(model).await?;
     }
@@ -1057,7 +1091,7 @@ impl Chat {
             model = format!("auto → {}", used.join(", "));
         }
         let budget = self.agent.options.context_kib.map_or(crate::session::CHAR_BUDGET, |k| k * 1024);
-        let window: usize = self.session.window().iter().map(|m| m.to_string().len()).sum();
+        let window: usize = self.session.window().iter().map(crate::session::cost).sum();
         let project =
             self.agent.tools.workdir().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         Status {
@@ -1089,19 +1123,87 @@ impl Chat {
             self.shell(command.trim()).await;
             return None;
         }
+        if let Some(arg) = text.strip_prefix("/image").filter(|a| a.is_empty() || a.starts_with(' ')) {
+            if let Err(e) = self.attach_command(app, arg.trim()) {
+                say(&style::red(&e));
+            }
+            return None;
+        }
         if text.starts_with('/') {
             match self.command(text).await {
-                Ok(Some(Next::Send(text))) => self.turn(app, &text).await,
+                Ok(Some(Next::Send(text))) => self.turn(app, &text, Vec::new()).await,
                 Ok(next) => return next,
                 Err(e) => say(&style::red(&e)),
             }
             return None;
         }
-        self.turn(app, text).await;
+        // The images that go with it: the composer's tokens, `@` mentions of image files, and
+        // what `/image` attached.
+        let (text, mut images) = app.editor.images_in(text);
+        for image in
+            mention_images(&text, self.agent.tools.workdir()).into_iter().chain(std::mem::take(&mut self.pending))
+        {
+            if !images.contains(&image) {
+                images.push(image);
+            }
+        }
+        if !images.is_empty()
+            && let Some(why) = self.blind()
+        {
+            // Not sent: the message comes back to send again once a model that can see is picked.
+            say(&format!("{} {why}", style::red("✗")));
+            if app.tty() {
+                return Some(Next::Prefill(shown.trim_end().to_owned()));
+            }
+            self.pending = images;
+            return None;
+        }
+        self.turn(app, &text, images).await;
         None
     }
 
-    async fn turn(&mut self, app: &mut App, text: &str) {
+    /// Why images cannot be sent now: the model is known not to see them.
+    fn blind(&self) -> Option<String> {
+        (self.agent.options.vision == Some(false)).then(|| match self.agent.gateway.model() {
+            "auto" => {
+                "none of the gateway's models can see images; add one that can (see `invincible cloud add`)".to_owned()
+            }
+            model => format!("{model} can't see images; /model to pick one that can"),
+        })
+    }
+
+    /// `/image <path>`: the image goes with the next message: as a token in the composer, or
+    /// (without a terminal) kept for the next line.
+    fn attach_command(&mut self, app: &mut App, arg: &str) -> Result<(), String> {
+        if arg.is_empty() {
+            return Err("/image <path>: a PNG, JPEG, WebP or GIF (or drag one in, or ctrl+v)".to_owned());
+        }
+        // Relative to where autobot was started, else to the project (`autobot chat` works in a
+        // directory of its own).
+        let project = self.agent.tools.workdir().to_owned();
+        let here = std::env::current_dir().unwrap_or_else(|_| project.clone());
+        let workdir =
+            if images::pasted_paths(arg, &here).is_some() || here.join(arg).exists() { here } else { project };
+        // Quoted or escaped like a dragged path; else as typed (so its error is the file's).
+        let paths = images::pasted_paths(arg, &workdir).unwrap_or_else(|| vec![workdir.join(arg)]);
+        for path in paths {
+            // Errors name the file as it was typed.
+            let image = images::attach(&path).map_err(|e| e.replace(&format!("{}/", workdir.display()), ""))?;
+            if app.tty() {
+                say(&style::gray(&format!("  └ {} · in the composer; write your message and send", image.describe())));
+                app.editor.attach(image);
+            } else {
+                say(&style::gray(&format!("  └ attached {}; it goes with your next message", image.describe())));
+                self.pending.push(image);
+            }
+        }
+        if let Some(why) = self.blind() {
+            say(&style::yellow(&format!("  └ {why}")));
+        }
+        Ok(())
+    }
+
+    async fn turn(&mut self, app: &mut App, text: &str, images: Vec<Attachment>) {
         let mut request = expand_mentions(text, self.agent.tools.workdir(), &self.ui);
         let shell = std::mem::take(&mut self.shell);
         if !shell.is_empty() {
@@ -1117,8 +1219,10 @@ impl Chat {
         let tty = app.tty();
         let outcome = {
             let context = crate::tools::TurnContext { inbox: Some(inbox.clone()), ..Default::default() };
-            let turn = crate::tools::TURN
-                .scope(context, self.agent.turn(&mut self.session, &request, &approver, &mut self.grants, &events));
+            let turn = crate::tools::TURN.scope(
+                context,
+                self.agent.turn_with(&mut self.session, &request, &images, &approver, &mut self.grants, &events),
+            );
             let mut turn = std::pin::pin!(turn);
             loop {
                 app.draw(&ui);
@@ -1137,8 +1241,11 @@ impl Chat {
                             ui.respond(answer);
                         }
                         Did::Submit(shown, sent) => {
-                            if sent.trim_start().starts_with(['/', '!']) {
-                                ui.note(&format!("{} {}  {}", style::faint("↳"), shown.trim(), style::faint("(runs when this turn ends)")));
+                            // An image cannot be read in mid-turn: it goes as the next message.
+                            let image = !app.editor.images_in(&sent).1.is_empty();
+                            if sent.trim_start().starts_with(['/', '!']) || image {
+                                let when = if image { "(with its image, when this turn ends)" } else { "(runs when this turn ends)" };
+                                ui.note(&format!("{} {}  {}", style::faint("↳"), shown.trim(), style::faint(when)));
                                 app.queued.push((shown, sent));
                             } else {
                                 ui.note(&format!("{} {}  {}", style::accent("↳"), shown.trim(), style::faint("(it reads this before its next step)")));
@@ -1173,7 +1280,7 @@ impl Chat {
                 if !unread.is_empty() {
                     let next = unread.join("\n");
                     say(&format!("\n{} {}", style::bold(&style::accent("›")), next));
-                    Box::pin(self.turn(app, &next)).await;
+                    Box::pin(self.turn(app, &next, Vec::new())).await;
                 }
             }
             Some(Err(e)) => {
@@ -1478,7 +1585,7 @@ impl Chat {
                 }
                 let budget = self.agent.options.context_kib.map_or(crate::session::CHAR_BUDGET, |k| k * 1024);
                 self.session.budget = budget;
-                let window: usize = self.session.window().iter().map(|m| m.to_string().len()).sum();
+                let window: usize = self.session.window().iter().map(crate::session::cost).sum();
                 say(&format!(
                     "{} messages · {} KiB sent per call of {} KiB{}",
                     self.session.messages.len(),
@@ -1506,6 +1613,16 @@ impl Chat {
                 term::print(&invincible::brand::rows(&rows));
             }
             "/undo" => {
+                // A request with images is not handed back: its text alone would not be it.
+                let had_images = self
+                    .session
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| {
+                        m["role"] == "user" && !m["content"].as_str().is_some_and(|c| c.starts_with("(The owner adds"))
+                    })
+                    .is_some_and(|m| !images::of(m).is_empty());
                 let (request, files) = self.session.undo()?;
                 for file in &files {
                     let shown = Path::new(file)
@@ -1519,7 +1636,7 @@ impl Chat {
                 } else {
                     "put back; the turn is taken back"
                 }));
-                if request.contains("(I ran `") || request.contains("[Attached @") {
+                if had_images || request.contains("(I ran `") || request.contains("[Attached @") {
                     return Ok(None);
                 }
                 return Ok(Some(Next::Prefill(request)));
@@ -1572,6 +1689,9 @@ impl Chat {
                 self.session = Session::open(&self.home.join("sessions"), arg)?;
                 self.grants.clear();
                 say(&style::gray(&format!("now in {arg} ({} messages)", self.session.messages.len())));
+                for line in recap(&self.session.messages, style::columns().saturating_sub(4)) {
+                    say(&line);
+                }
             }
             "/memory" => {
                 let facts = crate::memory::Memory::new(&self.home).list();
@@ -1683,8 +1803,66 @@ fn ago_text(secs: u64) -> String {
     }
 }
 
+/// The end of a conversation picked up again: its last few requests and answers, a line each,
+/// with the images a request had as `[image: shot.png]` (`gone` when its file is not there now:
+/// it is not sent again then).
+fn recap(messages: &[serde_json::Value], width: usize) -> Vec<String> {
+    let said: Vec<&serde_json::Value> = messages
+        .iter()
+        .filter(|m| match m["role"].as_str() {
+            Some("user") => m["content"].as_str().is_some_and(|c| !c.starts_with("(The owner adds")),
+            Some("assistant") => m["content"].as_str().is_some_and(|c| !c.trim().is_empty()),
+            _ => false,
+        })
+        .collect();
+    let mut lines = Vec::new();
+    for m in &said[said.len().saturating_sub(4)..] {
+        let text = m["content"].as_str().unwrap_or_default();
+        let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+        if m["role"] == "user" {
+            lines.push(truncate(&format!("{} {}", style::faint("›"), style::gray(first)), width));
+            for image in images::of(m) {
+                let gone = if image.path.is_file() { "" } else { " · gone" };
+                lines.push(style::faint(&format!("  [image: {}]{gone}", image.name)));
+            }
+        } else {
+            lines.push(truncate(&format!("  {}", style::faint(first)), width));
+        }
+    }
+    lines
+}
+
+/// `@shot.png` in [text]: image files in the project, attached as images (shown to the model,
+/// not pasted in as text).
+fn mention_images(text: &str, workdir: &Path) -> Vec<Attachment> {
+    let mut found: Vec<Attachment> = Vec::new();
+    for word in text.split_whitespace() {
+        let Some(name) = word.strip_prefix('@') else { continue };
+        let name = name.trim_end_matches([',', ';', ':', ')', '?', '!']).trim_end_matches('.');
+        if !images::is_image(Path::new(name)) {
+            continue;
+        }
+        let Some(path) = inside(workdir, name) else { continue };
+        match images::attach(&path) {
+            Ok(image) => {
+                say(&style::gray(&format!("  └ attached @{name} (image · {}×{})", image.width, image.height)));
+                if !found.contains(&image) {
+                    found.push(image);
+                }
+            }
+            Err(e) => say(&style::yellow(&format!("  └ {e}; not attached"))),
+        }
+    }
+    found
+}
+
+/// [name] in [workdir], when it is there (links followed, and still inside).
+fn inside(workdir: &Path, name: &str) -> Option<PathBuf> {
+    workdir.join(name).canonicalize().ok().filter(|p| workdir.canonicalize().is_ok_and(|w| p.starts_with(w)))
+}
+
 /// `@path` in [text]: the files' contents attached (text files in the project, up to 256 KiB
-/// each; a directory's listing).
+/// each; a directory's listing). Images are [mention_images]'.
 pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
     let _ = ui;
     let mut attached = String::new();
@@ -1696,16 +1874,20 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
             continue;
         }
         // In the project only: anything else is the agent's to read, with the owner's approval.
-        let Some(path) =
-            workdir.join(name).canonicalize().ok().filter(|p| workdir.canonicalize().is_ok_and(|w| p.starts_with(w)))
-        else {
+        let Some(path) = inside(workdir, name) else {
             if std::fs::symlink_metadata(workdir.join(name)).is_ok() {
-                say(&style::yellow(&format!(
-                    "  └ @{name} is outside the project; not attached (the agent can ask to read it)"
-                )));
+                let how = if images::is_image(Path::new(name)) {
+                    "drag it in, or /image <path>"
+                } else {
+                    "the agent can ask to read it"
+                };
+                say(&style::yellow(&format!("  └ @{name} is outside the project; not attached ({how})")));
             }
             continue;
         };
+        if images::is_image(&path) && path.is_file() {
+            continue;
+        }
         if path.is_dir() {
             let mut names: Vec<String> = std::fs::read_dir(&path)
                 .into_iter()
@@ -1765,6 +1947,8 @@ mod tests {
             queued: Vec::new(),
             instead: None,
             picker: None,
+            workdir: std::env::temp_dir(),
+            attachments: std::env::temp_dir(),
         }
     }
 
@@ -1877,8 +2061,20 @@ mod tests {
     #[test]
     fn a_picker_chooses_with_enter() {
         let models = vec![
-            crate::gateway::ModelInfo { id: "qwen3".into(), tier: "node".into(), context: Some(32_000), healthy: true },
-            crate::gateway::ModelInfo { id: "deepseek".into(), tier: "cloud".into(), context: None, healthy: false },
+            crate::gateway::ModelInfo {
+                id: "qwen3".into(),
+                tier: "node".into(),
+                context: Some(32_000),
+                healthy: true,
+                vision: Some(false),
+            },
+            crate::gateway::ModelInfo {
+                id: "deepseek".into(),
+                tier: "cloud".into(),
+                context: None,
+                healthy: false,
+                vision: None,
+            },
         ];
         let picker = model_picker(&models, "deepseek");
         assert_eq!(picker.all[1].detail, "cloud · unhealthy · now");
@@ -1930,6 +2126,73 @@ mod tests {
         assert!(super::style::width(&status_line(&status, "x", 30)) <= 30);
         assert_eq!(hint(true, true, false), "y yes · a always · n no · e instead");
         assert_eq!(hint(false, true, false), "enter steers · esc interrupts");
+    }
+
+    #[test]
+    fn a_dragged_in_image_becomes_a_token_and_goes_as_an_image() {
+        let dir = std::env::temp_dir().join(format!("autobot-chat-image-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let shot = dir.join("Screen Shot.png");
+        std::fs::write(&shot, crate::images::tests::picture(1280, 720, image::ImageFormat::Png)).unwrap();
+        let mut a = app(&[]);
+        a.workdir = dir.clone();
+        typed(&mut a, "what is");
+        // Terminals paste a dragged file's path, quoted or escaped.
+        a.press(Event::Paste(format!("'{}'", shot.display())), false, None);
+        assert_eq!(a.editor.text(), "what is [image 1: Screen Shot.png 1280×720] ");
+        typed(&mut a, "?");
+        // Any other paste is text.
+        a.press(Event::Paste("plain words".into()), false, None);
+        a.press(Event::Paste(dir.join("missing.png").display().to_string()), false, None);
+        let Did::Submit(shown, sent) = a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None) else {
+            panic!("sent")
+        };
+        assert!(shown.starts_with("what is [image 1: Screen Shot.png 1280×720] ?plain words"));
+        let (text, images) = a.editor.images_in(&sent);
+        assert!(text.starts_with("what is [image 1: Screen Shot.png] ?plain words"), "{text}");
+        assert_eq!(images.len(), 1);
+        assert_eq!((images[0].width, images[0].height), (1280, 720));
+        // `@shot.png` in the project is an image too, not text.
+        std::fs::write(dir.join("b.jpg"), crate::images::tests::picture(10, 10, image::ImageFormat::Jpeg)).unwrap();
+        let found = super::mention_images("compare @b.jpg, and @missing.png", &dir);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].mime, "image/jpeg");
+        let ui = super::Ui::new(dir.clone());
+        assert_eq!(expand_mentions("compare @b.jpg", &dir, &ui), "compare @b.jpg", "not pasted in as text");
+        let _ = std::fs::remove_file(&a.history);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_resumed_conversation_shows_its_images_and_which_are_gone() {
+        let image = |path: &str| crate::images::Attachment {
+            path: path.into(),
+            name: "shot.png".into(),
+            sha256: "ab".into(),
+            bytes: 1,
+            mime: "image/png".into(),
+            width: 1,
+            height: 1,
+        };
+        let messages = vec![
+            serde_json::json!({ "role": "user", "content": "old" }),
+            crate::images::message("what is [image 1: shot.png]?", &[image("/definitely/not/here.png")]),
+            serde_json::json!({ "role": "assistant", "content": null, "tool_calls": [] }),
+            serde_json::json!({ "role": "assistant", "content": "A cat.\nWith a hat." }),
+        ];
+        let lines = super::recap(&messages, 80);
+        assert_eq!(lines, ["› old", "› what is [image 1: shot.png]?", "  [image: shot.png] · gone", "  A cat."]);
+        let models = vec![crate::gateway::ModelInfo {
+            id: "qwen3".into(),
+            tier: "node".into(),
+            context: None,
+            healthy: true,
+            vision: Some(false),
+        }];
+        assert_eq!(crate::vision(&models, "qwen3"), Some(false));
+        assert_eq!(crate::vision(&models, "auto"), Some(false), "no model can");
+        assert_eq!(crate::vision(&[], "auto"), None);
     }
 
     #[test]
