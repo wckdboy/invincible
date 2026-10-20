@@ -100,8 +100,9 @@ Both CLIs and the installer speak one grammar:
   status line (model, approvals, project and branch, context, tokens on the left; what the keys
   do now on the right). A question is a card above the composer: `■ title`, what it is about
   hanging under it, and `└ y yes   a always, this session   n no   e no, and say what instead`.
-  A picker (`/model`, `/resume` alone) and the `/` and `@` lists sit under the composer: the
-  chosen row marked `›` in the signal, the rest ash, a faint count and keys last. Searching what
+  A picker (`/model`, `/resume`, `/personality`, `/skills` alone) and the `/` and `@` lists sit
+  under the composer: the chosen row marked `›` in the signal, the rest ash, a faint count and
+  keys last. Searching what
   was sent (ctrl+r) turns the status line into `search: query` (the query bold) with its keys on
   the right. What stands in for something in the composer is quieter than what is typed, in
   ash: a folded paste `[pasted 120 lines]`, an image `[image 1: shot.png 1280×720]`; in the `@`
@@ -112,7 +113,9 @@ Both CLIs and the installer speak one grammar:
 - Answers are Markdown, wrapped to the width: bold headings, `•` lists with hanging indents,
   `▎` quotes, aligned tables, code in sand, code blocks framed `╭── lang ──` … `╰────` with a
   light tint (keywords, strings, numbers; comments faint).
-- `─ model · N tool calls · in · out · time` closes each turn, in faint ash.
+- `─ model · N tool calls · in · out · time` closes each turn, in faint ash. What the agent kept
+  on its own after a turn (a nudge) is one faint line, `↳ kept profile: …`; usage and insights
+  are `label  value` rows like the banner's.
 - Truecolor when the terminal says so (`COLORTERM`), the nearest 256-color otherwise, nothing
   when output is not a terminal or `NO_COLOR` is set. Without a terminal there is no composer
   or spinner: plain lines in, plain lines out. Errors print as `✗ message` on a terminal and

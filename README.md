@@ -308,10 +308,18 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   `/resume` (alone, the recent conversations with what each is about and when, to pick from),
   `/image <path>` (show it an image),
   `/copy` (the last answer's Markdown onto the clipboard, through the terminal: OSC 52, passed
-  through tmux), `/memory`, `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
+  through tmux), `/memory`, `/profile`, `/personality` (alone, a list to pick from; for this
+  conversation), `/skills` (alone, a list of skills to run; `/skills accept <name>`), `/team`,
+  `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
+  `/retry` runs the last request again without its answer (files it changed stay; `/undo` puts
+  them back); `/stop` is esc, typed; `/new` (or `/reset`) starts over. `/usage` shows the tokens,
+  time and cost of this conversation and of today; `/insights [--days N]` what the agent did:
+  turns, the tools it used, projects, failures, and how much ran on your own hardware.
   `/init` has the agent write (or improve) the project's `AGENTS.md`; `/compact` folds the
   conversation so far into a summary, keeping the last turn; `/ps` shows background processes
   (`/ps 2` its output, `/ps stop 2`).
+- **Skills as commands:** every skill is a command too: `/deploy staging` sends the skill's
+  instructions with what you typed after it; the `/` list has them as `skill: …`.
 - **Your own commands:** a Markdown file is a slash command: `.autobot/commands/review.md` in the
   project (or `~/.autobot/commands/`) is `/review`, its text the prompt, `$ARGUMENTS` (or `$1`…`$9`)
   what you type after it; a subdirectory makes a prefix (`git/pr.md` is `/git:pr`), and a
@@ -346,6 +354,24 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (ripgrep's walker: `.gitignore` respected), `todo` (its task list for a longer job). Results
   are cut to a size small local models can take, larger for models with large contexts
   (`[agent] context_kib`, or set by `/model`). Answers stream (`[agent] stream`).
+- **Scripts that use the tools:** `execute_code` runs a short Python 3 (or `sh`) script, asked
+  for like a command with its code shown and run where commands run (sandboxed when confined,
+  in the container, over SSH). In it, `search`, `read_file`, `find_files`, `list_dir`,
+  `search_sessions`, `read_skill` and `web_fetch` are functions, so twenty searches and reads
+  cost one step and only what the script prints comes back. They talk over the script's own
+  stdin and stdout; reads outside the working directory are refused, a fetch is asked for like
+  any fetch, at most 200 calls per script.
+- **A browser:** where Chrome, Chromium, Edge or Brave is installed (or `AUTOBOT_BROWSER` names
+  one), the `browser` tool drives it headless over the DevTools Protocol, for pages that need
+  scripts, a login or a form, and for a dev server: `navigate`, `text`, `snapshot` (what can be
+  clicked or typed into, numbered), `click`, `type`, `submit`, `screenshot`, `close`. A new site
+  asks first, like a fetch (the URL allowlist and "always" cover a site); typing into a page and
+  submitting a form ask every time and are refused unattended; a click never submits a form or
+  follows a link to another site. Its traffic follows the gateway's network mode (Tor or SOCKS5
+  as its proxy; nothing but loopback while offline); it is not receipted. A screenshot goes to
+  a model that can see as an image, and stays in `~/.autobot/attachments`. One browser per
+  process, with a throwaway profile, closed with the session or after ten idle minutes;
+  `[agent] browser = false` turns it off.
 - **MCP servers:** any [Model Context Protocol](https://modelcontextprotocol.io) server over stdio
   adds its tools (`<server>__<tool>`), each call asked for like a command, logged, and allowed
   unattended only with `mcp:<server>/<tool>` in the allowlist:
@@ -387,6 +413,19 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   network = "bridge"       # or "none"
   args = ["--memory", "4g"]
   ```
+- **Commands on another machine:** `[agent.ssh]` runs the terminal and the file tools on a
+  machine you reach with `ssh`, in a working directory there: a build box, a GPU machine, the
+  server you are fixing. It uses the system's `ssh` with one shared connection (ControlMaster,
+  kept ten minutes), never prompts for a login (BatchMode: a key the ssh agent or
+  `~/.ssh/config` gives), stops a command there after its timeout, and never writes through a
+  link. Diffs come from the file there; files there have no `/undo`. Search uses ripgrep there
+  when it is installed, `grep -E` otherwise. `autobot doctor` checks it.
+
+  ```toml
+  [agent.ssh]
+  host = "me@build-box"      # or a Host from ~/.ssh/config
+  workdir = "/home/me/work"  # default: the same path as here
+  ```
 - **Private by default:** agent turns carry `invincible-private`, so the router keeps them on local
   models; tool results carry your files and command output. With `[gateway] private = false` the
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
@@ -407,16 +446,57 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   recent part (at most about 12k tokens, so small local models keep room to think); what falls out
   of it is summarized first, on the gateway like any call, and the summary leads the next prompt,
   so a long conversation is condensed, not forgotten.
+- **Who it is:** `~/.autobot/SOUL.md` is the agent's character, in every conversation (tone,
+  directness, how it disagrees). On top of it, a **personality**: four are built in (`concise`,
+  `technical`, `teacher`, `creative`), and a Markdown file in `~/.autobot/personalities/` is one
+  of yours. `autobot personality list|show|set <name|none>` picks the one in use; `/personality`
+  picks one for a conversation; the app sends `personality` with a turn or sets it. Both come
+  after the agent's working rules in its instructions: they change how it answers, never what it
+  may do.
 - **Memory:** the agent keeps short facts with `remember` (your preferences, where things are,
   decisions) in `~/.autobot/memory.jsonl`, and every later conversation starts with them, newest
-  first. `autobot memory` lists them; `autobot memory --forget 3` removes one.
-- **Skills:** how-to notes you give it, one Markdown file each in `~/.autobot/skills/` (a
-  `description:` line in front matter, or the first line, says what it is for). The agent sees
-  their names and descriptions, and reads one with `read_skill` when it fits the task.
-  `autobot skills` lists them. The agent can also **propose** one (`propose_skill`) after a
-  multi-step task that worked and will come up again; a proposal is never used until you keep it
-  (`autobot skills accept <name>`, `/skills accept <name>` in Telegram, or the app), since a skill
-  is instructions the agent will follow.
+  first. `autobot memory` lists them; `autobot memory --forget 3` removes one. Never secrets:
+  a fact with a key, a token, a password or personal data (an email, a phone or card number) is
+  refused.
+- **How you work:** `~/.autobot/USER.md` is the agent's short profile of you (preferences, your
+  tools, how you want answers), at most 2000 characters, kept with `update_user_profile`: one
+  small change at a time (add, replace, remove), shown to you as a diff, checked like memory.
+  Every eighth turn of a conversation in the terminal (`[agent] nudge_every`, 0 for never), a
+  short extra call, as private as the turns, looks back for what is worth keeping, and a faint
+  line says what it kept (`↳ kept profile: …`). `autobot profile` (or `/profile`) shows it; edit
+  the file as you like.
+- **Skills:** how-to notes for the agent in `~/.autobot/skills/`, in the
+  [agentskills.io](https://agentskills.io) format: a directory per skill with a `SKILL.md`
+  (front matter with `name`, `description` and optionally `allowed-tools`, shown but never
+  granted: approvals hold) and any files it needs beside it (scripts, references); a plain
+  `<name>.md` is a skill too. The agent sees their names and descriptions, and reads one (or one
+  of its files) with `read_skill` when it fits the task. `autobot skills install <git-url|path>`
+  adds the skills in a repository or directory (regular files only, never over one you have),
+  `autobot skills` lists them, `autobot skills remove <name>`. The agent writes skills itself:
+  after a task that took many steps and worked, `create_skill`; when a skill it followed was
+  wrong, `improve_skill`, shown to you as a diff. Neither is used until you keep it
+  (`autobot skills accept <name>`, `/skills accept <name>` in the terminal or Telegram, or the
+  app), since a skill is instructions the agent will follow.
+- **Usage and insights:** every turn of the main agent, on any channel, goes into
+  `~/.autobot/turns.jsonl`: its model calls with their models, tiers and tokens (from the
+  gateway's receipts), the tools it used, how long, how it ended; never prompts or answers.
+  `autobot usage` (or `/usage`) sums today and a conversation, `autobot insights --days 30` (or
+  `/insights`) shows turns, tools, projects, failures and the share that ran on your own
+  hardware. Local models cost nothing; for cloud ones, give prices per million tokens:
+
+  ```toml
+  [prices."deepseek-chat"]
+  input = 0.27
+  output = 1.10
+  ```
+- **Coming from Hermes Agent or OpenClaw:** `autobot migrate hermes` (or `openclaw`) brings over
+  its SOUL.md (as a personality when you have one already), memory and user profile entries
+  (through the same checks), your skills, AGENTS.md, the plain commands of its allowlist
+  (patterns are named and left out), the model when the gateway serves it, and the command
+  timeout. Nothing here is overwritten; `--dry-run` says what it would do; `--from DIR` for
+  another place. API keys and bot tokens come only with `--with-secrets`, into Autobot's own
+  files (mode 0600: `~/.autobot/secrets/<provider>.key`, `telegram.token`, `discord.token`),
+  with the command that gives a key to the gateway.
 - **Search over past conversations:** `search_sessions` finds what was said or decided before
   (words in your messages, its answers and conversation summaries).
 - **A team of agents:** define members in `config.toml`, and the agent hands them work with its
