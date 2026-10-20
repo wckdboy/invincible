@@ -1,5 +1,6 @@
 //! Running in the background, 24/7: launchd agents on macOS, systemd units on Linux (user units
-//! with linger, or system units when installed as root, as on a VPS).
+//! with linger, or system units when installed as root, as on a VPS), Task Scheduler tasks on
+//! Windows (the user's, started at logon, in a console nobody sees).
 //!
 //! - The gateway (`invincible serve`) and the agent (`autobot serve`) run always: started at
 //!   boot (at login on macOS), restarted whenever they exit, with their output appended to a log
@@ -28,6 +29,9 @@ pub enum Platform {
     SystemdUser,
     /// `systemctl`, units in `/etc/systemd/system` (installed as root).
     SystemdSystem,
+    /// `schtasks`, the user's tasks in the `\Invincible\` folder; their definitions kept in
+    /// `%LOCALAPPDATA%\Invincible\tasks` (to see what changed).
+    TaskScheduler,
 }
 
 impl Platform {
@@ -36,6 +40,7 @@ impl Platform {
             "macos" => Ok(Self::Launchd),
             "linux" if uid().is_ok_and(|u| u == "0") => Ok(Self::SystemdSystem),
             "linux" => Ok(Self::SystemdUser),
+            "windows" => Ok(Self::TaskScheduler),
             other => Err(format!("no service manager support on {other}")),
         }
     }
@@ -45,6 +50,7 @@ impl Platform {
             Self::Launchd => "launchd agents",
             Self::SystemdUser => "systemd user units",
             Self::SystemdSystem => "systemd system units",
+            Self::TaskScheduler => "Task Scheduler tasks",
         }
     }
 
@@ -96,6 +102,7 @@ pub fn dir(platform: Platform, home: &Path) -> PathBuf {
         Platform::Launchd => home.join("Library/LaunchAgents"),
         Platform::SystemdUser => home.join(".config/systemd/user"),
         Platform::SystemdSystem => PathBuf::from("/etc/systemd/system"),
+        Platform::TaskScheduler => home.join("AppData/Local/Invincible/tasks"),
     }
 }
 
@@ -103,6 +110,7 @@ pub fn dir(platform: Platform, home: &Path) -> PathBuf {
 pub fn path(platform: Platform, home: &Path, label: &str) -> PathBuf {
     match platform {
         Platform::Launchd => dir(platform, home).join(format!("{label}.plist")),
+        Platform::TaskScheduler => dir(platform, home).join(format!("{label}.xml")),
         _ => dir(platform, home).join(format!("{}.service", unit(label))),
     }
 }
@@ -176,7 +184,57 @@ impl Service {
         match platform {
             Platform::Launchd => self.plist(&command, &env),
             Platform::SystemdUser | Platform::SystemdSystem => self.systemd(platform, &command, &env),
+            Platform::TaskScheduler => self.task(&command, &env),
         }
+    }
+
+    /// A Task Scheduler task (its XML, as `schtasks /Create /XML` reads it). Task Scheduler
+    /// keeps no output, so the command runs in a console nobody sees (`conhost --headless`)
+    /// through `cmd`, which sets the environment and appends the output to the log.
+    fn task(&self, command: &[String], env: &[(String, String)]) -> String {
+        let quote = |a: &str| if a.contains([' ', '&', '(', ')', '^']) { format!("\"{a}\"") } else { a.to_owned() };
+        let sets: String = env.iter().map(|(k, v)| format!("set \"{k}={v}\"&& ")).collect();
+        let line: Vec<String> = command.iter().map(|a| quote(a)).collect();
+        let script = format!("{sets}{} >> \"{}\" 2>&1", line.join(" "), self.log.display());
+        let trigger = match self.kind {
+            Kind::Daemon => "    <LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>\n".to_owned(),
+            Kind::Daily { hour, minute } => format!(
+                "    <CalendarTrigger>\n      <StartBoundary>2026-01-01T{hour:02}:{minute:02}:00</StartBoundary>\n      <RandomDelay>PT1H</RandomDelay>\n      <ScheduleByDay>\n        <DaysInterval>1</DaysInterval>\n      </ScheduleByDay>\n    </CalendarTrigger>\n"
+            ),
+        };
+        // Always on: never stopped for running long, restarted every minute when it fails.
+        let restart = match self.kind {
+            Kind::Daemon => {
+                "    <RestartOnFailure>\n      <Interval>PT1M</Interval>\n      <Count>999</Count>\n    </RestartOnFailure>\n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
+            }
+            Kind::Daily { .. } => "    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>\n",
+        };
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>{description}</Description>
+  </RegistrationInfo>
+  <Triggers>
+{trigger}  </Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <AllowHardTerminate>true</AllowHardTerminate>
+{restart}  </Settings>
+  <Actions>
+    <Exec>
+      <Command>conhost.exe</Command>
+      <Arguments>{args}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+            description = xml(self.description),
+            args = xml(&format!("--headless cmd.exe /d /c \"{script}\"")),
+        )
     }
 
     fn plist(&self, command: &[String], env: &[(String, String)]) -> String {
@@ -325,6 +383,28 @@ pub fn install(platform: Platform, home: &Path, services: &[Service]) -> Result<
                 done.push(format!("{} {}", if loaded { "reloaded" } else { "started" }, service.name));
             }
         }
+        Platform::TaskScheduler => {
+            for (service, changed) in services.iter().zip(changed) {
+                let task = task_name(service.name);
+                let known = task_status(&task).is_some();
+                if changed || !known {
+                    schtasks_create(&task, &service.path(platform, home))?;
+                }
+                match service.kind {
+                    Kind::Daemon if changed || !task_running(&task) => {
+                        let _ = run("schtasks", &["/End", "/TN", &task]);
+                        run("schtasks", &["/Run", "/TN", &task])?;
+                        done.push(format!("started {}", service.name));
+                    }
+                    Kind::Daemon => done.push(format!("{} already running", service.name)),
+                    Kind::Daily { .. } => done.push(format!(
+                        "{} {}",
+                        service.name,
+                        if changed { "scheduled" } else { "already scheduled" }
+                    )),
+                }
+            }
+        }
         Platform::SystemdUser | Platform::SystemdSystem => {
             if changed.iter().any(|c| *c) {
                 systemctl(platform, &["daemon-reload"])?;
@@ -384,6 +464,11 @@ pub fn uninstall(platform: Platform, home: &Path, services: &[Service]) -> Resul
             Platform::SystemdUser | Platform::SystemdSystem => {
                 let _ = systemctl(platform, &["disable", "--now", &service.enabled_unit()]);
             }
+            Platform::TaskScheduler => {
+                let task = task_name(service.name);
+                let _ = run("schtasks", &["/End", "/TN", &task]);
+                let _ = run("schtasks", &["/Delete", "/TN", &task, "/F"]);
+            }
         }
         for (file, _) in files {
             match std::fs::remove_file(&file) {
@@ -394,7 +479,7 @@ pub fn uninstall(platform: Platform, home: &Path, services: &[Service]) -> Resul
         }
         removed = true;
     }
-    if removed && platform != Platform::Launchd {
+    if removed && matches!(platform, Platform::SystemdUser | Platform::SystemdSystem) {
         let _ = systemctl(platform, &["daemon-reload"]);
     }
     Ok(done)
@@ -416,6 +501,12 @@ pub fn restart(platform: Platform, home: &Path, labels: &[&str]) -> Vec<String> 
             Platform::SystemdUser | Platform::SystemdSystem => {
                 let unit = format!("{}.service", unit(label));
                 active(platform, &unit) && systemctl(platform, &["restart", &unit]).is_ok()
+            }
+            Platform::TaskScheduler => {
+                let task = task_name(label);
+                task_running(&task)
+                    && run("schtasks", &["/End", "/TN", &task]).is_ok()
+                    && run("schtasks", &["/Run", "/TN", &task]).is_ok()
             }
         };
         if ok {
@@ -461,6 +552,14 @@ fn status_of(platform: Platform, home: &Path, service: &Service) -> Status {
                 let parsed = parse_launchctl(&text);
                 status.last_exit = parsed.0;
                 status.restarts = parsed.1;
+            }
+        }
+        Platform::TaskScheduler => {
+            if let Some(fields) = task_status(&task_name(service.name)) {
+                let field = |name: &str| fields.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+                status.enabled = field("Scheduled Task State") != Some("Disabled");
+                status.running = field("Status") == Some("Running");
+                status.last_exit = parse_task_result(field("Last Result").unwrap_or_default());
             }
         }
         Platform::SystemdUser | Platform::SystemdSystem => {
@@ -509,6 +608,75 @@ pub fn parse_systemd_show(text: &str) -> (Option<String>, Option<u64>) {
         _ => None,
     };
     (last, field("NRestarts").and_then(|v| v.parse().ok()))
+}
+
+/// The task's path in Task Scheduler: `\Invincible\<label>`.
+fn task_name(label: &str) -> String {
+    format!("\\Invincible\\{label}")
+}
+
+/// Registers the task in [xml] as [task], replacing one of that name. schtasks reads the XML as
+/// UTF-16 (what the declaration says), so it is handed a UTF-16 copy.
+fn schtasks_create(task: &str, xml: &Path) -> Result<(), String> {
+    let text = std::fs::read_to_string(xml).map_err(|e| format!("{}: {e}", xml.display()))?;
+    let wide = xml.with_extension("utf16.xml");
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+    std::fs::write(&wide, bytes).map_err(|e| format!("{}: {e}", wide.display()))?;
+    let made = run("schtasks", &["/Create", "/TN", task, "/XML", &wide.display().to_string(), "/F"]);
+    let _ = std::fs::remove_file(&wide);
+    made
+}
+
+/// `schtasks /Query /V /FO CSV` for [task]: its fields by name; None when there is no such task.
+fn task_status(task: &str) -> Option<Vec<(String, String)>> {
+    let out = Command::new("schtasks").args(["/Query", "/TN", task, "/V", "/FO", "CSV"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_task_csv(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn task_running(task: &str) -> bool {
+    task_status(task).is_some_and(|f| f.iter().any(|(k, v)| k == "Status" && v == "Running"))
+}
+
+/// The header and first row of `schtasks /Query /FO CSV`, paired.
+pub fn parse_task_csv(text: &str) -> Option<Vec<(String, String)>> {
+    let row = |line: &str| -> Vec<String> {
+        let mut cells = Vec::new();
+        let (mut cell, mut quoted) = (String::new(), false);
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' if quoted && chars.peek() == Some(&'"') => {
+                    cell.push('"');
+                    chars.next();
+                }
+                '"' => quoted = !quoted,
+                ',' if !quoted => cells.push(std::mem::take(&mut cell)),
+                _ => cell.push(c),
+            }
+        }
+        cells.push(cell);
+        cells
+    };
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let header = row(lines.next()?);
+    let values = row(lines.next()?);
+    Some(header.into_iter().zip(values).collect())
+}
+
+/// Task Scheduler's last result: `0` is a clean exit, 267011 (0x41303) never ran, 267009
+/// (0x41301) still running; anything else is how it ended.
+pub fn parse_task_result(text: &str) -> Option<String> {
+    match text.trim() {
+        "" | "0" | "267009" | "267011" => None,
+        other => match other.parse::<i64>() {
+            Ok(code) => Some(format!("exit code {code}")),
+            Err(_) => Some(other.to_owned()),
+        },
+    }
 }
 
 fn loaded(domain: &str, label: &str) -> bool {
@@ -560,7 +728,10 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AGENT, GATEWAY, Kind, Platform, Service, UPDATE, parse_launchctl, parse_systemd_show};
+    use super::{
+        AGENT, GATEWAY, Kind, Platform, Service, UPDATE, parse_launchctl, parse_systemd_show, parse_task_csv,
+        parse_task_result, path, task_name, update_job,
+    };
     use std::path::{Path, PathBuf};
 
     fn agent() -> Service {
@@ -672,5 +843,43 @@ mod tests {
         let systemd = "Result=watchdog\nNRestarts=4\nExecMainStatus=6\n";
         assert_eq!(parse_systemd_show(systemd), (Some("watchdog".into()), Some(4)));
         assert_eq!(parse_systemd_show("Result=success\nNRestarts=0\nExecMainStatus=0\n"), (None, Some(0)));
+    }
+
+    #[test]
+    fn task_scheduler_tasks() {
+        let service = Service {
+            name: GATEWAY,
+            description: "Invincible Gateway",
+            program: PathBuf::from("C:/Users/me/.local/bin/invincible.exe"),
+            args: vec!["serve".into()],
+            log: PathBuf::from("C:/Users/me/.invincible/logs/gateway.log"),
+            after: None,
+            env: vec![("INVINCIBLE_HOME".into(), "D:/node".into())],
+            kind: Kind::Daemon,
+        };
+        let xml = service.render(Platform::TaskScheduler, "C:/Windows/system32");
+        assert!(xml.contains("<LogonTrigger>") && xml.contains("<RestartOnFailure>"), "{xml}");
+        assert!(xml.contains("<Command>conhost.exe</Command>"), "{xml}");
+        assert!(xml.contains("--headless cmd.exe /d /c"), "{xml}");
+        assert!(
+            xml.contains(r#"set "INVINCIBLE_HOME=D:/node"&amp;&amp; C:/Users/me/.local/bin/invincible.exe serve"#),
+            "{xml}"
+        );
+        assert!(xml.contains(r#"&gt;&gt; "C:/Users/me/.invincible/logs/gateway.log" 2&gt;&amp;1"#), "{xml}");
+        assert_eq!(
+            path(Platform::TaskScheduler, Path::new("C:/Users/me"), GATEWAY),
+            Path::new("C:/Users/me/AppData/Local/Invincible/tasks/sh.invincible.gateway.xml")
+        );
+        let daily = update_job(PathBuf::from("C:/bin/invincible.exe"), Path::new("C:/Users/me/.invincible"));
+        let xml = daily.render(Platform::TaskScheduler, "");
+        assert!(xml.contains("<StartBoundary>2026-01-01T04:17:00</StartBoundary>"), "{xml}");
+        assert!(!xml.contains("RestartOnFailure"));
+
+        let csv = "\"HostName\",\"TaskName\",\"Status\",\"Last Result\",\"Scheduled Task State\"\r\n\"PC\",\"\\Invincible\\sh.invincible.gateway\",\"Running\",\"267009\",\"Enabled\"\r\n";
+        let fields = parse_task_csv(csv).unwrap();
+        assert!(fields.contains(&("Status".to_owned(), "Running".to_owned())));
+        assert_eq!(parse_task_result("267009"), None);
+        assert_eq!(parse_task_result("2"), Some("exit code 2".to_owned()));
+        assert_eq!(task_name(AGENT), r"\Invincible\sh.invincible.autobot");
     }
 }
