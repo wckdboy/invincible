@@ -20,6 +20,8 @@ pub mod service;
 pub mod sshsig;
 pub mod synth;
 pub mod term;
+#[doc(hidden)]
+pub mod testgen;
 pub mod token;
 pub mod update;
 pub mod version;

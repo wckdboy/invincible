@@ -344,4 +344,63 @@ mod tests {
         // Anthropic Messages, whole and streamed.
         assert_eq!(usage(br#"{"usage":{"input_tokens":14,"output_tokens":20}}"#), Some((14, 20)));
     }
+
+    /// A random receipt-shaped value: integers, strings, booleans, arrays and objects.
+    fn value(g: &mut crate::testgen::Gen, depth: usize) -> serde_json::Value {
+        match if depth == 0 { g.below(4) } else { g.below(6) } {
+            0 => json!(g.number() as i64 >> g.below(64)),
+            1 => json!(g.text(12)),
+            2 => json!(g.one_in(2)),
+            3 => serde_json::Value::Null,
+            4 => serde_json::Value::Array((0..g.below(4)).map(|_| value(g, depth - 1)).collect()),
+            _ => {
+                let mut map = serde_json::Map::new();
+                for _ in 0..g.below(5) {
+                    let key: String = g.text(6).chars().filter(char::is_ascii).collect();
+                    map.insert(key, value(g, depth - 1));
+                }
+                serde_json::Value::Object(map)
+            }
+        }
+    }
+
+    #[test]
+    fn any_receipt_verifies_and_any_change_or_garbage_does_not() {
+        let key = ReceiptKey::from_seed(&[9; 32]);
+        crate::testgen::cases("receipts", |g| {
+            let receipt = json!({ "version": 0, "body": value(g, 3) });
+            let envelope = key.sign(receipt.clone()).unwrap();
+            let signature = envelope["signature"].as_str().unwrap();
+            assert!(verify(&key.public(), &receipt, signature));
+            // The same after a trip through text (the canonical form does not depend on it).
+            let again: serde_json::Value = serde_json::from_str(&envelope.to_string()).unwrap();
+            assert!(verify(&key.public(), &again["receipt"], again["signature"].as_str().unwrap()));
+            let mut changed = receipt.clone();
+            changed["body"] = json!([changed["body"].clone()]);
+            assert!(!verify(&key.public(), &changed, signature));
+            // Garbage keys and signatures are refused, never a panic.
+            assert!(!verify(&g.text(50), &receipt, signature));
+            assert!(!verify(&key.public(), &receipt, &g.text(90)));
+        });
+    }
+
+    #[test]
+    fn usage_is_read_from_any_bytes_without_panicking() {
+        crate::testgen::cases("usage", |g| {
+            let pieces = [
+                "\"prompt_tokens\":",
+                "\"completion_tokens\": ",
+                "\"input_tokens\":",
+                "12",
+                "99999999999999999999999",
+                "data: ",
+                "{",
+                "}",
+                "\n",
+            ];
+            let mut bytes = g.assemble(&pieces, 30).into_bytes();
+            bytes.extend(g.bytes(20));
+            let _ = usage(&bytes);
+        });
+    }
 }

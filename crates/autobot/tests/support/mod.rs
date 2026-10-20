@@ -306,7 +306,7 @@ pub fn quantile_ms(samples: &mut [Duration], q: f64) -> f64 {
 /// Turns refused as busy right after the one before ended, and tried again.
 pub static BUSY: AtomicU64 = AtomicU64::new(0);
 
-/// One agent turn over the agent API: the events' `type`s, and the last event.
+/// One agent turn over the agent API: its answer or error event.
 pub async fn api_turn(
     client: &reqwest::Client,
     agent: &str,
@@ -343,7 +343,8 @@ pub async fn api_turn(
     body.lines()
         .filter_map(|l| l.strip_prefix("data: "))
         .filter_map(|d| serde_json::from_str::<Value>(d).ok())
-        .last()
+        // The answer or the error (`kept` lines may follow it).
+        .rfind(|e| e["type"] == "answer" || e["type"] == "error")
         .ok_or_else(|| format!("no events: {body}"))
 }
 
