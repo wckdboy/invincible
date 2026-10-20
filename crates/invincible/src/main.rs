@@ -1079,7 +1079,7 @@ fn update_command(args: UpdateArgs) -> Result<(), String> {
                 // itself while it runs.
                 let installed = invincible::service::path(platform, &user, invincible::service::GATEWAY).exists();
                 if installed && !args.scheduled {
-                    let refreshed = std::process::Command::new(bin.join("autobot"))
+                    let refreshed = std::process::Command::new(bin.join(invincible::update::program_file("autobot")))
                         .args(["service", "install"])
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null())

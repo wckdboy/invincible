@@ -86,9 +86,12 @@ pub fn start(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        // Its own process group, so stopping it stops what it started (npm → node).
-        .process_group(0)
         .kill_on_drop(true);
+    // Its own process group, so stopping it stops what it started (npm → node).
+    #[cfg(unix)]
+    command.process_group(0);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     let mut child = command.spawn().map_err(|e| format!("sh: {e}"))?;
     let pid = child.id();
     let shared = Arc::new(Mutex::new(Shared::default()));
@@ -112,7 +115,7 @@ pub fn start(
             };
             let text = String::from_utf8_lossy(&pending[..valid]).into_owned();
             pending.drain(..valid);
-            shared.lock().expect("proc").push(&text);
+            shared.lock().expect("proc").push(&text.replace("\r\n", "\n"));
         }
     };
     {
@@ -131,11 +134,11 @@ pub fn start(
                         stopping.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
                         let _ = tokio::time::timeout(Duration::from_secs(8), stopping.status()).await;
                     }
-                    signal_group(pid, rustix::process::Signal::TERM);
+                    stop_group(pid, false).await;
                     match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
                         Ok(_) => {}
                         Err(_) => {
-                            signal_group(pid, rustix::process::Signal::KILL);
+                            stop_group(pid, true).await;
                             let _ = child.wait().await;
                         }
                     }
@@ -165,9 +168,27 @@ pub fn start(
     Ok(id)
 }
 
-fn signal_group(pid: Option<u32>, signal: rustix::process::Signal) {
-    if let Some(pid) = pid.and_then(|p| rustix::process::Pid::from_raw(p as i32)) {
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// Asks [pid]'s process group to stop ([kill]: makes it): SIGTERM or SIGKILL to the group on
+/// Unix; on Windows, `taskkill /T` over the process tree (`/F` to force).
+async fn stop_group(pid: Option<u32>, kill: bool) {
+    let Some(pid) = pid else { return };
+    #[cfg(unix)]
+    if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
+        let signal = if kill { rustix::process::Signal::KILL } else { rustix::process::Signal::TERM };
         let _ = rustix::process::kill_process_group(pid, signal);
+    }
+    #[cfg(windows)]
+    {
+        let mut taskkill = tokio::process::Command::new("taskkill");
+        taskkill.args(["/T", "/PID", &pid.to_string()]);
+        if kill {
+            taskkill.arg("/F");
+        }
+        let quiet = std::process::Stdio::null;
+        let _ = taskkill.stdin(quiet()).stdout(quiet()).stderr(quiet()).status().await;
     }
 }
 
@@ -261,18 +282,19 @@ mod tests {
     #[tokio::test]
     async fn runs_reads_and_stops() {
         let dir = std::env::temp_dir();
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.arg("-c").arg("echo started; sleep 30");
+        // `echo` and `sleep` mean the same in PowerShell.
+        let cmd = crate::shell::command("echo started; sleep 30");
         let id = start("sleeper", cmd, &dir, None).unwrap();
-        let out = output(id, Duration::from_millis(300)).await.unwrap();
+        // PowerShell takes a moment to start.
+        let wait = if cfg!(windows) { Duration::from_secs(5) } else { Duration::from_millis(300) };
+        let out = output(id, wait).await.unwrap();
         assert!(out.contains("started"), "{out}");
         assert!(out.contains("running"), "{out}");
         assert!(list().contains("sleeper"));
         let out = stop(id).await.unwrap();
         assert!(out.contains("stopped"), "{out}");
 
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.arg("-c").arg("echo done; exit 4");
+        let cmd = crate::shell::command("echo done; exit 4");
         let id = start("quick", cmd, &dir, None).unwrap();
         let out = output(id, Duration::from_secs(5)).await.unwrap();
         assert!(out.contains("done") && out.contains("exit code 4"), "{out}");

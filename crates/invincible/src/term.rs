@@ -7,13 +7,27 @@ pub fn read_hidden(prompt: &str) -> Result<String, String> {
     let secret = if std::io::stdin().is_terminal() {
         eprint!("{prompt}");
         let _ = std::io::stderr().flush();
-        let out = std::process::Command::new("sh")
-            .arg("-c")
-            .arg("trap 'stty echo; exit 130' INT TERM; stty -echo; IFS= read -r line; status=$?; stty echo; printf '%s' \"$line\"; exit $status")
+        #[cfg(not(windows))]
+        let mut reader = std::process::Command::new("sh");
+        #[cfg(not(windows))]
+        reader.arg("-c").arg(
+            "trap 'stty echo; exit 130' INT TERM; stty -echo; IFS= read -r line; status=$?; stty echo; printf '%s' \"$line\"; exit $status",
+        );
+        // The console's own hidden input.
+        #[cfg(windows)]
+        let mut reader = std::process::Command::new("powershell");
+        #[cfg(windows)]
+        // (Not -NonInteractive: Read-Host refuses to read then.)
+        reader.args([
+            "-NoProfile",
+            "-Command",
+            "$s = Read-Host -AsSecureString; [Console]::Out.Write([Net.NetworkCredential]::new('', $s).Password)",
+        ]);
+        let out = reader
             .stdin(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
-            .map_err(|e| format!("sh: {e}"))?;
+            .map_err(|e| format!("reading the input: {e}"))?;
         eprintln!();
         if out.status.code() == Some(130) {
             return Err("stopped".to_owned());

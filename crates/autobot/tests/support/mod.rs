@@ -364,6 +364,8 @@ pub async fn api_turn(
         .ok_or_else(|| format!("no events: {body}"))
 }
 
+// Pseudo-terminals are Unix.
+#[cfg(unix)]
 /// [command] on a pseudo-terminal of 120 × 40: the time from its start until its output holds
 /// [marker] (the terminal's questions answered as a terminal would), at most [within]; the
 /// process is killed then.

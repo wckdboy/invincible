@@ -382,8 +382,10 @@ pub fn pasted_paths(text: &str, cwd: &Path) -> Option<Vec<PathBuf>> {
 }
 
 /// [text] split as a shell would: by spaces, with `'…'`, `"…"` and `\` escapes. None when a quote
-/// is left open.
+/// is left open. On Windows `\` separates a path's parts and escapes nothing (a terminal there
+/// pastes a dropped file as `"C:\Users\…\Shot.png"`).
 fn shell_words(text: &str) -> Option<Vec<String>> {
+    let escapes = !cfg!(windows);
     let mut words = Vec::new();
     let mut word = String::new();
     let mut started = false;
@@ -404,12 +406,12 @@ fn shell_words(text: &str) -> Option<Vec<String>> {
                 loop {
                     match chars.next()? {
                         '"' => break,
-                        '\\' => word.push(chars.next()?),
+                        '\\' if escapes => word.push(chars.next()?),
                         c => word.push(c),
                     }
                 }
             }
-            '\\' => {
+            '\\' if escapes => {
                 started = true;
                 word.push(chars.next()?);
             }
@@ -619,6 +621,7 @@ pub mod tests {
         let one = Some(vec![dir.join("Screen Shot.png")]);
         assert_eq!(pasted_paths(&format!("'{d}/Screen Shot.png'"), &dir), one);
         assert_eq!(pasted_paths(&format!("\"{d}/Screen Shot.png\" "), &dir), one);
+        #[cfg(unix)]
         assert_eq!(pasted_paths(&format!("{}/Screen\\ Shot.png", d), &dir), one);
         assert_eq!(pasted_paths(&format!("file://{}/Screen%20Shot.png", d), &dir), one);
         assert_eq!(pasted_paths("b.JPG", &dir), Some(vec![dir.join("b.JPG")]), "relative to the project");

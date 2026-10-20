@@ -233,7 +233,7 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<(String, std::path:
         if kind.is_dir() {
             walk(root, &entry.path(), depth + 1, out);
         } else if kind.is_file() {
-            let rel = entry.path().strip_prefix(root).map(|r| r.display().to_string()).unwrap_or(name);
+            let rel = entry.path().strip_prefix(root).map(crate::slash).unwrap_or(name);
             out.push((rel, entry.path()));
         }
     }

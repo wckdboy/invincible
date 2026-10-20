@@ -29,13 +29,22 @@ pub const NAMESPACE: &str = "invincible-release";
 /// The programs in a release archive.
 pub const PROGRAMS: [&str; 2] = ["invincible", "autobot"];
 
+/// [program]'s file name here: `autobot`, or `autobot.exe` on Windows.
+pub fn program_file(program: &str) -> String {
+    format!("{program}{}", std::env::consts::EXE_SUFFIX)
+}
+
 /// This machine's release platform.
 pub fn platform() -> Result<&'static str, String> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Ok("macos-arm64"),
         ("linux", "x86_64") => Ok("linux-x64"),
         ("linux", "aarch64") => Ok("linux-arm64"),
-        (os, arch) => Err(format!("no releases for {os}/{arch} (macOS on Apple silicon, Linux on x86_64 or arm64)")),
+        ("windows", "x86_64") => Ok("windows-x64"),
+        ("windows", "aarch64") => Ok("windows-arm64"),
+        (os, arch) => {
+            Err(format!("no releases for {os}/{arch} (macOS on Apple silicon, Linux and Windows on x86_64 or arm64)"))
+        }
     }
 }
 
@@ -272,7 +281,8 @@ pub async fn run(options: Options<'_>) -> Result<Outcome, String> {
     // Known to be the same bytes: nothing to fetch.
     let same_archive = installed.get("archive_sha256") == Some(release.archive_sha256.as_str())
         && PROGRAMS.iter().all(|p| {
-            sha256_file(&options.bin.join(p)).is_some_and(|sha| installed.get(&format!("{p}_sha256")) == Some(&sha))
+            sha256_file(&options.bin.join(program_file(p)))
+                .is_some_and(|sha| installed.get(&format!("{p}_sha256")) == Some(&sha))
         });
     if !options.force {
         let decision = match (&release.version, &options.target) {
@@ -314,14 +324,14 @@ pub async fn run(options: Options<'_>) -> Result<Outcome, String> {
     let _ = std::fs::remove_dir_all(&unpacked);
     let _ = std::fs::remove_file(&archive);
     let changed = result?;
-    let to = release.version.clone().unwrap_or_else(|| version_of(&options.bin.join("invincible")));
+    let to = release.version.clone().unwrap_or_else(|| version_of(&options.bin.join(program_file("invincible"))));
     let mut record = installed;
     record.set("version", &to);
     record.set("channel", channel.name());
     record.set("bin", &options.bin.display().to_string());
     record.set("archive_sha256", &release.archive_sha256);
     for p in PROGRAMS {
-        if let Some(sha) = sha256_file(&options.bin.join(p)) {
+        if let Some(sha) = sha256_file(&options.bin.join(program_file(p))) {
             record.set(&format!("{p}_sha256"), &sha);
         }
     }
@@ -371,17 +381,20 @@ fn unpack(archive: &Path, bin: &Path) -> Result<PathBuf, String> {
 
 /// Puts the unpacked programs in place of the installed ones; returns those that changed.
 fn swap(unpacked: &Path, options: &Options<'_>, release: &Release) -> Result<Vec<String>, String> {
-    use std::os::unix::fs::PermissionsExt;
     let dir = unpacked.join(format!("invincible-{}", options.platform));
     let mut ready = Vec::new();
     for program in PROGRAMS {
-        let new = dir.join(program);
+        let new = dir.join(program_file(program));
         let sha = sha256_file(&new).ok_or(format!("the release's archive has no {program}"))?;
-        if sha256_file(&options.bin.join(program)).as_deref() == Some(sha.as_str()) {
+        if sha256_file(&options.bin.join(program_file(program))).as_deref() == Some(sha.as_str()) {
             continue;
         }
-        std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("{}: {e}", new.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| format!("{}: {e}", new.display()))?;
+        }
         // It must run here before it replaces anything.
         let ran = std::process::Command::new(&new).arg("--version").output();
         if !ran.as_ref().is_ok_and(|o| o.status.success()) {
@@ -400,7 +413,15 @@ fn swap(unpacked: &Path, options: &Options<'_>, release: &Release) -> Result<Vec
     }
     let mut changed = Vec::new();
     for (program, new) in ready {
-        let dest = options.bin.join(program);
+        let dest = options.bin.join(program_file(program));
+        // Windows will not replace a running program, but lets it be renamed: the old one moves
+        // aside (removed the next time, once nothing runs it).
+        #[cfg(windows)]
+        if dest.exists() {
+            let old = dest.with_extension("old.exe");
+            let _ = std::fs::remove_file(&old);
+            std::fs::rename(&dest, &old).map_err(|e| format!("{}: {e}", dest.display()))?;
+        }
         std::fs::rename(&new, &dest).map_err(|e| format!("{}: {e}", dest.display()))?;
         changed.push(program.to_owned());
     }

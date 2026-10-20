@@ -982,14 +982,30 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
     if app.tty() {
         // Killed or hung up: the terminal is put back first.
         tokio::spawn(async {
-            use tokio::signal::unix::{SignalKind, signal};
-            let (Ok(mut terminate), Ok(mut hangup)) = (signal(SignalKind::terminate()), signal(SignalKind::hangup()))
-            else {
-                return;
-            };
-            tokio::select! {
-                _ = terminate.recv() => {}
-                _ = hangup.recv() => {}
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{SignalKind, signal};
+                let (Ok(mut terminate), Ok(mut hangup)) =
+                    (signal(SignalKind::terminate()), signal(SignalKind::hangup()))
+                else {
+                    return;
+                };
+                tokio::select! {
+                    _ = terminate.recv() => {}
+                    _ = hangup.recv() => {}
+                }
+            }
+            // The console window closed, or Ctrl+Break.
+            #[cfg(windows)]
+            {
+                use tokio::signal::windows::{ctrl_break, ctrl_close};
+                let (Ok(mut close), Ok(mut brk)) = (ctrl_close(), ctrl_break()) else {
+                    return;
+                };
+                tokio::select! {
+                    _ = close.recv() => {}
+                    _ = brk.recv() => {}
+                }
             }
             term::restore();
             crate::procs::stop_all().await;
@@ -1428,12 +1444,7 @@ impl Chat {
         if command.is_empty() {
             return;
         }
-        let output = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .current_dir(self.agent.tools.workdir())
-            .output()
-            .await;
+        let output = crate::shell::command(command).current_dir(self.agent.tools.workdir()).output().await;
         match output {
             Ok(out) => {
                 let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -2499,6 +2510,8 @@ mod tests {
         assert_eq!(crate::vision(&[], "auto"), None);
     }
 
+    // Symbolic links and Unix paths.
+    #[cfg(unix)]
     #[test]
     fn mentions_attach_files_and_paths_complete() {
         let dir = std::env::temp_dir().join(format!("autobot-mention-{}", std::process::id()));

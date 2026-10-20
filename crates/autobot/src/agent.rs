@@ -850,9 +850,18 @@ impl Agent {
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
     ) -> String {
-        let command = match crate::script::command_line(language, code) {
-            Ok(line) => self.tools.shell_command(&line).await,
-            Err(e) => Err(e),
+        // On Windows, here: Python is started with its arguments, no shell line to quote.
+        #[cfg(windows)]
+        let here = self.tools.ssh().is_none() && self.tools.docker().is_none();
+        #[cfg(not(windows))]
+        let here = false;
+        let command = if here {
+            crate::script::direct(language, code, self.tools.workdir())
+        } else {
+            match crate::script::command_line(language, code) {
+                Ok(line) => self.tools.shell_command(&line).await,
+                Err(e) => Err(e),
+            }
         };
         let command = match command {
             Ok(command) => command,
@@ -1012,9 +1021,15 @@ impl Agent {
              again, write down how with create_skill before you answer; when a skill you followed was \
              wrong or out of date, fix it with improve_skill. When you learn how the owner likes to \
              work (a preference, their tools, their style), keep it with update_user_profile. \
-             Work step by step, check results, and answer briefly in plain text.",
+             Work step by step, check results, and answer briefly in plain text.{shell}",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
+            // Over SSH (below) the other machine's shell is sh.
+            shell = if cfg!(windows) && self.tools.ssh().is_none() {
+                " Shell commands run in PowerShell: write them for it."
+            } else {
+                ""
+            },
         );
         if let Some(ssh) = self.tools.ssh() {
             prompt.push_str(&format!(

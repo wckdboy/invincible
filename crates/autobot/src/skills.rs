@@ -187,7 +187,7 @@ fn collect_files(base: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
         } else if kind.is_file()
             && let Ok(rel) = path.strip_prefix(base)
         {
-            out.push(rel.display().to_string());
+            out.push(crate::slash(rel));
         }
     }
 }
@@ -607,6 +607,8 @@ mod tests {
         std::fs::remove_dir_all(home).unwrap();
     }
 
+    // Symbolic links and Unix paths.
+    #[cfg(unix)]
     #[test]
     fn skills_install_from_a_directory_and_remove() {
         let home = home("install");

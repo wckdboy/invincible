@@ -488,7 +488,10 @@ impl Tools {
         json!([
             function(
                 "terminal",
-                "Run a shell command (sh -c) in the working directory and return its output and exit code. For something that keeps running (a dev server, a watcher, a long build), set background: it returns at once with a process number for the process tool.",
+                &format!(
+                    "Run a shell command ({}) in the working directory and return its output and exit code. For something that keeps running (a dev server, a watcher, a long build), set background: it returns at once with a process number for the process tool.",
+                    if cfg!(windows) { "PowerShell" } else { "sh -c" }
+                ),
                 json!({
                     "command": { "type": "string", "description": "The command line." },
                     "background": { "type": "boolean", "description": "Leave it running and return at once (default false)." },
@@ -980,9 +983,7 @@ impl Tools {
         } else if self.confined {
             crate::sandbox::command(command, &self.workdir)?
         } else {
-            let mut plain = tokio::process::Command::new("sh");
-            plain.arg("-c").arg(command);
-            plain
+            crate::shell::command(command)
         };
         let id = crate::procs::start(command, child, &self.workdir, stopper)?;
         Ok(format!(
@@ -1016,6 +1017,8 @@ impl Tools {
                 if !err.is_empty() {
                     text.push_str(&String::from_utf8_lossy(&err));
                 }
+                // Windows programs end lines with \r\n: the same text as anywhere else.
+                let text = text.replace("\r\n", "\n");
                 let code = status.code().map_or("killed by a signal".to_owned(), |c| format!("exit code {c}"));
                 Ok(format!("{text}{}[{code}]", if text.is_empty() || text.ends_with('\n') { "" } else { "\n" }))
             }
@@ -1036,9 +1039,7 @@ impl Tools {
         } else if self.confined {
             crate::sandbox::command(command, &self.workdir)?
         } else {
-            let mut plain = tokio::process::Command::new("sh");
-            plain.arg("-c").arg(command);
-            plain
+            crate::shell::command(command)
         };
         if self.ssh.is_none() {
             child.current_dir(&self.workdir);
@@ -1330,14 +1331,13 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
         tokio::fs::create_dir_all(dir).await.map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     // Never through a link: the approval was for this path, not where a link points.
-    if let Ok(meta) = tokio::fs::symlink_metadata(path).await {
-        if meta.file_type().is_symlink() {
-            return Err(format!("{} is a symbolic link; not writing through it", path.display()));
-        }
-        #[cfg(unix)]
-        if std::os::unix::fs::MetadataExt::nlink(&meta) > 1 {
-            return Err(format!("{} has other hard links; not writing to it", path.display()));
-        }
+    let meta = tokio::fs::symlink_metadata(path).await.ok();
+    if meta.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
+        return Err(format!("{} is a symbolic link; not writing through it", path.display()));
+    }
+    #[cfg(unix)]
+    if meta.as_ref().is_some_and(|m| std::os::unix::fs::MetadataExt::nlink(m) > 1) {
+        return Err(format!("{} has other hard links; not writing to it", path.display()));
     }
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -1498,9 +1498,12 @@ mod tests {
         let (tools, dir) = tools();
         assert_eq!(tools.resolve("a/b.txt"), dir.join("a/b.txt"));
         assert_eq!(tools.resolve("a/../b.txt"), dir.join("b.txt"));
-        assert_eq!(tools.resolve("/etc/hosts"), std::path::PathBuf::from("/etc/hosts"));
+        let absolute = if cfg!(windows) { r"C:\Windows\win.ini" } else { "/etc/hosts" };
+        assert_eq!(tools.resolve(absolute), std::path::PathBuf::from(absolute));
     }
 
+    // Symbolic links and Unix paths.
+    #[cfg(unix)]
     #[test]
     fn reads_outside_the_workdir_need_approval() {
         let (tools, dir) = tools();
@@ -1543,6 +1546,8 @@ mod tests {
         assert!(matches!(tools.action(&call), Some(Action::Write { bytes: 2, inside: true, .. })));
     }
 
+    // Symbolic links and Unix paths.
+    #[cfg(unix)]
     #[tokio::test]
     async fn writes_never_go_through_links_or_into_dot_names_unseen() {
         let (tools, dir) = tools();
@@ -1576,15 +1581,16 @@ mod tests {
     async fn unattended_commands_write_only_in_the_working_directory() {
         let (tools, dir) = tools();
         let outside = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
             .map(std::path::PathBuf::from)
             .unwrap()
             .join(format!(".autobot-sandbox-test-{}", rand()));
         let confined = tools.clone().with_sandbox(crate::sandbox::Mode::Unattended).unattended();
         let command = format!("echo in > inside.txt; echo out > {}; echo done", outside.display());
         let out = confined.run(&Call::Terminal { command: command.clone() }).await;
-        if out.contains("bwrap") {
-            // No usable sandbox here (not installed, or user namespaces disallowed): refused or
-            // failed, never run unconfined.
+        if out.contains("bwrap") || out.contains("no sandbox") {
+            // No usable sandbox here (not installed, user namespaces disallowed, Windows):
+            // refused or failed, never run unconfined.
             assert!(!dir.join("inside.txt").exists());
             return;
         }
@@ -1601,10 +1607,17 @@ mod tests {
     #[tokio::test]
     async fn terminal_reports_output_and_exit_code() {
         let (tools, dir) = tools();
-        let out = tools.run(&Call::Terminal { command: "echo hi; echo oops >&2; exit 3".into() }).await;
+        let (both, here) = if cfg!(windows) {
+            ("echo hi; [Console]::Error.WriteLine('oops'); exit 3", "(Get-Location).Path")
+        } else {
+            ("echo hi; echo oops >&2; exit 3", "pwd")
+        };
+        let out = tools.run(&Call::Terminal { command: both.into() }).await;
         assert_eq!(out, "hi\noops\n[exit code 3]");
-        let out = tools.run(&Call::Terminal { command: "pwd".into() }).await;
-        assert!(out.starts_with(dir.to_str().unwrap()), "{out}");
+        let out = tools.run(&Call::Terminal { command: here.into() }).await;
+        // The same directory, however it is spelled (Windows' short 8.3 names).
+        let said = std::path::Path::new(out.lines().next().unwrap_or_default());
+        assert_eq!(said.canonicalize().ok(), dir.canonicalize().ok(), "{out}");
         let tools = Tools::new(dir, Duration::from_millis(200));
         let out = tools.run(&Call::Terminal { command: "sleep 5".into() }).await;
         assert!(out.contains("stopped after"), "{out}");

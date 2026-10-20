@@ -350,6 +350,12 @@ pub async fn readiness(config: &Config, home: &Path) -> Vec<Check> {
             crate::service::Platform::SystemdSystem => {
                 checks.push(ok("systemd system units: the services run without a login"));
             }
+            // Tasks start at logon: a reboot waits for someone to log in.
+            crate::service::Platform::TaskScheduler => {
+                checks.push(warn(
+                    "Task Scheduler tasks start when you log in: after a restart, log in (or turn on automatic sign-in) for the services to run",
+                ));
+            }
             crate::service::Platform::Launchd => {
                 let out = std::process::Command::new("pmset").arg("-g").output();
                 if let Ok(out) = out {
@@ -525,8 +531,15 @@ pub fn free_space(path: &Path) -> Option<u64> {
     while !dir.exists() {
         dir = dir.parent()?;
     }
-    let stat = rustix::fs::statvfs(dir).ok()?;
-    Some(stat.f_bavail.saturating_mul(stat.f_frsize))
+    #[cfg(unix)]
+    {
+        let stat = rustix::fs::statvfs(dir).ok()?;
+        Some(stat.f_bavail.saturating_mul(stat.f_frsize))
+    }
+    #[cfg(windows)]
+    {
+        fs4::available_space(dir).ok()
+    }
 }
 
 /// Whether the clock follows network time (receipts, schedules and TLS need it right).

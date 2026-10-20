@@ -53,6 +53,7 @@ pub mod service;
 pub mod session;
 pub mod settings;
 pub mod setup;
+pub mod shell;
 pub mod signal;
 pub mod skills;
 pub mod slack;
@@ -210,7 +211,8 @@ pub fn network() -> Result<invincible_policy::NetworkMode, String> {
 
 /// A program next to this one, else on the PATH.
 pub fn find_program(name: &str) -> Option<PathBuf> {
-    if let Some(sibling) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(name)))
+    let file = invincible::update::program_file(name);
+    if let Some(sibling) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(&file)))
         && sibling.is_file()
     {
         return Some(sibling);
@@ -218,10 +220,29 @@ pub fn find_program(name: &str) -> Option<PathBuf> {
     find_on_path(name)
 }
 
+/// A relative path written with `/` on every system (Windows writes `\\`): how paths in the
+/// working directory, a skill or the home are shown to the model and kept in files that move
+/// between machines (backups). Absolute paths are left as the system writes them.
+pub fn slash(path: &Path) -> String {
+    if cfg!(windows) && path.is_relative() {
+        path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+    } else {
+        path.display().to_string()
+    }
+}
+
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = Path::new(name);
     if path.components().count() > 1 {
         return path.is_file().then(|| path.to_owned());
     }
-    std::env::split_paths(&std::env::var_os("PATH")?).map(|dir| dir.join(name)).find(|p| p.is_file())
+    // Windows finds `pwsh` as `pwsh.exe`: the extensions PATHEXT lists, after the name itself.
+    let mut names = vec![name.to_owned()];
+    if cfg!(windows) && path.extension().is_none() {
+        let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+        names.extend(exts.split(';').filter(|e| !e.is_empty()).map(|e| format!("{name}{}", e.to_lowercase())));
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+        .find(|p| p.is_file())
 }

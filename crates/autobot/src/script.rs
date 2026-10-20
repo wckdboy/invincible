@@ -101,6 +101,25 @@ pub fn command_line(language: Language, code: &str) -> Result<String, String> {
     })
 }
 
+/// [code] started directly, without a shell (Windows, where commands go to PowerShell): Python
+/// as `python` (Windows has no `python3` by default); `sh` scripts need a Unix shell.
+pub fn direct(language: Language, code: &str, workdir: &std::path::Path) -> Result<tokio::process::Command, String> {
+    // The same checks as for a command line.
+    command_line(language, code)?;
+    match language {
+        Language::Python => {
+            let program = ["python", "python3", "py"]
+                .into_iter()
+                .find(|p| crate::find_on_path(p).is_some())
+                .ok_or("no Python here: install it from python.org or the Microsoft Store")?;
+            let mut command = tokio::process::Command::new(program);
+            command.args(["-I", "-u", "-c", &format!("{PYTHON}{code}")]).current_dir(workdir);
+            Ok(command)
+        }
+        Language::Shell => Err("sh scripts need a Unix shell; write the script in Python here".to_owned()),
+    }
+}
+
 /// How the script is shown for approval: what it is, then the code.
 pub fn shown(language: Language, code: &str) -> String {
     format!("{} - <<'EOF'\n{}\nEOF", language.name(), code.trim_end())
@@ -247,6 +266,8 @@ mod tests {
         assert_eq!(shown(Language::Shell, "ls\n"), "sh - <<'EOF'\nls\nEOF");
     }
 
+    // The script is sh.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_shell_script_calls_tools_through_its_pipes() {
         let line = command_line(

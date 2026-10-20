@@ -1,7 +1,6 @@
 //! `autobot migrate`: a Hermes Agent and an OpenClaw home, made up here, brought over into an
 //! Autobot home; nothing overwritten, no secrets unless asked, and a dry run changes nothing.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use autobot::config::Config;
@@ -102,7 +101,11 @@ fn a_hermes_home_comes_over() {
     assert!(text.contains("SOUL.md: there is one here already; keep theirs as the personality hermes"), "{text}");
     let key = home.join("secrets/anthropic.key");
     assert_eq!(std::fs::read_to_string(&key).unwrap(), "sk-ant-fake-key-for-tests\n");
-    assert_eq!(std::fs::metadata(&key).unwrap().permissions().mode() & 0o777, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&key).unwrap().permissions().mode() & 0o777, 0o600);
+    }
     assert!(text.contains("invincible cloud add anthropic --key-stdin <"), "{text}");
     assert_eq!(std::fs::read_to_string(home.join("telegram.token")).unwrap(), "123:fake\n");
     assert_eq!(Config::load(&home.join("config.toml")).unwrap().approvals.allow, ["ls", "git status"]);
