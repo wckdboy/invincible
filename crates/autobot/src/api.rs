@@ -418,6 +418,7 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/usage", get(usage))
         .route("/v1/agent/insights", get(insights))
         .route("/v1/agent/stats", get(stats))
+        .route("/v1/agent/alerts/test", post(alerts_test))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     health.merge(guarded).with_state(state)
 }
@@ -455,6 +456,23 @@ async fn require_token(State(state): State<Arc<ApiState>>, request: Request, nex
         );
     }
     next.run(request).await
+}
+
+/// `POST /v1/agent/alerts/test`: a test alert to where alerts go, now ([crate::alerts::test]).
+async fn alerts_test() -> Response {
+    match crate::alerts::test().await {
+        Ok(sent) => Json(json!({
+            "sent": sent
+                .into_iter()
+                .map(|(to, result)| match result {
+                    Ok(()) => json!({ "to": to }),
+                    Err(e) => json!({ "to": to, "error": e }),
+                })
+                .collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::CONFLICT, "no_alerts", &e),
+    }
 }
 
 fn error(status: StatusCode, code: &str, message: &str) -> Response {

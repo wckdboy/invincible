@@ -4,8 +4,10 @@
 pub mod acp;
 pub mod actions;
 pub mod agent;
+pub mod alerts;
 pub mod api;
 pub mod approval;
+pub mod backup;
 pub mod board;
 pub mod bots;
 pub mod browser;
@@ -29,6 +31,7 @@ pub mod hub;
 pub mod identity;
 pub mod images;
 pub mod insights;
+pub mod logs;
 pub mod mail;
 pub mod manage;
 pub mod markdown;

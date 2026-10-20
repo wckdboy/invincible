@@ -520,7 +520,7 @@ pub fn mac_sleep(pmset: &str) -> Option<u64> {
     field("sleep")
 }
 
-fn free_space(path: &Path) -> Option<u64> {
+pub fn free_space(path: &Path) -> Option<u64> {
     let mut dir = path;
     while !dir.exists() {
         dir = dir.parent()?;

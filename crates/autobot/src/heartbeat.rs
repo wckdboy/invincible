@@ -48,7 +48,16 @@ pub async fn run(runtime: std::sync::Arc<crate::bots::Runtime>, every: Duration)
     loop {
         tokio::time::sleep(every).await;
         let Some(list) = checklist(&home) else { continue };
-        match check(&runtime.agent(), &home, &list).await {
+        let checked = check(&runtime.agent(), &home, &list).await;
+        if checked.is_ok() {
+            // It ran, whatever it found.
+            crate::alerts::raise(crate::alerts::Alert::cleared(
+                crate::alerts::Kind::Job,
+                &format!("heartbeat:{}", runtime.name),
+                format!("{}'s heartbeat runs again.", runtime.name),
+            ));
+        }
+        match checked {
             Ok(answer) if quiet(&answer) => tracing::info!(bot = %runtime.name, "heartbeat: all quiet"),
             Ok(answer) => {
                 tracing::info!(bot = %runtime.name, "heartbeat: something needs the owner");
@@ -61,6 +70,11 @@ pub async fn run(runtime: std::sync::Arc<crate::bots::Runtime>, every: Duration)
             Err(e) => {
                 tracing::warn!(bot = %runtime.name, "heartbeat: {e}");
                 runtime.error(&format!("heartbeat: {e}"));
+                crate::alerts::raise(crate::alerts::Alert::new(
+                    crate::alerts::Kind::Job,
+                    &format!("heartbeat:{}", runtime.name),
+                    format!("{}'s heartbeat check failed: {e}", runtime.name),
+                ));
             }
         }
     }

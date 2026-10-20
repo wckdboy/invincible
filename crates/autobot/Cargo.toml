@@ -41,6 +41,8 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 rustls-native-certs = "0.8"
 rustix = { version = "1", features = ["termios", "event", "stdio", "fs", "process"] }
 base64.workspace = true
+# Backups are .tar.gz (the tar is written here; flate2 is already in the tree, under png).
+flate2 = "1"
 # Images shown to the agent: decoded, downscaled and re-encoded before they are sent (only the
 # four formats terminals hand over; no rayon, no other codecs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
