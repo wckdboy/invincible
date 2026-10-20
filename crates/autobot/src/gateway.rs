@@ -111,6 +111,32 @@ impl Gateway {
         })
     }
 
+    /// Whether the gateway answers its health check (`GET /health`, no token needed).
+    pub async fn healthy(&self) -> bool {
+        let root = self.url.strip_suffix("/v1").unwrap_or(&self.url);
+        let request = self.client.get(format!("{root}/health")).timeout(Duration::from_secs(5));
+        matches!(request.send().await, Ok(r) if r.status().is_success())
+    }
+
+    /// Keeps an eye on the gateway for a long-running agent: says when it goes away and when it
+    /// is back. Every call reconnects anyway, so nothing else has to change when it restarts
+    /// (an upgrade, a crash); turns in between fail with the gateway's error and can be retried.
+    pub async fn watch(&self, every: Duration) {
+        let mut up = true;
+        loop {
+            let now = self.healthy().await;
+            if now != up {
+                if now {
+                    tracing::info!("the gateway at {} answers again", self.url);
+                } else {
+                    tracing::warn!("the gateway at {} does not answer; waiting for it", self.url);
+                }
+                up = now;
+            }
+            tokio::time::sleep(every).await;
+        }
+    }
+
     pub fn model(&self) -> &str {
         &self.model
     }

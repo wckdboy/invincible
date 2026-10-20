@@ -1,0 +1,21 @@
+[Unit]
+Description=Invincible Gateway
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/home/me/.local/bin/invincible serve
+Environment=PATH=/usr/bin
+Environment=HOME=/root
+Restart=always
+RestartSec=5
+WatchdogSec=180
+TimeoutStopSec=20
+LimitNOFILE=65536
+StandardOutput=append:/home/me/.invincible/logs/gateway.log
+StandardError=append:/home/me/.invincible/logs/gateway.log
+
+[Install]
+WantedBy=multi-user.target

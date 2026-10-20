@@ -1,26 +1,90 @@
-# Release binaries for install.sh: `invincible` and `autobot` for macOS (Apple silicon) and Linux
-# (x86_64, arm64; static musl builds, so they run on any distribution).
+# Release binaries for install.sh and `invincible update`: `invincible` and `autobot` for macOS
+# (Apple silicon) and Linux (x86_64, arm64; static musl builds, so they run on any distribution).
 #
-# - A tag `v*` builds, checksums and publishes a GitHub release.
-# - Run by hand (workflow_dispatch), it builds the same files as workflow artifacts only, to
-#   check a release before tagging one.
+# Two channels, built the same way and signed with the same key:
+# - stable: a tag `v*` builds, checksums and publishes a GitHub release (version 0.0.12).
+# - edge: every push to main that passed CI (the `ci` workflow) builds the same files and
+#   refreshes the prerelease `edge` (a moving tag) with them, version `0.0.12-edge.<short sha>`
+#   (the workspace version, then the commit), which `--version` shows.
+# Run by hand (workflow_dispatch), it builds the same files as workflow artifacts only, to check a
+# release before tagging one.
 #
 # Every archive gets a build-provenance attestation (Sigstore, keyless: GitHub signs that this
 # workflow at this commit built these exact bytes), checkable with `gh attestation verify`.
-# SHA256SUMS lists every archive, signed with the release key (SHA256SUMS.sig, an SSH signature);
-# install.sh checks the signature with the public key it pins, then the archive against SHA256SUMS.
+# SHA256SUMS lists every archive and VERSION, signed with the release key (SHA256SUMS.sig, an SSH
+# signature); install.sh and `invincible update` check the signature with the public key they pin,
+# then the archive against SHA256SUMS.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# One edge build at a time, the newest winning; tags each their own.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_run' && 'edge' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
+
 jobs:
+  # What is built: the commit, the channel and the version it says it is.
+  meta:
+    # Edge only from a push to main of this repository whose CI passed.
+    if: >-
+      github.event_name != 'workflow_run' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+      channel: ${{ steps.meta.outputs.channel }}
+      version: ${{ steps.meta.outputs.version }}
+      build_version: ${{ steps.meta.outputs.build_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          base=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          [ -n "$base" ] || { echo "no workspace version in Cargo.toml"; exit 1; }
+          build_version=""
+          if [ "$EVENT" = workflow_run ]; then
+            channel=edge
+            version="$base-edge.$(git rev-parse --short=7 HEAD)"
+            build_version="$version"
+          elif [ "${REF#refs/tags/v}" != "$REF" ]; then
+            channel=stable
+            version="${REF_NAME#v}"
+            [ "$version" = "$base" ] || { echo "tag $REF_NAME but Cargo.toml says $base"; exit 1; }
+          else
+            channel=check
+            version="$base"
+          fi
+          {
+            echo "sha=$sha"
+            echo "channel=$channel"
+            echo "version=$version"
+            echo "build_version=$build_version"
+          } >>"$GITHUB_OUTPUT"
+          echo "$channel $version ($sha)"
+
   build:
+    needs: meta
     strategy:
       matrix:
         include:
@@ -32,8 +96,13 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    env:
+      # Empty for stable: the binaries say the workspace version.
+      INVINCIBLE_BUILD_VERSION: ${{ needs.meta.outputs.build_version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
       - uses: dtolnay/rust-toolchain@1.91
         with:
           targets: ${{ matrix.target }}
@@ -45,6 +114,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
       - name: build
         run: |
+          [ -n "$INVINCIBLE_BUILD_VERSION" ] || unset INVINCIBLE_BUILD_VERSION
           # Always from the same path (Cargo hashes it into symbol names), with the machine's paths
           # kept out of the binaries: a rebuild anywhere gives the same bytes.
           src=/tmp/invincible-src
@@ -55,6 +125,8 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp target/${{ matrix.target }}/release/invincible target/${{ matrix.target }}/release/autobot "$GITHUB_WORKSPACE/out/"
       - name: package
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
           dir="invincible-${{ matrix.platform }}"
           mkdir -p "$dir"
@@ -62,8 +134,9 @@ jobs:
           # Fixed order, owner and times in the archive.
           if tar --version | grep -q GNU; then opts="--sort=name --owner=0 --group=0 --numeric-owner --mtime=@0"; else opts="--uid 0 --gid 0"; fi
           tar $opts -cf - "$dir" | gzip -n > "$dir.tar.gz"
-          "$dir/invincible" --version
-          "$dir/autobot" --version
+          # They say the version they are released as.
+          test "$("$dir/invincible" --version)" = "invincible $VERSION"
+          test "$("$dir/autobot" --version)" = "autobot $VERSION"
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: invincible-${{ matrix.platform }}.tar.gz
@@ -75,11 +148,14 @@ jobs:
   # The same commit built again, from another directory on another machine: the archive must be
   # the same bytes, so anyone can rebuild a release and compare.
   reproduce:
-    needs: build
+    needs: [meta, build]
     runs-on: ubuntu-24.04
+    env:
+      INVINCIBLE_BUILD_VERSION: ${{ needs.meta.outputs.build_version }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.meta.outputs.sha }}
           path: elsewhere/invincible
       - uses: dtolnay/rust-toolchain@1.91
       # Inside the checkout: rust-toolchain.toml picks the toolchain the target must be added to.
@@ -89,6 +165,7 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
       - working-directory: elsewhere/invincible
         run: |
+          [ -n "$INVINCIBLE_BUILD_VERSION" ] || unset INVINCIBLE_BUILD_VERSION
           src=/tmp/invincible-src
           rm -rf "$src" && cp -R "$PWD" "$src" && cd "$src"
           export RUSTFLAGS="--remap-path-prefix=$src=/build --remap-path-prefix=$HOME=/home"
@@ -116,16 +193,27 @@ jobs:
           fi
 
   publish:
-    needs: [build, reproduce]
+    needs: [meta, build, reproduce]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      CHANNEL: ${{ needs.meta.outputs.channel }}
+      VERSION: ${{ needs.meta.outputs.version }}
+      SHA: ${{ needs.meta.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - run: sha256sum invincible-*.tar.gz | tee SHA256SUMS
-      # The release key (a GitHub secret) signs SHA256SUMS; install.sh pins its public key.
+      # VERSION says what the release is, so an install that is up to date downloads nothing more;
+      # it is in the signed SHA256SUMS like the archives.
+      - run: |
+          printf '%s\n' "$VERSION" > VERSION
+          sha256sum invincible-*.tar.gz VERSION | tee SHA256SUMS
+      # The release key (a GitHub secret) signs SHA256SUMS; install.sh and `invincible update`
+      # pin its public key.
       - name: sign
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
@@ -135,17 +223,32 @@ jobs:
           ssh-keygen -Y sign -q -f "$RUNNER_TEMP/release.key" -n invincible-release SHA256SUMS
           rm -f "$RUNNER_TEMP/release.key"
           cat SHA256SUMS.sig
-      - if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - if: needs.meta.outputs.channel == 'stable'
         run: |
-          gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" \
-            --title "${{ github.ref_name }}" --generate-notes \
-            invincible-*.tar.gz SHA256SUMS SHA256SUMS.sig
-      - if: "!startsWith(github.ref, 'refs/tags/v')"
+          gh release create "v$VERSION" --repo "$REPO" --title "v$VERSION" --generate-notes \
+            invincible-*.tar.gz VERSION SHA256SUMS SHA256SUMS.sig
+      # The moving tag `edge` points at this commit; the prerelease's files are replaced, the
+      # signed list last (an install in the few seconds between sees a mismatch and stops).
+      - if: needs.meta.outputs.channel == 'edge'
+        run: |
+          if gh api "repos/$REPO/git/refs/tags/edge" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/tags/edge" -f sha="$SHA" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$REPO/git/refs" -f ref=refs/tags/edge -f sha="$SHA" >/dev/null
+          fi
+          notes="Built from $SHA on main after CI passed. Not a release: \`curl -fsSL https://invincible.sh/install.sh | sh -s -- --channel edge\` or \`invincible update --channel edge\` installs it."
+          if gh release view edge --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit edge --repo "$REPO" --prerelease --latest=false --title "edge ($VERSION)" --notes "$notes"
+          else
+            gh release create edge --repo "$REPO" --prerelease --latest=false --title "edge ($VERSION)" --notes "$notes" --verify-tag
+          fi
+          gh release upload edge --repo "$REPO" --clobber invincible-*.tar.gz VERSION
+          gh release upload edge --repo "$REPO" --clobber SHA256SUMS SHA256SUMS.sig
+      - if: needs.meta.outputs.channel == 'check'
         uses: actions/upload-artifact@v4
         with:
           name: SHA256SUMS
           path: |
             SHA256SUMS
             SHA256SUMS.sig
+            VERSION

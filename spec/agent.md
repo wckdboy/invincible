@@ -12,6 +12,11 @@ with `invincible-caller: device:<name>` (or `local`) saying who is asking; only 
 it, since only it has the token.
 If the agent is not running, the gateway answers `503` with error type `agent_unavailable`.
 
+One path needs no token: `GET /healthz` on the agent's own address (not under `/v1/agent`, so not
+through the gateway) answers `{"status": "ok", "version": "0.0.12"}` and nothing more. The
+gateway answers the same at its `GET /healthz`. The services' watchdog, the installer and
+monitoring use them.
+
 Every `POST` must say `Content-Type: application/json` (`415` otherwise), so a web page cannot
 reach the agent with a form or a no-cors request. The gateway passes on only `/v1/agent` paths made
 of plain segments (no `.`, `..`, encoded dots or slashes, or backslashes), and answers `404` for

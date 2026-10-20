@@ -219,6 +219,16 @@ async fn the_token_is_required_on_both_sides() {
     assert_eq!(client.get(format!("{agent}/v1/agent")).send().await.unwrap().status(), 401);
     assert_eq!(client.get(format!("{agent}/v1/agent")).bearer_auth("wrong").send().await.unwrap().status(), 401);
     assert_eq!(client.get(format!("{agent}/v1/agent")).bearer_auth(TOKEN).send().await.unwrap().status(), 200);
+    // Health needs none, and says only that it answers and its version.
+    for side in [&gateway, &agent] {
+        let root = side.trim_end_matches("/v1");
+        let health: Value = client.get(format!("{root}/healthz")).send().await.unwrap().json().await.unwrap();
+        assert_eq!(health, json!({ "status": "ok", "version": invincible::version::VERSION }), "{side}");
+    }
+    // What the agent's watch on the gateway asks.
+    let root = gateway.trim_end_matches("/v1");
+    assert!(Gateway::new(&format!("{root}/v1"), TOKEN, "auto", true).unwrap().healthy().await);
+    assert!(!Gateway::new("http://127.0.0.1:9/v1", TOKEN, "auto", true).unwrap().healthy().await);
 }
 
 #[tokio::test]

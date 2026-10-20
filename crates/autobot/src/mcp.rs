@@ -145,7 +145,7 @@ impl Hub {
         server
             .request(
                 "initialize",
-                json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "autobot", "version": env!("CARGO_PKG_VERSION") } }),
+                json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "autobot", "version": invincible::version::VERSION } }),
             )
             .await
             .map_err(|e| format!("MCP server {name}: initialize: {e}"))?;

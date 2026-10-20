@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    version,
+    version = invincible::version::VERSION,
     about = "The Autobot Agent, on Invincible Gateway. With no command: `autobot code` in a git repository, the chat anywhere else."
 )]
 struct Cli {
@@ -99,6 +99,13 @@ enum Command {
     Service {
         #[command(subcommand)]
         action: ServiceAction,
+    },
+    /// Update autobot and invincible to the newest release (`invincible update`, with the same
+    /// options: --channel stable|edge, --version, --check, --auto).
+    #[command(disable_help_flag = true)]
+    Update {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// List the saved conversations.
     Sessions,
@@ -236,9 +243,15 @@ enum DiscordAction {
 
 #[derive(Subcommand)]
 enum ServiceAction {
+    /// Install the services (or bring them up to date) and start them; run again, it changes
+    /// only what is out of date.
     Install,
+    /// Stop and remove them (the data stays).
     Uninstall,
+    /// Whether each is installed, enabled and running, and how it last stopped.
     Status,
+    /// Restart the running ones (after new binaries or a config change).
+    Restart,
 }
 
 fn main() -> ExitCode {
@@ -374,13 +387,18 @@ fn run(cli: Cli) -> Result<(), String> {
             runtime()?.block_on(serve(&config, home))
         }
         Command::Doctor => {
-            let checks = runtime()?.block_on(doctor::run(&config, &home));
-            let failed = checks.iter().filter(|c| !c.ok).count();
-            println!("{}\n", invincible::brand::Product::Autobot.header(env!("CARGO_PKG_VERSION")));
+            let (checks, ready) = runtime()?.block_on(async {
+                let checks = doctor::run(&config, &home).await;
+                (checks, doctor::readiness(&config, &home).await)
+            });
+            let failed = checks.iter().chain(&ready).filter(|c| !c.ok).count();
+            println!("{}\n", invincible::brand::Product::Autobot.header(invincible::version::VERSION));
             for check in &checks {
-                let line =
-                    if check.ok { invincible::brand::ok(&check.what) } else { invincible::brand::fail(&check.what) };
-                println!("  {line}");
+                println!("  {}", check.line());
+            }
+            println!("\n  {}\n", invincible::brand::bold("24/7 readiness"));
+            for check in &ready {
+                println!("  {}", check.line());
             }
             println!();
             if failed > 0 { Err(format!("{failed} problem(s)")) } else { Ok(()) }
@@ -446,30 +464,42 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Service { action } => {
             let platform = service::Platform::current()?;
             let user_home = setup::user_home()?;
-            let services = setup::services(&home)?;
             let lines = match action {
-                ServiceAction::Install => service::install(platform, &user_home, &services)?,
-                ServiceAction::Uninstall => service::uninstall(platform, &user_home, &services)?,
-                ServiceAction::Status => service::status(platform, &user_home, &services)
-                    .into_iter()
-                    .map(|(name, installed, running)| {
-                        format!(
-                            "{name}: {}",
-                            if running {
-                                "running"
-                            } else if installed {
-                                "stopped"
-                            } else {
-                                "not installed"
-                            }
-                        )
-                    })
-                    .collect(),
+                ServiceAction::Install => setup::install_services(&home)?,
+                ServiceAction::Uninstall => setup::uninstall_services(&home)?,
+                ServiceAction::Restart => {
+                    let restarted = service::restart(platform, &user_home, &[service::GATEWAY, service::AGENT]);
+                    if restarted.is_empty() {
+                        vec!["nothing running to restart".to_owned()]
+                    } else {
+                        restarted.into_iter().map(|name| format!("restarted {name}")).collect()
+                    }
+                }
+                ServiceAction::Status => {
+                    let mut services = setup::services(&home)?;
+                    services.push(setup::update_job()?.0);
+                    service::status(platform, &user_home, &services).iter().map(status_line).collect()
+                }
             };
             for line in lines {
                 println!("{line}");
             }
             Ok(())
+        }
+        Command::Update { args } => {
+            let program = autobot::find_program("invincible").ok_or("the `invincible` command is not installed")?;
+            let mut command = std::process::Command::new(&program);
+            command.arg("update").args(&args);
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                Err(format!("{}: {}", program.display(), command.exec()))
+            }
+            #[cfg(not(unix))]
+            {
+                let status = command.status().map_err(|e| format!("{}: {e}", program.display()))?;
+                if status.success() { Ok(()) } else { Err("the update failed".to_owned()) }
+            }
         }
         Command::Cron { action } => cron(action, &config, &home),
         Command::Hooks { action } => hooks(action, &config, &home),
@@ -827,6 +857,16 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
             "[serve] listen = {listen}: the agent API must be on loopback (devices reach it through the gateway)"
         ));
     }
+    // Started together (at boot, after an upgrade), the gateway may not have made its token yet:
+    // wait for it rather than exit into a restart loop.
+    let mut waiting = false;
+    while let Err(e) = config.gateway.token() {
+        if !waiting {
+            tracing::info!("waiting for the gateway: {e}");
+            waiting = true;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
     let agent = Arc::new(autobot::agent(config, &home)?);
     let info = serde_json::json!({
         "name": "Autobot",
@@ -837,7 +877,13 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
     });
     let state = Arc::new(autobot::api::ApiState::new(agent.clone(), config.gateway.token()?, home.clone(), info));
     let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("listen on {listen}: {e}"))?;
-    tracing::info!("agent API on http://{listen} (paired apps reach it through the gateway)");
+    tracing::info!(
+        "agent API on http://{listen} ({}; paired apps reach it through the gateway)",
+        invincible::version::VERSION
+    );
+    invincible::watchdog::spawn("agent", listen, home.join("logs"));
+    let gateway = agent.gateway.clone();
+    let watch_gateway = async move { gateway.watch(std::time::Duration::from_secs(15)).await };
     let api = async move {
         if let Err(e) = axum::serve(listener, autobot::api::app(state)).await {
             tracing::error!("agent API: {e}");
@@ -923,8 +969,26 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         () = schedules => Ok(()),
         () = hooks => Ok(()),
         () = discord => Ok(()),
+        () = watch_gateway => Ok(()),
         () = shutdown() => Ok(()),
     }
+}
+
+/// `sh.invincible.gateway: running (enabled; last stop: exit code 1; 2 restarts)`.
+fn status_line(s: &service::Status) -> String {
+    let state = match (s.installed, s.running) {
+        (false, _) => return format!("{}: not installed", s.name),
+        (true, true) => "running",
+        (true, false) => "stopped",
+    };
+    let mut notes = vec![if s.enabled { "enabled" } else { "not enabled" }.to_owned()];
+    if let Some(last) = &s.last_exit {
+        notes.push(format!("last stop: {last}"));
+    }
+    if let Some(n) = s.restarts.filter(|n| *n > 0) {
+        notes.push(format!("{n} restart{}", if n == 1 { "" } else { "s" }));
+    }
+    format!("{}: {state} ({})", s.name, notes.join("; "))
 }
 
 async fn discord_bot(config: &Config, home: &std::path::Path) -> Result<autobot::discord::Bot, String> {

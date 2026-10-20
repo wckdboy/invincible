@@ -42,6 +42,42 @@ pub struct Config {
     /// The Autobot Agent on this machine, which `/v1/agent` passes through to (spec/agent.md).
     #[serde(default)]
     pub agent: AgentLink,
+    /// Updates: none unless asked for (`invincible update`), or daily when `auto` is on.
+    #[serde(default)]
+    pub update: UpdateConfig,
+}
+
+/// ```toml
+/// [update]
+/// auto = "off"   # off, stable, edge: a daily `invincible update` on that channel
+/// ```
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateConfig {
+    #[serde(default = "auto_off")]
+    pub auto: String,
+}
+
+fn auto_off() -> String {
+    "off".to_owned()
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self { auto: auto_off() }
+    }
+}
+
+impl UpdateConfig {
+    /// The channel automatic updates follow, or `None` when they are off.
+    pub fn channel(&self) -> Result<Option<crate::version::Channel>, String> {
+        match self.auto.as_str() {
+            "off" => Ok(None),
+            other => crate::version::Channel::parse(other)
+                .map(Some)
+                .map_err(|_| format!("[update] auto = {other:?}: one of off, stable, edge")),
+        }
+    }
 }
 
 /// ```toml
@@ -281,6 +317,7 @@ impl Config {
                 return Err(format!("model id {id:?} appears twice"));
             }
         }
+        self.update.channel()?;
         for cloud in &self.cloud {
             crate::egress::check(&cloud.base_url).map_err(|e| format!("[[cloud]] {}: {e}", cloud.id))?;
             if cloud.api_key_file.is_some() && cloud.api_key_env.is_some() {

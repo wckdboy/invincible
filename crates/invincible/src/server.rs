@@ -245,7 +245,14 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({ "name": state.name, "receipt_key": state.receipt_key.public() }))
 }
 
-/// The loopback app: the API and the admin endpoints behind the token, plus `/health`.
+/// `GET /healthz`: unauthenticated, and says only that the node answers and its version (for the
+/// watchdog, the installer and monitoring).
+pub async fn healthz() -> Json<Value> {
+    Json(json!({ "status": "ok", "version": crate::version::VERSION }))
+}
+
+/// The loopback app: the API and the admin endpoints behind the token, plus `/health` and
+/// `/healthz`.
 pub fn app(state: Arc<AppState>) -> Router {
     let admin = Router::new()
         .route("/v1/fetch", post(fetch))
@@ -253,7 +260,11 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/admin/devices", get(list_devices))
         .route("/v1/admin/devices/{name}", delete(remove_device));
     let guarded = api().merge(admin).route_layer(middleware::from_fn_with_state(state.clone(), require_token));
-    Router::new().route("/health", get(|| async { Json(json!({ "status": "ok" })) })).merge(guarded).with_state(state)
+    Router::new()
+        .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
+        .route("/healthz", get(healthz))
+        .merge(guarded)
+        .with_state(state)
 }
 
 /// What paired devices reach through their encrypted session: the API only. They are

@@ -1,0 +1,21 @@
+[Unit]
+Description=Autobot Agent
+After=network-online.target invincible.service
+Wants=invincible.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/home/me/.local/bin/autobot serve
+Environment="PATH=/usr/bin:/a b"
+Environment="AUTOBOT_HOME=/home/me/a b"
+Restart=always
+RestartSec=5
+WatchdogSec=180
+TimeoutStopSec=20
+LimitNOFILE=65536
+StandardOutput=append:/home/me/.autobot/logs/agent.log
+StandardError=append:/home/me/.autobot/logs/agent.log
+
+[Install]
+WantedBy=default.target

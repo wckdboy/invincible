@@ -67,6 +67,8 @@ async fn the_token_is_required() {
     assert_eq!(chat.status(), 401);
     // Health says nothing about the node, so it needs no token.
     assert_eq!(client.get(format!("{node}/health")).send().await.unwrap().status(), 200);
+    let healthz: Value = client.get(format!("{node}/healthz")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(healthz, serde_json::json!({ "status": "ok", "version": invincible::version::VERSION }));
 }
 
 #[tokio::test]
