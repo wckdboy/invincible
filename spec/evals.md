@@ -53,17 +53,21 @@ Every run is kept (unless `--no-record`) as one line of `$INVINCIBLE_HOME/evals/
 ```json
 {"at": "2026-10-20T21:00:00+02:00", "suite": "projects", "digest": "3f9a1c2b7d01", "tasks": 50,
  "kind": "answers", "version": "0.0.18",
- "models": [{"model": "qwen3.5-4b", "tier": "node", "passed": 30, "total": 50, "median_ms": 200},
-            {"model": "deepseek", "tier": "cloud", "passed": 45, "total": 50, "median_ms": 900}]}
+ "models": [{"model": "qwen3.5-4b", "tier": "node", "passed": 30, "total": 50, "median_ms": 200, "errors": 0},
+            {"model": "deepseek", "tier": "cloud", "passed": 45, "total": 50, "median_ms": 900, "errors": 0}]}
 ```
 
 `suite` is the task file's name (`name#tag` when `--tag` chose some of its tasks); `digest` is
-the first 6 bytes of the SHA-256 of its task ids in order, one per line, so runs of the same tasks
-are compared and a changed file starts a history of its own. `tier` is what the gateway's
+the first 6 bytes of the SHA-256 of the tasks that ran, each as written in the file (re-serialized
+as JSON with sorted keys, one per line, in the file's order), so runs of the same tasks are
+compared and a task whose prompt, checks or files changed starts a history of its own. `errors`
+counts the tasks a model gave no answer to (refused, unreachable); a run in which no model
+answered anything is not kept. `tier` is what the gateway's
 `/v1/models` says (`node`, `cloud`; absent for a model it does not list, such as `auto`). `kind`
 is `answers` for `invincible eval` and `agent` for `autobot eval`, which keeps its runs in the
 same file.
 
 The gap of a run is the best cloud model's pass rate less the best node model's, in percentage
-points; a run without both has none. `invincible eval --history [FILE]` prints each suite's runs
-with every model's score and the gap, and how the gap moved from the first run to the last.
+points, among the models that answered every task; a run without both has none. `invincible eval
+--history [FILE] [--tag TAG]` prints each suite's runs (a file's include its tagged runs) with
+every model's score and the gap, and how the gap moved from the first run to the last.
