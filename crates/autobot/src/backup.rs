@@ -178,6 +178,9 @@ fn walk(home: &Path, rel: &Path, secrets: bool, also_skip: &[PathBuf], found: &m
         };
         if also_skip.iter().any(|s| s == &path) {
             exclude("backups", found);
+        } else if shown.contains('\\') {
+            // Kept as written, a name with a backslash would not come back the same.
+            exclude("a name with a backslash", found);
         } else if let Some(why) = skipped(&rel) {
             exclude(why, found);
         } else if meta.file_type().is_symlink() {
@@ -230,8 +233,37 @@ fn set_mode(path: &Path, mode: u32) -> Result<(), String> {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
-    invincible::token::hex(&Sha256::digest(bytes))
+/// The SHA-256 of what [reader] gives, read in pieces, and how many bytes it gave.
+fn hash_reader(
+    reader: &mut dyn Read,
+    mut also: impl FnMut(&[u8]) -> Result<(), String>,
+) -> Result<(u64, String), String> {
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut n = 0u64;
+    loop {
+        let got = match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(got) => got,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e.to_string()),
+        };
+        hasher.update(&buf[..got]);
+        also(&buf[..got])?;
+        n += got as u64;
+    }
+    Ok((n, invincible::token::hex(&hasher.finalize())))
+}
+
+/// [path]'s SHA-256, read in pieces.
+fn hash_file(path: &Path) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    hash_reader(&mut file, |_| Ok(())).ok().map(|(_, sha)| sha)
+}
+
+/// [path], or what it resolves to.
+fn canon(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_owned())
 }
 
 /// A file for the archive, only the owner can read it.
@@ -259,7 +291,7 @@ pub fn write(home: &Path, out: &Path, secrets: bool, also_skip: &[PathBuf]) -> R
         skip.push(dir.join(out.file_name().unwrap_or_default()));
     }
     let home_real = home.canonicalize().map_err(|e| format!("{}: {e}", home.display()))?;
-    let skip: Vec<PathBuf> = skip.iter().map(|p| p.canonicalize().unwrap_or_else(|_| p.clone())).collect();
+    let skip: Vec<PathBuf> = skip.iter().map(|p| canon(p)).collect();
     let found = contents(&home_real, secrets, &skip)?;
     let tmp = out.with_extension(format!("partial-{}", std::process::id()));
     let result = (|| {
@@ -276,13 +308,21 @@ pub fn write(home: &Path, out: &Path, secrets: bool, also_skip: &[PathBuf]) -> R
         };
         for rel in &found.files {
             let path = home_real.join(rel);
-            let Ok(meta) = std::fs::metadata(&path) else { continue };
-            // Gone since the walk (a session pruned, a temporary file renamed): left out.
-            let Ok(data) = std::fs::read(&path) else { continue };
-            let name = rel.to_string_lossy().replace('\\', "/");
+            let opened = std::fs::File::open(&path).and_then(|f| f.metadata().map(|m| (f, m)));
+            let (mut file, meta) = match opened {
+                Ok(found) => found,
+                // Gone since the walk (a session pruned, a temporary file renamed): left out.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(format!("{}: {e}", path.display())),
+            };
+            let name = rel.to_string_lossy().into_owned();
             let mode = mode_of(&meta);
-            tar.file(&format!("{PREFIX}{name}"), mode, &data)?;
-            manifest.files.push(Entry { path: name, size: data.len() as u64, mode, sha256: hex(&data) });
+            // As much as it had when opened (a log or a conversation may grow meanwhile).
+            let size = meta.len();
+            let sha256 = tar
+                .file_from(&format!("{PREFIX}{name}"), mode, size, &mut (&mut file).take(size))
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            manifest.files.push(Entry { path: name, size, mode, sha256 });
         }
         let text = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
         tar.file(MANIFEST, 0o600, &text)?;
@@ -303,17 +343,22 @@ pub fn write(home: &Path, out: &Path, secrets: bool, also_skip: &[PathBuf]) -> R
 }
 
 /// Reads the backup at [archive], calling [each] with every file (its path in the home, mode
-/// and contents) as it comes; then checks them against the manifest (every file there, with
-/// its checksum, and nothing else): the manifest, when they all match.
-pub fn read(archive: &Path, mut each: impl FnMut(&str, u32, &[u8]) -> Result<(), String>) -> Result<Manifest, String> {
+/// and contents, to read) as it comes; then checks them against the manifest (every file
+/// there, with its checksum and mode, and nothing else): the manifest, when they all match.
+pub fn read(
+    archive: &Path,
+    mut each: impl FnMut(&str, u32, &mut dyn Read) -> Result<(), String>,
+) -> Result<Manifest, String> {
     let file = std::fs::File::open(archive).map_err(|e| format!("{}: {e}", archive.display()))?;
     let mut reader = flate2::read::GzDecoder::new(std::io::BufReader::new(file));
-    let mut seen: BTreeMap<String, (u64, String)> = BTreeMap::new();
+    let mut seen: BTreeMap<String, (u64, String, u32)> = BTreeMap::new();
     let mut manifest: Option<Manifest> = None;
     let not_backup = |why: String| format!("{} is not a whole autobot backup: {why}", archive.display());
     read_tar(&mut reader, |name, mode, data| {
         if name == MANIFEST {
-            let m: Manifest = serde_json::from_slice(data).map_err(|e| format!("{MANIFEST}: {e}"))?;
+            let mut text = Vec::new();
+            data.take(256 << 20).read_to_end(&mut text).map_err(|e| format!("{MANIFEST}: {e}"))?;
+            let m: Manifest = serde_json::from_slice(&text).map_err(|e| format!("{MANIFEST}: {e}"))?;
             if m.format > FORMAT {
                 return Err(format!("made by a newer autobot ({}, format {}); update first", m.version, m.format));
             }
@@ -324,10 +369,16 @@ pub fn read(archive: &Path, mut each: impl FnMut(&str, u32, &[u8]) -> Result<(),
         if !safe(rel) {
             return Err(format!("{name}: not a plain path in the home"));
         }
-        if seen.insert(rel.to_owned(), (data.len() as u64, hex(data))).is_some() {
+        if seen.contains_key(rel) {
             return Err(format!("{name}: twice"));
         }
-        each(rel, mode, data)
+        // What [each] reads is hashed on the way, and the rest after it.
+        let mut hashing = Hashing { inner: data, hasher: Sha256::new(), n: 0 };
+        each(rel, mode, &mut hashing)?;
+        std::io::copy(&mut hashing, &mut std::io::sink()).map_err(|e| e.to_string())?;
+        let sha = invincible::token::hex(&hashing.hasher.finalize());
+        seen.insert(rel.to_owned(), (hashing.n, sha, mode & 0o777));
+        Ok(())
     })
     .map_err(not_backup)?;
     let manifest = manifest.ok_or_else(|| not_backup(format!("no {MANIFEST}")))?;
@@ -335,8 +386,11 @@ pub fn read(archive: &Path, mut each: impl FnMut(&str, u32, &[u8]) -> Result<(),
     for entry in &manifest.files {
         match seen.get(&entry.path) {
             None => return Err(not_backup(format!("{} is missing", entry.path))),
-            Some((size, sha)) if *size != entry.size || *sha != entry.sha256 => {
+            Some((size, sha, _)) if *size != entry.size || *sha != entry.sha256 => {
                 return Err(not_backup(format!("{} does not match its checksum", entry.path)));
+            }
+            Some((_, _, mode)) if *mode != entry.mode & 0o777 => {
+                return Err(not_backup(format!("{} does not have the mode the manifest says", entry.path)));
             }
             Some(_) => {}
         }
@@ -345,6 +399,22 @@ pub fn read(archive: &Path, mut each: impl FnMut(&str, u32, &[u8]) -> Result<(),
         return Err(not_backup(format!("{extra} is not in the manifest")));
     }
     Ok(manifest)
+}
+
+/// A reader that hashes and counts what goes through it.
+struct Hashing<'a> {
+    inner: &'a mut dyn Read,
+    hasher: Sha256,
+    n: u64,
+}
+
+impl Read for Hashing<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let got = self.inner.read(buf)?;
+        self.hasher.update(&buf[..got]);
+        self.n += got as u64;
+        Ok(got)
+    }
 }
 
 /// Whether [rel] is a relative path of plain names (no `..`, no root, nothing empty).
@@ -376,47 +446,66 @@ impl Plan {
     }
 }
 
-/// Checks the backup at [archive] and compares it with [home] now.
-pub fn plan(archive: &Path, home: &Path) -> Result<(Manifest, Plan), String> {
-    let mut theirs: BTreeMap<String, String> = BTreeMap::new();
-    let manifest = read(archive, |rel, _, data| {
-        theirs.insert(rel.to_owned(), hex(data));
-        Ok(())
-    })?;
+/// Checks the backup at [archive] and compares it with [home] now; [also_skip]: paths in the
+/// home backups leave out too (a backup directory of its own, `[backup] dir`).
+pub fn plan(archive: &Path, home: &Path, also_skip: &[PathBuf]) -> Result<(Manifest, Plan), String> {
+    let manifest = read(archive, |_, _, _| Ok(()))?;
     let (ours, kept) = if home.exists() {
-        let now = contents(home, manifest.secrets, &[])?;
+        let skip: Vec<PathBuf> = also_skip.iter().map(|p| canon(p)).collect();
+        let now = contents(&canon(home), manifest.secrets, &skip)?;
         (now.files, now.excluded.into_iter().map(|e| e.path).collect())
     } else {
         (Vec::new(), Vec::new())
     };
     let mut plan = Plan { kept, ..Plan::default() };
     let ours: BTreeMap<String, PathBuf> =
-        ours.into_iter().map(|rel| (rel.to_string_lossy().replace('\\', "/"), home.join(rel))).collect();
-    for (rel, sha) in &theirs {
-        match ours.get(rel) {
-            None => plan.added.push(rel.clone()),
-            Some(path) => match std::fs::read(path) {
-                Ok(data) if hex(&data) == *sha => plan.same += 1,
-                _ => plan.changed.push(rel.clone()),
-            },
+        ours.into_iter().map(|rel| (rel.to_string_lossy().into_owned(), home.join(rel))).collect();
+    for entry in &manifest.files {
+        match ours.get(&entry.path) {
+            None => plan.added.push(entry.path.clone()),
+            Some(path) => {
+                let mode = std::fs::metadata(path).map(|m| mode_of(&m)).ok();
+                if hash_file(path).as_deref() == Some(entry.sha256.as_str()) && mode == Some(entry.mode & 0o777) {
+                    plan.same += 1;
+                } else {
+                    plan.changed.push(entry.path.clone());
+                }
+            }
         }
     }
-    plan.removed = ours.keys().filter(|k| !theirs.contains_key(*k)).cloned().collect();
+    let theirs: BTreeSet<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
+    plan.removed = ours.keys().filter(|k| !theirs.contains(k.as_str())).cloned().collect();
     Ok((manifest, plan))
 }
 
+/// What a restore did.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Restored {
+    /// The home as it was: `<home>.before-restore-<time>` (None: there was none).
+    pub previous: Option<PathBuf>,
+    /// Moved from it into the restored home: what backups leave out (`work/`, the logs, …).
+    pub moved: Vec<String>,
+    /// What could not be moved, and why: still in [previous].
+    pub left: Vec<String>,
+}
+
 /// Restores [home] from the backup at [archive]: built beside it, checked whole, then swapped
-/// in. What the backup does not cover is carried over from the home now. The home as it was,
-/// when there was one: `<home>.before-restore-<time>`.
-pub fn restore(archive: &Path, home: &Path) -> Result<Option<PathBuf>, String> {
+/// in; until the swap the home is not touched, and a failure leaves it as it was. What the
+/// backup does not cover comes from the home as it was: secrets and links are copied before
+/// the swap; the directories backups leave out (the working directory can be large) are moved
+/// after it. [also_skip]: as for [plan].
+pub fn restore(archive: &Path, home: &Path, also_skip: &[PathBuf]) -> Result<Restored, String> {
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let name = home.file_name().ok_or("the home has no name")?.to_string_lossy().into_owned();
     let parent = home.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let staging = parent.join(format!("{name}.restoring-{stamp}"));
-    let previous = parent.join(format!("{name}.before-restore-{stamp}"));
-    if staging.exists() || previous.exists() {
-        return Err(format!("{} or {} already exists", staging.display(), previous.display()));
-    }
+    // Two restores in a second: `-2`, `-3`, … after the second one.
+    let (staging, previous) = (1..100)
+        .map(|n| {
+            let stamp = if n == 1 { stamp.clone() } else { format!("{stamp}-{n}") };
+            (parent.join(format!("{name}.restoring-{stamp}")), parent.join(format!("{name}.before-restore-{stamp}")))
+        })
+        .find(|(staging, previous)| !staging.exists() && !previous.exists())
+        .ok_or_else(|| format!("{name}.before-restore-{stamp}: too many already"))?;
     create_private_dir(&staging)?;
     let built = (|| {
         let manifest = read(archive, |rel, mode, data| {
@@ -425,42 +514,67 @@ pub fn restore(archive: &Path, home: &Path) -> Result<Option<PathBuf>, String> {
                 create_private_dir(dir)?;
             }
             let mut file = private_file(&path)?;
-            file.write_all(data).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::io::copy(data, &mut file).map_err(|e| format!("{}: {e}", path.display()))?;
             set_mode(&path, mode)
         })?;
-        if home.exists() {
-            carry_over(home, &staging, manifest.secrets)?;
-        }
-        Ok::<_, String>(manifest)
+        if home.exists() { copy_over(home, &staging, manifest.secrets, also_skip) } else { Ok(Vec::new()) }
     })();
-    if let Err(e) = built {
-        let _ = std::fs::remove_dir_all(&staging);
-        return Err(e);
-    }
+    let to_move = match built {
+        Ok(to_move) => to_move,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(e);
+        }
+    };
     if !home.exists() {
         std::fs::rename(&staging, home).map_err(|e| format!("{}: {e}", home.display()))?;
-        return Ok(None);
+        return Ok(Restored::default());
     }
     std::fs::rename(home, &previous).map_err(|e| format!("{}: {e}", home.display()))?;
     if let Err(e) = std::fs::rename(&staging, home) {
         let _ = std::fs::rename(&previous, home);
+        let _ = std::fs::remove_dir_all(&staging);
         return Err(format!("{}: {e}", home.display()));
     }
-    Ok(Some(previous))
+    let mut done = Restored { previous: Some(previous.clone()), ..Restored::default() };
+    for rel in to_move {
+        let (from, to) = (previous.join(&rel), home.join(&rel));
+        let moved = to
+            .parent()
+            .map_or(Ok(()), create_private_dir)
+            .and_then(|()| std::fs::rename(&from, &to).map_err(|e| e.to_string()));
+        match moved {
+            Ok(()) => done.moved.push(rel),
+            Err(e) => done.left.push(format!("{rel}: {e}")),
+        }
+    }
+    Ok(done)
 }
 
-/// Puts into [staging] what the backup does not cover from [home]: secrets (copied, so the old
-/// home keeps them too), links, and the directories backups leave out (moved: the working
-/// directory can be large).
-fn carry_over(home: &Path, staging: &Path, secrets_in_backup: bool) -> Result<(), String> {
-    let now = contents(home, secrets_in_backup, &[])?;
+/// Copies into [staging] the secrets and links of [home] the backup does not cover; what else
+/// it does not cover, to move after the swap.
+fn copy_over(
+    home: &Path,
+    staging: &Path,
+    secrets_in_backup: bool,
+    also_skip: &[PathBuf],
+) -> Result<Vec<String>, String> {
+    let skip: Vec<PathBuf> = also_skip.iter().map(|p| canon(p)).collect();
+    let home = canon(home);
+    let now = contents(&home, secrets_in_backup, &skip)?;
+    let mut to_move = Vec::new();
     for excluded in now.excluded {
-        let rel = excluded.path.trim_end_matches('/');
-        let (from, to) = (home.join(rel), staging.join(rel));
+        let rel = excluded.path.trim_end_matches('/').to_owned();
+        let (from, to) = (home.join(&rel), staging.join(&rel));
         if std::fs::symlink_metadata(&to).is_ok() {
             continue;
         }
         let Ok(meta) = std::fs::symlink_metadata(&from) else { continue };
+        let copy = meta.file_type().is_symlink() || is_secret(Path::new(&rel));
+        if !copy {
+            to_move.push(rel);
+            continue;
+        }
         if let Some(dir) = to.parent() {
             create_private_dir(dir)?;
         }
@@ -471,16 +585,12 @@ fn carry_over(home: &Path, staging: &Path, secrets_in_backup: bool) -> Result<()
                 std::os::unix::fs::symlink(target, &to).map_err(|e| format!("{}: {e}", to.display()))?;
             }
         } else if meta.is_dir() {
-            if is_secret(Path::new(rel)) {
-                copy_dir(&from, &to)?;
-            } else {
-                std::fs::rename(&from, &to).map_err(|e| format!("{}: {e}", from.display()))?;
-            }
+            copy_dir(&from, &to)?;
         } else if meta.is_file() {
             std::fs::copy(&from, &to).map_err(|e| format!("{}: {e}", from.display()))?;
         }
     }
-    Ok(())
+    Ok(to_move)
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
@@ -586,7 +696,12 @@ struct Tar<W: Write>(flate2::write::GzEncoder<W>);
 
 impl<W: Write> Tar<W> {
     fn file(&mut self, name: &str, mode: u32, data: &[u8]) -> Result<(), String> {
-        let size = data.len() as u64;
+        let mut reader = data;
+        self.file_from(name, mode, data.len() as u64, &mut reader).map(drop)
+    }
+
+    /// An entry of [size] bytes from [reader], streamed: their SHA-256.
+    fn file_from(&mut self, name: &str, mode: u32, size: u64, reader: &mut dyn Read) -> Result<String, String> {
         if size > MAX_FILE {
             return Err(format!("{name}: over 4 GiB"));
         }
@@ -608,8 +723,12 @@ impl<W: Write> Tar<W> {
             name.to_owned()
         };
         self.write(&header(&short, mode, size, b'0'))?;
-        self.write(data)?;
-        self.pad(size)
+        let (got, sha) = hash_reader(reader, |piece| self.write(piece))?;
+        if got != size {
+            return Err(format!("{name}: shorter than when it was opened ({got} of {size} bytes)"));
+        }
+        self.pad(size)?;
+        Ok(sha)
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -671,11 +790,12 @@ fn parse_octal(field: &[u8]) -> Result<u64, String> {
     u64::from_str_radix(text, 8).map_err(|_| format!("a bad number in a header: {text:?}"))
 }
 
-/// Reads a tar from [reader]: every regular file to [each] (name, mode, contents). Directories
-/// are skipped; anything else (links, devices) is refused.
+/// Reads a tar from [reader]: every regular file to [each] (name, mode, contents to read; what
+/// it leaves unread is skipped). Directories are skipped; anything else (links, devices) is
+/// refused.
 fn read_tar(
     reader: &mut impl Read,
-    mut each: impl FnMut(&str, u32, &[u8]) -> Result<(), String>,
+    mut each: impl FnMut(&str, u32, &mut dyn Read) -> Result<(), String>,
 ) -> Result<(), String> {
     let mut long_name: Option<String> = None;
     loop {
@@ -693,10 +813,6 @@ fn read_tar(
         if size > MAX_FILE {
             return Err("an entry over 4 GiB".to_owned());
         }
-        let mut data = vec![0u8; size as usize];
-        reader.read_exact(&mut data).map_err(|e| format!("cut short: {e}"))?;
-        let rest = (512 - size % 512) % 512;
-        std::io::copy(&mut reader.by_ref().take(rest), &mut std::io::sink()).map_err(|e| e.to_string())?;
         let field = |range: std::ops::Range<usize>| -> String {
             String::from_utf8_lossy(&h[range]).trim_end_matches('\0').to_owned()
         };
@@ -704,15 +820,30 @@ fn read_tar(
             let (prefix, name) = (field(345..500), field(0..100));
             if prefix.is_empty() { name } else { format!("{prefix}/{name}") }
         };
+        let mut entry = reader.by_ref().take(size);
         match h[156] {
-            b'x' => long_name = pax_path(&data),
+            b'x' => {
+                let mut data = Vec::new();
+                entry.by_ref().take(1 << 20).read_to_end(&mut data).map_err(|e| e.to_string())?;
+                long_name = pax_path(&data);
+            }
             b'g' => {}
             b'0' | 0 => {
-                let name = long_name.take().unwrap_or(name);
-                each(&name, parse_octal(&h[100..108])? as u32, &data)?;
+                let name = long_name.take().unwrap_or_else(|| name.clone());
+                each(&name, parse_octal(&h[100..108])? as u32, &mut entry)?;
             }
             b'5' => long_name = None,
             other => return Err(format!("{name}: an entry of type {:?}, not a file", other as char)),
+        }
+        std::io::copy(&mut entry, &mut std::io::sink()).map_err(|e| format!("cut short: {e}"))?;
+        if entry.limit() > 0 {
+            return Err(format!("{name}: cut short"));
+        }
+        let rest = (512 - size % 512) % 512;
+        let padding =
+            std::io::copy(&mut reader.by_ref().take(rest), &mut std::io::sink()).map_err(|e| e.to_string())?;
+        if padding != rest {
+            return Err("cut short".to_owned());
         }
     }
 }
@@ -867,7 +998,9 @@ mod tests {
         }
         let mut got = BTreeMap::new();
         let read_back = read(&out, |rel, _, data| {
-            got.insert(rel.to_owned(), data.to_vec());
+            let mut bytes = Vec::new();
+            data.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            got.insert(rel.to_owned(), bytes);
             Ok(())
         })
         .unwrap();
@@ -900,7 +1033,9 @@ mod tests {
         let mut entries = Vec::new();
         let file = std::fs::File::open(&out).unwrap();
         read_tar(&mut flate2::read::GzDecoder::new(file), |name, mode, data| {
-            entries.push((name.to_owned(), mode, data.to_vec()));
+            let mut bytes = Vec::new();
+            data.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            entries.push((name.to_owned(), mode, bytes));
             Ok(())
         })
         .unwrap();
@@ -952,14 +1087,16 @@ mod tests {
         put(&home, "telegram.token", "456:new");
         put(&home, "work/later.txt", "kept");
 
-        let (_, plan) = plan(&out, &home).unwrap();
+        let (_, plan) = plan(&out, &home, &[]).unwrap();
         assert_eq!(plan.changed, vec!["SOUL.md"]);
         assert_eq!(plan.added, vec!["memory.jsonl"]);
         assert_eq!(plan.removed, vec!["new-note.md"]);
         assert!(plan.kept.contains(&"telegram.token".to_owned()));
         assert!(plan.kept.contains(&"work/".to_owned()));
 
-        let previous = restore(&out, &home).unwrap().unwrap();
+        let done = restore(&out, &home, &[]).unwrap();
+        let previous = done.previous.clone().unwrap();
+        assert!(done.moved.contains(&"work".to_owned()) && done.left.is_empty(), "{done:?}");
         assert_eq!(std::fs::read_to_string(home.join("SOUL.md")).unwrap(), "Be brief.");
         assert!(home.join("memory.jsonl").exists());
         assert!(!home.join("new-note.md").exists());
@@ -972,7 +1109,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(previous.join("SOUL.md")).unwrap(), "Be loud.");
         assert_eq!(std::fs::read_to_string(previous.join("telegram.token")).unwrap(), "456:new");
         assert!(previous.join("new-note.md").exists());
-        let (_, again) = super::plan(&out, &home).unwrap();
+        let (_, again) = super::plan(&out, &home, &[]).unwrap();
         assert!(again.is_empty(), "{again:?}");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -985,12 +1122,12 @@ mod tests {
         let out = dir.join("b.tar.gz");
         write(&home, &out, true, &[]).unwrap();
         let elsewhere = dir.join("elsewhere");
-        assert_eq!(restore(&out, &elsewhere).unwrap(), None);
+        assert_eq!(restore(&out, &elsewhere, &[]).unwrap(), Restored::default());
         assert_eq!(std::fs::read_to_string(elsewhere.join("telegram.token")).unwrap(), "123:abc");
         assert!(!elsewhere.join("logs").exists());
 
         std::fs::write(&out, b"broken").unwrap();
-        assert!(restore(&out, &home).is_err());
+        assert!(restore(&out, &home, &[]).is_err());
         assert_eq!(std::fs::read_to_string(home.join("SOUL.md")).unwrap(), "Be brief.");
         let leftovers: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -1024,6 +1161,65 @@ mod tests {
         assert_eq!(list(&home.join("backups")).len(), 2);
         assert_eq!(BackupConfig::default().every().unwrap(), None);
         assert!(BackupConfig { every: "soon".into(), ..Default::default() }.every().is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_restore_leaves_the_home_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp("failed-restore");
+        let home = dir.join("home");
+        sample(&home);
+        let out = dir.join("b.tar.gz");
+        write(&home, &out, false, &[]).unwrap();
+        put(&home, "work/big.txt", "kept");
+        // A secret it cannot copy: the restore fails before the swap.
+        put(&home, "secrets/locked.key", "x");
+        std::fs::set_permissions(home.join("secrets/locked.key"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(home.join("secrets/locked.key")).is_ok() {
+            // Running as root: nothing is unreadable.
+            std::fs::remove_dir_all(dir).unwrap();
+            return;
+        }
+        assert!(restore(&out, &home, &[]).is_err());
+        assert_eq!(std::fs::read_to_string(home.join("work/big.txt")).unwrap(), "kept");
+        assert!(home.join("logs/agent.log").exists());
+        let names: Vec<String> =
+            std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.iter().all(|n| !n.contains(".restoring-") && !n.contains(".before-restore-")), "{names:?}");
+        // Nor does a backup leave out a file it cannot read.
+        let e = write(&home, &dir.join("c.tar.gz"), true, &[]).unwrap_err();
+        assert!(e.contains("locked.key"), "{e}");
+        std::fs::set_permissions(home.join("secrets/locked.key"), std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn modes_names_and_a_backup_dir_of_its_own() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp("modes");
+        let home = dir.join("home");
+        put(&home, "SOUL.md", "x");
+        put(&home, "skills/run/run.sh", "#!/bin/sh");
+        std::fs::set_permissions(home.join("skills/run/run.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        put(&home, "odd\\name.md", "y");
+        put(&home, "archives/autobot-backup-20000101-000000.tar.gz", "old");
+        let archives = home.join("archives");
+        let out = dir.join("b.tar.gz");
+        let manifest = write(&home, &out, false, std::slice::from_ref(&archives)).unwrap();
+        assert!(manifest.files.iter().all(|f| !f.path.contains('\\') && !f.path.starts_with("archives")));
+        assert!(manifest.excluded.iter().any(|e| e.path.contains('\\')));
+        // Only its mode changed: a change.
+        std::fs::set_permissions(home.join("skills/run/run.sh"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        let (_, plan) = plan(&out, &home, std::slice::from_ref(&archives)).unwrap();
+        assert_eq!(plan.changed, vec!["skills/run/run.sh"]);
+        assert!(plan.removed.is_empty(), "{plan:?}");
+        restore(&out, &home, std::slice::from_ref(&archives)).unwrap();
+        let mode = std::fs::metadata(home.join("skills/run/run.sh")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755);
+        assert!(home.join("archives/autobot-backup-20000101-000000.tar.gz").exists(), "carried over");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

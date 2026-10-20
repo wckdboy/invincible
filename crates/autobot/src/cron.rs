@@ -639,12 +639,13 @@ pub fn start(
         tracing::info!(id = %schedule.id, trigger, "cron: running {:?}", schedule.task);
         let (result, receipts) = run(&agent, &home, &schedule).await;
         tracing::info!(id = %schedule.id, ok = result.ok, "cron: done");
-        let key = format!("job:{}", schedule.id);
+        // Ids are per bot: the home tells them apart.
+        let alert_key = format!("job:{}:{}", home.display(), schedule.id);
         let what = schedule.name.as_deref().unwrap_or(&schedule.task);
         if result.ok {
             crate::alerts::raise(crate::alerts::Alert::cleared(
                 crate::alerts::Kind::Job,
-                &key,
+                &alert_key,
                 format!("The scheduled task {what:?} ran fine again."),
             ));
         } else {
@@ -656,7 +657,7 @@ pub fn start(
             crate::alerts::raise(
                 crate::alerts::Alert::new(
                     crate::alerts::Kind::Job,
-                    &key,
+                    &alert_key,
                     format!("The scheduled task {what:?} failed: {}", cut(&result.result)),
                 )
                 .except(told),

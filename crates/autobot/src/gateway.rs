@@ -145,8 +145,10 @@ impl Gateway {
     pub async fn watch(&self, every: Duration) {
         let mut up = true;
         let mut down_since: Option<std::time::Instant> = None;
-        // As if told: a clearing of what the last run sent, once it answers (nothing, if none).
-        let mut told = true;
+        // Whether this watch said it was down; and, until it first answers, the clearing of
+        // what the last run may have sent (dropped when nothing is open).
+        let mut told = false;
+        let mut first = true;
         loop {
             let now = self.healthy().await;
             if now != up {
@@ -159,7 +161,7 @@ impl Gateway {
             }
             if now {
                 down_since = None;
-                if std::mem::take(&mut told) {
+                if std::mem::take(&mut told) | std::mem::take(&mut first) {
                     crate::alerts::raise(crate::alerts::Alert::cleared(
                         crate::alerts::Kind::Gateway,
                         "gateway",

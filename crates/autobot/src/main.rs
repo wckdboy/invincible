@@ -614,6 +614,10 @@ fn run(mut cli: Cli) -> Result<(), String> {
     if cli.bot.is_none() {
         cli.bot = std::env::var("AUTOBOT_BOT").ok().filter(|b| !b.is_empty());
     }
+    // Before reading the configuration: a broken one is what a restore may be for.
+    if let Some(Command::Restore { file, dry_run, yes }) = &cli.command {
+        return restore(&root, file, *dry_run, *yes);
+    }
     // `--bot ops`: its directory and configuration; the default bot's otherwise.
     let def = match &cli.bot {
         Some(name) => autobot::bots::load(&root, name)?,
@@ -1037,7 +1041,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
         }
         Command::Backup { out, include_secrets } => {
             let out = out.unwrap_or_else(|| PathBuf::from(autobot::backup::file_name(chrono::Local::now())));
-            let manifest = autobot::backup::write(&root, &out, include_secrets, &[])?;
+            let manifest = autobot::backup::write(&root, &out, include_secrets, &backup_dirs(&root))?;
             for line in autobot::backup::summary(&out, &manifest) {
                 println!("{line}");
             }
@@ -1048,7 +1052,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Restore { file, dry_run, yes } => restore(&root, &file, dry_run, yes),
+        Command::Restore { .. } => unreachable!("dispatched before the configuration is read"),
         Command::Alerts { action: None | Some(AlertsAction::Status) } => {
             let main = autobot::bots::load_default(&root)?;
             for line in autobot::alerts::status(&root, &main.config.alerts) {
@@ -1103,9 +1107,15 @@ fn run(mut cli: Cli) -> Result<(), String> {
     }
 }
 
+/// The backup directory `[backup] dir` sets, when the configuration reads (backups leave it out).
+fn backup_dirs(root: &std::path::Path) -> Vec<PathBuf> {
+    autobot::bots::load_default(root).map(|main| vec![main.config.backup.dir(root)]).unwrap_or_default()
+}
+
 /// `autobot restore FILE`.
 fn restore(root: &std::path::Path, file: &std::path::Path, dry_run: bool, yes: bool) -> Result<(), String> {
-    let (manifest, plan) = autobot::backup::plan(file, root)?;
+    let skip = backup_dirs(root);
+    let (manifest, plan) = autobot::backup::plan(file, root, &skip)?;
     println!(
         "{}: {} file(s) from {}, made {} by autobot {}; every checksum matches",
         file.display(),
@@ -1150,11 +1160,18 @@ fn restore(root: &std::path::Path, file: &std::path::Path, dry_run: bool, yes: b
         }
     }
     let running = live_bots(root).is_some();
-    match autobot::backup::restore(file, root)? {
+    let done = autobot::backup::restore(file, root, &skip)?;
+    match &done.previous {
         Some(previous) => {
             println!("restored {}; the home as it was is {} (move it back to undo)", root.display(), previous.display())
         }
         None => println!("restored {}", root.display()),
+    }
+    if !done.moved.is_empty() {
+        println!("moved over from the home as it was: {}", done.moved.join(", "));
+    }
+    for left in &done.left {
+        println!("warning: not moved over, still in the home as it was: {left}");
     }
     if running {
         println!("`autobot serve` is running: `autobot service restart` starts it on the restored home");
@@ -1541,7 +1558,7 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         part.abort();
     }
     fleet.stop();
-    autobot::alerts::stopped(&root);
+    autobot::alerts::stopped(&root).await;
     Ok(())
 }
 

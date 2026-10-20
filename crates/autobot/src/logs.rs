@@ -21,30 +21,63 @@ pub fn matches(line: &str, grep: Option<&str>) -> bool {
     grep.is_none_or(|g| line.to_lowercase().contains(&g.to_lowercase()))
 }
 
-/// The last [n] lines of [path] that match [grep], read from the end (a log can be large), and
-/// where the file ends.
+/// Read backwards this much at a time.
+const CHUNK: u64 = 1 << 20;
+
+/// The last [n] whole lines of [path] that match [grep], read from the end in pieces (a log can
+/// be large; a search goes back as far as it has to), and where the whole lines end: a line
+/// still being written is left for [read_new] to give once it is.
 pub fn tail(path: &Path, n: usize, grep: Option<&str>) -> Result<(Vec<String>, u64), String> {
     let mut file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let len = file.metadata().map_err(|e| e.to_string())?.len();
-    let mut chunk = 64 * 1024u64;
-    loop {
-        let start = len.saturating_sub(chunk);
-        file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let mut read = |from: u64, to: u64| -> Result<Vec<u8>, String> {
+        file.seek(SeekFrom::Start(from)).map_err(|e| e.to_string())?;
         let mut bytes = Vec::new();
-        file.by_ref().take(len - start).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-        let text = String::from_utf8_lossy(&bytes);
-        let mut lines: Vec<&str> = text.lines().collect();
-        // A line cut by the chunk's start is not whole.
-        if start > 0 && !lines.is_empty() {
-            lines.remove(0);
+        (&mut file).take(to - from).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        Ok(bytes)
+    };
+    // Where the whole lines end.
+    let mut whole = 0;
+    let mut end = len;
+    while end > 0 {
+        let start = end.saturating_sub(CHUNK);
+        if let Some(i) = read(start, end)?.iter().rposition(|b| *b == b'\n') {
+            whole = start + i as u64 + 1;
+            break;
         }
-        let found: Vec<String> = lines.iter().filter(|l| matches(l, grep)).map(|l| (*l).to_owned()).collect();
-        if found.len() >= n || start == 0 || chunk >= 64 << 20 {
-            let skip = found.len().saturating_sub(n);
-            return Ok((found.into_iter().skip(skip).collect(), len));
-        }
-        chunk *= 4;
+        end = start;
     }
+    let mut found = Vec::new();
+    // The start of a line whose beginning is further back.
+    let mut carry: Vec<u8> = Vec::new();
+    let mut pos = whole;
+    while pos > 0 && found.len() < n {
+        let start = pos.saturating_sub(CHUNK);
+        let mut bytes = read(start, pos)?;
+        bytes.extend_from_slice(&carry);
+        pos = start;
+        let cut = if start == 0 {
+            0
+        } else {
+            match bytes.iter().position(|b| *b == b'\n') {
+                Some(i) => i + 1,
+                None => {
+                    carry = bytes;
+                    continue;
+                }
+            }
+        };
+        carry = bytes[..cut].to_vec();
+        let text = String::from_utf8_lossy(&bytes[cut..]);
+        for line in text.lines().rev().filter(|l| matches(l, grep)) {
+            found.push(line.to_owned());
+            if found.len() == n {
+                break;
+            }
+        }
+    }
+    found.reverse();
+    Ok((found, whole))
 }
 
 /// What [path] has gained since [pos]: whole lines, and where to read on from. A file that
@@ -94,6 +127,9 @@ mod tests {
 
         let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
         std::io::Write::write_all(&mut f, b"next\npart").unwrap();
+        // A line being written is left until it is whole.
+        let (last, at) = tail(&log, 1, None).unwrap();
+        assert_eq!((last, at), (vec!["next".to_owned()], end + 5));
         let (new, pos) = read_new(&log, end).unwrap();
         assert_eq!(new, vec!["next"]);
         std::io::Write::write_all(&mut f, b"ial\n").unwrap();
@@ -103,6 +139,14 @@ mod tests {
         // Rotated: emptied, then written again.
         std::fs::write(&log, "after\n").unwrap();
         assert_eq!(read_new(&log, pos).unwrap(), (vec!["after".to_owned()], 6));
+        // Far back, past many pieces: still found.
+        let mut big = String::from("needle first\n");
+        while big.len() < 5 * CHUNK as usize {
+            big.push_str(&"x".repeat(99));
+            big.push('\n');
+        }
+        std::fs::write(&log, &big).unwrap();
+        assert_eq!(tail(&log, 5, Some("needle")).unwrap().0, vec!["needle first"]);
         assert!(tail(&dir.join("none.log"), 3, None).is_err());
         assert!(path("weather", &dir).is_err());
         assert_eq!(path("agent", &dir).unwrap(), dir.join("logs/agent.log"));

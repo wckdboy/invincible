@@ -246,6 +246,18 @@ pub struct Held {
     pub key: String,
     pub text: String,
     pub at: i64,
+    /// [Kind::name] (empty: not known, from an older state).
+    #[serde(default)]
+    pub kind: String,
+    /// Addresses not to send it to ([Alert::except]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
+}
+
+impl Held {
+    fn of(alert: &Alert, key: String, at: i64) -> Self {
+        Self { key, text: alert.text.clone(), at, kind: alert.kind.name().to_owned(), except: alert.except.clone() }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -348,6 +360,7 @@ fn decide_inner(state: &mut State, policy: &Policy, alert: &Alert, now: DateTime
     } else {
         if let Some(held) = state.held.iter_mut().find(|h| h.key == alert.key) {
             held.text = alert.text.clone();
+            held.except = alert.except.clone();
             return Decision::Hold;
         }
         let repeat = policy.repeat.as_secs() as i64;
@@ -356,12 +369,8 @@ fn decide_inner(state: &mut State, policy: &Policy, alert: &Alert, now: DateTime
         }
     }
     if policy.quiet_at(now) {
-        if alert.clear {
-            // Its alert was sent; that it is over can wait too.
-            state.held.push(Held { key: format!("{}:cleared", alert.key), text: alert.text.clone(), at: t });
-        } else {
-            state.held.push(Held { key: alert.key.clone(), text: alert.text.clone(), at: t });
-        }
+        // A clearing's alert was sent; that it is over can wait too.
+        state.held.push(Held::of(alert, held_key(alert), t));
         return Decision::Hold;
     }
     state.sent.retain(|at| t - at < 3600);
@@ -382,27 +391,67 @@ fn decide_inner(state: &mut State, policy: &Policy, alert: &Alert, now: DateTime
     Decision::Send(text)
 }
 
-/// Once quiet hours are over: what waited, as one message.
-pub fn flush(state: &mut State, policy: &Policy, now: DateTime<Local>) -> Option<String> {
-    if state.held.is_empty() || policy.quiet_at(now) {
-        return None;
+/// How long an alert waits, for quiet hours to end or a channel to take it, before it is dropped.
+const HELD_FOR: i64 = 2 * 86400;
+
+/// The key [alert] waits under (a clearing has its own).
+fn held_key(alert: &Alert) -> String {
+    if alert.clear { format!("{}:cleared", alert.key) } else { alert.key.clone() }
+}
+
+/// What waited (quiet hours, a channel that failed), once it may go: one message for each of
+/// [targets], without what it is not to go to; [state] updated as if they were sent. Alerts the
+/// policy no longer wants, or that waited too long, are dropped.
+pub fn flush(state: &mut State, policy: &Policy, targets: &[String], now: DateTime<Local>) -> Vec<(String, String)> {
+    if state.held.is_empty() || policy.quiet_at(now) || targets.is_empty() {
+        return Vec::new();
     }
     let t = now.timestamp();
-    let held = std::mem::take(&mut state.held);
-    let mut lines = vec![format!("During quiet hours ({}):", held.len())];
-    for h in &held {
-        let at = crate::cron::local(h.at).format("%H:%M");
-        match h.key.strip_suffix(":cleared") {
-            Some(_) => lines.push(format!("✅ {at} {}", h.text)),
-            None => {
-                state.last.insert(h.key.clone(), t);
-                state.open.insert(h.key.clone());
-                lines.push(format!("⚠️ {at} {}", h.text));
+    let held: Vec<Held> = std::mem::take(&mut state.held)
+        .into_iter()
+        .filter(|h| {
+            let kind = KINDS.iter().find(|(n, _)| *n == h.kind).map(|(_, k)| *k);
+            let wanted = policy.enabled
+                && kind.is_none_or(|k| policy.events.as_ref().is_none_or(|e| e.contains(&k)))
+                && t - h.at < HELD_FOR;
+            if !wanted {
+                state.log.push(Logged {
+                    at: t,
+                    kind: h.kind.clone(),
+                    key: h.key.clone(),
+                    text: h.text.clone(),
+                    outcome: "dropped while waiting".to_owned(),
+                });
             }
+            wanted
+        })
+        .collect();
+    let extra = state.log.len().saturating_sub(LOG);
+    state.log.drain(..extra);
+    let mut out = Vec::new();
+    for address in targets {
+        let mine: Vec<&Held> = held.iter().filter(|h| !h.except.contains(address)).collect();
+        if mine.is_empty() {
+            continue;
+        }
+        let mut lines = vec![format!("Held back ({}):", mine.len())];
+        for h in mine {
+            let at = crate::cron::local(h.at).format("%H:%M");
+            let mark = if h.key.ends_with(":cleared") { "✅" } else { "⚠️" };
+            lines.push(format!("{mark} {at} {}", h.text));
+        }
+        out.push((address.clone(), lines.join("\n")));
+    }
+    for h in &held {
+        if !h.key.ends_with(":cleared") {
+            state.last.insert(h.key.clone(), t);
+            state.open.insert(h.key.clone());
         }
     }
-    state.sent.push(t);
-    Some(lines.join("\n"))
+    if !out.is_empty() {
+        state.sent.push(t);
+    }
+    out
 }
 
 /// At start: what the last run left (a crash, an update), with [state] marked as running now.
@@ -551,26 +600,42 @@ impl Alerter {
             let _ = state.save(&self.root);
             return;
         }
+        let before = state.clone();
         let decision = decide(&mut state, &policy, &alert, now);
-        if let Err(e) = state.save(&self.root) {
-            tracing::warn!("alerts: {e}");
-        }
         let Decision::Send(text) = decision else {
             tracing::info!(key = %alert.key, "alert not sent now: {:?}", decision);
+            if let Err(e) = state.save(&self.root) {
+                tracing::warn!("alerts: {e}");
+            }
             return;
         };
-        let failed: Vec<String> = self
-            .deliver(&config, &text, &alert.except)
-            .await
-            .into_iter()
-            .filter_map(|(to, r)| r.err().map(|e| format!("{to}: {e}")))
-            .collect();
-        if !failed.is_empty() {
-            let mut state = State::load(&self.root);
-            if let Some(last) = state.log.iter_mut().rev().find(|l| l.key == alert.key) {
-                last.outcome = format!("sent, but not to {}", failed.join("; "));
+        // The lock is held: nothing else changes the state meanwhile.
+        let results = self.deliver(&config, &text, &alert.except).await;
+        let failed: Vec<String> =
+            results.iter().filter_map(|(to, r)| r.as_ref().err().map(|e| format!("{to}: {e}"))).collect();
+        let outcome = if results.iter().any(|(_, r)| r.is_ok()) {
+            if let Some(version) = alert.key.strip_prefix("available:") {
+                state.update_seen = Some(version.to_owned());
             }
-            let _ = state.save(&self.root);
+            (!failed.is_empty()).then(|| format!("sent, but not to {}", failed.join("; ")))
+        } else {
+            // Nobody has it: not sent after all. It waits, and goes with the next round.
+            if !alert.clear {
+                state.last = before.last;
+                state.open = before.open;
+            }
+            state.sent = before.sent;
+            state.dropped = before.dropped;
+            state.held.push(Held::of(&alert, held_key(&alert), now.timestamp()));
+            Some(format!("not delivered ({}); waiting to be sent again", failed.join("; ")))
+        };
+        if let Some(outcome) = outcome
+            && let Some(last) = state.log.iter_mut().rev().find(|l| l.key == alert.key)
+        {
+            last.outcome = outcome;
+        }
+        if let Err(e) = state.save(&self.root) {
+            tracing::warn!("alerts: {e}");
         }
     }
 
@@ -601,11 +666,35 @@ impl Alerter {
         let config = self.config();
         let Ok(policy) = config.policy() else { return };
         let mut state = State::load(&self.root);
-        if let Some(text) = flush(&mut state, &policy, Local::now()) {
-            if let Err(e) = state.save(&self.root) {
-                tracing::warn!("alerts: {e}");
+        let before = state.clone();
+        let all = targets(&config, &(self.bots)());
+        let messages = flush(&mut state, &policy, &all, Local::now());
+        if messages.is_empty() {
+            if state != before {
+                let _ = state.save(&self.root);
             }
-            self.deliver(&config, &text, &[]).await;
+            return;
+        }
+        let bots = (self.bots)();
+        let mut any = false;
+        for (address, text) in messages {
+            let text = format!("{text}\n— autobot on {}", host());
+            for (address, result) in send(&bots, &[address], &text).await {
+                match result {
+                    Ok(()) => {
+                        any = true;
+                        tracing::info!("held alerts sent to {address}");
+                    }
+                    Err(e) => tracing::warn!("held alerts to {address}: {e}"),
+                }
+            }
+        }
+        if !any {
+            // All of it waits for the next round (what the policy dropped is dropped again then).
+            state = before;
+        }
+        if let Err(e) = state.save(&self.root) {
+            tracing::warn!("alerts: {e}");
         }
     }
 }
@@ -692,7 +781,9 @@ pub fn start(root: &Path, bots: Bots) -> Vec<tokio::task::JoinHandle<()>> {
     let a = alerter.clone();
     let backends = tokio::spawn(async move {
         let mut down: BTreeMap<String, u32> = BTreeMap::new();
-        let mut told: BTreeSet<String> = BTreeSet::new();
+        // What the last run said is failing: its clearing is owed too.
+        let mut told: BTreeSet<String> =
+            State::load(&a.root).open.iter().filter_map(|k| k.strip_prefix("backend:")).map(str::to_owned).collect();
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
             let Some(bot) = (a.bots)().into_iter().next() else { continue };
@@ -711,10 +802,8 @@ pub fn start(root: &Path, bots: Bots) -> Vec<tokio::task::JoinHandle<()>> {
             if every.is_some()
                 && let Some(version) = check_update().await
             {
-                let mut state = State::load(&a.root);
-                if state.update_seen.as_deref() != Some(&version) {
-                    state.update_seen = Some(version.clone());
-                    let _ = state.save(&a.root);
+                // Marked as told once the alert is delivered ([Alerter::handle]).
+                if State::load(&a.root).update_seen.as_deref() != Some(&version) {
                     raise(Alert::new(
                         Kind::Update,
                         &format!("available:{version}"),
@@ -770,8 +859,16 @@ async fn check_update() -> Option<String> {
     available(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// `autobot serve` shut down cleanly.
-pub fn stopped(root: &Path) {
+/// `autobot serve` shut down cleanly (once no alert is being decided or sent).
+pub async fn stopped(root: &Path) {
+    let _one = match ALERTER.get() {
+        Some(alerter) => Some(alerter.lock.lock().await),
+        None => None,
+    };
+    mark_stopped(root);
+}
+
+fn mark_stopped(root: &Path) {
     let mut state = State::load(root);
     if let Some(serve) = &mut state.serve
         && serve.pid == std::process::id()
@@ -819,7 +916,7 @@ pub fn status(root: &Path, config: &AlertsConfig) -> Vec<String> {
     }
     let state = State::load(root);
     if !state.held.is_empty() {
-        lines.push(format!("{} waiting for quiet hours to end", state.held.len()));
+        lines.push(format!("{} waiting to be sent (quiet hours, or a channel that failed)", state.held.len()));
     }
     if state.log.is_empty() {
         lines.push("no alerts yet".to_owned());
@@ -941,13 +1038,34 @@ mod tests {
         // Gone before morning: neither goes.
         assert_eq!(decide(&mut s, &p, &gw_up, at(1, 5)), Decision::Skip("gone before it was sent"));
         assert_eq!(s.held.len(), 1);
-        assert_eq!(flush(&mut s, &p, at(6, 0)), None, "still quiet");
-        let text = flush(&mut s, &p, at(7, 1)).unwrap();
-        assert!(text.starts_with("During quiet hours (1):") && text.contains("The disk is low."), "{text}");
+        let to = ["telegram:1".to_owned()];
+        assert!(flush(&mut s, &p, &to, at(6, 0)).is_empty(), "still quiet");
+        let sent = flush(&mut s, &p, &to, at(7, 1));
+        let text = &sent[0].1;
+        assert!(text.starts_with("Held back (1):") && text.contains("The disk is low."), "{text}");
         assert!(s.held.is_empty() && s.open.contains("disk"));
-        assert_eq!(flush(&mut s, &p, at(7, 2)), None);
+        assert!(flush(&mut s, &p, &to, at(7, 2)).is_empty());
         // Sent from the digest: not again soon.
         assert_eq!(decide(&mut s, &p, &disk, at(8, 0)), Decision::Skip("sent lately"));
+    }
+
+    #[test]
+    fn held_alerts_keep_their_exclusions_and_follow_the_policy() {
+        let p = policy("quiet_hours = \"23:00-07:00\"");
+        let to = ["telegram:1".to_owned(), "email:me@example.org".to_owned()];
+        let mut s = State::default();
+        let job = Alert::new(Kind::Job, "job:t1", "The task failed.").except(vec!["telegram:1".into()]);
+        assert_eq!(decide(&mut s, &p, &job, at(23, 30)), Decision::Hold);
+        let sent = flush(&mut s, &p, &to, at(7, 1));
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "email:me@example.org");
+        // Turned off overnight: what waited is dropped.
+        let mut s = State::default();
+        assert_eq!(decide(&mut s, &p, &job, at(23, 30)), Decision::Hold);
+        let off = policy("quiet_hours = \"23:00-07:00\"\nevents = [\"disk\"]");
+        assert!(flush(&mut s, &off, &to, at(7, 1)).is_empty());
+        assert!(s.held.is_empty() && !s.open.contains("job:t1"));
+        assert_eq!(s.log.last().unwrap().outcome, "dropped while waiting");
     }
 
     #[test]
@@ -972,7 +1090,7 @@ mod tests {
         let mut s = State::default();
         started(&mut s, std::process::id(), "0.0.15", 1);
         s.save(&root).unwrap();
-        stopped(&root);
+        mark_stopped(&root);
         assert!(!State::load(&root).serve.unwrap().running);
         std::fs::remove_dir_all(root).unwrap();
     }

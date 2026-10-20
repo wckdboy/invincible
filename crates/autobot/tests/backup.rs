@@ -78,8 +78,16 @@ fn back_up_change_restore() {
         .map(|e| e.path())
         .filter(|p| p.to_string_lossy().contains("autobot.before-restore-"))
         .collect();
-    assert_eq!(previous.len(), 1);
+    assert_eq!(previous.len(), 1, "{previous:?}");
     assert_eq!(std::fs::read_to_string(previous[0].join("SOUL.md")).unwrap(), "Be loud.");
+    let first = previous[0].clone();
+
+    // A broken configuration is no obstacle: it is what the backup puts right.
+    put(&home, "config.toml", "[agent\nthis is not toml");
+    let (ok, out) = autobot(&home, &["restore", &out_arg, "--yes"]);
+    assert!(ok && out.contains("the home as it was is"), "{out}");
+    assert_eq!(std::fs::read_to_string(home.join("config.toml")).unwrap(), "[agent]\nheartbeat = \"off\"\n");
+    assert_eq!(std::fs::read_to_string(first.join("SOUL.md")).unwrap(), "Be loud.", "the first one kept");
 
     // A file that is not a backup is refused before anything changes.
     std::fs::write(&archive, b"nope").unwrap();
