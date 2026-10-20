@@ -11,6 +11,13 @@ use std::time::Duration;
 
 use invincible_policy::NetworkMode;
 
+/// A client for this machine's own services over plain HTTP (an engine, the agent, the
+/// gateway): no proxy, and no trust roots, whose loading from the system is most of a short
+/// command's run (~100 ms on macOS).
+pub fn local() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().no_proxy().tls_built_in_root_certs(false)
+}
+
 /// The client for outbound requests under [mode].
 pub fn client(mode: &NetworkMode) -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder()

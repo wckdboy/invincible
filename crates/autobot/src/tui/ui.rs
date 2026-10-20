@@ -341,6 +341,8 @@ impl Ui {
                 }
                 s.thought.clear();
             }
+            // The diff before it shows it.
+            Event::Change { .. } => {}
             Event::Diff(diff) => {
                 let mut s = self.state.lock().expect("ui");
                 Self::finish_step(&mut s);

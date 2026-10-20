@@ -8,7 +8,6 @@
 //! projects, failures, local against cloud.
 
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -86,19 +85,11 @@ impl Log {
     }
 
     pub fn append(&self, record: &Record) -> Result<(), String> {
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > ROTATE) {
             let _ = std::fs::rename(&self.path, self.path.with_file_name("turns.1.jsonl"));
         }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?;
         let line = serde_json::to_string(record).map_err(|e| e.to_string())?;
-        writeln!(file, "{line}").map_err(|e| format!("{}: {e}", self.path.display()))
+        invincible::fsutil::append_private(&self.path, &line)
     }
 
     /// The turns that ended at or after [since] (unix seconds), oldest first.

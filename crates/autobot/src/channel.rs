@@ -595,7 +595,7 @@ async fn handle_inner(
     };
     runtime.turn_ended();
     // What is worth keeping, in the background; nothing is said about it in the chat.
-    let _ = runtime.nudge(agent.clone(), guard.session.messages.clone());
+    let _ = runtime.nudge(agent.clone(), &guard.session.messages);
     typing.abort();
     drop(lines);
     if let Some((tx, task)) = progress {
@@ -658,7 +658,7 @@ pub async fn converse(
         crate::tools::TURN.scope(context, agent.turn(session, text, approver, grants, &|_| {})).await
     };
     runtime.turn_ended();
-    let _ = runtime.nudge(agent, guard.session.messages.clone());
+    let _ = runtime.nudge(agent, &guard.session.messages);
     result.map(|outcome| outcome.text)
 }
 

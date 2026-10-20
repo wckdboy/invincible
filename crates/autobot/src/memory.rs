@@ -2,7 +2,6 @@
 //! `$AUTOBOT_HOME/memory.jsonl`, shown to it at the start of every turn. The owner reads and
 //! removes them with `autobot memory`.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -64,16 +63,8 @@ impl Memory {
         let id = facts.iter().map(|f| f.id).max().unwrap_or(0) + 1;
         let at =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?;
         let line = serde_json::to_string(&Fact { id, at, text }).map_err(|e| e.to_string())?;
-        writeln!(file, "{line}").map_err(|e| format!("{}: {e}", self.path.display()))?;
+        invincible::fsutil::append_private(&self.path, &line)?;
         Ok(id)
     }
 

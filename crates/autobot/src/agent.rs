@@ -69,6 +69,9 @@ pub enum Event<'a> {
     Reasoning(&'a str),
     /// What a write or an edit changes, as a unified diff: before it is approved.
     Diff(&'a str),
+    /// The same change whole, right after its [Event::Diff]: the file, its text before (empty
+    /// when it is new) and after (for an editor that shows changes itself, [crate::acp]).
+    Change { path: &'a std::path::Path, before: &'a str, after: &'a str },
     /// What a tool handed back to the model.
     Output { name: &'a str, text: &'a str },
     /// Tokens one model call used: input (of which cached), output.
@@ -376,7 +379,10 @@ impl Agent {
             }
             messages[0] = json!({ "role": "system", "content": system });
             messages.extend(session.window());
-            sent.clone_from(&messages);
+            // What was sent, kept only for a trajectory.
+            if self.trajectories.is_some() {
+                sent.clone_from(&messages);
+            }
             let streamed = |delta: crate::gateway::Delta| match delta {
                 crate::gateway::Delta::Text(text) => events(Event::Text(text)),
                 crate::gateway::Delta::Reasoning(text) => events(Event::Reasoning(text)),
@@ -384,15 +390,17 @@ impl Agent {
             // Images go as parts, read from their files now; the session and trajectories keep
             // only their references.
             // (Reading and scaling them is slow work: off the task that draws the terminal.)
-            let wire = if crate::images::any(&messages) {
+            let expanded;
+            let wire: &[Value] = if crate::images::any(&messages) {
                 let (owned, vision) = (messages.clone(), self.options.vision);
-                tokio::task::spawn_blocking(move || crate::images::expand(&owned, vision))
+                expanded = tokio::task::spawn_blocking(move || crate::images::expand(&owned, vision))
                     .await
-                    .map_err(|e| format!("the images: {e}"))?
+                    .map_err(|e| format!("the images: {e}"))?;
+                &expanded
             } else {
-                messages.clone()
+                &messages
             };
-            let reply = match self.gateway.chat_with(&wire, &definitions, confirmed, &streamed).await {
+            let reply = match self.gateway.chat_with(wire, &definitions, confirmed, &streamed).await {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
                     let action = Action::Cloud(why);
@@ -671,8 +679,21 @@ impl Agent {
                 );
             }
         }
-        if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
-            events(Event::Diff(&diff));
+        // What a write or an edit changes, from the file as it will find it (an editor's buffer,
+        // [crate::acp]); the profile and skills from their own previews.
+        match self.tools.change_now(&call).await {
+            Some((path, before, after)) => {
+                let diff = self.tools.diff(&path, &before, &after);
+                if !diff.is_empty() {
+                    events(Event::Diff(&diff));
+                    events(Event::Change { path: &path, before: &before, after: &after });
+                }
+            }
+            None => {
+                if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
+                    events(Event::Diff(&diff));
+                }
+            }
         }
         if let Some(action) = self.tools.action(&call) {
             if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {

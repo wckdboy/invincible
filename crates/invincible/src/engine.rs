@@ -104,7 +104,7 @@ pub fn free_port() -> std::io::Result<u16> {
 /// Dropping or aborting the returned task kills the engine.
 pub fn supervise(engine: Engine, launch: Launch) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let client = reqwest::Client::builder()
+        let client = crate::egress::local()
             .connect_timeout(Duration::from_secs(1))
             .timeout(Duration::from_secs(2))
             .build()

@@ -87,6 +87,9 @@ enum Command {
     /// Serve every enabled bot: the agent API (for paired apps, through the gateway), their
     /// channels, schedules, board, heartbeat and hooks.
     Serve,
+    /// Be the agent of an editor (Zed, or any Agent Client Protocol client): ACP on standard
+    /// input and output, sessions coding in the folder the editor opens.
+    Acp,
     /// Check the install, the gateway, the model and the channels.
     Doctor,
     /// The bots on this machine: list, add, show, edit, remove, enable, disable, status.
@@ -686,6 +689,15 @@ fn run(mut cli: Cli) -> Result<(), String> {
                 Err(e) => Err(e),
             }
         }),
+        Command::Acp => {
+            // Standard output is the protocol's: the log goes to standard error.
+            tracing_subscriber::fmt().with_writer(std::io::stderr).with_target(false).init();
+            runtime()?.block_on(async {
+                let done = autobot::acp::serve(config, home, tokio::io::stdin(), tokio::io::stdout()).await;
+                autobot::procs::stop_all().await;
+                done
+            })
+        }
         Command::Serve => {
             tracing_subscriber::fmt().with_target(false).init();
             runtime()?.block_on(serve(root))
@@ -1208,6 +1220,7 @@ fn event_json(event: &Event) -> serde_json::Value {
         Event::Text(text) => json!({ "type": "text", "text": text }),
         Event::Reasoning(text) => json!({ "type": "reasoning", "text": text }),
         Event::Diff(diff) => json!({ "type": "diff", "diff": diff }),
+        Event::Change { path, .. } => json!({ "type": "change", "path": path.display().to_string() }),
         Event::Output { name, text } => json!({ "type": "output", "tool": name, "text": text }),
         Event::Usage { input, output, cached } => {
             json!({ "type": "usage", "input": input, "output": output, "cached": cached })
@@ -1229,7 +1242,7 @@ fn print_event(event: Event) {
         }
         Event::Member { name, text } => eprintln!("\x1b[2m[{name}] → {}\x1b[0m", text.replace('\n', " ")),
         Event::Diff(diff) => eprint!("{}", autobot::tui::ui::render_diff(diff, 80)),
-        Event::Text(_) | Event::Reasoning(_) | Event::Output { .. } | Event::Usage { .. } => {}
+        Event::Text(_) | Event::Reasoning(_) | Event::Output { .. } | Event::Usage { .. } | Event::Change { .. } => {}
     }
 }
 
@@ -1418,7 +1431,9 @@ fn live_bots(root: &std::path::Path) -> Option<Vec<serde_json::Value>> {
     let token = main.config.gateway.token().ok()?;
     let url = format!("http://{}/v1/agent/bots", main.config.serve.listen);
     runtime().ok()?.block_on(async {
-        let reply = reqwest::Client::new()
+        let reply = invincible::egress::local()
+            .build()
+            .ok()?
             .get(url)
             .bearer_auth(token)
             .timeout(std::time::Duration::from_secs(3))

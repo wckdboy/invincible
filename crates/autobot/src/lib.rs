@@ -1,6 +1,7 @@
 //! The Autobot Agent: Autobot's agent on a VPS or a desktop, with Invincible Gateway on the same
 //! machine as its model provider. Installed, configured and run together with the gateway.
 
+pub mod acp;
 pub mod actions;
 pub mod agent;
 pub mod api;
