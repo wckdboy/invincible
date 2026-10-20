@@ -35,6 +35,28 @@ pub fn replace_private(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Appends [line] and a newline to [path] (created 0600, its directory too when missing) in one
+/// write: one system call, and a line two writers append at once cannot interleave with another.
+pub fn append_private(path: &Path, line: &str) -> Result<(), String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let file = match options.open(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && path.parent().is_some() => {
+            let dir = path.parent().unwrap_or(path);
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            options.open(path)
+        }
+        other => other,
+    };
+    let mut file = file.map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut bytes = Vec::with_capacity(line.len() + 1);
+    bytes.extend_from_slice(line.as_bytes());
+    bytes.push(b'\n');
+    file.write_all(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// Reads [path], or `None` when it does not exist.
 pub fn read_optional(path: &Path) -> Result<Option<String>, String> {
     match std::fs::read_to_string(path) {

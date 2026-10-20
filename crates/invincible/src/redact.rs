@@ -866,10 +866,17 @@ impl Vault {
     /// Replaces every occurrence of a known value (longest first, no overlaps).
     fn replace(&mut self, text: &str) -> String {
         let guards = Guards::new(text);
+        let mut lower: Option<String> = None;
         let mut hits: Vec<(usize, usize, usize)> = Vec::new();
         for (i, (_, e)) in self.entries.iter().enumerate() {
             for form in &e.forms {
-                let found: Vec<(usize, usize)> = if e.kind == Kind::Email {
+                let found: Vec<(usize, usize)> = if e.kind == Kind::Email && form.is_ascii() {
+                    // Any case: ASCII lowercasing keeps every byte where it was, so the offsets
+                    // hold in [text] (no pattern compiled for each address and each text).
+                    let lower = lower.get_or_insert_with(|| text.to_ascii_lowercase());
+                    let form = form.to_ascii_lowercase();
+                    lower.match_indices(form.as_str()).map(|(at, f)| (at, at + f.len())).collect()
+                } else if e.kind == Kind::Email {
                     let pattern =
                         RegexBuilder::new(&regex::escape(form)).case_insensitive(true).build().expect("escaped");
                     pattern.find_iter(text).map(|m| (m.start(), m.end())).collect()

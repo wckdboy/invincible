@@ -27,6 +27,10 @@ use crate::approval::{Action, Answer, Approver};
 use crate::bots::{Fleet, Runtime};
 use crate::session::Session;
 
+/// Conversations kept open in memory at most, beyond those in use: past it, the idle ones are
+/// let go (they are on disk; "always" answers given in them end with them).
+const MAX_OPEN: usize = 64;
+
 /// How long a question waits for an answer.
 const APPROVAL_WAIT: Duration = Duration::from_secs(10 * 60);
 /// How long a turn's stream stays open after its answer for what the nudge kept.
@@ -84,13 +88,22 @@ impl BotApi {
     }
 
     fn inbox(&self, id: &str) -> crate::tools::Inbox {
-        self.inboxes.lock().expect("inboxes").entry(id.to_owned()).or_default().clone()
+        let mut inboxes = self.inboxes.lock().expect("inboxes");
+        if inboxes.len() >= MAX_OPEN && !inboxes.contains_key(id) {
+            // Only running turns hold theirs.
+            inboxes.retain(|_, inbox| Arc::strong_count(inbox) > 1);
+        }
+        inboxes.entry(id.to_owned()).or_default().clone()
     }
 
     fn open(&self, id: &str) -> Result<Arc<tokio::sync::Mutex<Open>>, String> {
         let mut open = self.open.lock().expect("open sessions");
         if let Some(session) = open.get(id) {
             return Ok(session.clone());
+        }
+        if open.len() >= MAX_OPEN {
+            // Idle: nobody holds it (a running turn holds its own).
+            open.retain(|_, session| Arc::strong_count(session) > 1);
         }
         let session = Session::open(&self.sessions_dir(), id)?;
         let entry = Arc::new(tokio::sync::Mutex::new(Open { session, grants: HashSet::new() }));

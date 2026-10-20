@@ -2,7 +2,7 @@
 //! whether it ran, and who said so (the policy, the owner on which channel, a grant for the
 //! session), in `$AUTOBOT_HOME/actions.jsonl`. Read with `autobot actions` or `GET /v1/agent/actions`.
 
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -43,16 +43,8 @@ impl ActionLog {
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() >= ROTATE_AT) {
             std::fs::rename(&self.path, self.rotated()).map_err(|e| format!("{}: {e}", self.path.display()))?;
         }
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?;
         let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
-        writeln!(file, "{line}").map_err(|e| format!("{}: {e}", self.path.display()))
+        invincible::fsutil::append_private(&self.path, &line)
     }
 
     /// The newest [limit] entries at or after [since] (unix seconds), oldest first.

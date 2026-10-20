@@ -1350,7 +1350,9 @@ fn live_bots(root: &std::path::Path) -> Option<Vec<serde_json::Value>> {
     let token = main.config.gateway.token().ok()?;
     let url = format!("http://{}/v1/agent/bots", main.config.serve.listen);
     runtime().ok()?.block_on(async {
-        let reply = reqwest::Client::new()
+        let reply = invincible::egress::local()
+            .build()
+            .ok()?
             .get(url)
             .bearer_auth(token)
             .timeout(std::time::Duration::from_secs(3))

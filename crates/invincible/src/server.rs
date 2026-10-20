@@ -61,7 +61,7 @@ impl AppState {
         // No overall timeout: a long generation is not a hung one. Connecting to a loopback
         // engine is instant or it is down.
         let client =
-            reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(2)).build().expect("HTTP client");
+            crate::egress::local().connect_timeout(std::time::Duration::from_secs(2)).build().expect("HTTP client");
         let egress = crate::egress::client(&node.network).ok();
         // An ephemeral receipt key until the node's own is set ([AppState::with_receipt_key]).
         let receipt_key = Arc::new(ReceiptKey::from_seed(&crate::token::random::<32>().expect("random bytes")));
@@ -542,7 +542,8 @@ async fn infer(
                     ok: true,
                 });
                 draft.data_policy = Some(data_policy_code(cloud.data_policy));
-                match crate::cloud::forward(client, cloud, outgoing, vault, received).await {
+                let streaming = parsed.get("stream").and_then(Value::as_bool) == Some(true);
+                match crate::cloud::forward(client, cloud, outgoing, vault, received, streaming).await {
                     Ok(response) => response,
                     Err(CloudError::Failover(why)) => {
                         tracing::warn!(model = %cloud.id, "cloud backend failed ({why}); routing again");

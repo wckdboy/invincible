@@ -3,7 +3,19 @@
 //! Plain RFC 5322 and MIME: multipart, quoted-printable and base64, encoded words, UTF-8 and
 //! Latin-1. No other crate: what arrives is untrusted, so the parser is small and checked here.
 
+use std::sync::LazyLock;
+
 use base64::Engine as _;
+use regex::Regex;
+
+/// Compiled once, not for every header and message.
+static ENCODED_WORD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"=\?([^?]+)\?([bBqQ])\?([^?]*)\?=").expect("a valid pattern"));
+static MESSAGE_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^<>\s]+>").expect("a valid pattern"));
+static HTML_BREAK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<br\s*/?>|</p>|</div>|</li>").expect("a valid pattern"));
+static HTML_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<style.*?</style>|<script.*?</script>|<[^>]*>").expect("a valid pattern"));
 
 /// One message, read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -93,7 +105,7 @@ fn decode_charset(bytes: &[u8], charset: &str) -> String {
 
 /// `=?UTF-8?B?…?=` and `=?ISO-8859-1?Q?…?=` words decoded (RFC 2047).
 pub fn decode_words(text: &str) -> String {
-    let re = regex::Regex::new(r"=\?([^?]+)\?([bBqQ])\?([^?]*)\?=").expect("a valid pattern");
+    let re = &*ENCODED_WORD;
     let mut out = String::new();
     let mut last = 0;
     let mut previous_word = false;
@@ -166,8 +178,7 @@ pub fn address(value: &str) -> (String, String) {
 }
 
 fn ids(value: &str) -> Vec<String> {
-    let re = regex::Regex::new(r"<[^<>\s]+>").expect("a valid pattern");
-    re.find_iter(value).map(|m| m.as_str().to_owned()).collect()
+    MESSAGE_ID.find_iter(value).map(|m| m.as_str().to_owned()).collect()
 }
 
 /// A body part, decoded: its type, its disposition's file name, the bytes.
@@ -254,10 +265,8 @@ pub fn unquote(text: &str) -> String {
 
 /// Tags out of HTML, for a message with no plain-text part.
 fn html_text(html: &str) -> String {
-    let breaks = regex::Regex::new(r"(?i)<br\s*/?>|</p>|</div>|</li>").expect("a valid pattern");
-    let tags = regex::Regex::new(r"(?s)<style.*?</style>|<script.*?</script>|<[^>]*>").expect("a valid pattern");
-    let text = breaks.replace_all(html, "\n");
-    let text = tags.replace_all(&text, "");
+    let text = HTML_BREAK.replace_all(html, "\n");
+    let text = HTML_TAG.replace_all(&text, "");
     text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&amp;", "&")
 }
 

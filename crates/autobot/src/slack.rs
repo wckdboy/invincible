@@ -453,8 +453,10 @@ async fn event_message(shared: &Shared, event: &Value) -> Result<(), String> {
 
 /// Slack's escapes undone, and links shown as their addresses.
 fn unescape(text: &str) -> String {
-    let links = regex::Regex::new(r"<((?:https?|mailto):[^|>]+)(?:\|[^>]*)?>").expect("a valid pattern");
-    let text = links.replace_all(text, "$1");
+    static LINKS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"<((?:https?|mailto):[^|>]+)(?:\|[^>]*)?>").expect("a valid pattern")
+    });
+    let text = LINKS.replace_all(text, "$1");
     text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 }
 

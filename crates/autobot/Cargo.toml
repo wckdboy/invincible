@@ -44,5 +44,9 @@ base64.workspace = true
 # four formats terminals hand over; no rayon, no other codecs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
+[dev-dependencies]
+# The benchmarks drive the terminal UI through a pseudo-terminal (the same crate, one more feature).
+rustix = { version = "1", features = ["pty", "termios"] }
+
 [lints]
 workspace = true

@@ -11,7 +11,6 @@
 //! "receipts", "steps", "refused", "outcome": "answer" | "stopped", "source": "turn" | "eval",
 //! "task", "pass"}}`.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -58,15 +57,7 @@ impl Recorder {
 
 /// Appends [record] as a line of [file] (0600).
 pub fn append(file: &Path, record: &Value) -> Result<(), String> {
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut out = options.open(file).map_err(|e| format!("{}: {e}", file.display()))?;
-    writeln!(out, "{record}").map_err(|e| format!("{}: {e}", file.display()))
+    invincible::fsutil::append_private(file, &record.to_string())
 }
 
 /// Every trajectory in [dir] (oldest first), torn lines skipped.

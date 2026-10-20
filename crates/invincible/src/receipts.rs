@@ -29,6 +29,8 @@ const TAIL: usize = 64 * 1024;
 /// The node's receipt signing key.
 pub struct ReceiptKey {
     signing: SigningKey,
+    /// The public key, encoded once (every receipt names it).
+    public: String,
 }
 
 impl ReceiptKey {
@@ -50,12 +52,14 @@ impl ReceiptKey {
     }
 
     pub fn from_seed(seed: &[u8; 32]) -> Self {
-        Self { signing: SigningKey::from_bytes(seed) }
+        let signing = SigningKey::from_bytes(seed);
+        let public = URL_SAFE_NO_PAD.encode(signing.verifying_key().to_bytes());
+        Self { signing, public }
     }
 
     /// The public key, base64url.
     pub fn public(&self) -> String {
-        URL_SAFE_NO_PAD.encode(self.signing.verifying_key().to_bytes())
+        self.public.clone()
     }
 
     /// The signed envelope `{"receipt": …, "signature": …}`.
@@ -200,7 +204,9 @@ impl Draft {
 
     fn observe(&mut self, bytes: &[u8]) {
         self.tail.extend_from_slice(bytes);
-        if self.tail.len() > TAIL {
+        // Cut back only when it is twice the size kept: not a 64 KiB move for every chunk of a
+        // long stream.
+        if self.tail.len() > 2 * TAIL {
             let cut = self.tail.len() - TAIL;
             self.tail.drain(..cut);
         }

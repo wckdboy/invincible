@@ -96,9 +96,12 @@ impl Gateway {
         if parsed.scheme() != "http" && parsed.scheme() != "https" {
             return Err(format!("{url}: not an HTTP URL"));
         }
+        // Plain HTTP (the gateway on this machine) needs no trust roots, and loading the
+        // system's takes most of the agent's start (~100 ms on macOS).
         let client = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_secs(10))
+            .tls_built_in_root_certs(parsed.scheme() == "https")
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -375,14 +378,17 @@ async fn read_stream(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("the gateway's answer stopped: {e}"))?;
         pending.extend_from_slice(&chunk);
-        while let Some(end) = pending.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = pending.drain(..=end).collect();
-            let line = String::from_utf8_lossy(&line);
+        // Every whole line in what came, then what is left moved to the front once.
+        let mut start = 0;
+        while let Some(end) = pending[start..].iter().position(|b| *b == b'\n') {
+            let line = String::from_utf8_lossy(&pending[start..start + end]);
+            start += end + 1;
             if assembled.line(line.trim(), on)? {
                 let usage = assembled.usage.take();
                 return Ok((assembled.message(), usage));
             }
         }
+        pending.drain(..start);
     }
     let rest = String::from_utf8_lossy(&pending).into_owned();
     assembled.line(rest.trim(), on)?;

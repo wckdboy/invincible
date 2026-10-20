@@ -144,7 +144,8 @@ pub fn prepare(model: &CloudModel, mut body: Value) -> (Vec<u8>, Vault) {
     (serde_json::to_vec(&body).expect("JSON serialises"), vault)
 }
 
-/// Sends a [prepare]d request to [model] and returns the restored answer. Bytes received from the
+/// Sends a [prepare]d request to [model] and returns the restored answer ([streaming]: the
+/// request asked for a stream, so the client is not parsed again here). Bytes received from the
 /// provider are added to [received].
 pub async fn forward(
     client: &reqwest::Client,
@@ -152,9 +153,8 @@ pub async fn forward(
     body: Vec<u8>,
     vault: Vault,
     received: Arc<AtomicU64>,
+    streaming: bool,
 ) -> Result<Response, CloudError> {
-    let streaming = serde_json::from_slice::<Value>(&body).ok().and_then(|b| b.get("stream").and_then(Value::as_bool))
-        == Some(true);
     let mut request = client
         .post(format!("{}/chat/completions", model.base_url))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
