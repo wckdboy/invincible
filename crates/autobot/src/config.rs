@@ -186,6 +186,9 @@ pub struct AgentConfig {
     /// shorter tool list makes a small local model's calls faster.
     #[serde(default)]
     pub tools: Option<Vec<String>>,
+    /// Tools turned off one by one, in groups that are on (`autobot tools disable browser`).
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
     /// KiB of recent conversation sent per model call (default 48: small local models have small
     /// contexts). Frontier models take far more: `context_kib = 400`.
     #[serde(default)]
@@ -253,6 +256,7 @@ impl Default for AgentConfig {
             command_timeout: command_timeout(),
             sandbox: Default::default(),
             tools: None,
+            disabled_tools: Vec::new(),
             heartbeat: heartbeat(),
             trajectories: false,
             context_kib: None,

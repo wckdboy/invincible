@@ -42,6 +42,7 @@ pub mod script;
 pub mod search;
 pub mod service;
 pub mod session;
+pub mod settings;
 pub mod setup;
 pub mod signal;
 pub mod skills;
@@ -111,6 +112,10 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         }
         tools = tools.only(tools::tools_for(groups));
     }
+    if let Some(unknown) = config.agent.disabled_tools.iter().find(|t| settings::group_of(t).is_none()) {
+        return Err(format!("[agent] disabled_tools: unknown tool {unknown:?}"));
+    }
+    tools = tools.without(config.agent.disabled_tools.clone());
     Ok(agent::Agent {
         gateway,
         tools,

@@ -20,6 +20,8 @@ pub struct Tools {
     home: Option<PathBuf>,
     /// Only these tools (by name), when set: a recipe's tool groups ([groups]).
     only: Option<Vec<String>>,
+    /// Never these tools (by name): turned off one by one ([crate::settings::set_tool]).
+    off: Vec<String>,
     sandbox: crate::sandbox::Mode,
     /// Commands run sandboxed now: always, or unattended in a run with nobody watching.
     confined: bool,
@@ -47,6 +49,9 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("terminal", &["terminal", "process", "execute_code"]),
     ("plan", &["todo"]),
     ("home", &["home"]),
+    ("schedule", &["schedule_task", "list_schedules", "cancel_schedule"]),
+    // Made by the node's speech and image backends.
+    ("media", &["speak", "generate_image"]),
 ];
 
 /// The tool names [groups] allow.
@@ -195,6 +200,7 @@ impl Tools {
             timeout,
             home: None,
             only: None,
+            off: Vec::new(),
             sandbox: crate::sandbox::Mode::Off,
             confined: false,
             limit: RESULT_LIMIT,
@@ -276,13 +282,19 @@ impl Tools {
         self
     }
 
+    /// Never offers or runs [tools] (by name).
+    pub fn without(mut self, tools: Vec<String>) -> Self {
+        self.off = tools;
+        self
+    }
+
     /// Whether [name] is offered ("mcp" stands for every MCP tool).
     pub fn offers(&self, name: &str) -> bool {
         self.offered(name)
     }
 
     fn offered(&self, name: &str) -> bool {
-        self.only.as_ref().is_none_or(|only| only.iter().any(|t| t == name))
+        self.only.as_ref().is_none_or(|only| only.iter().any(|t| t == name)) && !self.off.iter().any(|t| t == name)
     }
 
     pub fn workdir(&self) -> &Path {
