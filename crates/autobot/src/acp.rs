@@ -266,7 +266,8 @@ impl Acp {
         let mut agent = crate::agent_in(&config, &self.home, Some(cwd.to_owned())).map_err(|e| (INTERNAL, e))?;
         crate::for_coding(&mut agent);
         let (read, write) = (self.fs_read.load(Ordering::Relaxed), self.fs_write.load(Ordering::Relaxed));
-        if read || write {
+        // The editor's files are this machine's: not when the agent works on another one.
+        if (read || write) && agent.tools.ssh().is_none() {
             let files = EditorFiles { conn: self.conn.clone(), session: id.to_owned(), read, write };
             agent.tools = agent.tools.clone().with_files(Arc::new(files));
         }
@@ -362,7 +363,16 @@ impl Acp {
         let result = task.await;
         open.running.lock().expect("running").take();
         let outcome = match result {
-            Err(e) if e.is_cancelled() => return Ok(json!({ "stopReason": "cancelled" })),
+            Err(e) if e.is_cancelled() => {
+                // The call it was in stops with it.
+                if let Some(call) = turn.lock().expect("turn").current.take() {
+                    self.conn.update(
+                        &open.id,
+                        json!({ "sessionUpdate": "tool_call_update", "toolCallId": call.id, "status": "failed" }),
+                    );
+                }
+                return Ok(json!({ "stopReason": "cancelled" }));
+            }
             Err(e) => return Err((INTERNAL, format!("the turn failed: {e}"))),
             Ok(Err(e)) => return Err((INTERNAL, e)),
             Ok(Ok(outcome)) => outcome,

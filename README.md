@@ -28,7 +28,7 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
-| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant |
+| Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code run on local models; the comparison with a frontier model is still to do |
@@ -1109,19 +1109,23 @@ Markdown for the chat platforms, pastes) have property tests over generated inpu
 under steady traffic with the gateway restarting, every message answered, and no growth in
 memory, file descriptors, tasks or threads.
 
-**Numbers** (Apple M-series, release build, against stand-ins on loopback; `bench/run.sh`):
+**Numbers** (an Apple M-series Mac, release builds, against stand-ins on loopback that answer at
+once; `bench/run.sh`, medians):
 
 | | 0.0.13 | now |
 | --- | ---: | ---: |
-| `autobot` start to the first composer frame | 104 ms | 6.5 ms |
-| `autobot run` (one turn, whole process) | 112 ms | 7.0 ms |
-| Agent loop, per turn (1000-turn conversation) | 0.87 ms | 0.41 ms |
+| `autobot` start to the first composer frame | 105 ms | 6.3 ms |
+| `autobot run "…"`, one turn, the whole process | 107 ms | 6.7 ms |
+| Agent loop, per turn, in a 1000-turn conversation | 0.80 ms | 0.39 ms |
 | Model calls per turn, in a long conversation | 2.0 | 1.1 |
-| Gateway latency added, p50 / p99 | 0.27 / 3.7 ms | 0.19 / 0.38 ms |
-| Gateway time to first token added, p50 | 0.23 ms | 0.23 ms |
-| `invincible serve` memory, idle / after 1000 requests | 16.4 / 21.7 MiB | 9.9 / 16.1 MiB |
-| `autobot serve` (two bots) memory, idle / after 1000 turns | 17.2 / 27.0 MiB | 11.9 / 22.3 MiB |
-| Binary sizes, `invincible` / `autobot` | 6.4 / 11.3 MiB | see the PR |
+| `autobot serve`, turns a second (16 at once) | 7,300 | 14,800 |
+| Gateway latency added, p50; to the first streamed token | 0.3 ms; 0.3 ms | 0.3 ms; 0.25 ms |
+| `invincible serve` memory, idle / after 1000 requests | 16.5 / 21.6 MiB | 9.9 / 15.9 MiB |
+| `autobot serve` (two bots) memory, idle / after 1000 turns | 16.9 / 26.0 MiB | 12.0 / 21.1 MiB |
+| Binary sizes, `invincible` / `autobot` | 6.4 / 11.3 MiB | 6.4 / 11.9 MiB |
+
+(Most of the start was loading the system's trust roots for a plain-HTTP connection to this
+machine; `autobot` grew with the editor protocol, Home Assistant and WhatsApp.)
 
 ## Principles
 

@@ -1,15 +1,27 @@
 # Every night (and on demand): the benchmarks (bench/run.sh, numbers in the run's summary) and the
-# soak test (two bots, steady traffic and gateway restarts, ten minutes), on Linux and macOS.
+# soak test (two bots, steady traffic and gateway restarts, ten minutes), on Linux and macOS. A pull
+# request that changes them runs them too, with a two-minute soak.
 name: nightly
 
 on:
   schedule:
     - cron: "17 3 * * *"
+  pull_request:
+    paths:
+      - bench/**
+      - crates/autobot/tests/perf.rs
+      - crates/autobot/tests/soak.rs
+      - crates/autobot/tests/support/**
+      - .github/workflows/nightly.yml
   workflow_dispatch:
     inputs:
       soak_secs:
         description: How long the soak test runs, in seconds
         default: "600"
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -31,4 +43,4 @@ jobs:
       - name: soak
         run: cargo test --release --locked -p autobot --test soak -- --ignored --nocapture
         env:
-          SOAK_SECS: ${{ inputs.soak_secs || '600' }}
+          SOAK_SECS: ${{ inputs.soak_secs || (github.event_name == 'pull_request' && '120') || '600' }}

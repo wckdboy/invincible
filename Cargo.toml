@@ -41,6 +41,11 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# Measured with bench/run.sh (the PR that added it has the numbers). Fat LTO and one codegen unit:
+# the smallest and fastest binaries (thin LTO is 10% larger). Panics unwind: a bug in one bot's
+# channel or one request's task is caught there and the rest keep running (`panic = "abort"`
+# would save 20% of the size and take every bot and stream down with it). opt-level 3: `"s"`
+# saves 20% but costs 30% on the gateway's added latency and the agent's turns.
 [profile.release]
 lto = true
 codegen-units = 1

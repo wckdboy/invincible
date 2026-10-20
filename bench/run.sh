@@ -22,7 +22,7 @@ for bin in invincible autobot; do
   awk -v b="$bytes" -v n="$bin" 'BEGIN { printf "BENCH size.%s %.3f MiB\n", n, b / 1048576 }' >> "$out"
 done
 cargo test --release --locked --quiet -p autobot --test perf -- --ignored --nocapture --test-threads 1 $filter \
-  | grep '^BENCH' >> "$out"
+  | grep -o 'BENCH .*' >> "$out"
 
 sed 's/^BENCH //' "$out"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
