@@ -138,14 +138,8 @@ impl Agent {
     pub async fn nudge(&self, messages: &[Value], events: &(dyn Fn(Event) + Send + Sync)) -> Vec<String> {
         let Some(home) = self.tools.home() else { return Vec::new() };
         let every = self.options.nudge_every;
-        let turns: Vec<usize> = messages
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| {
-                m["role"] == "user" && !m["content"].as_str().is_some_and(|c| c.starts_with("(The owner adds"))
-            })
-            .map(|(i, _)| i)
-            .collect();
+        let turns: Vec<usize> =
+            messages.iter().enumerate().filter(|(_, m)| crate::session::is_request(m)).map(|(i, _)| i).collect();
         if every == 0 || turns.is_empty() || !turns.len().is_multiple_of(every) {
             return Vec::new();
         }
@@ -425,6 +419,7 @@ impl Agent {
             }
             // Reads that need no approval, next to each other, run at the same time; the rest in
             // order. Results go back in the order the model asked.
+            let mut screenshots: Vec<crate::images::Attachment> = Vec::new();
             let mut rest = own.into_iter().peekable();
             while let Some(first) = rest.next() {
                 let mut batch = vec![first];
@@ -458,6 +453,19 @@ impl Agent {
                 let result = self.call(&session.id, at, &name, &arguments, approver, grants, events).await;
                 events(Event::Output { name: &name, text: &result });
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
+                // A browser screenshot is shown to a model that can see (a tool result cannot
+                // carry an image; a message of its own can).
+                if name == "browser"
+                    && self.options.vision != Some(false)
+                    && let Some(path) = result.strip_prefix("saved a screenshot").and_then(|r| r.rsplit_once(": "))
+                    && let Ok(image) = crate::images::attach(std::path::Path::new(path.1.trim()))
+                {
+                    screenshots.push(image);
+                }
+            }
+            if !screenshots.is_empty() {
+                let note = format!("{}: what the page looks like now)", crate::session::SCREENSHOT_NOTE);
+                session.push(crate::images::message(&note, &std::mem::take(&mut screenshots)))?;
             }
         }
     }

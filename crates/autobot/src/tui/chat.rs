@@ -163,6 +163,16 @@ fn question(action: &Action, workdir: &Path) -> (String, String) {
         Action::Mcp { tool, arguments } => {
             ("Use this tool?", format!("{tool} {}", style::gray(&arguments.chars().take(400).collect::<String>())))
         }
+        Action::Type { page, field, text, submit } => {
+            let page = style::underline(page);
+            match (text.is_empty(), submit) {
+                (true, _) => ("Submit this form?", format!("{field} {} {page}", style::gray("on"))),
+                (false, submit) => (
+                    if *submit { "Type this and send it?" } else { "Type this into the page?" },
+                    format!("{} {} {field} {} {page}", style::code(text), style::gray("into"), style::gray("on")),
+                ),
+            }
+        }
     };
     (format!("{who}{title}"), what)
 }
@@ -1753,9 +1763,7 @@ impl Chat {
                     .messages
                     .iter()
                     .rev()
-                    .find(|m| {
-                        m["role"] == "user" && !m["content"].as_str().is_some_and(|c| c.starts_with("(The owner adds"))
-                    })
+                    .find(|m| crate::session::is_request(m))
                     .is_some_and(|m| !images::of(m).is_empty());
                 let (request, files) = self.session.undo()?;
                 for file in &files {
@@ -2014,7 +2022,7 @@ fn recap(messages: &[serde_json::Value], width: usize) -> Vec<String> {
     let said: Vec<&serde_json::Value> = messages
         .iter()
         .filter(|m| match m["role"].as_str() {
-            Some("user") => m["content"].as_str().is_some_and(|c| !c.starts_with("(The owner adds")),
+            Some("user") => crate::session::is_request(m),
             Some("assistant") => m["content"].as_str().is_some_and(|c| !c.trim().is_empty()),
             _ => false,
         })

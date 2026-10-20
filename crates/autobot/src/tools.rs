@@ -27,13 +27,15 @@ pub struct Tools {
     limit: usize,
     /// Commands run in this container instead of here ([crate::docker]).
     docker: Option<std::sync::Arc<crate::docker::Docker>>,
+    /// The `browser` tool is offered (when a browser is installed).
+    browser: bool,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
 /// no tools for (`web`, `vault`) allow nothing.
 pub const GROUPS: &[(&str, &[&str])] = &[
     ("files-read", &["read_file", "list_dir", "search", "find_files", "read_skill"]),
-    ("web", &["web_fetch"]),
+    ("web", &["web_fetch", "browser"]),
     // Every MCP server's tools.
     ("mcp", &["mcp"]),
     ("files-write", &["write_file", "edit_file"]),
@@ -167,6 +169,8 @@ pub enum Call {
     Todo {
         items: Value,
     },
+    /// The headless browser ([crate::browser]).
+    Browser(crate::browser::Act),
 }
 
 impl Tools {
@@ -180,7 +184,14 @@ impl Tools {
             confined: false,
             limit: RESULT_LIMIT,
             docker: None,
+            browser: false,
         }
+    }
+
+    /// With the `browser` tool, when there is a browser to drive ([crate::browser::find]).
+    pub fn with_browser(mut self, on: bool) -> Self {
+        self.browser = on;
+        self
     }
 
     /// Commands in a container ([crate::docker]).
@@ -316,6 +327,14 @@ impl Tools {
                     "file": { "type": "string", "description": "A supporting file the skill lists (relative path)." },
                 }, "required": ["name"] },
             }}));
+        }
+        // The browser, where there is one to drive (and commands run here, not elsewhere).
+        if self.browser
+            && self.docker.is_none()
+            && crate::browser::find().is_some()
+            && let Some(list) = tools.as_array_mut()
+        {
+            list.push(crate::browser::definition());
         }
         if let Some(list) = tools.as_array_mut() {
             list.retain(|t| self.offered(t["function"]["name"].as_str().unwrap_or_default()));
@@ -527,6 +546,7 @@ impl Tools {
             }
             "search_sessions" if self.home.is_some() => Call::SearchSessions { query: text("query")? },
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
+            "browser" if self.browser => Call::Browser(crate::browser::Act::parse(&args)?),
             other => return Err(format!("there is no tool named {other:?}")),
         })
     }
@@ -535,6 +555,29 @@ impl Tools {
     pub fn action(&self, call: &Call) -> Option<Action> {
         match call {
             Call::Terminal { command } | Call::Background { command } => Some(Action::Command(command.clone())),
+            Call::Browser(act) => {
+                use crate::browser::{Act, current_url, origin};
+                let page = || current_url().unwrap_or_else(|| "about:blank".to_owned());
+                match act {
+                    // A new site is an outside read, like a fetch; the page's own site is not.
+                    Act::Navigate { url } => match origin(url) {
+                        Some(to) if current_url().and_then(|c| origin(&c)).as_deref() != Some(to.as_str()) => {
+                            Some(Action::Fetch(to))
+                        }
+                        _ => None,
+                    },
+                    Act::Type { target, text, submit } => Some(Action::Type {
+                        page: page(),
+                        field: target.describe(),
+                        text: text.clone(),
+                        submit: *submit,
+                    }),
+                    Act::Submit { target } => {
+                        Some(Action::Type { page: page(), field: target.describe(), text: String::new(), submit: true })
+                    }
+                    _ => None,
+                }
+            }
             Call::Fetch { url } => Some(Action::Fetch(url.clone())),
             Call::WriteFile { path, content } => Some(Action::Write {
                 path: path.clone(),
@@ -623,6 +666,10 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
             Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
+            Call::Browser(act) => {
+                let shots = self.home.as_ref().map_or_else(std::env::temp_dir, |h| h.join("attachments"));
+                crate::browser::run(act, &shots, self.limit).await.map(|(text, _)| text)
+            }
             Call::CreateSkill { name, description, steps, files } => match &self.home {
                 Some(home) => crate::skills::propose(home, name, description, steps, files),
                 None => Err("no skills here".to_owned()),

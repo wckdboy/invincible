@@ -6,6 +6,7 @@ pub mod agent;
 pub mod api;
 pub mod approval;
 pub mod board;
+pub mod browser;
 pub mod commands;
 pub mod config;
 pub mod cron;
@@ -57,7 +58,8 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
     std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
     let mut tools = tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout))
         .with_home(home.to_owned())
-        .with_sandbox(config.agent.sandbox);
+        .with_sandbox(config.agent.sandbox)
+        .with_browser(config.agent.browser);
     if let Some(kib) = config.agent.context_kib {
         tools = tools.with_context(kib);
     }

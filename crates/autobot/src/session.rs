@@ -27,6 +27,18 @@ fn is_summary(message: &Value) -> bool {
     message["autobot"] == "summary"
 }
 
+/// The start of a message the agent adds for itself: a browser screenshot to look at.
+pub const SCREENSHOT_NOTE: &str = "(Screenshot from the browser";
+
+/// Whether [message] is a request from the owner: not a note they added while a turn ran, and
+/// not a screenshot the agent took.
+pub fn is_request(message: &Value) -> bool {
+    message["role"] == "user"
+        && !message["content"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("(The owner adds") || c.starts_with(SCREENSHOT_NOTE))
+}
+
 /// What [message] takes of the budget: its characters, and about what an image costs
 /// ([crate::images::BUDGET_CHARS]) for each it carries.
 pub fn cost(message: &Value) -> usize {
@@ -111,9 +123,7 @@ impl Session {
 
     /// The index of the last turn's request (not a note added while it worked).
     fn last_turn(&self) -> Option<usize> {
-        self.messages.iter().rposition(|m| {
-            m["role"] == "user" && !m["content"].as_str().is_some_and(|c| c.starts_with("(The owner adds"))
-        })
+        self.messages.iter().rposition(is_request)
     }
 
     /// Takes the last turn out of the conversation (`/retry`): its request comes back as it was

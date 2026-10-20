@@ -1353,3 +1353,82 @@ async fn every_few_turns_a_nudge_keeps_what_is_worth_keeping() {
     agent.options.nudge_every = 0;
     assert!(agent.nudge(&session.messages, &quiet).await.is_empty());
 }
+
+/// The last tool result the model was sent in call [n].
+fn tool_result(script: &Script, n: usize) -> String {
+    let messages = script.seen[n].1["messages"].as_array().unwrap();
+    messages.iter().rev().find(|m| m["role"] == "tool").unwrap()["content"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn the_browser_reads_types_clicks_and_shows_a_screenshot_asking_where_it_should() {
+    if autobot::browser::find().is_none() {
+        eprintln!("no Chrome, Chromium, Edge or Brave here: skipped");
+        return;
+    }
+    let page = r#"<!doctype html><html><head><title>Test page</title></head><body>
+        <h1>Hello</h1>
+        <input id="q" placeholder="Search">
+        <button id="b" onclick="document.getElementById('out').innerText = 'clicked ' + document.getElementById('q').value">Show</button>
+        <p id="out">nothing yet</p>
+        <form action="/sent"><input name="x"><button type="submit">Send</button></form>
+        <a href="https://example.org/">away</a>
+        </body></html>"#;
+    let site = axum::Router::new().route("/", axum::routing::get(move || async move { axum::response::Html(page) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, site).await.unwrap() });
+    let (url, script) = gateway(vec![
+        call("browser", json!({"action": "navigate", "url": format!("{origin}/")})),
+        call("browser", json!({"action": "snapshot"})),
+        call("browser", json!({"action": "type", "selector": "#q", "text": "rust"})),
+        call("browser", json!({"action": "click", "element": "Show"})),
+        call("browser", json!({"action": "click", "element": "Send"})),
+        call("browser", json!({"action": "click", "element": "away"})),
+        call("browser", json!({"action": "navigate", "url": format!("{origin}/#again")})),
+        call("browser", json!({"action": "screenshot"})),
+        call("browser", json!({"action": "close"})),
+        say("Done."),
+    ])
+    .await;
+    let dir = temp("browser");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone()).with_browser(true);
+    agent.max_steps = 12;
+    let owner = owner(Answer::Once);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let outcome = agent.turn(&mut session, "check the page", &owner, &mut HashSet::new(), &quiet).await;
+    autobot::procs::stop_all().await;
+    assert_eq!(outcome.unwrap().text, "Done.");
+    // A new site and typing asked; the same site again, reading and clicking did not.
+    assert_eq!(
+        *owner.asked.lock().unwrap(),
+        vec![
+            Action::Fetch(origin.clone()),
+            Action::Type { page: format!("{origin}/"), field: "element #q".into(), text: "rust".into(), submit: false },
+        ]
+    );
+    let script = script.lock().unwrap();
+    let opened = tool_result(&script, 1);
+    assert!(opened.starts_with(&format!("opened {origin}/\ntitle: Test page")), "{opened}");
+    let snapshot = tool_result(&script, 2);
+    assert!(snapshot.contains("# Hello") && snapshot.contains(r#"input text "Search""#), "{snapshot}");
+    assert!(snapshot.contains("→ https://example.org"), "{snapshot}");
+    assert!(tool_result(&script, 3).starts_with("typed 4 characters into element #q"));
+    assert!(tool_result(&script, 4).starts_with("clicked \"Show\""));
+    assert!(tool_result(&script, 5).contains("it submits a form"), "never without asking");
+    assert!(tool_result(&script, 6).contains("leads to https://example.org"));
+    assert!(tool_result(&script, 7).starts_with("opened"));
+    let shot = tool_result(&script, 8);
+    assert!(shot.starts_with("saved a screenshot ("), "{shot}");
+    // The screenshot goes to the model as an image of its own.
+    let messages = script.seen[8].1["messages"].as_array().unwrap();
+    let last = messages.last().unwrap();
+    assert_eq!(last["role"], "user");
+    assert!(last["content"][0]["text"].as_str().unwrap().starts_with("(Screenshot from the browser"));
+    assert!(last["content"][1]["image_url"]["url"].as_str().unwrap().starts_with("data:image/"));
+    assert_eq!(tool_result(&script, 9), "closed the browser");
+    // It is not a request: /retry and /undo still find the owner's.
+    assert!(autobot::session::is_request(&session.messages[0]));
+    assert!(!session.messages.iter().skip(1).any(autobot::session::is_request));
+}

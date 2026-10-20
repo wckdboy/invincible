@@ -668,5 +668,8 @@ pub fn describe(action: &Action) -> Value {
         Action::Cloud(reason) => json!({ "kind": "cloud", "reason": reason }),
         Action::Fetch(url) => json!({ "kind": "fetch", "url": url }),
         Action::Mcp { tool, arguments } => json!({ "kind": "mcp", "tool": tool, "arguments": arguments }),
+        Action::Type { page, field, text, submit } => {
+            json!({ "kind": "type", "page": page, "field": field, "text": text, "submit": submit })
+        }
     }
 }
