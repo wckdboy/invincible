@@ -598,6 +598,65 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   the answer) and answer approvals, all inside its Noise session. Nothing new is exposed: the
   agent is reachable only from this machine and from devices you paired.
 
+## Bots and channels
+
+One `autobot serve` runs several bots. The configuration you have is the default bot
+(`~/.autobot/config.toml`, named `default`) and keeps working as it is. Every other bot is a
+directory of its own, `~/.autobot/bots/<name>/`: `bot.toml` (what differs from `config.toml`:
+model, tools, approvals, working directory, its channels), `SOUL.md` (its persona), and its own
+memory, `USER.md` profile, skills, personality, conversations, turn log (`/usage`, `/insights`), schedules and channel users. Bots share only the gateway and
+`[voice]`. Each runs in tasks of its own: a slow model or a failing channel holds up no other
+bot, and a part that stops is started again.
+
+```sh
+autobot bots add ops --description "Watches the servers" --model qwen3.5-4b \
+  --tools files-read,terminal --approvals allowlist --telegram-token 123:abc   # or answer questions
+autobot bots                      # list, with how the running ones are doing (also: bots status)
+autobot bots show ops             # its config and persona
+autobot bots edit ops [--soul]    # bot.toml or SOUL.md in $EDITOR
+autobot bots disable ops          # enable; remove (moved to ~/.autobot/bots-removed)
+autobot --bot ops chat            # any command for one bot: cron, memory, skills, sessions …
+```
+
+**Channels.** Each is a section in the bot's config, its token in the bot's directory. A token
+belongs to one bot: a second bot with the same one keeps that channel off. Strangers get a
+one-time code in a direct message and nothing else until you run `autobot <platform> approve
+<code>` (whichever bot gave it; `users` and `revoke` too). On every platform: approvals (buttons
+where there are any, else a reply: `yes`, `always`, `no`, `no, do X instead`), a message while it
+works steers it, long answers in parts, Markdown as the platform writes it, voice messages
+transcribed, and `/help`, `/status` (model, uptime, queue, last error), `/new`, `/stop`,
+`/model [id]`, `/sethome`, `/bots`, `/cron`, `/board`, `/actions`, `/memory`, `/skills` (also
+written `!status`: Slack keeps `/` for its own commands).
+
+| Platform | Config | Notes |
+|---|---|---|
+| Telegram | `[telegram] enabled = true`, token in `telegram.token` | Long polling; groups by @mention |
+| Discord | `[discord] enabled = true`, token in `discord.token` | Gateway websocket; servers by mention |
+| Slack | `[slack] enabled = true`, `slack-app.token` (`xapp-`, Socket Mode) and `slack-bot.token` (`xoxb-`) | No public URL; DMs and mentions; a thread is a conversation; Block Kit buttons. Scopes: `chat:write`, `im:history`, `app_mentions:read`, `files:read` |
+| Email | `[email] enabled = true`, `address`, `imap = "host:993"`, `smtp = "host:465"`, `allow = ["me@x.org"]`, password in `email.password` | IMAP IDLE (or polling) and SMTP, TLS or STARTTLS; a thread is a conversation, replies quote. Only `allow`ed senders that pass SPF, DKIM or DMARC; approval by a reply that keeps the code in the subject; auto-replies and lists are never answered |
+| Signal | `[signal] enabled = true`, `account = "+1555…"` | Through signal-cli's daemon (started for you, or `url = "http://127.0.0.1:7583"`); link or register the number with signal-cli first; direct messages |
+| Matrix | `[matrix] enabled = true`, `homeserver`, access token in `matrix.token` | `/sync` long poll; direct rooms, mentions elsewhere; unencrypted rooms only |
+
+**One conversation everywhere.** `autobot identities link telegram:123 slack:U456 email:me@x.org`
+makes them one person (the first one linked is `owner`): a direct conversation with them is the
+same conversation on every platform. Linking lets nobody in; each platform still pairs. Once an
+owner is linked, only the owner uses `/bots`, `/model <id>` and `/sethome`.
+
+**Where results go.** `/sethome` in a chat makes it the bot's home: heartbeat notices, hooks and
+schedules with nowhere else to go are sent there. A schedule can name places of its own:
+`autobot cron add @daily "summarize the logs" --to slack:#ops --to email:me@x.org`; a hook takes
+`to = ["slack:#ops"]`; a task scheduled from a chat answers in that chat. Another bot's hooks are
+at `/hooks/<bot>/<name>`.
+
+**Voice.** Telegram voice notes and audio in Discord, Slack, Signal, Matrix and email are
+transcribed on this machine, echoed briefly (`heard: "…"`), then handled as text. Set `[voice] url`
+to a local speech-to-text server in the OpenAI shape (whisper.cpp's server, faster-whisper), or
+install whisper.cpp (`whisper-cli`) and ffmpeg, with a model at `~/.autobot/whisper/ggml-base.bin`.
+The gateway has no speech-to-text of its own yet.
+
+The agent API lists the bots (`GET /v1/agent/bots`), turns them on and off, and takes `?bot=` on
+every path ([spec/agent.md](spec/agent.md)).
+
 ## v0 milestone
 
 Done when, with the internet unplugged:

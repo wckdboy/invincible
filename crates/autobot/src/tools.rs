@@ -63,6 +63,9 @@ pub struct TurnContext {
     pub telegram_chat: Option<i64>,
     /// The Discord channel it came from (answers to a scheduled task go back there).
     pub discord_channel: Option<String>,
+    /// Where it came from on any platform (`slack:C123/1712.0001`, `email:<thread>`): answers to
+    /// a scheduled task go back there ([crate::channel::parse_address]).
+    pub reply_to: Option<String>,
     /// The team member doing this turn; None for the main agent.
     pub agent: Option<String>,
     /// The board task it works on, when it is one ([crate::board]).
@@ -1049,6 +1052,13 @@ fn schedule(home: &Path, when: &str, task: &str, name: Option<&str>) -> Result<S
             s.name = Some(name.trim().chars().take(120).collect());
         }
         s.discord = turn.discord_channel.clone();
+        // Elsewhere than Telegram and Discord, the answer goes back by address.
+        if turn.telegram_chat.is_none()
+            && turn.discord_channel.is_none()
+            && let Some(to) = &turn.reply_to
+        {
+            s.to = vec![to.clone()];
+        }
     }
     schedules.save(home)?;
     let s = schedules.schedules.iter().find(|s| s.id == id).ok_or("lost the schedule")?;
@@ -1056,7 +1066,7 @@ fn schedule(home: &Path, when: &str, task: &str, name: Option<&str>) -> Result<S
         .ok()
         .and_then(|w| w.next(None, crate::cron::local(s.created), chrono::Local::now()))
         .map_or("-".to_owned(), |t| t.format("%a %Y-%m-%d %H:%M").to_string());
-    let reply = if turn.telegram_chat.is_some() || turn.discord_channel.is_some() {
+    let reply = if turn.telegram_chat.is_some() || turn.discord_channel.is_some() || turn.reply_to.is_some() {
         "; its answer comes to this chat"
     } else {
         ""

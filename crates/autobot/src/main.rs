@@ -17,6 +17,9 @@ use clap::{Parser, Subcommand};
     about = "The Autobot Agent, on Invincible Gateway. With no command: `autobot code` in a git repository, the chat anywhere else."
 )]
 struct Cli {
+    /// The bot to act as or on (`autobot bots`; also $AUTOBOT_BOT); the default bot without it.
+    #[arg(long, global = true)]
+    bot: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -81,10 +84,21 @@ enum Command {
         #[arg(long)]
         cloud: bool,
     },
-    /// Serve the agent API (for paired apps, through the gateway) and Telegram if enabled.
+    /// Serve every enabled bot: the agent API (for paired apps, through the gateway), their
+    /// channels, schedules, board, heartbeat and hooks.
     Serve,
     /// Check the install, the gateway, the model and the channels.
     Doctor,
+    /// The bots on this machine: list, add, show, edit, remove, enable, disable, status.
+    Bots {
+        #[command(subcommand)]
+        action: Option<BotsAction>,
+    },
+    /// The same person on several platforms (one conversation everywhere): list, link, unlink.
+    Identities {
+        #[command(subcommand)]
+        action: Option<IdentitiesAction>,
+    },
     /// Telegram access: approve a pairing code, list or remove users.
     Telegram {
         #[command(subcommand)]
@@ -93,7 +107,27 @@ enum Command {
     /// Discord access: approve a pairing code, list or remove users.
     Discord {
         #[command(subcommand)]
-        action: DiscordAction,
+        action: AccessAction,
+    },
+    /// Slack access: approve a pairing code, list or remove users.
+    Slack {
+        #[command(subcommand)]
+        action: AccessAction,
+    },
+    /// Email access: approve a pairing code, list or remove senders.
+    Email {
+        #[command(subcommand)]
+        action: AccessAction,
+    },
+    /// Signal access: approve a pairing code, list or remove users.
+    Signal {
+        #[command(subcommand)]
+        action: AccessAction,
+    },
+    /// Matrix access: approve a pairing code, list or remove users.
+    Matrix {
+        #[command(subcommand)]
+        action: AccessAction,
     },
     /// Run the gateway and the agent in the background (launchd on macOS, systemd on Linux).
     Service {
@@ -267,6 +301,10 @@ enum CronAction {
         /// Send each answer to Telegram.
         #[arg(long)]
         telegram: bool,
+        /// Send each answer here: slack:#ops, email:me@example.com, telegram:123, signal:+1555…
+        /// (repeat for several). Without any, answers go to the bot's home channel (/sethome).
+        #[arg(long)]
+        to: Vec<String>,
     },
     /// List the scheduled tasks, when they run next, and how their last run went.
     List,
@@ -287,13 +325,94 @@ enum TelegramAction {
 }
 
 #[derive(Subcommand)]
-enum DiscordAction {
-    /// Let in the Discord account that was given this code.
+enum AccessAction {
+    /// Let in the account that was given this code (whichever bot gave it, unless --bot).
     Approve { code: String },
     /// List who may use the bot, and who asked.
     Users,
     /// Remove an account's access, by its id.
     Revoke { id: String },
+}
+
+#[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
+enum BotsAction {
+    /// List the bots, and how the running ones are doing.
+    List,
+    /// Add a bot: a directory of its own in $AUTOBOT_HOME/bots, with bot.toml and SOUL.md.
+    /// Asks for what is not given, in a terminal.
+    Add {
+        name: String,
+        /// What it is for.
+        #[arg(long)]
+        description: Option<String>,
+        /// Its persona: SOUL.md's text.
+        #[arg(long)]
+        soul: Option<String>,
+        /// SOUL.md from this file.
+        #[arg(long)]
+        soul_file: Option<PathBuf>,
+        /// Its model: an id the gateway serves, or auto.
+        #[arg(long)]
+        model: Option<String>,
+        /// Only these tool groups (comma-separated: files-read,files-write,terminal,web,memory,mcp,plan).
+        #[arg(long, value_delimiter = ',')]
+        tools: Option<Vec<String>>,
+        /// ask, edits, allowlist or trust.
+        #[arg(long)]
+        approvals: Option<String>,
+        /// Where its tools work [default: its own directory's work/].
+        #[arg(long)]
+        workdir: Option<PathBuf>,
+        /// A Telegram bot token of its own (from @BotFather).
+        #[arg(long)]
+        telegram_token: Option<String>,
+        /// A Discord bot token of its own.
+        #[arg(long)]
+        discord_token: Option<String>,
+        /// A Slack app-level token (xapp-…), with --slack-bot-token.
+        #[arg(long)]
+        slack_app_token: Option<String>,
+        /// A Slack bot token (xoxb-…).
+        #[arg(long)]
+        slack_bot_token: Option<String>,
+        /// Ask nothing: take only what is given.
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Show a bot's configuration and persona.
+    Show { name: String },
+    /// Open a bot's bot.toml (or SOUL.md) in $EDITOR.
+    Edit {
+        name: String,
+        /// Its persona instead.
+        #[arg(long)]
+        soul: bool,
+    },
+    /// Remove a bot: moved to $AUTOBOT_HOME/bots-removed, with its memory and conversations.
+    Remove { name: String },
+    /// Let `autobot serve` run it.
+    Enable { name: String },
+    /// Keep it, but do not run it.
+    Disable { name: String },
+    /// How the running bots are doing: channels, turns, queue, last error.
+    Status,
+}
+
+#[derive(Subcommand)]
+enum IdentitiesAction {
+    /// List who is linked to whom.
+    List,
+    /// Link ids of one person: `autobot identities link telegram:123 slack:U456`. The first
+    /// person linked is the owner.
+    Link {
+        ids: Vec<String>,
+        /// The person's name (default: theirs already, or `owner` for the first).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Take an id out.
+    Unlink { id: String },
 }
 
 #[derive(Subcommand)]
@@ -324,10 +443,26 @@ fn runtime() -> Result<tokio::runtime::Runtime, String> {
     tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))
 }
 
-fn run(cli: Cli) -> Result<(), String> {
-    let home = config::home()?;
-    let config_path = home.join("config.toml");
-    let config = Config::load(&config_path)?;
+fn run(mut cli: Cli) -> Result<(), String> {
+    let root = config::home()?;
+    if cli.bot.is_none() {
+        cli.bot = std::env::var("AUTOBOT_BOT").ok().filter(|b| !b.is_empty());
+    }
+    // `--bot ops`: its directory and configuration; the default bot's otherwise.
+    let def = match &cli.bot {
+        Some(name) => autobot::bots::load(&root, name)?,
+        None => autobot::bots::load_default(&root)?,
+    };
+    let home = def.home.clone();
+    let config = def.config.clone();
+    // Where `approve` looks for a code: this bot, or every bot.
+    let homes: Vec<PathBuf> = match &cli.bot {
+        Some(_) => vec![home.clone()],
+        None => {
+            let (defs, _) = autobot::bots::load_all(&root)?;
+            defs.into_iter().map(|d| d.home).collect()
+        }
+    };
     // `autobot` alone: coding, in a git repository; the chat anywhere else.
     let in_repo = std::env::current_dir().is_ok_and(|d| d.join(".git").exists());
     let default = if in_repo {
@@ -439,8 +574,15 @@ fn run(cli: Cli) -> Result<(), String> {
         }),
         Command::Serve => {
             tracing_subscriber::fmt().with_target(false).init();
-            runtime()?.block_on(serve(&config, home))
+            runtime()?.block_on(serve(root))
         }
+        Command::Bots { action } => bots(action.unwrap_or(BotsAction::List), &root),
+        Command::Identities { action } => identities(action.unwrap_or(IdentitiesAction::List), &root),
+        Command::Discord { action } => access("discord", action, &homes),
+        Command::Slack { action } => access("slack", action, &homes),
+        Command::Email { action } => access("email", action, &homes),
+        Command::Signal { action } => access("signal", action, &homes),
+        Command::Matrix { action } => access("matrix", action, &homes),
         Command::Doctor => {
             let (checks, ready) = runtime()?.block_on(async {
                 let checks = doctor::run(&config, &home).await;
@@ -462,9 +604,9 @@ fn run(cli: Cli) -> Result<(), String> {
             let mut users = telegram::Users::load(&home)?;
             match action {
                 TelegramAction::Approve { code } => {
-                    let user = users.approve(&code)?;
-                    users.save(&home)?;
-                    println!("{} ({}) can now use the agent on Telegram", user.name, user.id);
+                    let refs: Vec<&std::path::Path> = homes.iter().map(PathBuf::as_path).collect();
+                    let (at, user) = autobot::pairing::approve_in(&refs, "telegram", &code)?;
+                    println!("{} ({}) can now use {} on Telegram", user.name, user.id, bot_name(&root, at));
                 }
                 TelegramAction::Users => {
                     for u in &users.allowed {
@@ -479,35 +621,6 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 TelegramAction::Revoke { id } => {
                     if !users.revoke(id) {
-                        return Err(format!("{id} is not an allowed user"));
-                    }
-                    users.save(&home)?;
-                    println!("removed {id}");
-                }
-            }
-            Ok(())
-        }
-        Command::Discord { action } => {
-            let mut users = autobot::discord::Users::load(&home)?;
-            match action {
-                DiscordAction::Approve { code } => {
-                    let user = users.approve(&code)?;
-                    users.save(&home)?;
-                    println!("{} ({}) can now use the agent on Discord", user.name, user.id);
-                }
-                DiscordAction::Users => {
-                    for u in &users.allowed {
-                        println!("{}  {}", u.id, u.name);
-                    }
-                    if users.allowed.is_empty() {
-                        println!("nobody yet: message the bot, then approve the code it gives you");
-                    }
-                    for p in &users.pending {
-                        println!("waiting: {}  {} ({})", p.code, p.user.name, p.user.id);
-                    }
-                }
-                DiscordAction::Revoke { id } => {
-                    if !users.revoke(&id) {
                         return Err(format!("{id} is not an allowed user"));
                     }
                     users.save(&home)?;
@@ -713,11 +826,17 @@ fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(
     use autobot::cron::{Schedules, State, When, local};
     let mut schedules = Schedules::load(home)?;
     match action {
-        CronAction::Add { when, task, telegram } => {
+        CronAction::Add { when, task, telegram, to } => {
             if telegram && !config.telegram.enabled {
                 return Err("Telegram is not set up (`autobot setup`)".to_owned());
             }
+            for address in &to {
+                autobot::channel::parse_address(address)?;
+            }
             let id = schedules.add(&when, &task, telegram)?;
+            if let Some(s) = schedules.schedules.iter_mut().find(|s| s.id == id) {
+                s.to = to;
+            }
             schedules.save(home)?;
             let schedule = schedules.schedules.iter().find(|s| s.id == id).expect("just added");
             let next = When::parse(&schedule.when)?.next(None, local(schedule.created), chrono::Local::now());
@@ -753,7 +872,8 @@ fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(
                     s.when,
                     recipe.unwrap_or_default(),
                     s.task,
-                    if s.telegram { "  → Telegram" } else { "" },
+                    if s.telegram { "  → Telegram".to_owned() } else { String::new() }
+                        + &s.to.iter().map(|t| format!("  → {t}")).collect::<String>(),
                     if s.enabled { "" } else { "  (off)" },
                     next.map_or("-".to_owned(), |t| t.format("%a %Y-%m-%d %H:%M").to_string())
                 );
@@ -894,8 +1014,11 @@ fn print_event(event: Event) {
     }
 }
 
-async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
-    let listen = config.serve.listen;
+/// Every enabled bot, each in tasks of its own, behind one agent API and one hooks listener.
+async fn serve(root: PathBuf) -> Result<(), String> {
+    use autobot::bots::{self, Runtime};
+    let main = bots::load_default(&root)?;
+    let listen = main.config.serve.listen;
     if !listen.ip().is_loopback() {
         return Err(format!(
             "[serve] listen = {listen}: the agent API must be on loopback (devices reach it through the gateway)"
@@ -904,32 +1027,67 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
     // Started together (at boot, after an upgrade), the gateway may not have made its token yet:
     // wait for it rather than exit into a restart loop.
     let mut waiting = false;
-    while let Err(e) = config.gateway.token() {
+    while let Err(e) = main.config.gateway.token() {
         if !waiting {
             tracing::info!("waiting for the gateway: {e}");
             waiting = true;
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
-    let agent = Arc::new(autobot::agent(config, &home)?);
-    let info = serde_json::json!({
-        "name": "Autobot",
-        "model": config.gateway.model,
-        "workdir": agent.tools.workdir().display().to_string(),
-        "approvals": format!("{:?}", config.approvals.mode).to_lowercase(),
-        "private": config.gateway.private,
+    let (mut defs, problems) = bots::load_all(&root)?;
+    for (name, problem) in &problems {
+        tracing::error!("bot {name} is off: {problem}");
+    }
+    defs.retain(|d| {
+        if !d.enabled() {
+            tracing::info!("bot {} is disabled (`autobot bots enable {}`)", d.name, d.name);
+        }
+        d.enabled()
     });
-    let state = Arc::new(
-        autobot::api::ApiState::new(agent.clone(), config.gateway.token()?, home.clone(), info)
-            .with_prices(config.prices.clone()),
-    );
+    // A channel account belongs to one bot: a second one on it keeps that channel off.
+    for (bot, platform, first) in bots::shared_accounts(&defs) {
+        tracing::error!("bot {bot}: its {platform} account is {first}'s too; {bot}'s {platform} stays off");
+        if let Some(def) = defs.iter_mut().find(|d| d.name == bot) {
+            match platform {
+                "telegram" => def.config.telegram.enabled = false,
+                "discord" => def.config.discord.enabled = false,
+                "slack" => def.config.slack.enabled = false,
+                "email" => def.config.email.enabled = false,
+                "signal" => def.config.signal.enabled = false,
+                _ => def.config.matrix.enabled = false,
+            }
+        }
+    }
+    let mut runtimes: Vec<Arc<Runtime>> = Vec::new();
+    let mut failed: Vec<(String, String)> = Vec::new();
+    for def in &defs {
+        match autobot::agent(&def.config, &def.home) {
+            Ok(agent) => runtimes.push(Runtime::new(def, agent)),
+            // One bot that cannot start does not keep the others from it.
+            Err(e) => {
+                tracing::error!("bot {} is off: {e}", def.name);
+                failed.push((def.name.clone(), e));
+            }
+        }
+    }
+    if runtimes.is_empty() {
+        return Err("no bot can run (see above)".to_owned());
+    }
+    Runtime::link_peers(&runtimes);
+    let names: Vec<&str> = runtimes.iter().map(|r| r.name.as_str()).collect();
+    tracing::info!("serving {} bot(s): {}", runtimes.len(), names.join(", "));
+
+    // Each bot's costs by its own `[prices]` (inherited from config.toml unless it sets them).
+    let state =
+        Arc::new(autobot::api::ApiState::for_bots(main.config.gateway.token()?, &runtimes, Some(root.clone()), failed));
     let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("listen on {listen}: {e}"))?;
     tracing::info!(
         "agent API on http://{listen} ({}; paired apps reach it through the gateway)",
         invincible::version::VERSION
     );
-    invincible::watchdog::spawn("agent", listen, home.join("logs"));
-    let gateway = agent.gateway.clone();
+    invincible::watchdog::spawn("agent", listen, root.join("logs"));
+    // All bots use the one gateway on this machine.
+    let gateway = runtimes[0].agent().gateway.clone();
     let watch_gateway = async move { gateway.watch(std::time::Duration::from_secs(15)).await };
     let api = async move {
         if let Err(e) = axum::serve(listener, autobot::api::app(state)).await {
@@ -937,88 +1095,55 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         }
     };
 
-    let bot = if config.telegram.enabled {
-        match telegram_bot(config, &home).await {
-            Ok(bots) => Some(bots),
-            Err(e) => {
-                // The agent API and schedules keep running; Telegram waits for a fix and a restart.
-                tracing::error!("Telegram is off: {e}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    let telegram = async {
-        match bot.clone() {
-            Some((bot, bots)) => telegram::serve(bot, bots, agent.clone(), home.clone()).await,
-            None => std::future::pending::<()>().await,
-        }
-    };
-    let discord = async {
-        if !config.discord.enabled {
-            return std::future::pending::<()>().await;
-        }
-        match discord_bot(config, &home).await {
-            Ok(bot) => autobot::discord::serve(bot, agent.clone(), home.clone()).await,
-            Err(e) => {
-                tracing::error!("Discord is off: {e}");
-                std::future::pending::<()>().await
-            }
-        }
-    };
-    let hooks = async {
-        let Some(listen) = config.hooks.listen.filter(|_| !config.hooks.hooks.is_empty()) else {
-            return std::future::pending::<()>().await;
-        };
-        if let Some(bad) = config.hooks.hooks.keys().find(|n| !autobot::hooks::valid_name(n)) {
-            tracing::error!("[hooks.{bad}]: not a hook name (letters, digits, - and _); hooks are off");
-            return std::future::pending::<()>().await;
-        }
-        let listener = match tokio::net::TcpListener::bind(listen).await {
-            Ok(listener) => listener,
-            Err(e) => {
-                tracing::error!("hooks: listen on {listen}: {e}");
-                return std::future::pending::<()>().await;
-            }
-        };
-        let names: Vec<&String> = config.hooks.hooks.keys().collect();
-        tracing::info!("webhooks on http://{listen}/hooks/<name> ({names:?})");
-        let app = autobot::hooks::app(
-            agent.clone(),
-            home.clone(),
-            config.hooks.hooks.clone(),
-            bot.as_ref().map(|(bot, _)| bot.clone()),
-        );
-        if let Err(e) = axum::serve(listener, app).await {
-            tracing::error!("hooks: {e}");
-        }
-    };
-    let schedules = autobot::cron::scheduler(agent.clone(), home.clone(), bot.as_ref().map(|(bot, _)| bot.clone()));
-    let board = autobot::board::dispatcher(agent.clone(), home.clone(), bot.clone());
-    let heartbeat = async {
-        match config.agent.heartbeat_every() {
-            Ok(Some(every)) => {
-                autobot::heartbeat::run(agent.clone(), home.clone(), every, bot.as_ref().map(|(b, _)| b.clone())).await
-            }
-            Ok(None) => std::future::pending::<()>().await,
-            Err(e) => {
-                tracing::error!("{e}");
-                std::future::pending::<()>().await
-            }
-        }
-    };
-    tokio::select! {
-        () = board => Ok(()),
-        () = heartbeat => Ok(()),
-        () = api => Ok(()),
-        () = telegram => Ok(()),
-        () = schedules => Ok(()),
-        () = hooks => Ok(()),
-        () = discord => Ok(()),
-        () = watch_gateway => Ok(()),
-        () = shutdown() => Ok(()),
+    // Each bot's channels, schedules, board and heartbeat.
+    let mut parts = Vec::new();
+    for runtime in &runtimes {
+        parts.extend(bots::start(runtime));
     }
+
+    // Hooks: one listener per address; the default bot's at /hooks/<name>, another's at
+    // /hooks/<bot>/<name>.
+    let mut listeners: std::collections::BTreeMap<std::net::SocketAddr, axum::Router> = Default::default();
+    let fallback = runtimes.iter().find_map(|r| r.config.hooks.listen);
+    for runtime in &runtimes {
+        let hooks = &runtime.config.hooks;
+        if hooks.hooks.is_empty() {
+            continue;
+        }
+        let Some(at) = hooks.listen.or(fallback) else {
+            tracing::error!(bot = %runtime.name, "[hooks] without listen: its hooks are off");
+            continue;
+        };
+        if let Some(bad) = hooks.hooks.keys().find(|n| !autobot::hooks::valid_name(n)) {
+            tracing::error!(bot = %runtime.name, "[hooks.{bad}]: not a hook name (letters, digits, - and _); hooks are off");
+            continue;
+        }
+        let prefix = if runtime.default { "/hooks".to_owned() } else { format!("/hooks/{}", runtime.name) };
+        let names: Vec<&String> = hooks.hooks.keys().collect();
+        tracing::info!(bot = %runtime.name, "webhooks on http://{at}{prefix}/<name> ({names:?})");
+        let app = autobot::hooks::app(runtime.clone(), hooks.hooks.clone(), &prefix);
+        let merged = listeners.remove(&at).map_or(app.clone(), |r| r.merge(app));
+        listeners.insert(at, merged);
+    }
+    for (at, app) in listeners {
+        match tokio::net::TcpListener::bind(at).await {
+            Ok(listener) => parts.push(tokio::spawn(async move {
+                if let Err(e) = axum::serve(listener, app).await {
+                    tracing::error!("hooks: {e}");
+                }
+            })),
+            Err(e) => tracing::error!("hooks: listen on {at}: {e}"),
+        }
+    }
+    tokio::select! {
+        () = api => {}
+        () = watch_gateway => {}
+        () = shutdown() => {}
+    }
+    for part in parts {
+        part.abort();
+    }
+    Ok(())
 }
 
 /// `sh.invincible.gateway: running (enabled; last stop: exit code 1; 2 restarts)`.
@@ -1038,50 +1163,299 @@ fn status_line(s: &service::Status) -> String {
     format!("{}: {state} ({})", s.name, notes.join("; "))
 }
 
-async fn discord_bot(config: &Config, home: &std::path::Path) -> Result<autobot::discord::Bot, String> {
-    let network = autobot::network()?;
-    let client = invincible::egress::client(&network)
-        .map_err(|e| format!("Discord needs the network: {e}; set [node] network in the gateway's config"))?;
-    let bot = autobot::discord::Bot::new(client, &config.discord.api(), &config.discord.token(home)?, network.clone())?;
-    let me = bot.me().await?;
-    tracing::info!(
-        "Discord bot {} answering (network: {})",
-        me["username"].as_str().unwrap_or("?"),
-        invincible::egress::route(&network)
-    );
-    Ok(bot)
+/// The name of the bot whose directory is [home].
+fn bot_name(root: &std::path::Path, home: &std::path::Path) -> String {
+    match autobot::bots::load_all(root) {
+        Ok((defs, _)) => defs.into_iter().find(|d| d.home == home).map_or_else(|| "the agent".to_owned(), |d| d.name),
+        Err(_) => "the agent".to_owned(),
+    }
 }
 
-async fn telegram_bot(config: &Config, home: &std::path::Path) -> Result<(telegram::Bot, Arc<telegram::Bots>), String> {
-    let network = autobot::network()?;
-    let client = invincible::egress::client(&network)
-        .map_err(|e| format!("Telegram needs the network: {e}; set [node] network in the gateway's config"))?;
-    let bot = telegram::Bot::new(client.clone(), &config.telegram.api(), &config.telegram.token(home)?)?;
-    let me = bot.me().await?;
-    let username = me["username"].as_str().unwrap_or_default().to_owned();
-    tracing::info!("Telegram bot @{username} answering (network: {})", invincible::egress::route(&network));
-    // Team members with bots of their own: they post; a broken one is skipped (the main bot
-    // posts for it).
-    let mut members = std::collections::HashMap::new();
-    for (name, role) in &config.agents {
-        let Some(file) = &role.telegram_token_file else { continue };
-        let path = if file.is_absolute() { file.clone() } else { home.join(file) };
-        let member = std::fs::read_to_string(&path)
-            .map_err(|e| format!("{}: {e}", path.display()))
-            .and_then(|token| telegram::Bot::new(client.clone(), &config.telegram.api(), token.trim()));
-        let checked = match member {
-            Ok(member) => member.me().await.map(|me| (member, me)),
-            Err(e) => Err(e),
-        };
-        match checked {
-            Ok((member, me)) => {
-                tracing::info!("team member {name} posts as @{}", me["username"].as_str().unwrap_or("?"));
-                members.insert(name.clone(), member);
+/// `autobot <platform> approve|users|revoke`.
+fn access(platform: &str, action: AccessAction, homes: &[PathBuf]) -> Result<(), String> {
+    let root = config::home()?;
+    let title = {
+        let mut name = platform.to_owned();
+        name[..1].make_ascii_uppercase();
+        name
+    };
+    match action {
+        AccessAction::Approve { code } => {
+            let refs: Vec<&std::path::Path> = homes.iter().map(PathBuf::as_path).collect();
+            let (at, user) = autobot::pairing::approve_in(&refs, platform, &code)?;
+            println!("{} ({}) can now use {} on {title}", user.name, user.id, bot_name(&root, at));
+        }
+        AccessAction::Users => {
+            for home in homes {
+                let users = autobot::pairing::Users::load(home, platform)?;
+                if homes.len() > 1 && (!users.allowed.is_empty() || !users.pending.is_empty()) {
+                    println!("{}:", bot_name(&root, home));
+                }
+                for u in &users.allowed {
+                    println!("  {}  {}", u.id, u.name);
+                }
+                for p in &users.pending {
+                    println!("  waiting: {}  {} ({})", p.code, p.user.name, p.user.id);
+                }
             }
-            Err(e) => tracing::warn!("team member {name}: its Telegram bot is off: {e}"),
+            if homes.iter().all(|h| autobot::pairing::Users::load(h, platform).is_ok_and(|u| u.allowed.is_empty())) {
+                println!("nobody yet: message the bot, then approve the code it gives you");
+            }
+        }
+        AccessAction::Revoke { id } => {
+            let mut removed = false;
+            for home in homes {
+                let mut users = autobot::pairing::Users::load(home, platform)?;
+                if users.revoke(&id) {
+                    users.save(home, platform)?;
+                    removed = true;
+                }
+            }
+            if !removed {
+                return Err(format!("{id} is not an allowed user"));
+            }
+            println!("removed {id}");
         }
     }
-    Ok((bot, Arc::new(telegram::Bots { username, members })))
+    Ok(())
+}
+
+/// The bots, as `autobot serve` reports them now (None when it is not running).
+fn live_bots(root: &std::path::Path) -> Option<Vec<serde_json::Value>> {
+    let main = autobot::bots::load_default(root).ok()?;
+    let token = main.config.gateway.token().ok()?;
+    let url = format!("http://{}/v1/agent/bots", main.config.serve.listen);
+    runtime().ok()?.block_on(async {
+        let reply = reqwest::Client::new()
+            .get(url)
+            .bearer_auth(token)
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+            .ok()?;
+        let value: serde_json::Value = reply.json().await.ok()?;
+        value["bots"].as_array().cloned()
+    })
+}
+
+fn bots(action: BotsAction, root: &std::path::Path) -> Result<(), String> {
+    use autobot::bots;
+    match action {
+        BotsAction::List | BotsAction::Status => {
+            let (defs, problems) = bots::load_all(root)?;
+            let live = live_bots(root);
+            if live.is_none() {
+                println!("autobot serve is not running here (or not reachable on its API)\n");
+            }
+            for def in &defs {
+                let status = live.as_ref().and_then(|l| l.iter().find(|b| b["name"] == def.name.as_str()).cloned());
+                let state = match (&status, def.enabled()) {
+                    (_, false) => "disabled".to_owned(),
+                    (Some(s), true) => format!(
+                        "running {} · {} turn(s) now",
+                        bots::human(s["uptime"].as_u64().unwrap_or(0)),
+                        s["running"]
+                    ),
+                    (None, true) if live.is_some() => "not running (see the serve log)".to_owned(),
+                    (None, true) => "stopped".to_owned(),
+                };
+                let channels = def.channels();
+                println!(
+                    "{}{}  {}",
+                    def.name,
+                    if def.default && def.name != autobot::bots::DEFAULT { " (default)" } else { "" },
+                    state
+                );
+                if !def.config.bot.description.is_empty() {
+                    println!("    {}", def.config.bot.description);
+                }
+                println!(
+                    "    model {} · approvals {} · channels {}",
+                    status.as_ref().and_then(|s| s["model"].as_str().map(str::to_owned)).unwrap_or_else(|| def
+                        .config
+                        .gateway
+                        .model
+                        .clone()),
+                    format!("{:?}", def.config.approvals.mode).to_lowercase(),
+                    if channels.is_empty() { "none".to_owned() } else { channels.join(", ") }
+                );
+                if let Some(s) = &status {
+                    let states: Vec<String> = s["channels"]
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .filter(|(_, v)| v != &"connected")
+                        .map(|(k, v)| format!("{k}: {}", v.as_str().unwrap_or("?")))
+                        .collect();
+                    if !states.is_empty() {
+                        println!("    ! {}", states.join("; "));
+                    }
+                    if matches!(action, BotsAction::Status) {
+                        println!(
+                            "    queue: {} waiting to be taken in · {} question(s) waiting",
+                            s["queued"], s["waiting"]
+                        );
+                        if let Some(home) = s["home_channel"].as_str() {
+                            println!("    home channel: {home}");
+                        }
+                    }
+                    if let Some(e) = s["last_error"].as_object() {
+                        println!(
+                            "    last error {}: {}",
+                            autobot::cron::local(e["at"].as_i64().unwrap_or(0)).format("%Y-%m-%d %H:%M"),
+                            e["text"].as_str().unwrap_or("")
+                        );
+                    }
+                }
+            }
+            for (name, problem) in problems {
+                println!("{name}  ✗ {problem}");
+            }
+            if defs.len() == 1 && matches!(action, BotsAction::List) {
+                println!("\nadd another with `autobot bots add <name>`");
+            }
+            Ok(())
+        }
+        BotsAction::Add {
+            name,
+            description,
+            soul,
+            soul_file,
+            model,
+            tools,
+            approvals,
+            workdir,
+            telegram_token,
+            discord_token,
+            slack_app_token,
+            slack_bot_token,
+            yes,
+        } => {
+            let soul = match soul_file {
+                Some(file) => Some(std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?),
+                None => soul,
+            };
+            let mut new = bots::NewBot {
+                description: description.clone().unwrap_or_default(),
+                soul,
+                model,
+                tools,
+                approvals,
+                workdir,
+                telegram_token,
+                discord_token,
+                slack_app_token,
+                slack_bot_token,
+            };
+            // Guided, in a terminal: what was not given.
+            let ask = !yes && std::io::IsTerminal::is_terminal(&std::io::stdin());
+            if ask {
+                let mut prompt = setup::Prompt::new(std::io::stdin().lock());
+                eprintln!("A new bot, {name}. Enter keeps the default.\n");
+                if description.is_none() {
+                    new.description = prompt.ask("  what it is for (one line)", "")?;
+                }
+                if new.soul.is_none() {
+                    let persona = prompt.ask("  its persona, in a sentence (SOUL.md; edit it later)", "")?;
+                    if !persona.is_empty() {
+                        new.soul = Some(format!("{persona}\n"));
+                    }
+                }
+                if new.model.is_none() {
+                    let model = prompt.ask("  model (an id the gateway serves)", "auto")?;
+                    new.model = (model != "auto").then_some(model);
+                }
+                if new.approvals.is_none() {
+                    let mode = prompt.ask("  approvals: ask, edits, allowlist or trust", "ask")?;
+                    new.approvals = (mode != "ask").then_some(mode);
+                }
+                if new.telegram_token.is_none() && prompt.yes("  a Telegram bot of its own?", false)? {
+                    eprintln!("    Make one with @BotFather (/newbot) and paste its token.");
+                    new.telegram_token = Some(prompt.ask("    token", "")?);
+                }
+                if new.slack_bot_token.is_none() && prompt.yes("  a Slack app of its own (Socket Mode)?", false)? {
+                    new.slack_app_token = Some(prompt.ask("    app-level token (xapp-…)", "")?);
+                    new.slack_bot_token = Some(prompt.ask("    bot token (xoxb-…)", "")?);
+                }
+            }
+            let dir = bots::add(root, &name, &new)?;
+            println!("added {name} in {}", dir.display());
+            println!("  persona: {} (who it is: its job, its tone, what it never does)", dir.join("SOUL.md").display());
+            println!("  config:  {}", dir.join("bot.toml").display());
+            println!(
+                "restart `autobot serve` (or the service) to run it; `autobot --bot {name} chat` talks to it here"
+            );
+            Ok(())
+        }
+        BotsAction::Show { name } => {
+            println!("{}", bots::show(&bots::load(root, &name)?));
+            Ok(())
+        }
+        BotsAction::Edit { name, soul } => {
+            let def = bots::load(root, &name)?;
+            let file = if soul { def.home.join("SOUL.md") } else { def.file() };
+            let editor =
+                std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".to_owned());
+            let status = std::process::Command::new(&editor)
+                .arg(&file)
+                .status()
+                .map_err(|e| format!("{editor}: {e} (set EDITOR)"))?;
+            if !status.success() {
+                return Err(format!("{editor} exited with {status}"));
+            }
+            // Say now when the edit does not load.
+            bots::load(root, &name)?;
+            println!("saved; restart `autobot serve` for it to take effect");
+            Ok(())
+        }
+        BotsAction::Remove { name } => {
+            let to = bots::remove(root, &name)?;
+            println!("removed {name}: its directory is now {} (move it back to restore it)", to.display());
+            Ok(())
+        }
+        BotsAction::Enable { name } => {
+            bots::set_enabled(root, &name, true)?;
+            println!("{name} is enabled; restart `autobot serve` to run it");
+            Ok(())
+        }
+        BotsAction::Disable { name } => {
+            bots::set_enabled(root, &name, false)?;
+            println!("{name} is disabled; restart `autobot serve` to stop it");
+            Ok(())
+        }
+    }
+}
+
+fn identities(action: IdentitiesAction, root: &std::path::Path) -> Result<(), String> {
+    use autobot::identity::Identities;
+    let mut ids = Identities::load(root)?;
+    match action {
+        IdentitiesAction::List => {
+            if ids.people.is_empty() {
+                println!(
+                    "nobody linked: `autobot identities link telegram:<id> slack:<id>` (ids from `autobot <platform> users`)"
+                );
+            }
+            for person in &ids.people {
+                println!("{}  {}", person.name, person.ids.join("  "));
+            }
+        }
+        IdentitiesAction::Link { ids: list, name } => {
+            let person = ids.link(&list, name.as_deref())?;
+            ids.save(root)?;
+            let linked = ids.people.iter().find(|p| p.name == person).map(|p| p.ids.join(", ")).unwrap_or_default();
+            println!("{person}: {linked}");
+            println!("a direct conversation with {person} is now one conversation on all of these");
+        }
+        IdentitiesAction::Unlink { id } => {
+            if !ids.unlink(&id)? {
+                return Err(format!("{id} is not linked"));
+            }
+            ids.save(root)?;
+            println!("unlinked {id}");
+        }
+    }
+    Ok(())
 }
 
 async fn shutdown() {

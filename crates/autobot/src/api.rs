@@ -1,16 +1,18 @@
 //! The agent's loopback API (spec/agent.md): Invincible Gateway passes `/v1/agent` through to it,
 //! so paired devices can run turns and answer approvals on this machine.
+//!
+//! With several bots ([crate::bots]), every path takes `?bot=<name>` (the default bot without
+//! it); `GET /v1/agent/bots` lists them, and approvals say which bot asks.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Query, Request, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::extract::{FromRequestParts, Path, Query, Request, State};
+use axum::http::{HeaderValue, StatusCode, header, request::Parts};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -21,23 +23,32 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::agent::{Agent, Event};
 use crate::approval::{Action, Answer, Approver};
+use crate::bots::Runtime;
 use crate::session::Session;
 
 /// How long a question waits for an answer.
 const APPROVAL_WAIT: Duration = Duration::from_secs(10 * 60);
 
 pub struct ApiState {
-    agent: Arc<Agent>,
     token: String,
-    home: PathBuf,
-    sessions_dir: PathBuf,
+    /// The bots, the default one first.
+    bots: Vec<Arc<BotApi>>,
+    waiting: Waiting,
+    /// `$AUTOBOT_HOME`, when serving its bots: the ones not running are listed from there.
+    root: Option<std::path::PathBuf>,
+    /// Bots that could not start, and why.
+    failed: Vec<(String, String)>,
+    /// Prices for `/usage` and `/insights`, for every bot; each bot's own `[prices]` without.
+    prices: Option<crate::insights::Prices>,
+}
+
+/// One bot as the API serves it.
+pub struct BotApi {
+    runtime: Arc<Runtime>,
     info: Value,
     open: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Open>>>>,
     /// Messages for a session's running turn (`…/steer`).
     inboxes: Mutex<HashMap<String, crate::tools::Inbox>>,
-    waiting: Waiting,
-    /// For costs in `/usage` and `/insights` (`[prices]` in the config).
-    prices: crate::insights::Prices,
 }
 
 /// The questions turns are waiting on, by id: where to send the answer, and the question as
@@ -50,32 +61,246 @@ struct Open {
     grants: HashSet<Action>,
 }
 
-impl ApiState {
+impl BotApi {
+    fn new(runtime: Arc<Runtime>, info: Value) -> Arc<Self> {
+        Arc::new(Self { runtime, info, open: Mutex::default(), inboxes: Mutex::default() })
+    }
+
+    fn agent(&self) -> Arc<Agent> {
+        self.runtime.agent()
+    }
+
+    fn home(&self) -> &std::path::Path {
+        &self.runtime.home
+    }
+
+    fn sessions_dir(&self) -> std::path::PathBuf {
+        self.runtime.home.join("sessions")
+    }
+
     fn inbox(&self, id: &str) -> crate::tools::Inbox {
         self.inboxes.lock().expect("inboxes").entry(id.to_owned()).or_default().clone()
     }
 
-    /// [home]: `$AUTOBOT_HOME` (conversations in `sessions/`, schedules beside them).
-    pub fn new(agent: Arc<Agent>, token: String, home: PathBuf, info: Value) -> Self {
-        let sessions_dir = home.join("sessions");
+    fn open(&self, id: &str) -> Result<Arc<tokio::sync::Mutex<Open>>, String> {
+        let mut open = self.open.lock().expect("open sessions");
+        if let Some(session) = open.get(id) {
+            return Ok(session.clone());
+        }
+        let session = Session::open(&self.sessions_dir(), id)?;
+        let entry = Arc::new(tokio::sync::Mutex::new(Open { session, grants: HashSet::new() }));
+        open.insert(id.to_owned(), entry.clone());
+        Ok(entry)
+    }
+}
+
+impl ApiState {
+    /// One bot: [agent] with its home [home] (`$AUTOBOT_HOME`: conversations in `sessions/`,
+    /// schedules beside them), described by [info].
+    pub fn new(agent: Arc<Agent>, token: String, home: std::path::PathBuf, info: Value) -> Self {
+        let runtime = Runtime::standalone(crate::bots::DEFAULT, &home, agent);
         Self {
-            agent,
             token,
-            home,
-            sessions_dir,
-            info,
-            open: Mutex::default(),
-            inboxes: Mutex::default(),
+            bots: vec![BotApi::new(runtime, info)],
             waiting: Arc::default(),
-            prices: Default::default(),
+            root: None,
+            failed: Vec::new(),
+            prices: None,
         }
     }
 
-    /// With the config's prices, for costs.
+    /// Every bot `autobot serve` runs, the default one first. [root] is `$AUTOBOT_HOME`, where
+    /// the bots it does not run are found (disabled ones; [failed] could not start, and why).
+    pub fn for_bots(
+        token: String,
+        runtimes: &[Arc<Runtime>],
+        root: Option<std::path::PathBuf>,
+        failed: Vec<(String, String)>,
+    ) -> Self {
+        let bots = runtimes.iter().map(|r| BotApi::new(r.clone(), info_of(r))).collect();
+        Self { token, bots, waiting: Arc::default(), root, failed, prices: None }
+    }
+
+    /// With these prices, for costs in `/usage` and `/insights`, instead of each bot's `[prices]`.
     pub fn with_prices(mut self, prices: crate::insights::Prices) -> Self {
-        self.prices = prices;
+        self.prices = Some(prices);
         self
     }
+
+    fn prices_for(&self, bot: &BotApi) -> crate::insights::Prices {
+        self.prices.clone().unwrap_or_else(|| bot.runtime.config.prices.clone())
+    }
+
+    fn named(&self, name: &str) -> Option<Arc<BotApi>> {
+        self.bots.iter().find(|b| b.runtime.name == name).cloned()
+    }
+
+    /// The bot whose conversation [id] is: the first one holding it.
+    fn owner(&self, id: &str) -> Option<Arc<BotApi>> {
+        if !valid(id) {
+            return None;
+        }
+        self.bots
+            .iter()
+            .find(|b| {
+                b.sessions_dir().join(format!("{id}.jsonl")).is_file() || b.open.lock().expect("open").contains_key(id)
+            })
+            .cloned()
+    }
+}
+
+fn unknown_bot(name: &str) -> Response {
+    error(StatusCode::NOT_FOUND, "unknown_bot", &format!("no bot {name:?} here"))
+}
+
+/// `GET /v1/agent` for [runtime].
+pub fn info_of(runtime: &Runtime) -> Value {
+    let agent = runtime.agent();
+    json!({
+        "name": if runtime.default { "Autobot".to_owned() } else { runtime.name.clone() },
+        "model": agent.gateway.model(),
+        "workdir": agent.tools.workdir().display().to_string(),
+        "approvals": format!("{:?}", agent.approvals.mode).to_lowercase(),
+        "private": runtime.config.gateway.private,
+    })
+}
+
+/// `?bot=<name>`, when given.
+fn wanted(parts: &Parts) -> Option<String> {
+    parts.uri.query().and_then(|q| {
+        q.split('&').find_map(|pair| pair.strip_prefix("bot=").map(|v| v.to_owned())).filter(|v| !v.is_empty())
+    })
+}
+
+/// The bot a request is for: `?bot=<name>`; for a conversation's path, the bot holding it; else
+/// the default one. The flag: it was chosen by default (a new conversation's turn may name its
+/// bot in the body instead).
+pub struct Bot(Arc<BotApi>, bool);
+
+impl FromRequestParts<Arc<ApiState>> for Bot {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &Arc<ApiState>) -> Result<Self, Self::Rejection> {
+        if let Some(name) = wanted(parts) {
+            return state.named(&name).map(|b| Bot(b, false)).ok_or_else(|| unknown_bot(&name));
+        }
+        let session =
+            parts.uri.path().strip_prefix("/v1/agent/sessions/").map(|rest| rest.split('/').next().unwrap_or(""));
+        if let Some(owner) = session.and_then(|id| state.owner(id)) {
+            return Ok(Bot(owner, false));
+        }
+        state.bots.first().cloned().map(|b| Bot(b, true)).ok_or_else(|| unknown_bot(""))
+    }
+}
+
+/// The first line of a bot's persona.
+fn persona(home: &std::path::Path) -> String {
+    crate::bots::soul(home)
+        .and_then(|s| s.lines().map(|l| l.trim().trim_start_matches('#').trim().to_owned()).find(|l| !l.is_empty()))
+        .unwrap_or_default()
+}
+
+/// The conversations in [home]: how many, and when the newest changed (Unix seconds).
+fn activity(home: &std::path::Path) -> (usize, Option<u64>) {
+    let list = crate::session::list(&home.join("sessions"));
+    let last = list.first().and_then(|(_, t)| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs());
+    (list.len(), last)
+}
+
+/// A channel's account as configured, for a bot that is not running.
+fn configured_account(def: &crate::bots::Def, kind: &str) -> String {
+    let c = &def.config;
+    match kind {
+        "email" => c.email.address.clone(),
+        "signal" => c.signal.account.clone(),
+        "matrix" => c.matrix.homeserver.clone(),
+        _ => String::new(),
+    }
+}
+
+/// One bot as `GET /v1/agent/bots` lists it (spec/agent.md).
+fn bot_item(def: Option<&crate::bots::Def>, bot: Option<&BotApi>, failed: Option<&str>) -> Value {
+    let (name, home) = match (bot, def) {
+        (Some(b), _) => (b.runtime.name.clone(), b.runtime.home.clone()),
+        (None, Some(d)) => (d.name.clone(), d.home.clone()),
+        (None, None) => return Value::Null,
+    };
+    let (sessions, last_active) = activity(&home);
+    let mut item = match bot {
+        Some(b) => b.runtime.status(),
+        None => json!({ "name": name, "default": def.is_some_and(|d| d.default) }),
+    };
+    let channels: Vec<Value> = match bot {
+        Some(b) => {
+            let s = b.runtime.status();
+            let accounts = b.runtime.accounts();
+            let mut list: Vec<Value> = s["channels"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(kind, _)| crate::pairing::PLATFORMS.contains(&kind.as_str()))
+                .map(|(kind, state)| {
+                    let state = state.as_str().unwrap_or_default();
+                    let (status, error) = match state {
+                        "connected" => ("connected", None),
+                        "starting" => ("connecting", None),
+                        s if s.starts_with("off: ") => ("down", Some(&s[5..])),
+                        s => ("connecting", Some(s.split_once(": ").map_or(s, |(_, e)| e))),
+                    };
+                    let account = accounts
+                        .get(kind)
+                        .cloned()
+                        .unwrap_or_else(|| def.map(|d| configured_account(d, kind)).unwrap_or_default());
+                    let mut channel = json!({ "kind": kind, "account": account, "status": status });
+                    if let Some(error) = error {
+                        channel["error"] = json!(error);
+                    }
+                    channel
+                })
+                .collect();
+            list.push(json!({ "kind": "api", "account": format!("/v1/agent?bot={name}"), "status": "connected" }));
+            list
+        }
+        None => def
+            .map(|d| {
+                d.channels()
+                    .into_iter()
+                    .map(|kind| json!({ "kind": kind, "account": configured_account(d, kind), "status": "down" }))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+    let model = match (bot, def) {
+        (Some(b), _) => b.agent().gateway.model().to_owned(),
+        (None, Some(d)) => d.config.gateway.model.clone(),
+        _ => String::new(),
+    };
+    let approvals = match (bot, def) {
+        (Some(b), _) => format!("{:?}", b.agent().approvals.mode).to_lowercase(),
+        (None, Some(d)) => format!("{:?}", d.config.approvals.mode).to_lowercase(),
+        _ => "ask".to_owned(),
+    };
+    let status = if bot.is_some() {
+        "running"
+    } else if failed.is_some() {
+        "error"
+    } else {
+        "stopped"
+    };
+    item["name"] = json!(name);
+    item["persona"] = json!(persona(&home));
+    item["model"] = json!(model);
+    item["approvals"] = json!(approvals);
+    item["enabled"] = json!(def.is_none_or(|d| d.enabled()));
+    item["status"] = json!(status);
+    if let Some(e) = failed {
+        item["error"] = json!(e);
+    }
+    item["channels"] = json!(channels);
+    item["sessions"] = json!(sessions);
+    item["last_active"] = json!(last_active);
+    item["queue"] = json!(item["queued"].as_u64().unwrap_or(0));
+    item
 }
 
 pub fn app(state: Arc<ApiState>) -> Router {
@@ -84,6 +309,9 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/healthz", get(|| async { Json(json!({ "status": "ok", "version": invincible::version::VERSION })) }));
     let guarded = Router::new()
         .route("/v1/agent", get(info))
+        .route("/v1/agent/bots", get(bots))
+        .route("/v1/agent/bots/{name}/enable", post(enable_bot))
+        .route("/v1/agent/bots/{name}/disable", post(disable_bot))
         .route("/v1/agent/sessions", get(sessions))
         .route("/v1/agent/sessions/{id}", get(history))
         .route("/v1/agent/sessions/{id}/turns", post(turn))
@@ -148,46 +376,103 @@ fn valid(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-async fn info(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    Json(state.info.clone())
+async fn info(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot) -> Json<Value> {
+    let mut info = bot.info.clone();
+    // The model may have changed (`/model`).
+    info["model"] = json!(bot.agent().gateway.model());
+    info["bot"] = json!(bot.runtime.name);
+    info["bots"] = json!(state.bots.iter().map(|b| b.runtime.name.clone()).collect::<Vec<_>>());
+    Json(info)
 }
 
-async fn sessions(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    let list: Vec<Value> = crate::session::list(&state.sessions_dir)
-        .into_iter()
-        .map(|(id, modified)| {
-            let secs = modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
-            json!({ "id": id, "modified": secs })
-        })
-        .collect();
-    Json(json!({ "sessions": list }))
-}
-
-impl ApiState {
-    fn open(&self, id: &str) -> Result<Arc<tokio::sync::Mutex<Open>>, String> {
-        let mut open = self.open.lock().expect("open sessions");
-        if let Some(session) = open.get(id) {
-            return Ok(session.clone());
+/// `GET /v1/agent/bots`: every bot, running or not, with how it is doing.
+async fn bots(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    let defs = state.root.as_deref().and_then(|root| crate::bots::load_all(root).ok());
+    let mut list: Vec<Value> = Vec::new();
+    let mut named: Vec<String> = Vec::new();
+    if let Some((defs, problems)) = &defs {
+        for def in defs {
+            let bot = state.named(&def.name);
+            let failed = state.failed.iter().find(|(n, _)| *n == def.name).map(|(_, e)| e.as_str());
+            list.push(bot_item(Some(def), bot.as_deref(), failed));
+            named.push(def.name.clone());
         }
-        let session = Session::open(&self.sessions_dir, id)?;
-        let entry = Arc::new(tokio::sync::Mutex::new(Open { session, grants: HashSet::new() }));
-        open.insert(id.to_owned(), entry.clone());
-        Ok(entry)
+        for (name, problem) in problems {
+            list.push(json!({
+                "name": name, "persona": "", "model": "", "approvals": "ask", "enabled": false,
+                "status": "error", "error": problem, "channels": [], "sessions": 0, "last_active": null, "queue": 0,
+            }));
+            named.push(name.clone());
+        }
+    }
+    // Bots served here whose directory is not under a root (tests, embedded uses).
+    for bot in &state.bots {
+        if !named.contains(&bot.runtime.name) {
+            list.push(bot_item(None, Some(bot), None));
+        }
+    }
+    Json(json!({ "bots": list }))
+}
+
+/// `POST /v1/agent/bots/{name}/enable` and `…/disable`: kept in its config; `autobot serve`
+/// starts or stops it when it restarts.
+async fn enable_bot(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {
+    set_bot(&state, &name, true)
+}
+
+async fn disable_bot(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {
+    set_bot(&state, &name, false)
+}
+
+fn set_bot(state: &ApiState, name: &str, enabled: bool) -> Response {
+    let Some(root) = &state.root else {
+        return if state.named(name).is_some() {
+            error(StatusCode::CONFLICT, "not_configurable", "this agent has no bot configuration to change")
+        } else {
+            unknown_bot(name)
+        };
+    };
+    if crate::bots::load(root, name).is_err() {
+        return unknown_bot(name);
+    }
+    match crate::bots::set_enabled(root, name, enabled) {
+        Ok(()) => Json(json!({ "ok": true, "enabled": enabled, "restart": true })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     }
 }
 
-async fn history(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+/// `GET /v1/agent/sessions`: every bot's conversations, newest first; `?bot=` only one's.
+async fn sessions(State(state): State<Arc<ApiState>>, query: Query<HashMap<String, String>>) -> Response {
+    let bots: Vec<Arc<BotApi>> = match query.get("bot").filter(|b| !b.is_empty()) {
+        Some(name) => match state.named(name) {
+            Some(bot) => vec![bot],
+            None => return unknown_bot(name),
+        },
+        None => state.bots.clone(),
+    };
+    let mut list: Vec<(u64, Value)> = Vec::new();
+    for bot in &bots {
+        for (id, modified) in crate::session::list(&bot.sessions_dir()) {
+            let secs = modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
+            list.push((secs, json!({ "id": id, "modified": secs, "bot": bot.runtime.name })));
+        }
+    }
+    list.sort_by(|a, b| b.0.cmp(&a.0));
+    Json(json!({ "sessions": list.into_iter().map(|(_, v)| v).collect::<Vec<_>>() })).into_response()
+}
+
+async fn history(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let open = match state.open(&id) {
+    let open = match bot.open(&id) {
         Ok(open) => open,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
     // A running turn holds the lock; its messages so far are on disk.
     let messages = match open.try_lock() {
         Ok(open) => open.session.messages.clone(),
-        Err(_) => match Session::open(&state.sessions_dir, &id) {
+        Err(_) => match Session::open(&bot.sessions_dir(), &id) {
             Ok(session) => session.messages,
             Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
         },
@@ -195,11 +480,11 @@ async fn history(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> 
     Json(json!({ "id": id, "messages": messages })).into_response()
 }
 
-async fn reset(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+async fn reset(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let open = match state.open(&id) {
+    let open = match bot.open(&id) {
         Ok(open) => open,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
@@ -216,6 +501,9 @@ async fn reset(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Re
 #[derive(Deserialize)]
 struct TurnBody {
     text: String,
+    /// Which bot answers a new conversation (an existing one keeps its bot).
+    #[serde(default)]
+    bot: Option<String>,
     /// A personality for this turn (`none` for none); the one in use otherwise.
     #[serde(default)]
     personality: Option<String>,
@@ -223,7 +511,7 @@ struct TurnBody {
 
 /// `POST …/fork {"to"?, "at"?}`: a new conversation that starts as this one did (up to
 /// message `at`); its id.
-async fn fork(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
+async fn fork(Bot(bot, _): Bot, Path(id): Path<String>, body: Bytes) -> Response {
     let args: Value = serde_json::from_slice(&body).unwrap_or_default();
     let to = args["to"].as_str().map(str::to_owned).unwrap_or_else(|| {
         let stamp = chrono::Local::now().format("%H%M%S");
@@ -231,7 +519,7 @@ async fn fork(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
     });
     let at = args["at"].as_u64().map(|n| n as usize);
     let forked =
-        crate::session::Session::open(&state.sessions_dir, &id).and_then(|s| s.fork(&state.sessions_dir, &to, at));
+        crate::session::Session::open(&bot.sessions_dir(), &id).and_then(|s| s.fork(&bot.sessions_dir(), &to, at));
     match forked {
         Ok(copy) => Json(json!({ "id": copy.id, "messages": copy.messages.len() })).into_response(),
         Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
@@ -240,53 +528,67 @@ async fn fork(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
 
 /// `POST …/steer {"text"}`: a message for the turn running in the session, taken in before
 /// the agent's next step; `409` when no turn is running.
-async fn steer(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
+async fn steer(Bot(bot, _): Bot, Path(id): Path<String>, body: Bytes) -> Response {
     let Ok(TurnBody { text, .. }) = serde_json::from_slice(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
     };
-    let open = match state.open(&id) {
+    let open = match bot.open(&id) {
         Ok(open) => open,
         Err(e) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
     };
     if open.try_lock().is_ok() {
         return error(StatusCode::CONFLICT, "no_turn", "no turn is running in this session; start one");
     }
-    state.inbox(&id).lock().expect("inbox").push(text);
+    bot.inbox(&id).lock().expect("inbox").push(text);
     Json(json!({ "ok": true })).into_response()
 }
 
-async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
+async fn turn(
+    State(state): State<Arc<ApiState>>,
+    Bot(bot, chosen): Bot,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let Ok(TurnBody { text, personality }) = serde_json::from_slice(&body) else {
+    let Ok(TurnBody { text, bot: named, personality }) = serde_json::from_slice(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
+    };
+    // A new conversation may name its bot; one that exists keeps the bot it has.
+    let bot = match named.filter(|n| !n.is_empty()) {
+        Some(name) => match state.named(&name) {
+            Some(named) if chosen => named,
+            Some(_) => bot,
+            None => return unknown_bot(&name),
+        },
+        None => bot,
     };
     if text.trim().is_empty() {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the text is empty");
     }
     if let Some(name) = personality.as_deref().filter(|p| !crate::personality::is_none(p))
-        && let Err(e) = crate::personality::text(&state.home, name)
+        && let Err(e) = crate::personality::text(bot.home(), name)
     {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e);
     }
-    let open = match state.open(&id) {
+    let open = match bot.open(&id) {
         Ok(open) => open,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
     let Ok(guard) = open.clone().try_lock_owned() else {
         return error(StatusCode::CONFLICT, "session_busy", "a turn is running in this session");
     };
-    stream_turn(&state, id, guard, text, Vec::new(), personality)
+    stream_turn(&state, bot, id, guard, text, Vec::new(), personality)
 }
 
 /// `POST …/retry`: the last turn leaves the conversation and its request runs again, streamed
 /// like a turn; `404` when there is no turn to retry.
-async fn retry(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+async fn retry(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let open = match state.open(&id) {
+    let open = match bot.open(&id) {
         Ok(open) => open,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
@@ -298,32 +600,33 @@ async fn retry(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Re
         Err(e) => return error(StatusCode::NOT_FOUND, "not_found", &e),
     };
     let text = request["content"].as_str().unwrap_or_default().to_owned();
-    stream_turn(&state, id, guard, text, crate::images::of(&request), None)
+    stream_turn(&state, bot, id, guard, text, crate::images::of(&request), None)
 }
 
-/// Runs a turn on its own task and streams its events.
+/// Runs a turn of [bot] on its own task and streams its events.
 fn stream_turn(
     state: &Arc<ApiState>,
+    bot: Arc<BotApi>,
     id: String,
     mut guard: tokio::sync::OwnedMutexGuard<Open>,
     text: String,
     images: Vec<crate::images::Attachment>,
     personality: Option<String>,
 ) -> Response {
-    let inbox = state.inbox(&id);
+    let inbox = bot.inbox(&id);
     let (tx, rx) = mpsc::unbounded_channel::<Value>();
     let agent = match personality {
         Some(personality) => {
-            let mut agent = (*state.agent).clone();
+            let mut agent = (*bot.agent()).clone();
             agent.options.personality = Some(personality);
             Arc::new(agent)
         }
-        None => state.agent.clone(),
+        None => bot.agent(),
     };
     let waiting = state.waiting.clone();
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
-        let approver = ApiApprover { events: tx.clone(), waiting, session: id.clone() };
+        let approver = ApiApprover { events: tx.clone(), waiting, session: id.clone(), bot: bot.runtime.name.clone() };
         let events = {
             let tx = tx.clone();
             move |event: Event| {
@@ -401,14 +704,14 @@ async fn approve(State(state): State<Arc<ApiState>>, Path(id): Path<String>, bod
     }
 }
 
-async fn schedules(State(state): State<Arc<ApiState>>) -> Response {
-    match crate::cron::listing(&state.home) {
+async fn schedules(Bot(bot, _): Bot) -> Response {
+    match crate::cron::listing(bot.home()) {
         Ok(list) => Json(list).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     }
 }
 
-async fn add_schedule(State(state): State<Arc<ApiState>>, headers: axum::http::HeaderMap, body: Bytes) -> Response {
+async fn add_schedule(Bot(bot, _): Bot, headers: axum::http::HeaderMap, body: Bytes) -> Response {
     let Ok(spec) = serde_json::from_slice::<crate::cron::ScheduleSpec>(&body) else {
         return error(
             StatusCode::BAD_REQUEST,
@@ -422,9 +725,9 @@ async fn add_schedule(State(state): State<Arc<ApiState>>, headers: axum::http::H
         .and_then(|v| v.to_str().ok())
         .filter(|v| v.starts_with("device:"))
         .map(str::to_owned);
-    let added = crate::cron::Schedules::load(&state.home).and_then(|mut schedules| {
+    let added = crate::cron::Schedules::load(bot.home()).and_then(|mut schedules| {
         let id = schedules.put(spec, origin)?;
-        schedules.save(&state.home)?;
+        schedules.save(bot.home())?;
         Ok(id)
     });
     match added {
@@ -440,26 +743,34 @@ struct ActionsQuery {
     limit: Option<usize>,
 }
 
-async fn actions(State(state): State<Arc<ApiState>>, Query(q): Query<ActionsQuery>) -> Json<Value> {
-    let log = crate::actions::ActionLog::new(&state.home);
-    Json(json!({ "actions": log.read(q.since, q.limit.unwrap_or(100).clamp(1, 500)) }))
+async fn actions(Bot(bot, _): Bot, Query(q): Query<ActionsQuery>) -> Json<Value> {
+    let log = crate::actions::ActionLog::new(bot.home());
+    let mut entries: Vec<Value> = log
+        .read(q.since, q.limit.unwrap_or(100).clamp(1, 500))
+        .into_iter()
+        .filter_map(|e| serde_json::to_value(e).ok())
+        .collect();
+    for entry in &mut entries {
+        entry["bot"] = json!(bot.runtime.name);
+    }
+    Json(json!({ "actions": entries }))
 }
 
-async fn board(State(state): State<Arc<ApiState>>) -> Response {
-    match crate::board::Board::load(&state.home) {
+async fn board(Bot(bot, _): Bot) -> Response {
+    match crate::board::Board::load(bot.home()) {
         Ok(board) => Json(json!({ "tasks": board.tasks })).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     }
 }
 
-async fn answer_board(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
+async fn answer_board(Bot(bot, _): Bot, Path(id): Path<String>, body: Bytes) -> Response {
     let Some(text) = serde_json::from_slice::<Value>(&body).ok().and_then(|b| b["text"].as_str().map(str::to_owned))
     else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is {\"text\": \"…\"}");
     };
-    let answered = crate::board::Board::load(&state.home).and_then(|mut board| {
+    let answered = crate::board::Board::load(bot.home()).and_then(|mut board| {
         board.answer(&id, &text)?;
-        board.save(&state.home)
+        board.save(bot.home())
     });
     match answered {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
@@ -467,62 +778,63 @@ async fn answer_board(State(state): State<Arc<ApiState>>, Path(id): Path<String>
     }
 }
 
-async fn memory(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    Json(json!({ "facts": crate::memory::Memory::new(&state.home).list() }))
+async fn memory(Bot(bot, _): Bot) -> Json<Value> {
+    Json(json!({ "facts": crate::memory::Memory::new(bot.home()).list() }))
 }
 
-async fn forget(State(state): State<Arc<ApiState>>, Path(id): Path<u64>) -> Response {
-    match crate::memory::Memory::new(&state.home).forget(id) {
+async fn forget(Bot(bot, _): Bot, Path(id): Path<u64>) -> Response {
+    match crate::memory::Memory::new(bot.home()).forget(id) {
         Ok(true) => Json(json!({ "ok": true })).into_response(),
         Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "no such fact"),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     }
 }
 
-async fn skills(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    let skills: Vec<Value> = crate::skills::list(&state.home)
+async fn skills(Bot(bot, _): Bot) -> Json<Value> {
+    let skills: Vec<Value> = crate::skills::list(bot.home())
         .into_iter()
         .map(|s| {
             json!({ "name": s.name, "description": s.description, "allowed_tools": s.allowed_tools, "files": s.files() })
         })
         .collect();
-    let proposed: Vec<Value> = crate::skills::proposals(&state.home)
+    let proposed: Vec<Value> = crate::skills::proposals(bot.home())
         .into_iter()
         .map(|s| {
             let text = std::fs::read_to_string(&s.path).unwrap_or_default();
-            let diff = crate::skills::proposal_diff(&state.home, &s.name);
+            let diff = crate::skills::proposal_diff(bot.home(), &s.name);
             json!({ "name": s.name, "description": s.description, "text": text, "improves": s.improves, "diff": diff })
         })
         .collect();
     Json(json!({ "skills": skills, "proposed": proposed }))
 }
 
-async fn personalities(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    let list: Vec<Value> = crate::personality::list(&state.home)
+async fn personalities(Bot(bot, _): Bot) -> Json<Value> {
+    let list: Vec<Value> = crate::personality::list(bot.home())
         .into_iter()
         .map(|p| json!({ "name": p.name, "description": p.description, "builtin": p.path.is_none() }))
         .collect();
     Json(json!({
-        "active": crate::personality::active(&state.home),
-        "soul": crate::personality::soul(&state.home),
+        "active": crate::personality::active(bot.home()),
+        "soul": crate::personality::soul(bot.home()),
         "personalities": list,
+        "bot": bot.runtime.name,
     }))
 }
 
 /// `POST /v1/agent/personality {"name"}`: the one in use from now on (`none`, or null, for none).
-async fn set_personality(State(state): State<Arc<ApiState>>, body: Bytes) -> Response {
+async fn set_personality(Bot(bot, _): Bot, body: Bytes) -> Response {
     let Ok(args) = serde_json::from_slice::<Value>(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is {\"name\": \"…\"}");
     };
     let name = args["name"].as_str().unwrap_or("none");
-    match crate::personality::set(&state.home, name) {
-        Ok(()) => Json(json!({ "active": crate::personality::active(&state.home) })).into_response(),
+    match crate::personality::set(bot.home(), name) {
+        Ok(()) => Json(json!({ "active": crate::personality::active(bot.home()) })).into_response(),
         Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
     }
 }
 
-async fn profile(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    Json(json!({ "entries": crate::profile::entries(&state.home), "text": crate::profile::read(&state.home) }))
+async fn profile(Bot(bot, _): Bot) -> Json<Value> {
+    Json(json!({ "entries": crate::profile::entries(bot.home()), "text": crate::profile::read(bot.home()) }))
 }
 
 #[derive(Deserialize)]
@@ -530,14 +842,15 @@ struct UsageQuery {
     session: Option<String>,
 }
 
-/// Today (and one conversation): turns, model calls, tokens, time, cost.
-async fn usage(State(state): State<Arc<ApiState>>, Query(q): Query<UsageQuery>) -> Json<Value> {
+/// Today (and one conversation): turns, model calls, tokens, time, cost; of the bot `?bot=` names.
+async fn usage(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Query(q): Query<UsageQuery>) -> Json<Value> {
     use crate::insights::{Log, today, totals};
-    let log = Log::new(&state.home);
-    let mut out = json!({ "today": totals(&log.read(today()), &state.prices) });
+    let prices = state.prices_for(&bot);
+    let log = Log::new(bot.home());
+    let mut out = json!({ "today": totals(&log.read(today()), &prices), "bot": bot.runtime.name });
     if let Some(session) = q.session.filter(|s| valid(s)) {
         let mine: Vec<_> = log.read(0).into_iter().filter(|r| r.session == session).collect();
-        out["session"] = json!(totals(&mine, &state.prices));
+        out["session"] = json!(totals(&mine, &prices));
     }
     Json(out)
 }
@@ -547,19 +860,21 @@ struct InsightsQuery {
     days: Option<u32>,
 }
 
-async fn insights(State(state): State<Arc<ApiState>>, Query(q): Query<InsightsQuery>) -> Json<Value> {
-    Json(crate::insights::insights(&state.home, q.days.unwrap_or(7).clamp(1, 3650), &state.prices))
+async fn insights(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Query(q): Query<InsightsQuery>) -> Json<Value> {
+    let mut out = crate::insights::insights(bot.home(), q.days.unwrap_or(7).clamp(1, 3650), &state.prices_for(&bot));
+    out["bot"] = json!(bot.runtime.name);
+    Json(out)
 }
 
-async fn accept_skill(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {
-    match crate::skills::accept(&state.home, &name) {
+async fn accept_skill(Bot(bot, _): Bot, Path(name): Path<String>) -> Response {
+    match crate::skills::accept(bot.home(), &name) {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(e) => error(StatusCode::NOT_FOUND, "not_found", &e),
     }
 }
 
-async fn reject_skill(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {
-    match crate::skills::reject(&state.home, &name) {
+async fn reject_skill(Bot(bot, _): Bot, Path(name): Path<String>) -> Response {
+    match crate::skills::reject(bot.home(), &name) {
         Ok(true) => Json(json!({ "ok": true })).into_response(),
         Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "no such proposed skill"),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
@@ -574,35 +889,31 @@ struct RunsQuery {
 
 /// A schedule's finished runs after `after` (unix seconds), oldest first: the whole answers and
 /// their receipt ids, for a phone collecting a recipe's results.
-async fn schedule_runs(
-    State(state): State<Arc<ApiState>>,
-    Path(id): Path<String>,
-    Query(q): Query<RunsQuery>,
-) -> Response {
+async fn schedule_runs(Bot(bot, _): Bot, Path(id): Path<String>, Query(q): Query<RunsQuery>) -> Response {
     if !crate::cron::valid_id(&id) {
         return error(StatusCode::NOT_FOUND, "not_found", "no such scheduled task");
     }
-    Json(json!({ "runs": crate::cron::runs(&state.home, &id, q.after) })).into_response()
+    Json(json!({ "runs": crate::cron::runs(bot.home(), &id, q.after) })).into_response()
 }
 
 /// Runs a schedule now, in the background; its run shows up in `/runs` when it is done.
-async fn run_schedule(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
-    let schedule = match crate::cron::Schedules::load(&state.home) {
+async fn run_schedule(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    let schedule = match crate::cron::Schedules::load(bot.home()) {
         Ok(schedules) => schedules.schedules.into_iter().find(|s| s.id == id),
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
     let Some(schedule) = schedule else { return error(StatusCode::NOT_FOUND, "not_found", "no such scheduled task") };
-    if crate::cron::start(state.agent.clone(), state.home.clone(), schedule, "manual", None) {
+    if crate::cron::start(bot.agent(), bot.home().to_owned(), schedule, "manual", Some(bot.runtime.clone())) {
         (StatusCode::ACCEPTED, Json(json!({ "started": true }))).into_response()
     } else {
         error(StatusCode::CONFLICT, "schedule_running", "it is running already")
     }
 }
 
-async fn remove_schedule(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
-    let removed = crate::cron::Schedules::load(&state.home).and_then(|mut schedules| {
+async fn remove_schedule(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    let removed = crate::cron::Schedules::load(bot.home()).and_then(|mut schedules| {
         let removed = schedules.remove(&id);
-        schedules.save(&state.home)?;
+        schedules.save(bot.home())?;
         Ok(removed)
     });
     match removed {
@@ -618,6 +929,8 @@ struct ApiApprover {
     waiting: Waiting,
     /// The conversation the turn runs in.
     session: String,
+    /// The bot asking.
+    bot: String,
 }
 
 impl Approver for ApiApprover {
@@ -635,6 +948,7 @@ impl Approver for ApiApprover {
                 "id": id,
                 "text": format!("{}{}", crate::approval::asker(), action.describe()),
                 "action": describe(action),
+                "bot": self.bot,
             });
             // A team member's question says whose it is.
             if let Some(agent) = crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten() {

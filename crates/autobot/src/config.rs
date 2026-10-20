@@ -21,6 +21,9 @@ use serde::Deserialize;
 /// [telegram]
 /// enabled = true                     # token in $AUTOBOT_HOME/telegram.token
 ///
+/// [slack]                            # also [discord], [email], [signal], [matrix]
+/// enabled = true                     # tokens in $AUTOBOT_HOME/slack-app.token and slack-bot.token
+///
 /// [serve]
 /// listen = "127.0.0.1:7792"          # the agent API (spec/agent.md); loopback only
 ///
@@ -59,6 +62,20 @@ pub struct Config {
     /// Dollars per million tokens, by model id, for `/usage` ([crate::insights::Price]).
     #[serde(default)]
     pub prices: crate::insights::Prices,
+    /// About this bot ([crate::bots]).
+    #[serde(default)]
+    pub bot: crate::bots::BotConfig,
+    #[serde(default)]
+    pub slack: crate::slack::SlackConfig,
+    #[serde(default)]
+    pub email: crate::email::EmailConfig,
+    #[serde(default)]
+    pub signal: crate::signal::SignalConfig,
+    #[serde(default)]
+    pub matrix: crate::matrix::MatrixConfig,
+    /// Speech-to-text for voice messages ([crate::voice]).
+    #[serde(default)]
+    pub voice: crate::voice::VoiceConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
