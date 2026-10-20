@@ -130,8 +130,8 @@ async fn an_approved_command_runs_and_its_output_goes_back() {
     assert_eq!(headers["invincible-private"], "1", "agent turns are private by default");
     assert_eq!(
         first["tools"].as_array().unwrap().len(),
-        10,
-        "terminal, process, read, todo, write, edit, fetch, search, find, list"
+        11,
+        "terminal, process, execute_code, read, todo, write, edit, fetch, search, find, list"
     );
     assert_eq!(first["messages"][0]["role"], "system");
     // The second call carries the tool call and its result, without the reasoning.
@@ -395,6 +395,7 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
         [
             "terminal",
             "process",
+            "execute_code",
             "read_file",
             "todo",
             "write_file",
@@ -605,7 +606,7 @@ async fn the_lead_hands_work_to_its_team_in_parallel() {
         "the lead's conversation stays with the lead"
     );
     let coder = member("coder");
-    assert_eq!(names(&coder), ["terminal", "process"]);
+    assert_eq!(names(&coder), ["terminal", "process", "execute_code"]);
     assert_eq!(coder["model"], "auto");
     // Both answers went back to the lead, by name.
     let back = seen[3].1["messages"].to_string();
@@ -1026,7 +1027,7 @@ async fn a_finished_turn_is_kept_as_a_trajectory_with_what_the_model_saw() {
     let roles: Vec<&str> = t["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
     assert_eq!(roles, ["system", "user", "assistant", "tool", "assistant", "tool", "assistant"]);
     assert_eq!(t["messages"][6]["content"], "It is ok.");
-    assert_eq!(t["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(t["tools"].as_array().unwrap().len(), 11);
     assert_eq!(t["meta"]["outcome"], "answer");
     assert_eq!(t["meta"]["refused"], 1, "rm was not allowlisted");
     assert_eq!(t["meta"]["models"], json!(["qwen"]));
@@ -1497,4 +1498,68 @@ async fn with_ssh_commands_and_files_are_on_the_other_machine() {
     let hosts = std::fs::read_to_string(dir.join("hosts")).unwrap();
     assert!(hosts.lines().all(|h| h == "me@build-box") && hosts.lines().count() >= 9);
     assert!(!tools.definitions().to_string().contains("\"browser\""), "no local browser for a remote machine");
+}
+
+/// Says yes to commands, no to everything else, and remembers what was asked.
+struct CommandsOnly {
+    asked: Mutex<Vec<Action>>,
+}
+
+impl Approver for CommandsOnly {
+    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        self.asked.lock().unwrap().push(action.clone());
+        let yes = matches!(action, Action::Command(_));
+        Box::pin(async move { if yes { Answer::Once } else { Answer::Deny } })
+    }
+}
+
+#[tokio::test]
+async fn a_script_calls_the_read_only_tools_in_one_step() {
+    if autobot::find_on_path("python3").is_none() {
+        eprintln!("no python3 here: skipped");
+        return;
+    }
+    let code = r#"
+hits = search("TODO", glob="*.rs")
+files = find_files("**/*.rs")
+first = read_file("src/a.rs", limit=1)
+try:
+    read_file("/etc/hosts")
+except RuntimeError as e:
+    print("outside:", str(e)[:40])
+try:
+    web_fetch("https://example.org/")
+except RuntimeError as e:
+    print("fetch:", str(e)[:30])
+print(len(hits.splitlines()), "TODOs in", len(files.splitlines()), "files; first line:", first.splitlines()[0])
+"#;
+    let (url, script) = gateway(vec![call("execute_code", json!({"code": code})), say("3 TODOs.")]).await;
+    let dir = temp("script");
+    std::fs::create_dir_all(dir.join("work/src")).unwrap();
+    std::fs::write(dir.join("work/src/a.rs"), "// TODO one\n// TODO two\n").unwrap();
+    std::fs::write(dir.join("work/src/b.rs"), "fn b() {} // TODO three\n").unwrap();
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let owner = CommandsOnly { asked: Mutex::new(Vec::new()) };
+    let tools = Mutex::new(Vec::new());
+    let events = |e: Event| {
+        if let Event::Tool(t) = e {
+            tools.lock().unwrap().push(t.to_owned());
+        }
+    };
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "count the TODOs", &owner, &mut HashSet::new(), &events).await.unwrap();
+    let result = tool_result(&script.lock().unwrap(), 1);
+    let asked = owner.asked.into_inner().unwrap();
+    // The script was asked for like a command, showing its code; the fetch like a fetch.
+    assert!(
+        matches!(&asked[0], Action::Command(c) if c.starts_with("python3 - <<'EOF'\n") && c.contains("search(\"TODO\""))
+    );
+    assert_eq!(asked[1], Action::Fetch("https://example.org/".into()));
+    assert_eq!(asked.len(), 2, "reads in the working directory ask nothing");
+    assert!(result.contains("outside: read /etc/hosts (outside the working"), "{result}");
+    assert!(result.contains("fetch: refused: the owner did not"), "{result}");
+    assert!(result.contains("3 TODOs in 2 files; first line: // TODO one"), "{result}");
+    assert!(result.ends_with("[exit code 0, 5 tool calls]"), "{result}");
+    let tools = tools.into_inner().unwrap();
+    assert!(tools.iter().any(|t| t.starts_with("script → search")), "{tools:?}");
 }

@@ -644,6 +644,9 @@ impl Agent {
         } else {
             events(Event::Tool(&format!("{name} {arguments}")));
         }
+        if let crate::tools::Call::ExecuteCode { language, code } = &call {
+            return self.execute(session, *language, code, approver, grants, events).await;
+        }
         if let crate::tools::Call::Fetch { url } = &call {
             return match self.gateway.fetch(url).await {
                 Ok((text, receipt)) => {
@@ -662,6 +665,35 @@ impl Agent {
             tracing::warn!("no undo for {}: {e}", path.display());
         }
         self.tools.run(&call).await
+    }
+
+    /// `execute_code`, approved already: the script runs where commands run, and its calls to
+    /// the read-only tools are answered here (reads outside the working directory refused,
+    /// fetches asked for like any fetch).
+    #[allow(clippy::too_many_arguments)]
+    async fn execute(
+        &self,
+        session: &str,
+        language: crate::script::Language,
+        code: &str,
+        approver: &dyn Approver,
+        grants: &mut HashSet<Action>,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> String {
+        let command = match crate::script::command_line(language, code) {
+            Ok(line) => self.tools.shell_command(&line).await,
+            Err(e) => Err(e),
+        };
+        let command = match command {
+            Ok(command) => command,
+            Err(e) => return format!("error: {e}"),
+        };
+        let mut rpc = ScriptCalls { agent: self, session, approver, grants, events };
+        let timeout = self.tools.timeout();
+        match crate::script::run(command, language, timeout, self.tools.limit(), &mut rpc).await {
+            Ok(text) => text,
+            Err(e) => format!("error: {e}"),
+        }
     }
 
     /// Summarizes what left the window, so it is not simply forgotten. On the gateway like any
@@ -902,6 +934,50 @@ impl Agent {
             }
         }
         prompt
+    }
+}
+
+/// What answers a script's calls ([Agent::execute]): the read-only tools, under the turn's
+/// approvals.
+struct ScriptCalls<'a> {
+    agent: &'a Agent,
+    session: &'a str,
+    approver: &'a dyn Approver,
+    grants: &'a mut HashSet<Action>,
+    events: &'a (dyn Fn(Event) + Send + Sync),
+}
+
+impl crate::script::Rpc for ScriptCalls<'_> {
+    fn call<'a>(
+        &'a mut self,
+        tool: String,
+        args: Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let (agent, events) = (self.agent, self.events);
+            let call = agent.tools.parse(&tool, &args.to_string())?;
+            let shown: String = format!("{tool} {args}").chars().take(160).collect();
+            events(Event::Tool(&format!("script → {shown}")));
+            if let crate::tools::Call::Fetch { url } = &call {
+                let action = Action::Fetch(url.clone());
+                if let Err(instead) = agent.allowed(self.session, &action, self.approver, self.grants, events).await {
+                    return Err(refusal(&action, instead));
+                }
+                let (text, receipt) = agent.gateway.fetch(url).await?;
+                if let Some(id) = &receipt {
+                    events(Event::Receipt { id, model: Some("fetch"), tier: Some("web") });
+                }
+                return Ok(crate::tools::cut(text));
+            }
+            if let Some(action) = agent.tools.action(&call) {
+                return Err(format!("{}: not from a script; ask with the tool itself", action.describe()));
+            }
+            let result = agent.tools.run(&call).await;
+            match result.strip_prefix("error: ") {
+                Some(e) => Err(e.to_owned()),
+                None => Ok(result),
+            }
+        })
     }
 }
 

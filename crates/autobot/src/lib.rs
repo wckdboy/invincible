@@ -27,6 +27,7 @@ pub mod personality;
 pub mod procs;
 pub mod profile;
 pub mod sandbox;
+pub mod script;
 pub mod search;
 pub mod service;
 pub mod session;

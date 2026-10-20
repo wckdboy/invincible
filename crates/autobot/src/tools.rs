@@ -42,7 +42,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("mcp", &["mcp"]),
     ("files-write", &["write_file", "edit_file"]),
     ("memory", &["remember", "search_sessions", "create_skill", "improve_skill", "update_user_profile"]),
-    ("terminal", &["terminal", "process"]),
+    ("terminal", &["terminal", "process", "execute_code"]),
     ("plan", &["todo"]),
 ];
 
@@ -173,6 +173,11 @@ pub enum Call {
     },
     /// The headless browser ([crate::browser]).
     Browser(crate::browser::Act),
+    /// A script that can call the read-only tools ([crate::script]); run by the agent.
+    ExecuteCode {
+        language: crate::script::Language,
+        code: String,
+    },
 }
 
 impl Tools {
@@ -268,6 +273,16 @@ impl Tools {
         self.home.as_deref()
     }
 
+    /// How long a command may run.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// Most text one result hands back.
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
     /// The tools this agent has, in the OpenAI `tools` shape.
     pub fn definitions(&self) -> Value {
         let mut tools = Self::base_definitions();
@@ -359,6 +374,14 @@ impl Tools {
 
     /// The tools every agent has.
     fn base_definitions() -> Value {
+        let mut all = Self::plain_definitions();
+        if let Some(list) = all.as_array_mut() {
+            list.insert(2, crate::script::definition());
+        }
+        all
+    }
+
+    fn plain_definitions() -> Value {
         let function = |name: &str, description: &str, properties: Value, required: &[&str]| {
             json!({
                 "type": "function",
@@ -562,6 +585,12 @@ impl Tools {
             "search_sessions" if self.home.is_some() => Call::SearchSessions { query: text("query")? },
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
             "browser" if self.browser => Call::Browser(crate::browser::Act::parse(&args)?),
+            "execute_code" => Call::ExecuteCode {
+                language: crate::script::Language::parse(
+                    args.get("language").and_then(Value::as_str).unwrap_or_default(),
+                )?,
+                code: text("code")?,
+            },
             other => return Err(format!("there is no tool named {other:?}")),
         })
     }
@@ -570,6 +599,7 @@ impl Tools {
     pub fn action(&self, call: &Call) -> Option<Action> {
         match call {
             Call::Terminal { command } | Call::Background { command } => Some(Action::Command(command.clone())),
+            Call::ExecuteCode { language, code } => Some(Action::Command(crate::script::shown(*language, code))),
             Call::Browser(act) => {
                 use crate::browser::{Act, current_url, origin};
                 let page = || current_url().unwrap_or_else(|| "about:blank".to_owned());
@@ -686,6 +716,7 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
             Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
+            Call::ExecuteCode { .. } => Err("execute_code runs in the agent".to_owned()),
             Call::Browser(act) => {
                 let shots = self.home.as_ref().map_or_else(std::env::temp_dir, |h| h.join("attachments"));
                 crate::browser::run(act, &shots, self.limit).await.map(|(text, _)| text)
@@ -813,24 +844,7 @@ impl Tools {
     }
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
-        if self.ssh.is_none() {
-            tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
-        }
-        let mut child = if let Some(ssh) = &self.ssh {
-            ssh.command(command, &self.workdir, Some(self.timeout.as_secs()))
-        } else if let Some(docker) = &self.docker {
-            let name = docker.ensure(&self.workdir).await?;
-            docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
-        } else if self.confined {
-            crate::sandbox::command(command, &self.workdir)?
-        } else {
-            let mut plain = tokio::process::Command::new("sh");
-            plain.arg("-c").arg(command);
-            plain
-        };
-        if self.ssh.is_none() {
-            child.current_dir(&self.workdir);
-        }
+        let mut child = self.shell_command(command).await?;
         let mut child = child
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -859,6 +873,30 @@ impl Tools {
                 Ok(format!("{text}{}[{code}]", if text.is_empty() || text.ends_with('\n') { "" } else { "\n" }))
             }
         }
+    }
+
+    /// What runs [command] (`sh -c`) where commands run: here (sandboxed when confined), in the
+    /// container, or on the SSH machine; stopped there after the timeout.
+    pub async fn shell_command(&self, command: &str) -> Result<tokio::process::Command, String> {
+        if self.ssh.is_none() {
+            tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
+        }
+        let mut child = if let Some(ssh) = &self.ssh {
+            ssh.command(command, &self.workdir, Some(self.timeout.as_secs()))
+        } else if let Some(docker) = &self.docker {
+            let name = docker.ensure(&self.workdir).await?;
+            docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
+        } else if self.confined {
+            crate::sandbox::command(command, &self.workdir)?
+        } else {
+            let mut plain = tokio::process::Command::new("sh");
+            plain.arg("-c").arg(command);
+            plain
+        };
+        if self.ssh.is_none() {
+            child.current_dir(&self.workdir);
+        }
+        Ok(child)
     }
 
     /// What a write or an edit would change, as a unified diff (paths relative to the working
