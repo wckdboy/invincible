@@ -111,11 +111,12 @@ truth for everything both sides must agree on:
 
 - **Node protocol:** pairing handshake, the native API Autobot speaks, receipt format.
 - **Policy semantics:** routing and cascade decisions, data-policy labels, redaction rules, kill-switch
-  behaviour.
+  behaviour ([spec/egress.md](spec/egress.md): an outbound request blocked, sent direct or through
+  Tor or SOCKS5; loopback always direct, so a local backend is reached even behind Tor).
 - **Conformance vectors:** input → expected output cases in plain JSON. Invincible's Rust tests and
   Autobot's Kotlin tests both run them (Autobot copies them in with `scripts/sync-invincible-spec.sh`,
   which records the commit they came from), so a rule change that only lands on one side fails CI on
-  the other. Autobot runs the pairing, Noise, receipt and redaction vectors; routing is decided on
+  the other. Autobot runs the pairing, Noise, receipt, redaction and egress vectors; routing is decided on
   the node alone (the app sends node requests to it), so only Invincible runs those.
 
 A privacy fix starts as a spec change with a new vector, and neither side is done until both pass it.

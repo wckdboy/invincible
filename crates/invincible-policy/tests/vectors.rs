@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use invincible_policy::{RouteInput, decide};
+use invincible_policy::{EgressInput, RouteInput, decide, decide_egress};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -43,6 +43,27 @@ fn routing() {
     assert!(
         failures.is_empty(),
         "{} of {} routing cases failed:\n{}",
+        failures.len(),
+        file.cases.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn egress() {
+    let file = load("egress");
+    let failures: Vec<String> = file
+        .cases
+        .iter()
+        .filter_map(|case| {
+            let input: EgressInput = serde_json::from_value(case.input.clone()).expect(&case.name);
+            let got = serde_json::to_value(decide_egress(&input)).expect(&case.name);
+            (got != case.expect).then(|| format!("{}\n  expected {}\n  got      {}", case.name, case.expect, got))
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} of {} egress cases failed:\n{}",
         failures.len(),
         file.cases.len(),
         failures.join("\n")

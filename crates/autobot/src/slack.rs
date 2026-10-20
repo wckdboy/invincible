@@ -363,7 +363,7 @@ pub async fn serve(
     network: invincible_policy::NetworkMode,
 ) -> Result<(), String> {
     let me = client.me().await?;
-    tracing::info!(bot = %runtime.name, "Slack app answering as {me} (network: {})", invincible::egress::route(&network));
+    tracing::info!(bot = %runtime.name, "Slack app answering as {me} (network: {})", invincible::egress::label(&network));
     let channel: Arc<dyn Transport> = Arc::new(Channel { client: client.clone() });
     runtime.register(channel.clone());
     runtime.channel_account("slack", &format!("@{me}"));
