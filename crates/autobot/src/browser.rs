@@ -214,7 +214,14 @@ struct Browser {
     profile: PathBuf,
     /// When it was last used: an idle browser is closed ([IDLE]).
     used: std::time::Instant,
+    /// The page's main frame, whose navigations count.
+    frame: String,
+    /// The page's events read while waiting for a command's answer, oldest first.
+    events: std::collections::VecDeque<Value>,
 }
+
+/// How many unread page events are kept.
+const EVENTS_KEPT: usize = 500;
 
 /// How long the browser stays open unused (in `autobot serve` the process lives on).
 const IDLE: Duration = Duration::from_secs(10 * 60);
@@ -319,15 +326,98 @@ impl Browser {
         let stream = tokio::net::TcpStream::connect(&address).await.map_err(|e| format!("DevTools {address}: {e}"))?;
         let (socket, _) =
             tokio_tungstenite::client_async(url.as_str(), stream).await.map_err(|e| format!("DevTools: {e}"))?;
-        let mut browser =
-            Self { child, socket, session: String::new(), next: 0, profile, used: std::time::Instant::now() };
+        let mut browser = Self {
+            child,
+            socket,
+            session: String::new(),
+            next: 0,
+            profile,
+            used: std::time::Instant::now(),
+            frame: String::new(),
+            events: std::collections::VecDeque::new(),
+        };
         let target = browser.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
         let target = target["targetId"].as_str().ok_or("no page")?.to_owned();
         let attached =
             browser.call(None, "Target.attachToTarget", json!({ "targetId": target, "flatten": true })).await?;
         browser.session = attached["sessionId"].as_str().ok_or("not attached to the page")?.to_owned();
         browser.page("Page.enable", json!({})).await?;
+        let tree = browser.page("Page.getFrameTree", json!({})).await?;
+        browser.frame = tree["frameTree"]["frame"]["id"].as_str().ok_or("no main frame")?.to_owned();
         Ok(browser)
+    }
+
+    /// Keeps [message] when it is an event of the page.
+    fn keep(&mut self, message: Value) {
+        if message.get("method").is_some() && message["sessionId"].as_str() == Some(self.session.as_str()) {
+            if self.events.len() >= EVENTS_KEPT {
+                self.events.pop_front();
+            }
+            self.events.push_back(message);
+        }
+    }
+
+    /// The next event of the page, kept or arriving before [deadline]; None when none came.
+    async fn next_event(&mut self, deadline: tokio::time::Instant) -> Result<Option<Value>, String> {
+        loop {
+            if let Some(event) = self.events.pop_front() {
+                return Ok(Some(event));
+            }
+            let message = match tokio::time::timeout_at(deadline, self.socket.next()).await {
+                Err(_) => return Ok(None),
+                Ok(Some(Ok(Message::Text(text)))) => serde_json::from_str::<Value>(text.as_str()).unwrap_or_default(),
+                Ok(Some(Ok(Message::Close(_))) | None) => return Err("the browser went away".to_owned()),
+                Ok(Some(Err(e))) => return Err(format!("DevTools: {e}")),
+                Ok(Some(Ok(_))) => continue,
+            };
+            self.keep(message);
+        }
+    }
+
+    /// Waits for the main frame to finish a navigation: the one with [loader] (Page.navigate's
+    /// answer) to commit and load; or, with None, one that starts within [start] (a click, a
+    /// form, typing enter): if none starts, or it stays within the document, there is nothing
+    /// to wait for. At most [LOAD_WAIT]: then the page is used as it is.
+    async fn load(&mut self, loader: Option<&str>, start: Duration) -> Result<(), String> {
+        let now = tokio::time::Instant::now();
+        let (deadline, start_by) = (now + LOAD_WAIT, now + start);
+        let mut started = loader.is_some();
+        let mut committed = loader.is_none();
+        loop {
+            let Some(event) = self.next_event(if started { deadline } else { start_by }).await? else {
+                return Ok(());
+            };
+            let p = &event["params"];
+            let main = |id: &Value| id.as_str() == Some(self.frame.as_str());
+            match event["method"].as_str().unwrap_or_default() {
+                "Page.frameStartedLoading" if main(&p["frameId"]) => started = true,
+                "Page.frameNavigated"
+                    if main(&p["frame"]["id"]) && loader.is_none_or(|l| p["frame"]["loaderId"].as_str() == Some(l)) =>
+                {
+                    started = true;
+                    committed = true;
+                }
+                "Page.navigatedWithinDocument" if main(&p["frameId"]) && loader.is_none() && !started => return Ok(()),
+                "Page.frameStoppedLoading" if main(&p["frameId"]) && committed => return Ok(()),
+                "Page.loadEventFired" if committed => return Ok(()),
+                _ => {}
+            }
+        }
+    }
+
+    /// Goes to [url] and waits until that page has committed and loaded.
+    async fn navigate(&mut self, url: &str) -> Result<(), String> {
+        // What came before is not this navigation.
+        self.events.clear();
+        let result = self.page("Page.navigate", json!({ "url": url })).await?;
+        if let Some(error) = result["errorText"].as_str().filter(|e| !e.is_empty()) {
+            return Err(format!("{url}: {error}"));
+        }
+        match result["loaderId"].as_str().map(str::to_owned) {
+            Some(loader) => self.load(Some(&loader), LOAD_WAIT).await,
+            // Within the same document (a #fragment): nothing loads.
+            None => self.load(None, Duration::from_millis(300)).await,
+        }
     }
 
     /// One DevTools command ([session]: on the page); its result.
@@ -345,6 +435,8 @@ impl Browser {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(reply) = serde_json::from_str::<Value>(text.as_str()) else { continue };
                         if reply["id"].as_u64() != Some(id) {
+                            // An event of the page: kept for whoever waits for one.
+                            self.keep(reply);
                             continue;
                         }
                         if let Some(error) = reply.get("error") {
@@ -378,16 +470,15 @@ impl Browser {
         Ok(result["result"]["value"].clone())
     }
 
-    /// Waits until the page has loaded (or [LOAD_WAIT] passed), then notes where it is.
+    /// Waits for a navigation an action started (a click, a form, enter) to load, then notes
+    /// where the page is: the committed document's address, which approvals go by.
     async fn settle(&mut self) -> Result<(String, String), String> {
-        let started = std::time::Instant::now();
-        loop {
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            let state = self.eval("document.readyState").await.unwrap_or_default();
-            if state == "complete" || started.elapsed() > LOAD_WAIT {
-                break;
-            }
-        }
+        self.load(None, Duration::from_millis(500)).await?;
+        self.here().await
+    }
+
+    /// Where the page is now, and its title; noted for approvals.
+    async fn here(&mut self) -> Result<(String, String), String> {
         let here = self.eval("[location.href, document.title]").await?;
         let url = here[0].as_str().unwrap_or_default().to_owned();
         set_current(Some(url.clone()));
@@ -483,11 +574,14 @@ async fn act_on(b: &mut Browser, act: &Act, shots: &Path, limit: usize) -> Resul
     let text = |s: String| Ok((s, None));
     match act {
         Act::Navigate { url } => {
-            let result = b.page("Page.navigate", json!({ "url": url })).await?;
-            if let Some(error) = result["errorText"].as_str().filter(|e| !e.is_empty()) {
-                return Err(format!("{url}: {error}"));
+            b.navigate(url).await?;
+            let (now, title) = b.here().await?;
+            // Approvals go by where the page is: never the blank page it left.
+            if now == "about:blank" && url != "about:blank" {
+                set_current(None);
+                return Err(format!("{url} did not load in {} seconds", LOAD_WAIT.as_secs()));
             }
-            let (url, title) = b.settle().await?;
+            let url = now;
             let body = b.eval("document.body ? document.body.innerText : ''").await?;
             let body = body.as_str().unwrap_or_default();
             let head: String = body.chars().take(2000).collect();
@@ -497,12 +591,12 @@ async fn act_on(b: &mut Browser, act: &Act, shots: &Path, limit: usize) -> Resul
             ))
         }
         Act::Text => {
-            let (url, title) = b.settle().await?;
+            let (url, title) = b.here().await?;
             let body = b.eval("document.body ? document.body.innerText : ''").await?;
             text(crate::tools::cut_to(format!("{url}\ntitle: {title}\n\n{}", body.as_str().unwrap_or_default()), limit))
         }
         Act::Snapshot => {
-            let (url, title) = b.settle().await?;
+            let (url, title) = b.here().await?;
             let list = b.eval(SNAPSHOT).await?;
             let list = list.as_str().unwrap_or_default();
             let list = if list.is_empty() { "(nothing to act on)" } else { list };
@@ -585,7 +679,7 @@ async fn act_on(b: &mut Browser, act: &Act, shots: &Path, limit: usize) -> Resul
             text(format!("submitted; now at {url} ({title})"))
         }
         Act::Screenshot => {
-            b.settle().await?;
+            b.here().await?;
             let shot = b.page("Page.captureScreenshot", json!({ "format": "png" })).await?;
             let data = shot["data"].as_str().ok_or("no screenshot")?;
             use base64::Engine as _;

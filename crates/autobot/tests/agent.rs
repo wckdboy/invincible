@@ -1375,7 +1375,14 @@ async fn the_browser_reads_types_clicks_and_shows_a_screenshot_asking_where_it_s
         <form action="/sent"><input name="x"><button type="submit">Send</button></form>
         <a href="https://example.org/">away</a>
         </body></html>"#;
-    let site = axum::Router::new().route("/", axum::routing::get(move || async move { axum::response::Html(page) }));
+    // A slow page: the browser must wait for it to commit, not read the blank page before it.
+    let site = axum::Router::new().route(
+        "/",
+        axum::routing::get(move || async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            axum::response::Html(page)
+        }),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, site).await.unwrap() });
