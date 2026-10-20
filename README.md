@@ -30,7 +30,7 @@ Early, and used daily. What is built, and what is not yet:
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included), tools, approvals, a team, schedules, webhooks, Telegram and Discord |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
-| Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key ([latest](https://github.com/wckdboy/invincible/releases/latest)); fixes from an internal security review are in, the independent review is still to come |
+| Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code run on local models; the comparison with a frontier model is still to do |
 
 Work is tracked in Plane (project **INV**). Invincible and Autobot are made by
@@ -154,55 +154,76 @@ There are no accounts, no passwords and no third-party relay.
 
 ## Install (VPS or desktop)
 
-One script installs **Invincible Gateway** (`invincible`) and the **Autobot Agent** (`autobot`) as
-one product, on macOS (Apple silicon) or Linux (x86_64, arm64), without root:
+macOS (Apple silicon) or Linux (x86_64, arm64), no root needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/wckdboy/invincible/main/install.sh | sh
+curl -fsSL https://invincible.sh/install.sh | sh
+autobot setup        # network, model, cloud models, agent, Telegram, background services
 ```
 
-It puts both commands in `~/.local/bin`: the latest release's static binaries (macOS arm64, Linux
-x86_64 and arm64). The release's `SHA256SUMS` must carry a valid signature from the release key
-pinned in the script (an SSH signature, checked with `ssh-keygen`), and the archive must match
-it; when the GitHub CLI is signed in, the archive's Sigstore build attestation is checked too.
-Without a signed release it builds them from source (installing Rust with rustup if needed). It installs llama.cpp if it is missing (Homebrew on macOS; otherwise a pinned upstream build checked
-against its SHA-256, the CUDA build when an NVIDIA GPU is present), then runs `autobot setup`:
+It puts `invincible` (the gateway) and `autobot` (the agent) in `~/.local/bin` and llama.cpp
+where it is missing. Run it again any time: it converges. The same version downloads nothing,
+another one replaces the binaries atomically and restarts the running services, and your config
+and data are never touched. Piped like this it asks nothing; `autobot setup` asks the questions.
 
-1. **Network** for the whole machine: `offline`, `direct`, or Tor / SOCKS5. The gateway's cloud
-   backends and the agent's Telegram bot both follow it.
-2. **Model**: a Qwen open-weights model sized to the machine's memory (Qwen3.5 4B, Qwen3.5 9B,
-   Qwen3.8 27B), downloaded and checked, or any `hf:` GGUF.
-3. **Agent**: its working directory, and whether its turns stay on local models (the default).
-4. **Telegram** (optional): a bot token from @BotFather.
-5. **Background**: the gateway and the agent as launchd agents on macOS or systemd user units on
-   Linux (with linger, so they run after you log out of a VPS).
+| Flag (after `sh -s --`) | |
+| --- | --- |
+| `--channel stable\|edge` | stable: tagged releases (default). edge: every commit on main that passed CI |
+| `--version 0.0.11` | that release, also to go back |
+| `--prefix DIR` | binaries in `DIR/bin` (default `~/.local`) |
+| `--no-service` | leave the background services alone |
+| `--yes` | yes to everything, sudo installs of build tools and bubblewrap included |
+| `--uninstall` | remove the binaries and the services; keep the data (`--purge` removes it too) |
 
-Then:
+```sh
+curl -fsSL https://invincible.sh/install.sh | sh -s -- --channel edge --yes
+```
+
+**Updating.** `invincible update` (or `autobot update`) installs the newest release of the channel
+you are on, checked exactly as the installer checks it, and restarts the services. `--check` only
+says whether there is one, `--channel edge` switches, `--version 0.0.11` goes back. Nothing checks
+for updates unless you ask (no phoning home), or turn on the daily update:
+`invincible update --auto stable` (or `edge`, or `off`), which sets `[update] auto` in
+`~/.invincible/config.toml` and installs a daily job (a launchd calendar job, a systemd timer).
+Edge builds say what they are: `invincible --version` prints `0.0.12-edge.1a2b3c4`.
+
+**24/7.** `autobot setup` (or `autobot service install`) runs the gateway and the agent as
+launchd agents on macOS, systemd user units on Linux (with linger, so they outlive your SSH
+session) or systemd system units when installed as root on a VPS. They start at boot, restart
+whenever they exit, and restart themselves when their health check (`GET /healthz`) stops
+answering for 3 minutes (also systemd's `WatchdogSec`). The agent waits for the gateway and picks
+it up again after a restart. Logs are in `~/.invincible/logs/` and `~/.autobot/logs/`, each capped
+at 16 MiB with one old copy. `autobot service status` says whether each runs, starts at boot and
+how it last stopped; `autobot doctor` ends with a **24/7 readiness** section: the services, linger,
+whether the Mac sleeps (`sudo pmset -a sleep 0` keeps it awake), disk space, the gateway, the
+models, the agent API, clock sync and the update channel.
 
 ```sh
 autobot              # chat in the terminal
 autobot code         # code in this directory (see "Code with Autobot")
 autobot run "task"   # one task, no questions: anything not allowlisted is refused
-autobot doctor       # check the gateway, the model, the tools, Telegram and the services
-autobot cron add "@daily" "check disk space and warn me if a disk is over 90% full" --telegram
+autobot doctor       # check everything, 24/7 readiness included
 ```
 
-Running the installer again upgrades: the binaries are replaced, the running services are
-restarted on them, and the setup is kept (`INVINCIBLE_SETUP=1` runs it again).
-
-Releases are built by [`release.yml`](.github/workflows/release.yml) on a `v*` tag; each archive
-carries a build-provenance attestation (`gh attestation verify <archive> --repo wckdboy/invincible`).
-The Linux builds are reproducible: before publishing, the workflow builds the x86_64 archive a
-second time on another machine and refuses to publish unless the bytes match. To check one
-yourself, build the tagged commit from `/tmp/invincible-src` with the flags in `release.yml`.
-`SHA256SUMS` is signed with the release key, which lives only as a GitHub secret. To check a
-download by hand:
+**What is checked.** Every release's `SHA256SUMS` (the archives and `VERSION`) is signed with
+the release key, which lives only as a GitHub secret; the installer and `invincible update` pin
+its public key and refuse anything else, then check the archive against the list. With a
+signed-in GitHub CLI the installer also checks the archive's Sigstore build attestation. Releases
+are built by [`release.yml`](.github/workflows/release.yml): a `v*` tag publishes stable, every
+green push to main refreshes the `edge` prerelease. The Linux builds are reproducible: the
+workflow builds the x86_64 archive again on another machine and publishes only if the bytes match
+(to check one yourself, build the commit from `/tmp/invincible-src` with the flags in
+`release.yml`). By hand:
 
 ```sh
 echo 'invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPGy6kHVQQ+W282VFPR/Qo' > allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I invincible-release -n invincible-release -s SHA256SUMS.sig < SHA256SUMS
 shasum -a 256 -c SHA256SUMS
+gh attestation verify invincible-linux-x64.tar.gz --repo wckdboy/invincible
 ```
+
+Without a release for the machine, or with `INVINCIBLE_FROM_SOURCE=1`, the installer builds from
+source (Rust from rustup if there is none).
 
 ## Code with Autobot
 
@@ -769,14 +790,15 @@ each, ready for a trainer that reads OpenAI's chat format or ShareGPT's with Her
 |---|---|
 | [`spec/`](spec/) | The rules Invincible and Autobot share, with conformance vectors |
 | `crates/invincible-policy` | The routing rules as a pure Rust library, tested against `spec/vectors/` |
-| `crates/invincible` | Invincible Gateway (the node): config, engine supervisor, local API, pairing and remote access, and the `invincible` command |
-| `crates/autobot` | The Autobot Agent: agent loop, tools, approvals, sessions, Telegram, setup, doctor, services, and the `autobot` command |
-| [`install.sh`](install.sh) | The installer for both |
+| `crates/invincible` | Invincible Gateway (the node): config, engine supervisor, local API, pairing and remote access, services, updates, and the `invincible` command |
+| `crates/autobot` | The Autobot Agent: agent loop, tools, approvals, sessions, Telegram, setup, doctor, and the `autobot` command |
+| [`install.sh`](install.sh) | The installer for both; [`tests/install/`](tests/install/) runs it against a fake signed release |
 | [`evals/`](evals/) | Task files for `invincible eval` |
 
 ```sh
 cargo test --workspace                                  # includes every conformance vector
 cargo clippy --workspace --all-targets -- -D warnings
+sh tests/install/test.sh                                # the installer, end to end, in a sandbox
 cargo run -p invincible -- route input.json             # where would this request run?
 cargo run -p invincible -- serve --config path/to/config.toml   # run a node
 cargo run -p autobot -- doctor                          # check an agent install
