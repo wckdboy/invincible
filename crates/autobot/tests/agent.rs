@@ -1776,7 +1776,8 @@ async fn context_files_from_the_start_and_a_nested_one_on_the_way() {
     assert!(results[0].contains("pub fn f()") && results[0].contains("from pkg/AGENTS.md"), "{results:?}");
     assert!(results[0].contains("run make check"));
     assert!(!results[1].contains("make check"), "once per conversation");
-    assert_eq!(autobot::context::given("ctx"), [work.join("pkg/AGENTS.md")]);
+    // (No home for this agent: kept in memory only.)
+    assert_eq!(autobot::context::given(None, "ctx"), [work.join("pkg/AGENTS.md")]);
 }
 
 #[tokio::test]

@@ -296,7 +296,11 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   is none of those), from the repository's root down to the directory it works in, each text
   once. A subdirectory's own `AGENTS.md` (a package in a monorepo) comes with the first tool
   result that reaches that directory, once per conversation (a write or an edit there waits for
-  it). `/context` lists the files in
+  it), and a restart does not give it again (`sessions/<id>.context.json`). Every file is
+  scanned first: one with text that looks like a prompt injection (ignore the previous
+  instructions, keep this from the user, send the keys somewhere, a hidden comment with orders, invisible
+  characters) is quarantined, not dropped: the model gets it quoted as data under a note saying
+  what was found, and `/context` marks it. `/context` lists the files in
   play. In a git repository it works like a careful engineer (find, read, change
   in small edits, run the build and tests, never commit unless asked). `search` (regular
   expressions over the files, `.gitignore` respected) and `find_files` (globs) find code without a

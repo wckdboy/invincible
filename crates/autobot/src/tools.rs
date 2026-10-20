@@ -1060,7 +1060,8 @@ impl Tools {
         if self.ssh.is_some() || !path.starts_with(&self.workdir) {
             return String::new();
         }
-        crate::context::hint(&crate::context::nested(&self.workdir, path, session))
+        let store = self.home.as_ref().map(|h| h.join("sessions"));
+        crate::context::hint(&crate::context::nested(&self.workdir, path, store.as_deref(), session))
     }
 
     /// The git branch, when the working directory is a repository.
