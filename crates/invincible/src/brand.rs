@@ -181,6 +181,11 @@ pub fn faint(text: &str) -> String {
     paint(FAINT, text)
 }
 
+/// A step being taken: `▪ what`, the square in ash.
+pub fn step(what: &str) -> String {
+    format!("{} {what}", paint(ASH, "▪"))
+}
+
 /// A check that passed: `✓ what`, quiet.
 pub fn ok(what: &str) -> String {
     format!("{} {what}", paint(ASH, "✓"))

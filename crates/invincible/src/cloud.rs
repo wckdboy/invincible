@@ -270,7 +270,7 @@ pub struct Entry<'a> {
     pub data_policy: &'a str,
 }
 
-fn edit(
+pub(crate) fn edit(
     config: &std::path::Path,
     change: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<(), String>,
 ) -> Result<(), String> {
@@ -329,6 +329,15 @@ pub fn set_egress(config: &std::path::Path, egress: &str) -> Result<(), String> 
     edit(config, |doc| {
         let node = doc.entry("node").or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
         node.as_table_mut().ok_or("`node` is not a table")?.insert("egress", toml_edit::value(egress));
+        Ok(())
+    })
+}
+
+/// Sets `[update] auto`, keeping the rest of the config as it is.
+pub fn set_update_auto(config: &std::path::Path, auto: &str) -> Result<(), String> {
+    edit(config, |doc| {
+        let update = doc.entry("update").or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
+        update.as_table_mut().ok_or("`update` is not a table")?.insert("auto", toml_edit::value(auto));
         Ok(())
     })
 }

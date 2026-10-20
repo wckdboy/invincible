@@ -17,7 +17,7 @@ use invincible_policy::{RouteInput, decide};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
-#[command(version, about = "Intelligence that never relies solely on frontier labs, corporations or countries.")]
+#[command(version = invincible::version::VERSION, about = "Intelligence that never relies solely on frontier labs, corporations or countries.")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -117,6 +117,38 @@ enum Command {
         /// The input file; reads stdin when absent or `-`.
         file: Option<PathBuf>,
     },
+    /// Update invincible and autobot to the newest release, checked as the installer checks it
+    /// (the release key's signature, then the SHA-256), and restart the services. Nothing checks
+    /// for updates unless you run this, or turn on the daily update with --auto.
+    Update {
+        /// stable (tagged releases) or edge (every commit on main that passed CI) [default:
+        /// [update] auto when on, else the channel of the version installed].
+        #[arg(long)]
+        channel: Option<String>,
+        /// Install this version instead of the newest (to go back, too): 0.0.11.
+        #[arg(long, conflicts_with = "channel")]
+        version: Option<String>,
+        /// Only say whether there is an update.
+        #[arg(long)]
+        check: bool,
+        /// Reinstall even when the version installed is the newest.
+        #[arg(long)]
+        force: bool,
+        /// Network for this update (direct, tor:<host>:<port>, socks5:<host>:<port>) [default: the
+        /// config's [node] network].
+        #[arg(long)]
+        network: Option<String>,
+        /// Leave the running services as they are (they keep the old binaries until restarted).
+        #[arg(long)]
+        no_restart: bool,
+        /// Update daily on this channel (stable or edge), or `off`: sets [update] auto and
+        /// installs or removes the daily job.
+        #[arg(long, value_name = "off|stable|edge")]
+        auto: Option<String>,
+        /// The daily job: updates only when [update] auto is on.
+        #[arg(long, hide = true)]
+        scheduled: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -167,17 +199,13 @@ enum CloudAction {
     },
 }
 
-/// How to restart the gateway so it reads its config again.
 /// The home the gateway service uses (its INVINCIBLE_HOME, or ~/.invincible), when there is a
 /// service.
 fn service_home() -> Option<std::path::PathBuf> {
+    use invincible::service;
     let user = std::path::PathBuf::from(std::env::var_os("HOME")?);
-    let file = if cfg!(target_os = "macos") {
-        user.join("Library/LaunchAgents/sh.invincible.gateway.plist")
-    } else {
-        user.join(".config/systemd/user/invincible.service")
-    };
-    let text = std::fs::read_to_string(file).ok()?;
+    let text =
+        std::fs::read_to_string(service::path(service::Platform::current().ok()?, &user, service::GATEWAY)).ok()?;
     // `INVINCIBLE_HOME=/x` (systemd) or `<key>INVINCIBLE_HOME</key><string>/x</string>` (launchd).
     let set = text.split_once("INVINCIBLE_HOME").map(|(_, rest)| {
         let rest = rest.trim_start_matches(['=', '<', '/', 'k', 'e', 'y', '>']).trim_start();
@@ -197,21 +225,14 @@ fn same(a: &std::path::Path, b: &std::path::Path) -> bool {
 /// The gateway reads its config when it starts: restarts it when it runs as a service with
 /// [config_path] (the default config), and says how otherwise.
 fn restart_gateway(config_path: &std::path::Path, home: &std::path::Path) {
-    use std::process::{Command, Stdio};
-    let quiet = |c: &mut Command| c.stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+    use invincible::service;
     let default = config_path == home.join("config.toml") && service_home().is_some_and(|served| same(&served, home));
     let restarted = default
-        && if cfg!(target_os = "macos") {
-            let uid =
-                Command::new("id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
-            uid.is_ok_and(|uid| {
-                let label = format!("gui/{uid}/sh.invincible.gateway");
-                quiet(Command::new("launchctl").args(["print", &label]))
-                    && quiet(Command::new("launchctl").args(["kickstart", "-k", &label]))
-            })
-        } else {
-            quiet(Command::new("systemctl").args(["--user", "is-active", "--quiet", "invincible.service"]))
-                && quiet(Command::new("systemctl").args(["--user", "restart", "invincible.service"]))
+        && match (service::Platform::current(), std::env::var_os("HOME")) {
+            (Ok(platform), Some(user)) => {
+                !service::restart(platform, std::path::Path::new(&user), &[service::GATEWAY]).is_empty()
+            }
+            _ => false,
         };
     if restarted {
         println!("{}", brand::ok("restarted the gateway service; it uses the change now"));
@@ -770,6 +791,9 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Update { channel, version, check, force, network, no_restart, auto, scheduled } => {
+            update_command(UpdateArgs { channel, version, check, force, network, no_restart, auto, scheduled })
+        }
         Command::Route { file } => {
             let text = match file.filter(|f| f.as_os_str() != "-") {
                 Some(path) => std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
@@ -866,13 +890,156 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     }
     let listener =
         tokio::net::TcpListener::bind(config.listen).await.map_err(|e| format!("listen on {}: {e}", config.listen))?;
-    tracing::info!("serving on http://{}", config.listen);
+    tracing::info!("serving on http://{} ({})", config.listen, invincible::version::VERSION);
+    invincible::watchdog::spawn("gateway", config.listen, logs.clone());
     axum::serve(listener, server::app(state))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(|e| e.to_string())?;
     for supervisor in supervisors {
         supervisor.abort();
+    }
+    Ok(())
+}
+
+struct UpdateArgs {
+    channel: Option<String>,
+    version: Option<String>,
+    check: bool,
+    force: bool,
+    network: Option<String>,
+    no_restart: bool,
+    auto: Option<String>,
+    scheduled: bool,
+}
+
+/// `invincible update`: see [invincible::update].
+fn update_command(args: UpdateArgs) -> Result<(), String> {
+    use invincible::update::{self, Outcome, Target};
+    use invincible::version::{Channel, VERSION, Version};
+    let home = config::home()?;
+    let config_path = home.join("config.toml");
+    if let Some(auto) = &args.auto {
+        return set_auto_update(&config_path, &home, auto);
+    }
+    let config = match fsutil::read_optional(&config_path)? {
+        Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", config_path.display()))?,
+        None => Config::parse("")?,
+    };
+    // The daily job writes to its log: each line with the time.
+    let say = |line: String| {
+        if args.scheduled {
+            println!("{} {line}", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"));
+        } else {
+            println!("{line}");
+        }
+    };
+    let auto = config.update.channel()?;
+    if args.scheduled && auto.is_none() {
+        say("automatic updates are off ([update] auto = \"off\"); nothing to do".to_owned());
+        return Ok(());
+    }
+    let target = match (&args.version, &args.channel) {
+        (Some(v), _) => {
+            Version::parse(v)?;
+            Target::Version(v.trim_start_matches('v').to_owned())
+        }
+        (None, Some(c)) => Target::Latest(Channel::parse(c)?),
+        (None, None) => {
+            Target::Latest(auto.unwrap_or_else(|| Version::parse(VERSION).map_or(Channel::Stable, |v| v.channel())))
+        }
+    };
+    let network = match &args.network {
+        Some(n) => invincible_policy::NetworkMode::decode(n),
+        None => config.node.settings().network,
+    };
+    if network.is_offline() {
+        return Err(
+            "the node is offline ([node] network = \"offline\"): `invincible update --network direct` (or tor:…) goes online for this update only"
+                .to_owned(),
+        );
+    }
+    let client = invincible::egress::client(&network)?;
+    let exe = std::env::current_exe().and_then(|e| e.canonicalize()).map_err(|e| format!("this program: {e}"))?;
+    let bin = exe.parent().map(std::path::Path::to_path_buf).ok_or("this program has no directory")?;
+    let platform = update::platform()?;
+    let source = update::Source::from_env()?;
+    if !args.scheduled {
+        println!("{}\n", brand::Product::Invincible.header(VERSION));
+    }
+    let what = match &target {
+        Target::Latest(c) => format!("the {c} channel"),
+        Target::Version(v) => format!("v{v}"),
+    };
+    say(brand::step(&format!("checking {what} for {platform}")));
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+    let outcome = runtime.block_on(update::run(update::Options {
+        client: &client,
+        source: &source,
+        target,
+        platform,
+        bin: bin.clone(),
+        home: home.clone(),
+        current: VERSION.to_owned(),
+        check: args.check,
+        force: args.force,
+    }))?;
+    match outcome {
+        Outcome::UpToDate { version, ahead: false } => say(brand::ok(&format!("up to date: {version}"))),
+        Outcome::UpToDate { version, ahead: true } => {
+            say(brand::ok(&format!("{version} is newer than the channel's latest release; kept")))
+        }
+        Outcome::Available { version } => say(brand::warn(&format!(
+            "{} is available: `invincible update{}` installs it",
+            version.unwrap_or_else(|| "a new build".to_owned()),
+            args.channel.as_ref().map(|c| format!(" --channel {c}")).unwrap_or_default()
+        ))),
+        Outcome::Updated { from, to, changed } => {
+            say(brand::ok(&format!("updated {} in {}: {from} -> {to}", changed.join(" and "), bin.display())));
+            if args.no_restart {
+                say(brand::warn("the services run the old binaries until they restart"));
+            } else if let Ok(platform) = invincible::service::Platform::current() {
+                let user = std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?);
+                let restarted = invincible::service::restart(
+                    platform,
+                    &user,
+                    &[invincible::service::GATEWAY, invincible::service::AGENT],
+                );
+                if !restarted.is_empty() {
+                    say(brand::ok(&format!("restarted {}", restarted.join(" and "))));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `invincible update --auto off|stable|edge`: the config, and the daily job to match.
+fn set_auto_update(config_path: &std::path::Path, home: &std::path::Path, auto: &str) -> Result<(), String> {
+    use invincible::service;
+    let channel = invincible::config::UpdateConfig { auto: auto.to_owned() }.channel()?;
+    invincible::cloud::set_update_auto(config_path, auto)?;
+    let platform = service::Platform::current()?;
+    let user = std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?);
+    let exe = std::env::current_exe().and_then(|e| e.canonicalize()).map_err(|e| format!("this program: {e}"))?;
+    let job = service::update_job(exe, home);
+    let lines = if channel.is_some() {
+        service::install(platform, &user, &[job])?
+    } else {
+        service::uninstall(platform, &user, &[job])?
+    };
+    for line in lines {
+        println!("{}", brand::ash(&line));
+    }
+    match channel {
+        Some(c) => println!(
+            "{}",
+            brand::ok(&format!(
+                "updates daily on the {c} channel (around 04:17; the log is {})",
+                home.join("logs/update.log").display()
+            ))
+        ),
+        None => println!("{}", brand::ok("automatic updates are off (`invincible update` updates by hand)")),
     }
     Ok(())
 }

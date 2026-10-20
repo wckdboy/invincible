@@ -1,0 +1,10 @@
+[Unit]
+Description=Invincible update check
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/me/.local/bin/invincible update --scheduled
+Environment=PATH=/usr/bin
+StandardOutput=append:/home/me/.invincible/logs/update.log
+StandardError=append:/home/me/.invincible/logs/update.log

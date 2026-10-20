@@ -1040,9 +1040,9 @@ impl Chat {
         // Beside the symbol the name stands alone; without it (no color) the mark leads.
         let symbol = invincible::brand::Product::Autobot.symbol();
         let name = if symbol.is_empty() {
-            invincible::brand::Product::Autobot.header(env!("CARGO_PKG_VERSION"))
+            invincible::brand::Product::Autobot.header(invincible::version::VERSION)
         } else {
-            format!("{} {}", style::bold("autobot"), style::gray(env!("CARGO_PKG_VERSION")))
+            format!("{} {}", style::bold("autobot"), style::gray(invincible::version::VERSION))
         };
         let header = format!("{name} {}", style::faint("· via invincible"));
         let private = if self.agent.gateway.private() { style::faint("  private") } else { String::new() };

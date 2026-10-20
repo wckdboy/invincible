@@ -289,7 +289,7 @@ pub fn run<R: BufRead>(prompt: &mut Prompt<R>, home: &Path) -> Result<(), String
 
     eprintln!("\n6. Background");
     if prompt.yes("   run the gateway and the agent in the background, also after reboots?", true)? {
-        for line in crate::service::install(crate::service::Platform::current()?, &user_home()?, &services(home)?)? {
+        for line in install_services(home)? {
             eprintln!("   {line}");
         }
     } else {
@@ -305,7 +305,7 @@ pub fn user_home() -> Result<std::path::PathBuf, String> {
 
 /// The services that run the gateway and the agent.
 pub fn services(home: &Path) -> Result<Vec<crate::service::Service>, String> {
-    use crate::service::{AGENT, GATEWAY, Service};
+    use crate::service::{AGENT, GATEWAY, Kind, Service, home_env};
     let gateway_bin = crate::find_program("invincible").ok_or("the `invincible` command is not installed")?;
     let gateway_home = invincible::config::home()?;
     let mut services = vec![Service {
@@ -315,6 +315,8 @@ pub fn services(home: &Path) -> Result<Vec<crate::service::Service>, String> {
         args: vec!["serve".into()],
         log: gateway_home.join("logs/gateway.log"),
         after: None,
+        env: home_env(),
+        kind: Kind::Daemon,
     }];
     // The agent too: its API is how paired apps reach it, and Telegram runs in it when on.
     services.push(Service {
@@ -324,8 +326,44 @@ pub fn services(home: &Path) -> Result<Vec<crate::service::Service>, String> {
         args: vec!["serve".into()],
         log: home.join("logs/agent.log"),
         after: Some(GATEWAY),
+        env: home_env(),
+        kind: Kind::Daemon,
     });
     Ok(services)
+}
+
+/// The daily update job, and whether it is wanted (the gateway's `[update] auto` is on).
+pub fn update_job() -> Result<(crate::service::Service, bool), String> {
+    let gateway_bin = crate::find_program("invincible").ok_or("the `invincible` command is not installed")?;
+    let path = crate::gateway_config_path()?;
+    let text = invincible::fsutil::read_optional(&path)?.unwrap_or_default();
+    let config = invincible::config::Config::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let job = crate::service::update_job(absolute(&gateway_bin)?, &invincible::config::home()?);
+    Ok((job, config.update.channel()?.is_some()))
+}
+
+/// Installs (or brings up to date) the gateway's and the agent's services, and the daily update
+/// job when it is on (removing it when it is off).
+pub fn install_services(home: &Path) -> Result<Vec<String>, String> {
+    let platform = crate::service::Platform::current()?;
+    let user = user_home()?;
+    let mut services = services(home)?;
+    let (job, wanted) = update_job()?;
+    let mut lines = Vec::new();
+    if wanted {
+        services.push(job);
+    } else {
+        lines.extend(crate::service::uninstall(platform, &user, &[job])?);
+    }
+    lines.extend(crate::service::install(platform, &user, &services)?);
+    Ok(lines)
+}
+
+/// Stops and removes every service: the gateway, the agent, the daily update job.
+pub fn uninstall_services(home: &Path) -> Result<Vec<String>, String> {
+    let mut services = services(home)?;
+    services.push(update_job()?.0);
+    crate::service::uninstall(crate::service::Platform::current()?, &user_home()?, &services)
 }
 
 fn absolute(path: &Path) -> Result<std::path::PathBuf, String> {

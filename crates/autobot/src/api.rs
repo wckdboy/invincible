@@ -70,7 +70,10 @@ impl ApiState {
 }
 
 pub fn app(state: Arc<ApiState>) -> Router {
-    Router::new()
+    // Unauthenticated, and only that the agent answers and its version (the watchdog asks it).
+    let health = Router::new()
+        .route("/healthz", get(|| async { Json(json!({ "status": "ok", "version": invincible::version::VERSION })) }));
+    let guarded = Router::new()
         .route("/v1/agent", get(info))
         .route("/v1/agent/sessions", get(sessions))
         .route("/v1/agent/sessions/{id}", get(history))
@@ -92,8 +95,8 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/skills", get(skills))
         .route("/v1/agent/skills/{name}/accept", post(accept_skill))
         .route("/v1/agent/skills/{name}/reject", post(reject_skill))
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_token))
-        .with_state(state)
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
+    health.merge(guarded).with_state(state)
 }
 
 async fn require_token(State(state): State<Arc<ApiState>>, request: Request, next: Next) -> Response {
