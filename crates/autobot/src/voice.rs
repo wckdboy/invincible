@@ -142,33 +142,16 @@ async fn by_server(config: &VoiceConfig, url: &str, audio: Audio) -> Result<Stri
     } else {
         return Err("[voice] url: http:// only on this machine; https:// elsewhere".to_owned());
     };
-    let boundary = format!("autobot{}", invincible::token::hex(&invincible::token::random::<12>()?));
     let model = config.model.as_deref().unwrap_or("whisper-1");
-    let mut body = Vec::new();
-    let mut field = |name: &str, value: &str| {
-        body.extend_from_slice(
-            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes(),
-        );
-    };
-    field("model", model);
-    field("response_format", "json");
+    let mut fields = vec![("model", model), ("response_format", "json")];
     if let Some(language) = config.language.as_deref().filter(|l| *l != "auto") {
-        field("language", language);
+        fields.push(("language", language));
     }
-    let name: String = audio.name.chars().filter(|c| c.is_ascii_alphanumeric() || ".-_".contains(*c)).collect();
-    let name = if name.is_empty() { "voice.ogg".to_owned() } else { name };
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: {}\r\n\r\n",
-            if audio.mime.is_empty() { "application/octet-stream" } else { &audio.mime }
-        )
-        .as_bytes(),
-    );
-    body.extend_from_slice(&audio.bytes);
-    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let name = if audio.name.chars().any(|c| c.is_ascii_alphanumeric()) { audio.name.as_str() } else { "voice.ogg" };
+    let (content_type, body) = crate::media::multipart(&fields, ("file", name, &audio.mime, &audio.bytes))?;
     let response = client
         .post(url)
-        .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+        .header("content-type", content_type)
         .body(body)
         .timeout(Duration::from_secs(config.timeout))
         .send()

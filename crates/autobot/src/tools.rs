@@ -35,6 +35,8 @@ pub struct Tools {
     ssh: Option<std::sync::Arc<crate::ssh::Ssh>>,
     /// Home Assistant, for the `home` tool ([crate::homeassistant]).
     ha: Option<std::sync::Arc<crate::homeassistant::Home>>,
+    /// What speech and image backends the node has ([crate::media]).
+    media: crate::media::Cache,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -80,6 +82,8 @@ pub struct TurnContext {
     pub board_task: Option<String>,
     /// What the owner sent while the turn runs: taken in before its next step.
     pub inbox: Option<Inbox>,
+    /// Files the turn made (speech, images), to go with its answer in the chat ([crate::media]).
+    pub outbox: Option<crate::media::Outbox>,
 }
 
 /// Messages for a running turn ([TurnContext::inbox]).
@@ -191,6 +195,16 @@ pub enum Call {
     },
     /// Home Assistant ([crate::homeassistant]).
     Home(crate::homeassistant::HomeCall),
+    /// Speech from the node ([crate::media]); run by the agent.
+    Speak {
+        text: String,
+        voice: Option<String>,
+    },
+    /// A picture from the node ([crate::media]); run by the agent.
+    Image {
+        prompt: String,
+        size: Option<String>,
+    },
 }
 
 impl Tools {
@@ -208,7 +222,13 @@ impl Tools {
             browser: false,
             ssh: None,
             ha: None,
+            media: Default::default(),
         }
+    }
+
+    /// What the node can make, asked at most once a minute ([crate::media]).
+    pub fn media(&self) -> &crate::media::Cache {
+        &self.media
     }
 
     /// With the `home` tool on [ha].
@@ -623,6 +643,14 @@ impl Tools {
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
             "browser" if self.browser => Call::Browser(crate::browser::Act::parse(&args)?),
             "home" if self.ha.is_some() => Call::Home(crate::homeassistant::HomeCall::parse(&args)?),
+            "speak" => Call::Speak {
+                text: text("text")?,
+                voice: args.get("voice").and_then(Value::as_str).map(str::to_owned).filter(|v| !v.trim().is_empty()),
+            },
+            "generate_image" => Call::Image {
+                prompt: text("prompt")?,
+                size: args.get("size").and_then(Value::as_str).map(str::to_owned).filter(|s| !s.trim().is_empty()),
+            },
             "execute_code" => Call::ExecuteCode {
                 language: crate::script::Language::parse(
                     args.get("language").and_then(Value::as_str).unwrap_or_default(),
@@ -695,6 +723,8 @@ impl Tools {
             | Call::CancelSchedule { .. }
             | Call::Process { .. }
             | Call::Todo { .. } => None,
+            // Asked for in the agent, when it leaves the machine ([crate::media]).
+            Call::Speak { .. } | Call::Image { .. } => None,
         }
     }
 
@@ -756,6 +786,7 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
             Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
+            Call::Speak { .. } | Call::Image { .. } => Err("speak and generate_image run in the agent".to_owned()),
             Call::Home(call) => match &self.ha {
                 Some(ha) => call.run(ha).await,
                 None => Err("Home Assistant is not set up here ([homeassistant] url)".to_owned()),

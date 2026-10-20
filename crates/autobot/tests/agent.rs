@@ -1614,3 +1614,130 @@ async fn search_sessions_recalls_earlier_conversations_with_a_cached_summary() {
     assert_eq!(script.seen.len(), 5, "no second summary call");
     assert!(script.seen[4].1.to_string().contains("They chose Postgres 16"));
 }
+
+/// A gateway with speech on the node and images off it, besides the scripted chat.
+async fn media_gateway(answers: Vec<(u16, Value)>) -> (String, Shared, Arc<Mutex<Vec<(String, HeaderMap, Value)>>>) {
+    let script: Shared = Arc::new(Mutex::new(Script { answers: answers.into(), seen: Vec::new() }));
+    let made: Arc<Mutex<Vec<(String, HeaderMap, Value)>>> = Arc::default();
+    let (speech, images) = (made.clone(), made.clone());
+    let app = axum::Router::new()
+        .route("/v1/chat/completions", axum::routing::post(completions))
+        .with_state(script.clone())
+        .route(
+            "/v1/node",
+            axum::routing::get(|| async {
+                Json(json!({ "name": "n", "speech": [{ "id": "kokoro", "tier": "node", "host": "127.0.0.1", "healthy": true }],
+                    "images": [{ "id": "img", "tier": "cloud", "host": "api.images.example", "healthy": true }] }))
+            }),
+        )
+        .route(
+            "/v1/audio/speech",
+            axum::routing::post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                let made = speech.clone();
+                async move {
+                    made.lock().unwrap().push(("speech".into(), headers, body));
+                    let mut response = ([("content-type", "audio/mpeg")], b"ID3 spoken".to_vec()).into_response();
+                    response.headers_mut().insert("invincible-request-id", "tts1".parse().unwrap());
+                    response
+                }
+            }),
+        )
+        .route(
+            "/v1/images/generations",
+            axum::routing::post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                let made = images.clone();
+                async move {
+                    made.lock().unwrap().push(("images".into(), headers, body));
+                    Json(json!({ "data": [{ "b64_json": "iVBORw0KGgo=" }] })).into_response()
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (url, script, made)
+}
+
+#[tokio::test]
+async fn speech_on_the_node_is_made_without_asking_and_goes_to_the_chat() {
+    let (url, script, made) =
+        media_gateway(vec![call("speak", json!({"text": "The build is green.", "voice": "af"})), say("Said.")]).await;
+    let dir = temp("speak");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let owner = owner(Answer::Deny);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let outbox = autobot::media::Outbox::default();
+    let context = autobot::tools::TurnContext { outbox: Some(outbox.clone()), ..Default::default() };
+    let mut grants = HashSet::new();
+    let receipts = Mutex::new(Vec::new());
+    let events = |event: Event| {
+        if let Event::Receipt { id, .. } = event {
+            receipts.lock().unwrap().push(id.to_owned());
+        }
+    };
+    let turn = agent.turn(&mut session, "say it out loud", &owner, &mut grants, &events);
+    let outcome = autobot::tools::TURN.scope(context, turn).await.unwrap();
+    assert_eq!(outcome.text, "Said.");
+    assert!(owner.asked.lock().unwrap().is_empty(), "the node's own backend: nothing asked");
+    assert_eq!(*receipts.lock().unwrap(), ["req1", "tts1", "req2"], "the speech has its receipt");
+    let (what, headers, body) = made.lock().unwrap()[0].clone();
+    assert_eq!(what, "speech");
+    assert_eq!(headers["invincible-private"], "1", "a private turn's speech stays private");
+    assert_eq!(body, json!({ "input": "The build is green.", "voice": "af", "response_format": "mp3" }));
+    let files = outbox.lock().unwrap().clone();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].kind, autobot::media::Kind::Speech);
+    assert!(files[0].path.starts_with(dir.join("attachments")));
+    assert_eq!(std::fs::read(&files[0].path).unwrap(), b"ID3 spoken");
+    let script = script.lock().unwrap();
+    let names: Vec<&str> =
+        script.seen[0].1["tools"].as_array().unwrap().iter().filter_map(|t| t["function"]["name"].as_str()).collect();
+    assert!(names.contains(&"speak") && names.contains(&"generate_image"));
+    let result = script.seen[1].1["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool").cloned();
+    assert!(result.unwrap()["content"].as_str().unwrap().starts_with("spoke it: saved to "));
+}
+
+#[tokio::test]
+async fn an_image_off_the_machine_is_asked_for_first() {
+    let prompt = json!({"prompt": "a lighthouse at dusk"});
+    let (url, _, made) = media_gateway(vec![call("generate_image", prompt.clone()), say("No picture, then.")]).await;
+    let dir = temp("image-denied");
+    let mut denied = agent(&url, &dir, ApprovalMode::Ask, true);
+    denied.tools = denied.tools.clone().with_home(dir.clone());
+    let no = owner(Answer::Deny);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    denied.turn(&mut session, "draw a lighthouse", &no, &mut HashSet::new(), &quiet).await.unwrap();
+    let asked = no.asked.lock().unwrap().clone();
+    assert!(
+        matches!(&asked[..], [Action::Cloud(why)] if why.contains("api.images.example") && why.contains("a lighthouse")),
+        "{asked:?}"
+    );
+    assert!(made.lock().unwrap().is_empty(), "nothing sent");
+
+    let (url, _, made) = media_gateway(vec![call("generate_image", prompt), say("Here it is.")]).await;
+    let dir = temp("image-approved");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "draw a lighthouse", &owner(Answer::Once), &mut HashSet::new(), &quiet).await.unwrap();
+    let (what, headers, body) = made.lock().unwrap()[0].clone();
+    assert_eq!(what, "images");
+    assert_eq!(headers["invincible-confirmed"], "1");
+    assert!(headers.get("invincible-private").is_none(), "the owner let it leave");
+    assert_eq!(body["response_format"], "b64_json");
+    let saved: Vec<_> = std::fs::read_dir(dir.join("attachments")).unwrap().flatten().map(|e| e.path()).collect();
+    assert!(saved[0].extension().is_some_and(|e| e == "png"), "{saved:?}");
+}
+
+#[tokio::test]
+async fn without_media_backends_there_are_no_media_tools() {
+    let (url, script) = gateway(vec![say("hi")]).await;
+    let dir = temp("no-media");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "hello", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    let text = script.lock().unwrap().seen[0].1["tools"].to_string();
+    assert!(!text.contains("\"speak\"") && !text.contains("generate_image"));
+}

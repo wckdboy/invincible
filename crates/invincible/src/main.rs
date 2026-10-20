@@ -862,8 +862,11 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     }
     let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
     let receipt_public = receipt_key.public();
+    let speech = invincible::synth::from_config(&config.speech, &home);
+    let images = invincible::synth::from_config(&config.images, &home);
     let mut state = AppState::new(engines, config.node.settings(), token)
         .with_cloud(cloud)
+        .with_media(speech, images)
         .with_receipt_key(&config.remote.name(), receipt_key)
         .with_audit(invincible::audit::AuditLog::new(&home))
         .with_agent(&config.agent.url);

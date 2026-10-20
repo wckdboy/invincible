@@ -305,6 +305,17 @@ impl Agent {
                 list.push(crate::board::ask_owner_tool());
             }
         }
+        // Speech and pictures, when the node can make them ([crate::media]).
+        if self.tools.offers("speak") || self.tools.offers("generate_image") {
+            let media = self.tools.media().get(&self.gateway).await;
+            if let Some(list) = definitions.as_array_mut() {
+                list.extend(
+                    crate::media::definitions(&media)
+                        .into_iter()
+                        .filter(|d| self.tools.offers(d["function"]["name"].as_str().unwrap_or_default())),
+                );
+            }
+        }
         if !self.mcp.is_empty()
             && self.tools.offers("mcp")
             && let Some(list) = definitions.as_array_mut()
@@ -648,6 +659,9 @@ impl Agent {
             Ok(call) => call,
             Err(e) => return format!("error: {e}"),
         };
+        if matches!(call, crate::tools::Call::Speak { .. } | crate::tools::Call::Image { .. }) {
+            return self.make(session, &call, approver, grants, events).await;
+        }
         if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
             events(Event::Diff(&diff));
         }
@@ -690,6 +704,103 @@ impl Agent {
             tracing::warn!("no undo for {}: {e}", path.display());
         }
         self.tools.run(&call).await
+    }
+
+    /// `speak` and `generate_image` ([crate::media]): made by the node, asked for first when the
+    /// backend is off the machine, kept in the attachments and handed to the turn's chat.
+    async fn make(
+        &self,
+        session: &str,
+        call: &crate::tools::Call,
+        approver: &dyn Approver,
+        grants: &mut HashSet<Action>,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> String {
+        use crate::media::Kind;
+        use crate::tools::Call;
+        let (kind, path, body, what) = match call {
+            Call::Speak { text, voice } => {
+                let mut body = json!({ "input": text, "response_format": "mp3" });
+                if let Some(voice) = voice {
+                    body["voice"] = json!(voice);
+                }
+                (Kind::Speech, "/audio/speech", body, "speak")
+            }
+            Call::Image { prompt, size } => {
+                let mut body = json!({ "prompt": prompt, "n": 1, "response_format": "b64_json" });
+                if let Some(size) = size {
+                    body["size"] = json!(size);
+                }
+                (Kind::Image, "/images/generations", body, "generate_image")
+            }
+            _ => return "error: not a media call".to_owned(),
+        };
+        let shown: String = body[if kind == Kind::Speech { "input" } else { "prompt" }]
+            .as_str()
+            .unwrap_or_default()
+            .chars()
+            .take(120)
+            .collect();
+        let media = self.tools.media().get(&self.gateway).await;
+        let mut private = self.gateway.private();
+        let mut confirmed = false;
+        if let Some(host) = media.leaves_for(kind) {
+            let action = Action::Cloud(format!("{what} sends \"{shown}\" to {host}"));
+            if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {
+                return refusal(&action, instead);
+            }
+            (private, confirmed) = (false, true);
+        }
+        events(Event::Tool(&format!("{what}: {shown}")));
+        let mut answer = self.gateway.make(path, &body, private, confirmed).await;
+        // The node's own backend is down and the router would go off the machine: ask.
+        if let Err(GatewayError::Confirm(why)) = &answer
+            && !confirmed
+        {
+            let action = Action::Cloud(format!("{what}: {why}"));
+            if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {
+                return refusal(&action, instead);
+            }
+            answer = self.gateway.make(path, &body, false, true).await;
+        }
+        let (bytes, mime, receipt, decision) = match answer {
+            Ok(answer) => answer,
+            Err(e) => return format!("error: {e}"),
+        };
+        if let Some(id) = &receipt {
+            events(Event::Receipt {
+                id,
+                model: decision.as_ref().and_then(|d| d["model"].as_str()),
+                tier: decision.as_ref().and_then(|d| d["tier"].as_str()),
+            });
+        }
+        let dir = self.tools.home().map_or_else(std::env::temp_dir, |h| h.join("attachments"));
+        let (bytes, mime) = match kind {
+            Kind::Speech => (bytes, if mime.is_empty() { "audio/mpeg".to_owned() } else { mime }),
+            Kind::Image => {
+                let answer: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                match crate::media::first_image(&answer) {
+                    Ok(Ok(image)) => {
+                        let mime = crate::media::image_mime(&image).to_owned();
+                        (image, mime)
+                    }
+                    Ok(Err(url)) => return format!("the image is at {url} (the backend gave a link, not the file)"),
+                    Err(e) => return format!("error: {e}"),
+                }
+            }
+        };
+        let saved = match crate::media::save(&dir, if kind == Kind::Speech { "speech" } else { "image" }, &mime, &bytes)
+        {
+            Ok(path) => path,
+            Err(e) => return format!("error: {e}"),
+        };
+        crate::media::deliver(crate::media::Made { kind, path: saved.clone(), mime });
+        let made = if kind == Kind::Speech { "spoke it" } else { "drew it" };
+        format!(
+            "{made}: saved to {} ({} KiB); in a chat it is sent with your answer",
+            saved.display(),
+            bytes.len().div_ceil(1024)
+        )
     }
 
     /// `execute_code`, approved already: the script runs where commands run, and its calls to

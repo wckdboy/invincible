@@ -30,6 +30,7 @@ pub mod manage;
 pub mod markdown;
 pub mod matrix;
 pub mod mcp;
+pub mod media;
 pub mod memory;
 pub mod migrate;
 pub mod net;

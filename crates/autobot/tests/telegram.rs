@@ -343,3 +343,47 @@ async fn a_voice_note_is_heard_and_answered() {
     drop(asked);
     std::fs::remove_dir_all(home).unwrap();
 }
+
+#[tokio::test]
+async fn speech_goes_as_a_voice_message_and_a_picture_as_a_photo() {
+    // (method, content type, body) of each upload.
+    type Uploads = Arc<Mutex<Vec<(String, String, Vec<u8>)>>>;
+    let seen: Uploads = Arc::default();
+    let record = seen.clone();
+    let app = axum::Router::new().route(
+        "/{bot}/{method}",
+        axum::routing::post(
+            move |Path((_, method)): Path<(String, String)>,
+                  headers: axum::http::HeaderMap,
+                  body: axum::body::Bytes| {
+                let record = record.clone();
+                async move {
+                    let kind = headers["content-type"].to_str().unwrap().to_owned();
+                    record.lock().unwrap().push((method, kind, body.to_vec()));
+                    Json(json!({ "ok": true, "result": { "message_id": 1 } }))
+                }
+            },
+        ),
+    );
+    let url = listen(app).await;
+    let bot = Bot::new(reqwest::Client::new(), &url, "TOKEN").unwrap();
+    let dir = std::env::temp_dir().join(format!("autobot-tg-files-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let voice = dir.join("speech-1.mp3");
+    std::fs::write(&voice, b"ID3 spoken").unwrap();
+    let made = autobot::media::Made { kind: autobot::media::Kind::Speech, path: voice, mime: "audio/mpeg".into() };
+    bot.send_file(42, &made).await.unwrap();
+    let picture = dir.join("image-1.png");
+    std::fs::write(&picture, b"\x89PNG").unwrap();
+    let made = autobot::media::Made { kind: autobot::media::Kind::Image, path: picture, mime: "image/png".into() };
+    bot.send_file(42, &made).await.unwrap();
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0].0, "sendVoice");
+    assert!(seen[0].1.starts_with("multipart/form-data; boundary="));
+    let body = String::from_utf8_lossy(&seen[0].2);
+    assert!(body.contains("name=\"chat_id\"\r\n\r\n42\r\n"), "{body}");
+    assert!(body.contains("name=\"voice\"; filename=\"speech-1.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\nID3 spoken"));
+    assert_eq!(seen[1].0, "sendPhoto");
+    assert!(String::from_utf8_lossy(&seen[1].2).contains("name=\"photo\"; filename=\"image-1.png\""));
+    std::fs::remove_dir_all(dir).unwrap();
+}

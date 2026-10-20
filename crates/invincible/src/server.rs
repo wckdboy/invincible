@@ -51,6 +51,9 @@ pub struct AppState {
     pub audit: Option<Arc<AuditLog>>,
     /// The Autobot Agent's API on this machine (spec/agent.md).
     pub agent_url: String,
+    /// Speech and image backends ([crate::synth]).
+    pub speech: Vec<crate::synth::Backend>,
+    pub images: Vec<crate::synth::Backend>,
 }
 
 impl AppState {
@@ -75,7 +78,16 @@ impl AppState {
             receipts: Arc::default(),
             audit: None,
             agent_url: "http://127.0.0.1:7792".to_owned(),
+            speech: Vec::new(),
+            images: Vec::new(),
         }
+    }
+
+    /// With speech and image backends ([crate::synth]).
+    pub fn with_media(mut self, speech: Vec<crate::synth::Backend>, images: Vec<crate::synth::Backend>) -> Self {
+        self.speech = speech;
+        self.images = images;
+        self
     }
 
     pub fn with_agent(mut self, url: &str) -> Self {
@@ -136,6 +148,8 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat_completions).layer(DefaultBodyLimit::max(MAX_REQUEST)))
         .route("/v1/messages", post(messages).layer(DefaultBodyLimit::max(MAX_REQUEST)))
+        .route("/v1/audio/speech", post(crate::synth::speech))
+        .route("/v1/images/generations", post(crate::synth::images))
         .route("/v1/receipts/{id}", get(receipt))
         .route("/v1/audit", get(audit))
         .route("/v1/node", get(node_info))
@@ -242,7 +256,14 @@ async fn audit(
 }
 
 async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
-    Json(json!({ "name": state.name, "receipt_key": state.receipt_key.public() }))
+    let list =
+        |backends: &[crate::synth::Backend]| backends.iter().map(crate::synth::Backend::to_json).collect::<Vec<_>>();
+    Json(json!({
+        "name": state.name,
+        "receipt_key": state.receipt_key.public(),
+        "speech": list(&state.speech),
+        "images": list(&state.images),
+    }))
 }
 
 /// `GET /healthz`: unauthenticated, and says only that the node answers and its version (for the
@@ -396,7 +417,7 @@ async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({ "object": "list", "data": data }))
 }
 
-fn data_policy_code(policy: DataPolicy) -> String {
+pub(crate) fn data_policy_code(policy: DataPolicy) -> String {
     match policy {
         DataPolicy::Owned => "owned".into(),
         DataPolicy::NoRetention => "no-retention".into(),
@@ -561,7 +582,7 @@ async fn infer(
 }
 
 /// The routing request for one chat completion.
-fn route_request(headers: &HeaderMap, body: &Value) -> Request {
+pub(crate) fn route_request(headers: &HeaderMap, body: &Value) -> Request {
     let text = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).map(str::trim);
     let model = body.get("model").and_then(Value::as_str).filter(|m| !m.is_empty()).unwrap_or("auto");
     Request {
@@ -629,7 +650,7 @@ async fn forward(client: &reqwest::Client, engine: &Engine, path: &str, body: By
     response
 }
 
-fn block_status(reason: Reason) -> StatusCode {
+pub(crate) fn block_status(reason: Reason) -> StatusCode {
     match reason {
         Reason::UnknownModel => StatusCode::NOT_FOUND,
         Reason::ModelUnavailable | Reason::NoModel => StatusCode::SERVICE_UNAVAILABLE,
@@ -637,11 +658,11 @@ fn block_status(reason: Reason) -> StatusCode {
     }
 }
 
-fn reason_code(reason: Reason) -> String {
+pub(crate) fn reason_code(reason: Reason) -> String {
     serde_json::to_value(reason).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
-fn ask_message(decision: &Decision) -> &'static str {
+pub(crate) fn ask_message(decision: &Decision) -> &'static str {
     match decision.reason {
         Reason::Trains => "this model trains on prompts; send again with `invincible-confirmed: 1` to use it",
         Reason::Sensitive => "this request looks sensitive; send again with `invincible-confirmed: 1` to use the cloud",
@@ -650,7 +671,7 @@ fn ask_message(decision: &Decision) -> &'static str {
 }
 
 /// An error in the OpenAI shape.
-fn error(status: StatusCode, code: &str, message: &str) -> Response {
+pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
     (status, Json(json!({ "error": { "message": message, "type": code, "code": code } }))).into_response()
 }
 
