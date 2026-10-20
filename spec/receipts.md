@@ -13,7 +13,8 @@ receipt (`Receipt` in Autobot's `shared/session/Receipts.kt`). The point is a cl
 3. `GET /v1/receipts/<id>` returns it. A request that is still running is waited for (up to 10
    seconds); an unknown id answers 404. A node keeps the most recent 4096 receipts in memory, and
    finds older ones (and ones from before a restart) in its audit log ([audit.md](audit.md)).
-4. `GET /v1/node` returns `{"name": "…", "receipt_key": "<public key>"}`. A paired device also gets
+4. `GET /v1/node` returns `{"name": "…", "receipt_key": "<public key>", "speech": [...], "images": [...]}`
+   (the speech and image backends: `{"id", "tier", "host", "healthy"}` each). A paired device also gets
    the receipt key in the pairing reply ([pairing.md](pairing.md)), over the authenticated channel,
    and pins it.
 
@@ -86,3 +87,13 @@ HTTPS only, redirects held to the same rule) and answers `{"url", "status", "con
 "text", "truncated"}`, the text readable (tags, scripts and styles gone; at most 32 KiB). It gets a
 receipt like a chat completion, with `decision` null and one `egress` entry for the page's host,
 and is in the audit log with `api` `fetch`.
+
+## Speech and images
+
+`POST /v1/audio/speech {"input", "voice"?, "model"?, …}` and `POST /v1/images/generations
+{"prompt", "size"?, "model"?, …}` (OpenAI's shapes; on the loopback and the device API) go to the
+node's `[[speech]]` and `[[images]]` backends, routed by [routing.md](routing.md) with each
+backend a model (one on loopback is `node`, `owned`; any other `cloud`), the text's length for
+its tokens. They get a receipt like a chat completion, with the decision, the data policy, an
+`egress` entry when the backend is off the machine, and `redactions` when the text that left was
+redacted; the answer (audio bytes, or the images' JSON) comes back as the backend gave it.

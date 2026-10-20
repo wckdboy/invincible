@@ -291,8 +291,12 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   changed a note goes instead (`[image 1: shot.png] not sent: no longer on disk`). `/resume`
   shows the last requests with their images (`[image: shot.png]`, `· gone` when the file is
   not there). Without a terminal, `/image <path>` attaches to the next line.
-- **The project:** its `AGENTS.md`, `CLAUDE.md` or `.autobot/AGENTS.md` become part of the
-  agent's instructions; in a git repository it works like a careful engineer (find, read, change
+- **The project:** its `AGENTS.md`, `CLAUDE.md`, `HERMES.md` (or `.hermes.md`, Hermes Agent's)
+  and `.autobot/AGENTS.md` become part of the agent's instructions (`.cursorrules` where there
+  is none of those), from the repository's root down to the directory it works in, each text
+  once. A subdirectory's own `AGENTS.md` (a package in a monorepo) comes with the first tool
+  result that reaches that directory, once per conversation. `/context` lists the files in
+  play. In a git repository it works like a careful engineer (find, read, change
   in small edits, run the build and tests, never commit unless asked). `search` (regular
   expressions over the files, `.gitignore` respected) and `find_files` (globs) find code without a
   shell command to approve; `read_file` reads long files in parts.
@@ -472,7 +476,15 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (front matter with `name`, `description` and optionally `allowed-tools`, shown but never
   granted: approvals hold) and any files it needs beside it (scripts, references); a plain
   `<name>.md` is a skill too. The agent sees their names and descriptions, and reads one (or one
-  of its files) with `read_skill` when it fits the task. `autobot skills install <git-url|path>`
+  of its files) with `read_skill` when it fits the task. `autobot skills search pdf` looks in the
+  hub: [skills.sh](https://skills.sh), the public directory of skills in this format
+  (agentskills.io itself is the specification and has no index), else GitHub repositories with
+  the `agent-skills` topic. `autobot skills install pdf` (a name, `owner/repo/skill` or
+  `owner/repo`) fetches the skill's directory from GitHub and shows where it comes from, its
+  files (scripts marked) and its SKILL.md in full, and installs it only when you say yes
+  (`--yes` after reading). Nothing in it runs: files are written plain, and a script is
+  something the agent may ask to run like any command. The hub follows the node's network mode.
+  `autobot skills install <git-url|path>`
   adds the skills in a repository or directory (regular files only, never over one you have),
   `autobot skills` lists them, `autobot skills remove <name>`. The agent writes skills itself:
   after a task that took many steps and worked, `create_skill`; when a skill it followed was
@@ -491,6 +503,17 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   input = 0.27
   output = 1.10
   ```
+- **Tools on and off:** `autobot tools` lists the tool groups and their tools, on or off for the
+  bot (`--bot ops` for another); `autobot tools disable browser` turns one tool off
+  (`[agent] disabled_tools`), `autobot tools disable terminal` a whole group (`[agent] tools`),
+  `enable` turns them back on.
+- **Configuration from the command line:** `autobot config` shows the bot's file;
+  `autobot config get agent.max_steps`, `autobot config set approvals.mode edits`,
+  `autobot config unset gateway.model` change one dotted key in `config.toml` (or a bot's
+  `bot.toml`), with its comments kept. A change that would not load (an unknown key, a value of
+  the wrong kind, a tool group that does not exist) is refused and the file stays as it was;
+  `autobot serve` takes a good one within seconds. `autobot model` lists the models the gateway
+  serves and sets the one you pick (`autobot model qwen3.5-9b`, or `auto`).
 - **Coming from Hermes Agent or OpenClaw:** `autobot migrate hermes` (or `openclaw`) brings over
   its SOUL.md (as a personality when you have one already), memory and user profile entries
   (through the same checks), your skills, AGENTS.md, the plain commands of its allowlist
@@ -499,8 +522,21 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   another place. API keys and bot tokens come only with `--with-secrets`, into Autobot's own
   files (mode 0600: `~/.autobot/secrets/<provider>.key`, `telegram.token`, `discord.token`),
   with the command that gives a key to the gateway.
-- **Search over past conversations:** `search_sessions` finds what was said or decided before
-  (words in your messages, its answers and conversation summaries).
+- **Recall:** `search_sessions` finds what was said or decided in earlier conversations (words
+  in your messages, its answers and the summaries), and for the three conversations that match
+  best, a short call to the model says what each holds about it: decisions, names, paths, what
+  was left open. Each conversation has a small word index beside it (`sessions/.index`), so a
+  search does not read every transcript; summaries are kept by the conversation's hash and the
+  query (`sessions/.recall`), so asking again costs nothing until the conversation changes. They
+  run on the bot's model, or a smaller one with `[agent] recall_model = "qwen3.5-4b"` (`off`
+  for the matching messages only), as private as the turns. `/recall <what>` does the same for
+  you, in the terminal (the result goes with your next message) and, for the owner, in a chat.
+- **Speech and pictures:** when the node has a speech or an image backend
+  ([below](#speech-and-images-optional)), the agent has `speak` (text to an audio file) and
+  `generate_image`. On Telegram the speech goes as a voice message and a picture as a photo, on
+  Discord as an attachment; elsewhere the chat says where the file is (`~/.autobot/attachments`).
+  A backend on the node runs without asking; one off the machine is asked for first, like a cloud
+  model, and then the text goes out redacted, with a receipt.
 - **A team of agents:** define members in `config.toml`, and the agent hands them work with its
   `delegate` tool. Each member has its own instructions, only the tool groups you give it, and
   optionally its own model; it starts every task fresh, with just the goal and context it was
@@ -828,6 +864,31 @@ data_policy = "retention:30"        # what the provider does with prompts
   what was hidden.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
+
+### Speech and images (optional)
+
+`POST /v1/audio/speech` and `POST /v1/images/generations`, in OpenAI's shapes, go to the
+backends you give, under the same routing rules as chat:
+
+```toml
+[[speech]]
+id = "kokoro"
+base_url = "http://127.0.0.1:8880/v1"   # an OpenAI-compatible speech server here (Kokoro-FastAPI, …)
+voice = "af_heart"                      # when a request names none
+
+[[images]]
+id = "gpt-image"
+base_url = "https://api.openai.com/v1"  # off the machine: HTTPS, and the cloud rules
+upstream_model = "gpt-image-1"
+api_key_file = "keys/openai"
+data_policy = "retention:30"
+```
+
+A backend on loopback is the node's own and is taken first; any other is a cloud backend: never
+for a private request, offline or under `egress = "never"`, and asked about when the rules ask.
+The text that leaves (what to say, the prompt) is redacted first. Every request gets a receipt
+(`api` `speech` or `images` in the audit log). `GET /v1/node` lists the backends, and the agent
+offers `speak` and `generate_image` when there are some.
 
 ### Receipts
 

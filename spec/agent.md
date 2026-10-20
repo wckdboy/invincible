@@ -174,9 +174,13 @@ to the model and run, whatever the approval mode, and still under the unattended
 | `files-read` | `read_file`, `list_dir`, `read_skill` |
 | `web` | `web_fetch` (asks first; unattended, only allowlisted `https://` sites), `browser` where one is installed (a new site asks like a fetch; typing into a page asks, and is refused unattended) |
 | `files-write` | `write_file`, `edit_file` (in the working directory) |
-| `memory` | `remember`, `search_sessions`, `create_skill`, `improve_skill`, `update_user_profile` |
+| `memory` | `remember`, `search_sessions` (with a summary of the best matches, [Recall](#recall)), `create_skill`, `improve_skill`, `update_user_profile` |
 | `terminal` | `terminal` (allowlisted commands only), `process`, `execute_code` (a script, asked for like a command) |
 | `mcp` | every configured MCP server's tools (`<server>__<tool>`; unattended, only `mcp:<server>/<tool>` allowlisted) |
+| `plan` | `todo` |
+| `home` | `home` (Home Assistant, where it is set up) |
+| `schedule` | `schedule_task`, `list_schedules`, `cancel_schedule` |
+| `media` | `speak`, `generate_image`, where the node has a speech or image backend (one off the machine asks like a cloud model, and is refused unattended) |
 | `vault` | none: this machine has no such tool |
 
 No `tools` means every tool, as for schedules made here; a schedule from a device must name its
@@ -187,3 +191,22 @@ machine is, and sends it again when its UTC offset changes. The schedule records
 (`device:<name>`, from `invincible-caller`). Posting it again with the same `id` replaces it and
 keeps its creation time; `enabled: false` keeps it without running it. The phone collects results
 with `GET …/runs?after=<last run it has>`, so nothing is lost while it is away.
+
+On this machine, `[agent] tools` keeps a bot to some groups and `[agent] disabled_tools` turns
+single tools off (`autobot tools`); a recipe's `tools` work within what is left.
+
+## Recall
+
+`search_sessions` (and `/recall`) answer with, for each of the three conversations that match
+best, `[<id> · <date>]`, a short summary of what it holds about the query, and up to three of
+its matching messages (`user: …`, `assistant: …`); then `Also mentioned in:` and other matches.
+The summary is a model call on the gateway (the bot's model, or `[agent] recall_model`), with a
+`receipt` event, and is kept until that conversation changes. Without it (the model is down, or
+`recall_model = "off"`) the messages alone come back.
+
+## Files a turn makes
+
+A turn that used `speak` or `generate_image` keeps the file in `$AUTOBOT_HOME/attachments`, and
+the tool's result (in the `tool` events and the conversation) says where. Chat platforms get it
+after the answer: Telegram as a voice message or a photo, Discord as an attachment, the others as
+a line with the path.
