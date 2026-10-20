@@ -36,6 +36,16 @@ impl NetworkMode {
         }
     }
 
+    /// The text [decode] reads back: `offline`, `direct`, `tor:<host>:<port>`, `socks5:<host>:<port>`.
+    pub fn encode(&self) -> String {
+        match self {
+            Self::Offline => "offline".to_owned(),
+            Self::Direct => "direct".to_owned(),
+            Self::Tor { host, port } => format!("tor:{host}:{port}"),
+            Self::Socks5 { host, port } => format!("socks5:{host}:{port}"),
+        }
+    }
+
     pub fn is_offline(&self) -> bool {
         matches!(self, Self::Offline)
     }

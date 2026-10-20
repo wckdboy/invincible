@@ -1,0 +1,498 @@
+{
+  "spec": "egress",
+  "version": 0,
+  "cases": [
+    {
+      "name": "offline is offline",
+      "input": {
+        "network": "offline",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "direct goes straight out",
+      "input": {
+        "network": "direct",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "tor goes through its SOCKS port",
+      "input": {
+        "network": "tor:127.0.0.1:9050",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "tor:127.0.0.1:9050",
+        "action": "socks",
+        "proxy": "127.0.0.1:9050"
+      }
+    },
+    {
+      "name": "socks5 goes through the proxy",
+      "input": {
+        "network": "socks5:proxy.lan:1080",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "socks5:proxy.lan:1080",
+        "action": "socks",
+        "proxy": "proxy.lan:1080"
+      }
+    },
+    {
+      "name": "an IPv6 proxy keeps its brackets",
+      "input": {
+        "network": "socks5:[::1]:1080",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "socks5:[::1]:1080",
+        "action": "socks",
+        "proxy": "[::1]:1080"
+      }
+    },
+    {
+      "name": "an empty mode is offline",
+      "input": {
+        "network": "",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "an unknown kind is offline",
+      "input": {
+        "network": "vpn:10.0.0.1:1194",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "the kind is matched exactly",
+      "input": {
+        "network": "DIRECT",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "tor without an endpoint is offline",
+      "input": {
+        "network": "tor",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "tor without a port is offline",
+      "input": {
+        "network": "tor:127.0.0.1",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "port 0 is offline",
+      "input": {
+        "network": "tor:127.0.0.1:0",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "a port over 65535 is offline",
+      "input": {
+        "network": "socks5:proxy.lan:70000",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "a port that is not a number is offline",
+      "input": {
+        "network": "socks5:proxy.lan:http",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "a blank proxy host is offline",
+      "input": {
+        "network": "socks5: :1080",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "no proxy host is offline",
+      "input": {
+        "network": "socks5::1080",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "offline blocks before anything, cleartext too",
+      "input": {
+        "network": "offline",
+        "scheme": "http",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "offline blocks loopback unless allowed",
+      "input": {
+        "network": "offline",
+        "scheme": "http",
+        "host": "127.0.0.1",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "offline lets loopback through when allowed",
+      "input": {
+        "network": "offline",
+        "scheme": "http",
+        "host": "127.0.0.1",
+        "loopback_when_offline": true
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "offline lets localhost over HTTPS through when allowed",
+      "input": {
+        "network": "offline",
+        "scheme": "https",
+        "host": "localhost",
+        "loopback_when_offline": true
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "offline still blocks the rest when loopback is allowed",
+      "input": {
+        "network": "offline",
+        "scheme": "https",
+        "host": "api.example.com",
+        "loopback_when_offline": true
+      },
+      "expect": {
+        "mode": "offline",
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "cleartext to a remote host is blocked",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "block",
+        "reason": "cleartext"
+      }
+    },
+    {
+      "name": "cleartext to a private address is blocked",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "192.168.1.2",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "block",
+        "reason": "cleartext"
+      }
+    },
+    {
+      "name": "cleartext to localhost is fine",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "localhost",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "localhost in any case",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "LocalHost",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "a .localhost name is loopback",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "app.localhost",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "anywhere in 127/8 is loopback",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "127.5.6.7",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "IPv6 loopback in brackets",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "[::1]",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "IPv6 loopback without brackets",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "::1",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "IPv6 loopback written out",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "0:0:0:0:0:0:0:1",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "a name that starts like loopback is not",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "127.0.0.1.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "block",
+        "reason": "cleartext"
+      }
+    },
+    {
+      "name": "a name that starts with localhost is not",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "localhost.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "block",
+        "reason": "cleartext"
+      }
+    },
+    {
+      "name": "leading zeros are not loopback",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "127.0.0.01",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "block",
+        "reason": "cleartext"
+      }
+    },
+    {
+      "name": "an IPv4 number over 255 is not loopback",
+      "input": {
+        "network": "direct",
+        "scheme": "http",
+        "host": "127.0.0.256",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "direct",
+        "action": "block",
+        "reason": "cleartext"
+      }
+    },
+    {
+      "name": "loopback skips tor",
+      "input": {
+        "network": "tor:127.0.0.1:9050",
+        "scheme": "http",
+        "host": "127.0.0.1",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "tor:127.0.0.1:9050",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "loopback skips a socks5 proxy",
+      "input": {
+        "network": "socks5:proxy.lan:1080",
+        "scheme": "https",
+        "host": "localhost",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "socks5:proxy.lan:1080",
+        "action": "direct"
+      }
+    },
+    {
+      "name": "cleartext through tor is still blocked",
+      "input": {
+        "network": "tor:127.0.0.1:9050",
+        "scheme": "http",
+        "host": "api.example.com",
+        "loopback_when_offline": false
+      },
+      "expect": {
+        "mode": "tor:127.0.0.1:9050",
+        "action": "block",
+        "reason": "cleartext"
+      }
+    }
+  ]
+}

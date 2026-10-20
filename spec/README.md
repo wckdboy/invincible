@@ -7,6 +7,7 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 |---|---|---|
 | [routing.md](routing.md) | **v0, normative** | Where one request runs: node model, cloud model, ask first, or refuse |
 | [pairing.md](pairing.md) | **v0, implemented, unaudited** | How a device and a node pair and talk (Noise); pairing-code vectors, and full handshake transcripts from snow (`noise.json`) |
+| [egress.md](egress.md) | **v0, normative** | Where one outbound request may go: blocked (the kill switch), direct, or through Tor or a SOCKS5 proxy; what counts as loopback |
 | [redaction.md](redaction.md) | **v0, normative** | What is replaced before a request leaves for the cloud, and how it is restored |
 | [receipts.md](receipts.md) | **v0, normative** | The signed receipt for every request: where it ran, what left the node; vectors from an independent Ed25519 |
 | [audit.md](audit.md) | **v0, implemented** | The node's hash-chained log of every request, and the agent's log of its actions |
