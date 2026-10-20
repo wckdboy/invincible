@@ -428,13 +428,19 @@ pub fn thread_key(thread: &str) -> String {
     invincible::token::hex(&<sha2::Sha256 as sha2::Digest>::digest(thread.as_bytes())[..6])
 }
 
-/// Bytes attached to one mail at most: most servers take 25 MB, and base64 makes a third more.
-const MAX_ATTACHED: u64 = 18 * 1024 * 1024;
+/// Bytes attached to one mail at most: most servers take 25 MB, and base64 with its line breaks
+/// makes 37% more (15 MiB is about 21.6 MB sent). A server that takes less refuses it, and the
+/// answer then goes without the files.
+const MAX_ATTACHED: u64 = 15 * 1024 * 1024;
 
 /// [files] read as attachments, up to [MAX_ATTACHED] in all; those left over (too large, or
 /// unreadable: they go on their own, or are said where they are).
-fn attachments(files: Vec<crate::media::Made>) -> (Vec<crate::mail::Attachment>, Vec<crate::media::Made>) {
-    let (mut taken, mut rest, mut total) = (Vec::new(), Vec::new(), 0u64);
+type Taken = (Vec<crate::mail::Attachment>, Vec<crate::media::Made>, Vec<crate::media::Made>);
+
+/// [files] as attachments up to [MAX_ATTACHED] in all: the attachments, the files they are, and
+/// the rest.
+fn attachments(files: Vec<crate::media::Made>) -> Taken {
+    let (mut taken, mut made, mut rest, mut total) = (Vec::new(), Vec::new(), Vec::new(), 0u64);
     for file in files {
         let size = std::fs::metadata(&file.path).map(|m| m.len()).unwrap_or(u64::MAX);
         if total.saturating_add(size) > MAX_ATTACHED {
@@ -445,11 +451,12 @@ fn attachments(files: Vec<crate::media::Made>) -> (Vec<crate::mail::Attachment>,
             Ok(bytes) => {
                 total += bytes.len() as u64;
                 taken.push(crate::mail::Attachment { name: file.name(), mime: file.mime.clone(), bytes });
+                made.push(file);
             }
             _ => rest.push(file),
         }
     }
-    (taken, rest)
+    (taken, made, rest)
 }
 
 /// Email as [crate::channel] sees it.
@@ -580,8 +587,18 @@ impl Transport for Channel {
         files: Vec<crate::media::Made>,
     ) -> BoxFuture<'a, Result<Vec<crate::media::Made>, String>> {
         Box::pin(async move {
-            let (attachments, rest) = attachments(files);
-            self.mail_with(chat, &crate::markdown::to_plain(markdown), None, &attachments).await?;
+            let (attachments, made, mut rest) = attachments(files);
+            let text = crate::markdown::to_plain(markdown);
+            if let Err(e) = self.mail_with(chat, &text, None, &attachments).await {
+                if attachments.is_empty() {
+                    return Err(e);
+                }
+                // The server may refuse the size: the answer goes on its own, and the files after
+                // it one by one (each attached, or where it is saved).
+                tracing::warn!("email: the answer with its files was refused ({e}); sending it without them");
+                self.mail(chat, &text, None).await?;
+                rest.splice(0..0, made);
+            }
             Ok(rest)
         })
     }
@@ -783,6 +800,91 @@ fn incoming(channel: &Channel, config: &EmailConfig, mail: crate::mail::Mail) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SMTP that refuses a message with attachments (552, too large) and takes plain ones.
+    async fn picky_smtp(taken: Arc<Mutex<Vec<String>>>) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let taken = taken.clone();
+                tokio::spawn(async move {
+                    let (read, mut write) = stream.into_split();
+                    let mut read = BufReader::new(read);
+                    write.write_all(b"220 picky\r\n").await.unwrap();
+                    loop {
+                        let mut line = String::new();
+                        if read.read_line(&mut line).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+                        let upper = line.to_ascii_uppercase();
+                        let reply = if upper.starts_with("EHLO") {
+                            "250-picky\r\n250 AUTH PLAIN\r\n".to_owned()
+                        } else if upper.starts_with("AUTH") {
+                            "235 ok\r\n".to_owned()
+                        } else if upper.starts_with("DATA") {
+                            write.write_all(b"354 go\r\n").await.unwrap();
+                            let mut message = String::new();
+                            loop {
+                                let mut l = String::new();
+                                read.read_line(&mut l).await.unwrap();
+                                if l == ".\r\n" {
+                                    break;
+                                }
+                                message.push_str(&l);
+                            }
+                            if message.contains("multipart/mixed") {
+                                "552 message too large\r\n".to_owned()
+                            } else {
+                                taken.lock().unwrap().push(message);
+                                "250 queued\r\n".to_owned()
+                            }
+                        } else if upper.starts_with("QUIT") {
+                            write.write_all(b"221 bye\r\n").await.unwrap();
+                            return;
+                        } else {
+                            "250 ok\r\n".to_owned()
+                        };
+                        write.write_all(reply.as_bytes()).await.unwrap();
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn an_answer_whose_files_are_refused_goes_without_them() {
+        let home = std::env::temp_dir().join(format!("autobot-email-refused-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let file = home.join("speech-1.mp3");
+        std::fs::write(&file, b"ID3 audio").unwrap();
+        let taken: Arc<Mutex<Vec<String>>> = Arc::default();
+        let port = picky_smtp(taken.clone()).await;
+        let channel = Channel {
+            config: EmailConfig {
+                address: "bot@x.org".into(),
+                smtp: format!("127.0.0.1:{port}"),
+                ..Default::default()
+            },
+            password: "pw".into(),
+            network: invincible_policy::NetworkMode::Offline,
+            home: home.clone(),
+            name: "autobot".into(),
+            threads: Mutex::default(),
+        };
+        let made =
+            crate::media::Made { kind: crate::media::Kind::Speech, path: file.clone(), mime: "audio/mpeg".into() };
+        let left = channel.answer_with("ann@example.com", "Here it is.", vec![made]).await.unwrap();
+        assert_eq!(left.len(), 1, "the file goes after the answer, on its own");
+        assert_eq!(left[0].path, file);
+        let taken = taken.lock().unwrap();
+        assert_eq!(taken.len(), 1);
+        assert!(taken[0].contains("Here it is."), "{}", taken[0]);
+        drop(taken);
+        std::fs::remove_dir_all(home).unwrap();
+    }
 
     #[test]
     fn servers_and_security() {

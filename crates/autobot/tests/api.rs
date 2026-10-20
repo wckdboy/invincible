@@ -634,9 +634,14 @@ async fn a_turn_with_images_reaches_a_model_that_sees() {
 
     // Too many, not an image, not a data: URL: refused before the turn.
     let tiny = image_part(&noise_png(4), "image/png");
+    let attachments = std::path::Path::new(&kept).parent().unwrap().to_owned();
+    let files = || std::fs::read_dir(&attachments).unwrap().count();
+    let before = files();
     for (images, says) in [
         (json!(vec![tiny.clone(); 5]), "at most 4 images"),
         (json!([image_part(b"not a picture", "image/png")]), "not a PNG"),
+        // A good one, then a bad one: neither is kept.
+        (json!([tiny.clone(), image_part(b"not a picture", "image/png")]), "not a PNG"),
         (json!([{ "type": "image_url", "image_url": { "url": "https://example.org/x.png" } }]), "data: URL"),
     ] {
         let response =
@@ -645,6 +650,7 @@ async fn a_turn_with_images_reaches_a_model_that_sees() {
         let error: Value = response.json().await.unwrap();
         assert!(error["error"]["message"].as_str().unwrap().contains(says), "{error}");
     }
+    assert_eq!(files(), before, "a refused turn leaves no files");
     assert_eq!(asked.lock().unwrap().len(), 1);
     std::fs::remove_dir_all(dir).unwrap();
 }

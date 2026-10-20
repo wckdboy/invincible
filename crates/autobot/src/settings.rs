@@ -124,6 +124,25 @@ pub fn effective(def: &Def, key: &str) -> Result<(String, String), String> {
             _ => return Err(format!("there is no {key:?} in the configuration ({} is a value)", parts[..i].join("."))),
         };
     }
+    // What the bot works out at run time from what is written.
+    match key {
+        "agent.workdir" => value = serde_json::Value::String(config.agent.workdir(&def.home).display().to_string()),
+        "agent.heartbeat" => {
+            if let Ok(Some(every)) = config.agent.heartbeat_every() {
+                let written = value.as_str().unwrap_or_default().trim().to_owned();
+                // Only when the floor raised it.
+                if let Ok(crate::cron::When::Every(asked)) = crate::cron::When::parse(&format!("every {written}"))
+                    && asked < every
+                {
+                    value = serde_json::Value::String(format!(
+                        "{}m (written {written}; 5m at least)",
+                        every.as_secs() / 60
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
     let shown = match &value {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Null => "(none)".to_owned(),
@@ -458,6 +477,13 @@ mod tests {
         assert!(effective(&def, "agent.nonsense").unwrap_err().starts_with("there is no"));
         assert!(effective(&def, "agent.max_steps.x").is_err());
         assert!(effective(&def, "mcp.nothing").unwrap_err().contains("no default"));
+        // Worked out at run time: the working directory, the heartbeat's floor.
+        assert_eq!(effective(&def, "agent.workdir").unwrap().0, root.join("work").display().to_string());
+        change(&def, "agent.heartbeat", Some(value("1m"))).unwrap();
+        assert_eq!(effective(&def, "agent.heartbeat").unwrap().0, "5m (written 1m; 5m at least)");
+        change(&def, "agent.heartbeat", Some(value("2h"))).unwrap();
+        assert_eq!(effective(&def, "agent.heartbeat").unwrap().0, "2h");
+        change(&def, "agent.heartbeat", None).unwrap();
         // Refused, and the file as it was.
         for (key, bad) in [
             ("agent.shell", "\"bash\""),

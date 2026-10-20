@@ -58,6 +58,14 @@ pub struct Found {
     pub description: String,
 }
 
+/// Which skill directory of a repository is wanted.
+enum Want<'a> {
+    /// The one of this name (None: the only one there is).
+    Named(Option<String>),
+    /// The one at this path ("" for the root).
+    At(&'a str),
+}
+
 /// A skill fetched for review, in a directory of its own (removed when this is dropped).
 pub struct Fetched {
     pub name: String,
@@ -133,7 +141,8 @@ pub fn source(home: &Path, name: &str) -> Option<Source> {
     (!source.owner.is_empty()).then_some(source)
 }
 
-/// A digest of [dir]'s files (their paths and contents, `.source` left out): changed by any edit.
+/// A digest of [dir]'s files (their paths and contents, hidden ones too, `.source` left out):
+/// changed by any edit.
 pub fn digest(dir: &Path) -> String {
     fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<(String, Vec<u8>)>) {
         if depth > 4 {
@@ -141,7 +150,8 @@ pub fn digest(dir: &Path) -> String {
         }
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
+            // Autobot's own record; anything else here, hidden or not, is the owner's.
+            if depth == 0 && name == ".source" {
                 continue;
             }
             let Ok(kind) = entry.file_type() else { continue };
@@ -185,8 +195,11 @@ pub enum Status {
 pub struct Checked {
     pub name: String,
     pub status: Status,
-    /// Its files were edited here since it was installed.
+    /// Its files were edited here since it was installed; also when that cannot be told (a skill
+    /// installed before digests were kept), so an update asks rather than erase edits.
     pub modified: bool,
+    /// No digest to tell edits by.
+    pub untracked: bool,
     pub trust: crate::guard::Trust,
     pub source: Option<Source>,
 }
@@ -390,6 +403,23 @@ impl Hub {
     /// Fetches [id]'s directory from GitHub into a fresh directory under [scratch], for review.
     pub async fn fetch(&self, id: &str, scratch: &Path) -> Result<Fetched, String> {
         let (owner, repo, skill) = self.resolve(id).await?;
+        self.fetch_in(&owner, &repo, Want::Named(skill), scratch).await
+    }
+
+    /// Fetches the skill pinned at [pin] as its directory is now: the same directory of the same
+    /// repository, whatever else the repository has since.
+    pub async fn fetch_pinned(&self, pin: &Source, scratch: &Path) -> Result<Fetched, String> {
+        let plain = segment(&pin.owner)
+            && segment(&pin.repo)
+            && (pin.path.is_empty() || pin.path.split('/').all(|p| segment(p) && !p.starts_with('.')));
+        if !plain {
+            return Err(format!("{:?}: not a plain repository and directory", pin.source));
+        }
+        self.fetch_in(&pin.owner, &pin.repo, Want::At(&pin.path), scratch).await
+    }
+
+    async fn fetch_in(&self, owner: &str, repo: &str, want: Want<'_>, scratch: &Path) -> Result<Fetched, String> {
+        let (owner, repo) = (owner.to_owned(), repo.to_owned());
         // One revision for the tree and every file, so they belong together.
         let rev = self.head(&owner, &repo).await?;
         let tree = self.tree(&owner, &repo, &rev).await?;
@@ -418,11 +448,13 @@ impl Hub {
                 _ => None,
             })
             .collect();
-        let dir = match &skill {
-            Some(skill) => {
+        let dir = match want {
+            Want::At(path) if skill_dirs.iter().any(|d| d == path) => path.to_owned(),
+            Want::At(path) => return Err(format!("{owner}/{repo} no longer has {path}/SKILL.md")),
+            Want::Named(Some(skill)) => {
                 let named: Vec<&String> = skill_dirs
                     .iter()
-                    .filter(|d| d.rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case(skill)))
+                    .filter(|d| d.rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case(&skill)))
                     .collect();
                 match named.as_slice() {
                     [one] => (*one).clone(),
@@ -430,7 +462,7 @@ impl Hub {
                     _ => named.iter().min_by_key(|d| d.len()).map(|d| (*d).clone()).unwrap_or_default(),
                 }
             }
-            None => match skill_dirs.as_slice() {
+            Want::Named(None) => match skill_dirs.as_slice() {
                 [one] => one.clone(),
                 [] => return Err(format!("{owner}/{repo} has no SKILL.md")),
                 many => {
@@ -541,9 +573,11 @@ pub async fn check(hub: Result<&Hub, &str>, home: &Path, only: Option<&str>) -> 
     let mut out = Vec::new();
     for skill in skills {
         let pin = source(home, &skill.name);
+        let untracked = pin.as_ref().is_some_and(|p| p.digest.is_empty());
         let modified = match (&pin, skill.dir()) {
             (Some(pin), Some(dir)) if !pin.digest.is_empty() => digest(dir) != pin.digest,
-            _ => false,
+            (Some(_), _) => true,
+            (None, _) => false,
         };
         let status = match &pin {
             Some(pin) => match hub {
@@ -553,7 +587,7 @@ pub async fn check(hub: Result<&Hub, &str>, home: &Path, only: Option<&str>) -> 
             None => Status::Unpinned,
         };
         let trust = crate::guard::Trust::of(pin.as_ref().map(|p| p.owner.as_str()));
-        out.push(Checked { name: skill.name, status, modified, trust, source: pin });
+        out.push(Checked { name: skill.name, status, modified, untracked, trust, source: pin });
     }
     Ok(out)
 }

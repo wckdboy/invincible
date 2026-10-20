@@ -250,7 +250,11 @@ pub fn check_rows(checked: &[crate::hub::Checked]) -> String {
             Status::Unpinned => "local (not from the hub)".to_owned(),
             Status::Failed(why) => format!("could not check: {why}"),
         };
-        let edited = if c.modified { "; edited here" } else { "" };
+        let edited = match (c.modified, c.untracked) {
+            (_, true) => "; edits here unknown (installed before they were tracked)",
+            (true, false) => "; edited here",
+            _ => "",
+        };
         let from =
             c.source.as_ref().map(|s| format!("  {} @ {}", s.id, &s.rev[..s.rev.len().min(7)])).unwrap_or_default();
         out.push_str(&format!("{:<width$}  {status}{edited}  [{}]{from}\n", c.name, c.trust.label()));
@@ -278,19 +282,36 @@ pub async fn hub_update(home: &Path, name: Option<&str>, yes: bool, force: bool)
             }
         };
     }
+    // What could not be checked is said, and is not "up to date".
+    let unchecked: Vec<String> = checked
+        .iter()
+        .filter_map(|c| match &c.status {
+            crate::hub::Status::Failed(why) => Some(format!("{}: could not check: {why}", c.name)),
+            crate::hub::Status::Gone => Some(format!("{}: gone from its source", c.name)),
+            _ => None,
+        })
+        .collect();
+    for line in &unchecked {
+        println!("{line}");
+    }
     if due.is_empty() {
-        println!("every skill from the hub is up to date");
-        return Ok(());
+        if unchecked.is_empty() {
+            println!("every skill from the hub is up to date");
+            return Ok(());
+        }
+        return Err(format!("{} skills could not be updated", unchecked.len()));
     }
     let mut failed = Vec::new();
     for c in due {
         let Some(pin) = &c.source else { continue };
         let result: Result<bool, String> = async {
-            let fetched = hub.as_ref().map_err(Clone::clone)?.fetch(&pin.id, &std::env::temp_dir()).await?;
+            let fetched = hub.as_ref().map_err(Clone::clone)?.fetch_pinned(pin, &std::env::temp_dir()).await?;
             println!("{}", crate::hub::changes(home, &c.name, &fetched));
             println!("{}", crate::hub::guard(&fetched));
             if c.modified {
-                println!("  {} was edited here since it was installed: updating replaces those edits\n", c.name);
+                let what =
+                    if c.untracked { "may have been edited here" } else { "was edited here since it was installed" };
+                println!("  {} {what}: updating replaces those edits\n", c.name);
                 if yes && !force {
                     println!("left {} alone (edited here; add --force, or update it without --yes)", c.name);
                     return Ok(false);
@@ -312,6 +333,7 @@ pub async fn hub_update(home: &Path, name: Option<&str>, yes: bool, force: bool)
             }
         }
     }
+    failed.extend(unchecked);
     if failed.is_empty() { Ok(()) } else { Err(format!("not updated: {}", failed.join(", "))) }
 }
 

@@ -242,7 +242,13 @@ async fn installed_skills_are_pinned_checked_updated_and_audited() {
     assert!(autobot::hub::check(Ok(&hub), &home, Some("nope")).await.is_err());
 
     // The update is shown with what changes and the scan's word, then replaces it.
-    let new = hub.fetch(&pin.id, &scratch).await.unwrap();
+    // Fetched where it was pinned, the same directory.
+    let new = hub.fetch_pinned(&pin, &scratch).await.unwrap();
+    assert_eq!(new.pin.path, "pdf");
+    let moved = autobot::hub::Source { path: "elsewhere".into(), ..pin.clone() };
+    assert!(hub.fetch_pinned(&moved, &scratch).await.err().unwrap().contains("no longer has elsewhere/SKILL.md"));
+    let crafted = autobot::hub::Source { path: "../x".into(), ..pin.clone() };
+    assert!(hub.fetch_pinned(&crafted, &scratch).await.is_err());
     let changes = autobot::hub::changes(&home, "pdf", &new);
     assert!(changes.contains("added    scripts/new.sh"), "{changes}");
     assert!(changes.contains("removed  scripts/old.py") && changes.contains("removed  notes.md"), "{changes}");
@@ -262,6 +268,10 @@ async fn installed_skills_are_pinned_checked_updated_and_audited() {
     assert_eq!((pin.rev.as_str(), pin.tree.as_str()), ("bbb2222", "tree-pdf-2"));
     let checked = autobot::hub::check(Ok(&hub), &home, Some("pdf")).await.unwrap();
     assert!(checked[0].status == Status::Current && !checked[0].modified);
+    // A hidden file of the owner's is an edit too; Autobot's own `.source` is not.
+    std::fs::write(home.join("skills/pdf/.env"), "KEY=1").unwrap();
+    assert!(autobot::hub::check(Ok(&hub), &home, Some("pdf")).await.unwrap()[0].modified);
+    std::fs::remove_file(home.join("skills/pdf/.env")).unwrap();
 
     // An update that is not the skill puts the old one back.
     let other = hub.fetch("acme/kit/pdf", &scratch).await.unwrap();
@@ -307,6 +317,11 @@ async fn an_offline_check_says_so_for_pinned_skills_and_still_lists_local_ones()
     let checked = autobot::hub::check(Err("offline"), &home, None).await.unwrap();
     let rows = autobot::manage::check_rows(&checked);
     assert!(rows.contains("notes  local (not from the hub)  [local]"), "{rows}");
-    assert!(rows.contains("pdf    could not check: offline  [community]  acme/skills/pdf @ abc1234"), "{rows}");
+    assert!(
+        rows.contains("pdf    could not check: offline; edits here unknown (installed before they were tracked)  [community]  acme/skills/pdf @ abc1234"),
+        "{rows}"
+    );
+    let pdf = checked.iter().find(|c| c.name == "pdf").unwrap();
+    assert!(pdf.modified && pdf.untracked, "no digest: an update asks rather than erase edits");
     std::fs::remove_dir_all(home).unwrap();
 }

@@ -267,8 +267,14 @@ pub fn from_data_url(url: &str, dir: &Path) -> Result<Attachment, String> {
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let mut file = options.open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    std::io::Write::write_all(&mut file, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-    attach(&path)
+    let written = std::io::Write::write_all(&mut file, &bytes).map_err(|e| format!("{}: {e}", path.display()));
+    drop(file);
+    // Nothing is left of an image that is not taken.
+    let attached = written.and_then(|()| attach(&path));
+    if attached.is_err() {
+        let _ = std::fs::remove_file(&path);
+    }
+    attached
 }
 
 /// Whether a model's error says it cannot take images (a router that picked one that cannot see).

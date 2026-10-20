@@ -525,7 +525,8 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `enable` turns them back on.
 - **Configuration from the command line:** `autobot config` shows the bot's file;
   `autobot config get agent.max_steps` shows the value the bot runs with, defaults included
-  (`24  (default)`, `40  (set in config.toml)`, `inherited from config.toml` for a named bot);
+  (`24  (default)`, `40  (set in config.toml)`, `inherited from config.toml` for a named bot),
+  with what the bot works out from it (the working directory, the heartbeat's 5-minute floor);
   `autobot config set approvals.mode edits` and
   `autobot config unset gateway.model` change one dotted key in `config.toml` (or a bot's
   `bot.toml`), with its comments kept. A change that would not load (an unknown key, a value of
@@ -556,8 +557,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `generate_image`. They go with the answer in the platform's own way: a voice message and a photo
   on Telegram, an attachment on Discord, Signal and email, a file in the thread on Slack (the app
   needs `files:write`), uploaded media on Matrix (a voice message, a picture), an audio or image
-  message on WhatsApp (MP3, OGG, AAC, PNG, JPEG). What a platform cannot take, the chat names with
-  its path (`~/.autobot/attachments`).
+  message on WhatsApp (MP3, OGG, AAC, PNG, JPEG). An email answer carries up to 15 MiB of files;
+  when the mail server refuses that, the answer goes without them and the files follow one by
+  one. What a platform cannot take, the chat names with its path (`~/.autobot/attachments`).
   A backend on the node runs without asking; one off the machine is asked for first, like a cloud
   model, and then the text goes out redacted, with a receipt.
 - **A team of agents:** define members in `config.toml`, and the agent hands them work with its

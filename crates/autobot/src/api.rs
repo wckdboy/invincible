@@ -637,7 +637,20 @@ fn sent_images(bot: &BotApi, parts: &[Value]) -> Result<Vec<crate::images::Attac
         })
         .collect::<Result<Vec<_>, _>>()?;
     let dir = bot.home().join("attachments");
-    urls.into_iter().map(|url| crate::images::from_data_url(url, &dir)).collect()
+    let mut kept = Vec::new();
+    for url in urls {
+        match crate::images::from_data_url(url, &dir) {
+            Ok(image) => kept.push(image),
+            Err(e) => {
+                // A refused turn keeps none of its images.
+                for image in kept {
+                    let _ = std::fs::remove_file(image.path);
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(kept)
 }
 
 /// What one turn changes in its bot's agent.
