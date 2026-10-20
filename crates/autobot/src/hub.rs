@@ -220,7 +220,14 @@ impl Hub {
     /// Fetches [id]'s directory from GitHub into a fresh directory under [scratch], for review.
     pub async fn fetch(&self, id: &str, scratch: &Path) -> Result<Fetched, String> {
         let (owner, repo, skill) = self.resolve(id).await?;
-        let tree = self.json(&format!("{}/repos/{owner}/{repo}/git/trees/HEAD?recursive=1", self.github)).await?;
+        // One revision for the tree and every file, so they belong together.
+        let commit = self.json(&format!("{}/repos/{owner}/{repo}/commits/HEAD", self.github)).await?;
+        let rev = commit["sha"]
+            .as_str()
+            .filter(|s| s.len() >= 7 && s.chars().all(|c| c.is_ascii_hexdigit()))
+            .ok_or(format!("{owner}/{repo}: GitHub gave no revision"))?
+            .to_owned();
+        let tree = self.json(&format!("{}/repos/{owner}/{repo}/git/trees/{rev}?recursive=1", self.github)).await?;
         let blobs: Vec<(String, u64, String)> = tree["tree"]
             .as_array()
             .into_iter()
@@ -271,7 +278,7 @@ impl Hub {
         std::fs::create_dir_all(&target).map_err(|e| format!("{}: {e}", target.display()))?;
         let mut fetched = Fetched {
             name: name.clone(),
-            url: format!("https://github.com/{owner}/{repo}/tree/HEAD/{dir}"),
+            url: format!("https://github.com/{owner}/{repo}/tree/{rev}/{dir}"),
             dir: target.clone(),
             skill_md: String::new(),
             files: Vec::new(),
@@ -292,12 +299,22 @@ impl Hub {
                 continue;
             }
             let url = format!(
-                "{}/{owner}/{repo}/HEAD/{}",
+                "{}/{owner}/{repo}/{rev}/{}",
                 self.raw,
                 path.split('/').map(encode).collect::<Vec<_>>().join("/")
             );
-            let bytes = self.get(&url).await?.bytes().await.map_err(|e| format!("{rel}: {}", e.without_url()))?;
-            if bytes.len() as u64 > budget {
+            // Read in pieces, and no further than what is left of the budget.
+            let mut response = self.get(&url).await?;
+            let mut bytes = Vec::new();
+            let mut over = false;
+            while let Some(chunk) = response.chunk().await.map_err(|e| format!("{rel}: {}", e.without_url()))? {
+                if (bytes.len() + chunk.len()) as u64 > budget {
+                    over = true;
+                    break;
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            if over {
                 fetched.left_out.push(format!("{rel} (over the limit)"));
                 continue;
             }

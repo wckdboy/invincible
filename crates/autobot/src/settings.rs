@@ -121,13 +121,10 @@ pub fn change(def: &Def, key: &str, item: Option<toml_edit::Item>) -> Result<boo
     Ok(was)
 }
 
+/// Written whole, through a temporary file of its own, readable by the owner only (it can hold
+/// MCP servers' environments).
 fn write(path: &Path, text: &str) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+    invincible::fsutil::replace_private(path, text)
 }
 
 /// Where [key] is set for [def], and its value as written: in its own file, or (a named bot)

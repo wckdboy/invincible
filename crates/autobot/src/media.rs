@@ -160,12 +160,20 @@ pub fn image_mime(bytes: &[u8]) -> &'static str {
     }
 }
 
-/// Keeps [bytes] in [dir] as `<what>-<time>.<ext>`; where.
+/// Keeps [bytes] in [dir] as `<what>-<time>-<random>.<ext>`, a new file (two turns at once never
+/// share one); where.
 pub fn save(dir: &Path, what: &str, mime: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    use std::io::Write as _;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");
-    let path = dir.join(format!("{what}-{stamp}.{}", extension(mime)));
-    std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let random = invincible::token::hex(&invincible::token::random::<4>()?);
+    let path = dir.join(format!("{what}-{stamp}-{random}.{}", extension(mime)));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    file.write_all(bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(path)
 }
 

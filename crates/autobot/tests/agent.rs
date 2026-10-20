@@ -1778,3 +1778,21 @@ async fn context_files_from_the_start_and_a_nested_one_on_the_way() {
     assert!(!results[1].contains("make check"), "once per conversation");
     assert_eq!(autobot::context::given("ctx"), [work.join("pkg/AGENTS.md")]);
 }
+
+#[tokio::test]
+async fn a_change_in_a_directory_with_its_own_instructions_waits_for_them() {
+    let edit = json!({"path": "pkg/new.rs", "content": "fn x() {}\n"});
+    let (url, script) = gateway(vec![call("write_file", edit.clone()), call("write_file", edit), say("Done.")]).await;
+    let dir = temp("context-write");
+    let work = dir.join("work");
+    std::fs::create_dir_all(work.join("pkg")).unwrap();
+    std::fs::write(work.join("pkg/AGENTS.md"), "In pkg: four spaces.").unwrap();
+    let agent = agent(&url, &dir, ApprovalMode::Trust, true);
+    let mut session = Session::open(&dir.join("sessions"), "ctx-write").unwrap();
+    agent.turn(&mut session, "add pkg/new.rs", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    let script = script.lock().unwrap();
+    let first = script.seen[1].1["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "tool").cloned();
+    let first = first.unwrap()["content"].as_str().unwrap().to_owned();
+    assert!(first.starts_with("not changed yet") && first.contains("four spaces"), "{first}");
+    assert_eq!(std::fs::read_to_string(work.join("pkg/new.rs")).unwrap(), "fn x() {}\n", "the second call wrote it");
+}

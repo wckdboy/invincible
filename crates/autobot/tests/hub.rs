@@ -53,8 +53,9 @@ async fn stand_in(down: bool) -> (Hub, Arc<Mutex<Vec<String>>>) {
                 }
             }),
         )
+        .route("/repos/acme/skills/commits/HEAD", get(|| async { Json(json!({ "sha": "abc1234" })) }))
         .route(
-            "/repos/acme/skills/git/trees/HEAD",
+            "/repos/acme/skills/git/trees/abc1234",
             get(|| async {
                 Json(json!({ "tree": [
                     { "path": "README.md", "type": "blob", "mode": "100644", "size": 10 },
@@ -67,7 +68,7 @@ async fn stand_in(down: bool) -> (Hub, Arc<Mutex<Vec<String>>>) {
             }),
         )
         .route(
-            "/acme/skills/HEAD/{*path}",
+            "/acme/skills/abc1234/{*path}",
             get(move |Path(path): Path<String>| {
                 let asked = c.clone();
                 async move {
@@ -109,7 +110,7 @@ async fn a_skill_is_fetched_for_review_and_installed_without_running_anything() 
     // By name: the most installed skill of exactly that name.
     let fetched = hub.fetch("pdf", &scratch).await.unwrap();
     assert_eq!(fetched.name, "pdf");
-    assert_eq!(fetched.url, "https://github.com/acme/skills/tree/HEAD/skills/pdf");
+    assert_eq!(fetched.url, "https://github.com/acme/skills/tree/abc1234/skills/pdf");
     let files: Vec<(&str, bool)> = fetched.files.iter().map(|(p, _, s)| (p.as_str(), *s)).collect();
     assert_eq!(files, [("SKILL.md", false), ("scripts/fill.py", true)]);
     assert!(fetched.left_out.iter().any(|w| w.starts_with(".env")), "no dot files: {:?}", fetched.left_out);

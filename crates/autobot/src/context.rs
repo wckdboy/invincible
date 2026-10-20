@@ -6,7 +6,7 @@
 //! once.
 //!
 //! - **At the start**: the working directory's, and when it is inside a git repository, those of
-//!   the directories from the repository's root down to it (at most five levels up), root first,
+//!   the directories from the repository's root down to it, root first,
 //!   so the most specific comes last. At most 24 KiB in all, in the system prompt.
 //! - **On the way**: when a file tool first reaches a subdirectory that has its own (a nested
 //!   `AGENTS.md` in a monorepo's package), its text goes with that tool's result, once per
@@ -28,8 +28,6 @@ const FALLBACK: &str = ".cursorrules";
 const STARTUP: usize = 24 * 1024;
 /// One nested file, at most.
 const NESTED: usize = 16 * 1024;
-/// Directories above the working directory looked at for a repository's root.
-const UP: usize = 5;
 
 /// One context file.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,9 +74,9 @@ fn in_dir(dir: &Path, workdir: &Path, seen: &mut HashSet<[u8; 32]>) -> Vec<File>
         .collect()
 }
 
-/// The git repository's root above (or at) [dir], within [UP] levels.
+/// The git repository's root above (or at) [dir].
 fn repo_root(dir: &Path) -> Option<PathBuf> {
-    dir.ancestors().take(UP + 1).find(|d| d.join(".git").exists()).map(Path::to_owned)
+    dir.ancestors().find(|d| d.join(".git").exists()).map(Path::to_owned)
 }
 
 /// The files for working in [workdir]: from its repository's root down to it.
@@ -116,6 +114,13 @@ fn cut(text: &str, max: usize) -> &str {
 
 /// Nested files given in each conversation so far: (conversation → paths).
 static GIVEN: Mutex<Option<HashMap<String, Vec<PathBuf>>>> = Mutex::new(None);
+
+/// A conversation that starts over has had none.
+pub fn forget(session: &str) {
+    if let Some(map) = GIVEN.lock().expect("context").as_mut() {
+        map.remove(session);
+    }
+}
 
 /// The nested files taken in [session] so far.
 pub fn given(session: &str) -> Vec<PathBuf> {

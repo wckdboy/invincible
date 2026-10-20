@@ -220,6 +220,7 @@ impl Session {
         }
         let _ = std::fs::remove_file(self.undo_path());
         self.messages.clear();
+        crate::context::forget(&self.id);
         Ok(())
     }
 

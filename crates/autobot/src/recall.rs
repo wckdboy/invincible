@@ -31,8 +31,16 @@ const EXCERPT: usize = 12_000;
 /// Summaries kept in the cache at most (the oldest go first).
 const CACHED: usize = 500;
 
+/// The index format; an index of another is made again.
+const FORMAT: u32 = 1;
+
 #[derive(Default, Serialize, Deserialize)]
 struct Index {
+    #[serde(default)]
+    v: u32,
+    /// Where each searched line starts, in bytes: read back without reading what is before.
+    #[serde(default)]
+    offsets: BTreeMap<usize, u64>,
     /// The bytes of the conversation it covers.
     len: u64,
     /// SHA-256 of the last [TAIL] bytes of those.
@@ -85,9 +93,9 @@ fn index(dir: &Path, id: &str) -> Option<Index> {
         return Some(index);
     }
     // Grown since (the part it covered unchanged), or new, or rewritten: from where it holds.
-    let grown = index.len > 0 && index.len < len && index.tail == tail_hash(&mut file, index.len);
+    let grown = index.v == FORMAT && index.len > 0 && index.len < len && index.tail == tail_hash(&mut file, index.len);
     if !grown {
-        index = Index::default();
+        index = Index { v: FORMAT, ..Index::default() };
     }
     file.seek(std::io::SeekFrom::Start(index.len)).ok()?;
     let mut reader = std::io::BufReader::new(&mut file);
@@ -100,9 +108,11 @@ fn index(dir: &Path, id: &str) -> Option<Index> {
         if n == 0 || !line.ends_with('\n') {
             break;
         }
+        let start = read;
         read += n as u64;
         if let Some((_, text)) = searched(line.trim_end()) {
             let at = index.lines;
+            index.offsets.insert(at, start);
             for word in words(&text).into_iter().collect::<BTreeSet<_>>() {
                 index.terms.entry(word).or_default().push(at);
             }
@@ -132,17 +142,32 @@ pub struct Hit {
     pub snippet: String,
 }
 
-/// The lines [lines] of the conversation [id] in [dir] (those there are), by number.
+/// The searched lines [lines] of the conversation [id] in [dir] (those there are), by number,
+/// each read where the index says it starts.
 fn read_lines(dir: &Path, id: &str, lines: &BTreeSet<usize>) -> BTreeMap<usize, String> {
+    let Some(index) = index(dir, id) else { return BTreeMap::new() };
     let Ok(file) = std::fs::File::open(dir.join(format!("{id}.jsonl"))) else { return BTreeMap::new() };
-    let last = lines.iter().next_back().copied().unwrap_or(0);
-    std::io::BufReader::new(file)
-        .lines()
-        .take(last + 1)
-        .enumerate()
-        .filter(|(n, _)| lines.contains(n))
-        .filter_map(|(n, l)| Some((n, l.ok()?)))
-        .collect()
+    let mut reader = std::io::BufReader::new(file);
+    let mut out = BTreeMap::new();
+    for n in lines {
+        let Some(offset) = index.offsets.get(n) else { continue };
+        let mut line = String::new();
+        if reader.seek(std::io::SeekFrom::Start(*offset)).is_ok() && reader.read_line(&mut line).is_ok() {
+            out.insert(*n, line.trim_end().to_owned());
+        }
+    }
+    out
+}
+
+/// The searched lines around each of [lines] in [id]'s index: two before and two after.
+fn around(dir: &Path, id: &str, lines: &BTreeSet<usize>) -> BTreeSet<usize> {
+    let Some(index) = index(dir, id) else { return lines.clone() };
+    let mut near = BTreeSet::new();
+    for line in lines {
+        near.extend(index.offsets.range(..*line).rev().take(2).map(|(n, _)| *n));
+        near.extend(index.offsets.range(*line..).take(3).map(|(n, _)| *n));
+    }
+    near
 }
 
 fn snippet(role: &str, content: &str, query: &[String]) -> String {
@@ -201,12 +226,12 @@ pub fn search(dir: &Path, query: &str, limit: usize, skip: &str) -> Vec<Hit> {
 /// The part of conversation [id] around [lines] (the messages before and after each), as
 /// `role: text` lines, at most [EXCERPT] characters.
 fn excerpt(dir: &Path, id: &str, lines: &BTreeSet<usize>) -> String {
-    let near: BTreeSet<usize> = lines.iter().flat_map(|l| l.saturating_sub(2)..=l + 2).collect();
+    let near = around(dir, id, lines);
     let mut out = String::new();
     let mut last = None;
     for (n, line) in read_lines(dir, id, &near) {
         let Some((role, content)) = searched(&line) else { continue };
-        if last.is_some_and(|l: usize| n > l + 3) {
+        if last.is_some_and(|l: usize| n > l + 6) {
             out.push_str("…\n");
         }
         last = Some(n);
@@ -413,6 +438,8 @@ mod tests {
         std::fs::write(dir.join("a.jsonl"), &text).unwrap();
         let grown = index(&dir, "a").unwrap();
         assert_eq!(grown.terms["deploy"], [0, 3]);
+        let lines = read_lines(&dir, "a", &BTreeSet::from([3]));
+        assert!(lines[&3].contains("deploy production too"), "read at its offset");
         assert_eq!(grown.lines, 4);
         assert!(!grown.terms.contains_key("half"));
         // Rewritten (the same length, other words): indexed again.

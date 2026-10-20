@@ -295,7 +295,8 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   and `.autobot/AGENTS.md` become part of the agent's instructions (`.cursorrules` where there
   is none of those), from the repository's root down to the directory it works in, each text
   once. A subdirectory's own `AGENTS.md` (a package in a monorepo) comes with the first tool
-  result that reaches that directory, once per conversation. `/context` lists the files in
+  result that reaches that directory, once per conversation (a write or an edit there waits for
+  it). `/context` lists the files in
   play. In a git repository it works like a careful engineer (find, read, change
   in small edits, run the build and tests, never commit unless asked). `search` (regular
   expressions over the files, `.gitignore` respected) and `find_files` (globs) find code without a

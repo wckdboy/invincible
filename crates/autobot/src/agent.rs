@@ -662,6 +662,15 @@ impl Agent {
         if matches!(call, crate::tools::Call::Speak { .. } | crate::tools::Call::Image { .. }) {
             return self.make(session, &call, approver, grants, events).await;
         }
+        // A change in a directory with instructions of its own: those first, then the change.
+        if matches!(call, crate::tools::Call::WriteFile { .. } | crate::tools::Call::EditFile { .. }) {
+            let notes = self.tools.nested_notes(&call, session);
+            if !notes.is_empty() {
+                return format!(
+                    "not changed yet: this directory has instructions of its own; follow them and call again.{notes}"
+                );
+            }
+        }
         if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
             events(Event::Diff(&diff));
         }
@@ -745,22 +754,23 @@ impl Agent {
             .take(120)
             .collect();
         let media = self.tools.media().get(&self.gateway).await;
-        let mut private = self.gateway.private();
+        // Unless the owner said yes to sending it off the machine, it is private: the node's
+        // backend or nothing, whatever the gateway's settings (a local backend that fails must
+        // not fall back to a cloud one unasked).
         let mut confirmed = false;
         if let Some(host) = media.leaves_for(kind) {
             let action = Action::Cloud(format!("{what} sends \"{shown}\" to {host}"));
             if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {
                 return refusal(&action, instead);
             }
-            (private, confirmed) = (false, true);
+            confirmed = true;
         }
         events(Event::Tool(&format!("{what}: {shown}")));
-        let mut answer = self.gateway.make(path, &body, private, confirmed).await;
-        // The node's own backend is down and the router would go off the machine: ask.
-        if let Err(GatewayError::Confirm(why)) = &answer
-            && !confirmed
-        {
-            let action = Action::Cloud(format!("{what}: {why}"));
+        let mut answer = self.gateway.make(path, &body, !confirmed, confirmed).await;
+        // The node's own backend failed, and there is one off the machine: ask, then send there.
+        let cloud = media.of(kind).iter().find(|b| b.tier != "node").map(|b| b.host.clone());
+        if let (Err(e), false, Some(host)) = (&answer, confirmed, cloud) {
+            let action = Action::Cloud(format!("{what} sends \"{shown}\" to {host} (the node's own failed: {e})"));
             if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {
                 return refusal(&action, instead);
             }
