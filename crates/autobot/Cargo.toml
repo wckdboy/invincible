@@ -31,7 +31,6 @@ ignore = "0.4"
 globset = "0.4"
 regex = "1"
 crossterm = "0.28"
-rustyline = "15"
 unicode-width = "0.2"
 # Discord's gateway is a websocket.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }

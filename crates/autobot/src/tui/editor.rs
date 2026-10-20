@@ -1,0 +1,455 @@
+//! The composer's text: several lines, a cursor, the usual editing keys (ctrl+a/e/w/u/k/y,
+//! words with alt), history on ↑/↓ at the first and last line, and large pastes kept aside as
+//! `[pasted N lines]` until the message is sent.
+
+use std::path::Path;
+
+use unicode_width::UnicodeWidthChar;
+
+/// Pastes longer than this many lines (or characters) are shown as one label.
+const PASTE_LINES: usize = 4;
+const PASTE_CHARS: usize = 800;
+
+#[derive(Debug, Default)]
+pub struct Editor {
+    text: String,
+    /// A byte index into [text], on a character boundary.
+    cursor: usize,
+    history: Vec<String>,
+    /// Where ↑/↓ is in [history] (None: the draft), and the draft kept while browsing.
+    browsing: Option<usize>,
+    draft: String,
+    /// Labels standing in for pastes this session, and what they stand for.
+    pastes: Vec<(String, String)>,
+    /// What ctrl+w/u/k took, for ctrl+y.
+    killed: String,
+}
+
+impl Editor {
+    pub fn with_history(history: Vec<String>) -> Self {
+        Self { history, ..Self::default() }
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    pub fn history(&self) -> &[String] {
+        &self.history
+    }
+
+    /// Replaces everything (a prefilled request, a completion).
+    pub fn set(&mut self, text: &str) {
+        text.clone_into(&mut self.text);
+        self.cursor = self.text.len();
+        self.browsing = None;
+    }
+
+    /// Replaces the bytes [range] with [with], the cursor after it.
+    pub fn replace(&mut self, range: std::ops::Range<usize>, with: &str) {
+        self.text.replace_range(range.clone(), with);
+        self.cursor = range.start + with.len();
+    }
+
+    pub fn insert(&mut self, s: &str) {
+        self.text.insert_str(self.cursor, s);
+        self.cursor += s.len();
+        self.browsing = None;
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        self.text.insert(self.cursor, c);
+        self.cursor += c.len_utf8();
+        self.browsing = None;
+    }
+
+    /// A paste: as it is when short, as a label when long.
+    pub fn paste(&mut self, text: &str) {
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let lines = text.lines().count();
+        if lines <= PASTE_LINES && text.chars().count() <= PASTE_CHARS {
+            self.insert(&text);
+            return;
+        }
+        let what = if lines > 1 { format!("{lines} lines") } else { format!("{} chars", text.chars().count()) };
+        let base = format!("[pasted {what}");
+        let n =
+            self.pastes.iter().filter(|(l, _)| *l == format!("{base}]") || l.starts_with(&format!("{base} #"))).count();
+        let label = if n == 0 { format!("[pasted {what}]") } else { format!("[pasted {what} #{}]", n + 1) };
+        self.insert(&label);
+        self.pastes.push((label, text));
+    }
+
+    /// The labels standing in for pastes (to show them quieter).
+    pub fn paste_labels(&self) -> impl Iterator<Item = &str> {
+        self.pastes.iter().map(|(label, _)| label.as_str())
+    }
+
+    fn before(&self) -> &str {
+        &self.text[..self.cursor]
+    }
+
+    fn line_start(&self) -> usize {
+        self.before().rfind('\n').map_or(0, |i| i + 1)
+    }
+
+    fn line_end(&self) -> usize {
+        self.text[self.cursor..].find('\n').map_or(self.text.len(), |i| self.cursor + i)
+    }
+
+    pub fn left(&mut self) {
+        if let Some(c) = self.before().chars().next_back() {
+            self.cursor -= c.len_utf8();
+        }
+    }
+
+    pub fn right(&mut self) {
+        if let Some(c) = self.text[self.cursor..].chars().next() {
+            self.cursor += c.len_utf8();
+        }
+    }
+
+    pub fn home(&mut self) {
+        self.cursor = self.line_start();
+    }
+
+    pub fn end(&mut self) {
+        self.cursor = self.line_end();
+    }
+
+    /// Where the word before the cursor starts (spaces before it skipped).
+    fn word_back(&self) -> usize {
+        let before = self.before();
+        let trimmed = before.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+        trimmed.rfind(|c: char| !c.is_alphanumeric() && c != '_').map_or(0, |i| i + 1)
+    }
+
+    fn word_forward(&self) -> usize {
+        let after = &self.text[self.cursor..];
+        let skip = after.find(|c: char| c.is_alphanumeric() || c == '_').unwrap_or(after.len());
+        let rest = &after[skip..];
+        let word = rest.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(rest.len());
+        self.cursor + skip + word
+    }
+
+    pub fn word_left(&mut self) {
+        self.cursor = self.word_back();
+    }
+
+    pub fn word_right(&mut self) {
+        self.cursor = self.word_forward();
+    }
+
+    pub fn backspace(&mut self) {
+        // A paste's label goes whole.
+        if let Some(label) = self.pastes.iter().map(|(l, _)| l.clone()).find(|l| self.before().ends_with(l.as_str())) {
+            let start = self.cursor - label.len();
+            self.text.replace_range(start..self.cursor, "");
+            self.cursor = start;
+            return;
+        }
+        let start = self.cursor;
+        self.left();
+        self.text.replace_range(self.cursor..start, "");
+    }
+
+    pub fn delete(&mut self) {
+        let start = self.cursor;
+        if let Some(c) = self.text[start..].chars().next() {
+            self.text.replace_range(start..start + c.len_utf8(), "");
+        }
+    }
+
+    fn kill(&mut self, range: std::ops::Range<usize>) {
+        if range.is_empty() {
+            return;
+        }
+        self.killed = self.text[range.clone()].to_owned();
+        self.text.replace_range(range.clone(), "");
+        self.cursor = range.start;
+    }
+
+    /// ctrl+w: the word before the cursor.
+    pub fn kill_word(&mut self) {
+        self.kill(self.word_back()..self.cursor);
+    }
+
+    /// alt+d: the word after the cursor.
+    pub fn kill_word_forward(&mut self) {
+        self.kill(self.cursor..self.word_forward());
+    }
+
+    /// ctrl+u: back to the start of the line (the line break before it, at its start).
+    pub fn kill_to_start(&mut self) {
+        let start = self.line_start();
+        let start = if start == self.cursor && start > 0 { start - 1 } else { start };
+        self.kill(start..self.cursor);
+    }
+
+    /// ctrl+k: to the end of the line (the line break, at its end).
+    pub fn kill_to_end(&mut self) {
+        let end = self.line_end();
+        let end = if end == self.cursor && end < self.text.len() { end + 1 } else { end };
+        self.kill(self.cursor..end);
+    }
+
+    /// ctrl+y: what was killed last.
+    pub fn yank(&mut self) {
+        let killed = self.killed.clone();
+        self.insert(&killed);
+    }
+
+    /// ↑: a line up, or the previous message at the first line. Whether anything moved.
+    pub fn up(&mut self) -> bool {
+        let start = self.line_start();
+        if start > 0 {
+            let column = self.text[start..self.cursor].chars().count();
+            let prev_start = self.text[..start - 1].rfind('\n').map_or(0, |i| i + 1);
+            self.cursor = at_column(&self.text, prev_start, start - 1, column);
+            return true;
+        }
+        let next = match self.browsing {
+            None if self.history.is_empty() => return false,
+            None => {
+                self.draft = self.text.clone();
+                self.history.len() - 1
+            }
+            Some(0) => return false,
+            Some(i) => i - 1,
+        };
+        self.browsing = Some(next);
+        self.text = self.history[next].clone();
+        // At the end of its first line, so another ↑ goes on back.
+        self.cursor = self.text.find('\n').unwrap_or(self.text.len());
+        true
+    }
+
+    /// ↓: a line down, or the next message (then the draft) at the last line.
+    pub fn down(&mut self) -> bool {
+        let end = self.line_end();
+        if end < self.text.len() {
+            let column = self.text[self.line_start()..self.cursor].chars().count();
+            let next_end = self.text[end + 1..].find('\n').map_or(self.text.len(), |i| end + 1 + i);
+            self.cursor = at_column(&self.text, end + 1, next_end, column);
+            return true;
+        }
+        let Some(i) = self.browsing else { return false };
+        if i + 1 < self.history.len() {
+            self.browsing = Some(i + 1);
+            self.text = self.history[i + 1].clone();
+        } else {
+            self.browsing = None;
+            self.text = std::mem::take(&mut self.draft);
+        }
+        self.cursor = self.text.len();
+        true
+    }
+
+    /// Empties the composer (what was in it is not kept).
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+        self.browsing = None;
+    }
+
+    /// What was typed, as it is shown (labels for pastes), and as it is sent (pastes in full); the
+    /// composer emptied and the shown text added to the history.
+    pub fn take(&mut self) -> (String, String) {
+        let shown = std::mem::take(&mut self.text);
+        let mut sent = shown.clone();
+        // Pastes are kept for the session, so a message brought back with ↑ sends them again.
+        for (label, text) in &self.pastes {
+            if let Some(i) = sent.find(label.as_str()) {
+                sent.replace_range(i..i + label.len(), text);
+            }
+        }
+        self.cursor = 0;
+        self.browsing = None;
+        if !shown.trim().is_empty() && self.history.last() != Some(&shown) {
+            self.history.push(shown.clone());
+        }
+        (shown, sent)
+    }
+
+    /// The text in rows of at most [width] columns (cut where they fall), and the cursor's row
+    /// and column among them.
+    pub fn layout(&self, width: usize) -> (Vec<String>, (usize, usize)) {
+        let width = width.max(4);
+        let mut rows = vec![String::new()];
+        let mut used = 0;
+        let mut cursor = (0, 0);
+        for (i, c) in self.text.char_indices() {
+            if i == self.cursor {
+                cursor = (rows.len() - 1, used);
+            }
+            if c == '\n' {
+                rows.push(String::new());
+                used = 0;
+                continue;
+            }
+            let w = c.width().unwrap_or(0);
+            if used + w > width {
+                rows.push(String::new());
+                used = 0;
+                if i == self.cursor {
+                    cursor = (rows.len() - 1, 0);
+                }
+            }
+            rows.last_mut().expect("a row").push(c);
+            used += w;
+        }
+        if self.cursor >= self.text.len() {
+            cursor = if used >= width { (rows.len(), 0) } else { (rows.len() - 1, used) };
+            if cursor.0 == rows.len() {
+                rows.push(String::new());
+            }
+        }
+        (rows, cursor)
+    }
+}
+
+/// The byte index in `text[start..end]` at [column] characters (or its end).
+fn at_column(text: &str, start: usize, end: usize, column: usize) -> usize {
+    text[start..end].char_indices().nth(column).map_or(end, |(i, _)| start + i)
+}
+
+/// The history file (rustyline's format, so the old history carries over): `#V2`, then one
+/// entry a line, `\n` and `\\` escaped.
+pub fn load_history(path: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+    text.lines()
+        .filter(|l| *l != "#V2" && !l.is_empty())
+        .map(|l| {
+            let mut out = String::new();
+            let mut chars = l.chars();
+            while let Some(c) = chars.next() {
+                if c == '\\' {
+                    match chars.next() {
+                        Some('n') => out.push('\n'),
+                        Some(other) => out.push(other),
+                        None => out.push('\\'),
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+pub fn save_history(path: &Path, history: &[String]) {
+    let keep = &history[history.len().saturating_sub(2000)..];
+    let mut text = String::from("#V2\n");
+    for entry in keep {
+        text.push_str(&entry.replace('\\', "\\\\").replace('\n', "\\n"));
+        text.push('\n');
+    }
+    let _ = invincible::fsutil::replace_private(path, &text);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Editor, load_history, save_history};
+
+    fn typed(text: &str) -> Editor {
+        let mut e = Editor::default();
+        e.insert(text);
+        e
+    }
+
+    #[test]
+    fn editing_keys() {
+        let mut e = typed("hello brave world");
+        e.kill_word();
+        assert_eq!(e.text(), "hello brave ");
+        e.yank();
+        assert_eq!(e.text(), "hello brave world");
+        e.home();
+        e.word_right();
+        assert_eq!(e.cursor(), 5);
+        e.kill_to_end();
+        assert_eq!(e.text(), "hello");
+        e.left();
+        e.backspace();
+        assert_eq!(e.text(), "helo");
+        e.end();
+        e.kill_to_start();
+        assert!(e.is_empty());
+        let mut e = typed("añb");
+        e.left();
+        e.left();
+        e.backspace();
+        assert_eq!(e.text(), "ñb", "characters, not bytes");
+    }
+
+    #[test]
+    fn lines_and_history() {
+        let mut e = Editor::with_history(vec!["first".into(), "second".into()]);
+        e.insert("draft");
+        assert!(e.up());
+        assert_eq!(e.text(), "second");
+        assert!(e.up());
+        assert_eq!(e.text(), "first");
+        assert!(!e.up(), "the oldest");
+        assert!(e.down());
+        assert!(e.down());
+        assert_eq!(e.text(), "draft", "back to the draft");
+        e.set("one\ntwo");
+        assert!(e.up(), "a line up, not history");
+        assert_eq!(e.text(), "one\ntwo");
+        assert_eq!(e.cursor(), 3);
+        e.kill_to_end();
+        assert_eq!(e.text(), "onetwo", "ctrl+k at a line's end joins the next");
+    }
+
+    #[test]
+    fn long_pastes_are_a_label_until_sent() {
+        let mut e = typed("look: ");
+        let big: String = (0..40).map(|i| format!("line {i}\n")).collect();
+        e.paste(&big);
+        assert_eq!(e.text(), "look: [pasted 40 lines]");
+        e.paste("short");
+        let (shown, sent) = e.take();
+        assert_eq!(shown, "look: [pasted 40 lines]short");
+        assert!(sent.starts_with("look: line 0\nline 1\n") && sent.ends_with("line 39\nshort"));
+        assert_eq!(e.history(), ["look: [pasted 40 lines]short"]);
+        assert!(e.up());
+        assert_eq!(e.take().1, sent, "brought back, it sends the paste again");
+        let mut e = typed("x ");
+        e.paste(&big);
+        e.backspace();
+        assert_eq!(e.text(), "x ", "a label is deleted whole");
+    }
+
+    #[test]
+    fn layout_wraps_and_finds_the_cursor() {
+        let e = typed("abcdefgh\nij");
+        let (rows, cursor) = e.layout(5);
+        assert_eq!(rows, ["abcde", "fgh", "ij"]);
+        assert_eq!(cursor, (2, 2));
+        let e = typed("abcde");
+        assert_eq!(e.layout(5), (vec!["abcde".to_owned(), String::new()], (1, 0)));
+        let mut e = typed("abc");
+        e.home();
+        assert_eq!(e.layout(5).1, (0, 0));
+    }
+
+    #[test]
+    fn history_file_round_trips() {
+        let path = std::env::temp_dir().join(format!("autobot-history-{}", std::process::id()));
+        let entries = vec!["one".to_owned(), "two\nlines".to_owned(), r"back\slash".to_owned()];
+        save_history(&path, &entries);
+        assert!(std::fs::read_to_string(&path).unwrap().starts_with("#V2\none\ntwo\\nlines\n"));
+        assert_eq!(load_history(&path), entries);
+        std::fs::remove_file(path).unwrap();
+    }
+}

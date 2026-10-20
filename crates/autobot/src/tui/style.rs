@@ -5,6 +5,10 @@ use invincible::brand::{self, Color};
 
 /// Code in prose: sand, a warm neutral that is neither product's signal.
 const SAND: Color = Color { rgb: (0xD4, 0xC3, 0x9C), ansi: 187 };
+/// The light tint of code blocks: muted, warm, and clear of both signals.
+const KEYWORD: Color = Color { rgb: (0xC9, 0xA8, 0x8B), ansi: 180 };
+const STRING: Color = Color { rgb: (0xA9, 0xBC, 0x8A), ansi: 144 };
+const NUMBER: Color = Color { rgb: (0xD9, 0xB8, 0x7A), ansi: 179 };
 
 /// Colors on or off for everything printed from now on.
 pub fn set_color(on: bool) {
@@ -52,6 +56,16 @@ pub fn accent(t: &str) -> String {
 /// Code.
 pub fn code(t: &str) -> String {
     brand::paint(SAND, t)
+}
+/// Code blocks: keywords, strings, numbers.
+pub fn keyword(t: &str) -> String {
+    brand::paint(KEYWORD, t)
+}
+pub fn string(t: &str) -> String {
+    brand::paint(STRING, t)
+}
+pub fn number(t: &str) -> String {
+    brand::paint(NUMBER, t)
 }
 /// Secondary text.
 pub fn gray(t: &str) -> String {
@@ -103,6 +117,11 @@ pub fn last_columns(text: &str, columns: usize) -> String {
 /// The terminal's width in columns (80 when unknown).
 pub fn columns() -> usize {
     crossterm::terminal::size().map(|(w, _)| w as usize).ok().filter(|w| *w > 10).unwrap_or(80)
+}
+
+/// The terminal's height in rows (24 when unknown).
+pub fn rows() -> usize {
+    crossterm::terminal::size().map(|(_, h)| h as usize).ok().filter(|h| *h > 4).unwrap_or(24)
 }
 
 #[cfg(test)]

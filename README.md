@@ -221,17 +221,31 @@ then: the key is asked for (not shown), added with `invincible cloud add`, and t
 service restarted. The model and approvals are remembered (`~/.autobot/code.json`), and plain
 `autobot` in a git repository is `autobot code`.
 
-- **The terminal:** answers stream in as Markdown (headings, lists, code blocks); each tool call is a line
-  (`⏺ Read src/main.rs`, `⏺ Run cargo test`) with what it gave back (`⎿ 3 matches in 2 files`,
-  the last lines of a command and its exit code); every change shows as a colored diff before
-  it is made; the agent's task list (`todo`) shows as checkboxes; a spinner shows what it is
-  thinking, and the status line the models, tool calls, tokens (and how many were cached) and
-  time of each turn. Approvals take one key: `y`, `a` (always, this session), `n`; any other key
-  is no, and what was typed before the question is dropped.
-- **Steer while it works:** type while the agent works and your words show under the spinner;
-  Enter hands them to the agent before its next step ("use the existing helper instead"), and
-  what arrives as it finishes becomes the next request. Esc (or ctrl+c) stops a turn; the
-  conversation stays usable.
+- **The terminal:** your scrollback stays your terminal's own (no alternate screen); only the
+  bottom is drawn in place: a composer in a box, and under it a status line with the model (and
+  what `auto` chose), approvals, project and branch, how full the context is, and the tokens so
+  far, with what the keys do now on the right. Answers stream in as Markdown wrapped to the
+  width (headings, lists, quotes, aligned tables, code blocks with their language and a light
+  tint). Each tool call is a step (`▪ Read src/main.rs`, `▪ Run cargo test`) with what it gave
+  back hanging under it (`└ 3 matches in 2 files`, the last lines of a command and its exit
+  code, `… N more lines`); while it runs, a spinner and its seconds stand in for the `▪`, and
+  while the model thinks, the end of its reasoning shows beside the spinner. Every change shows
+  as a colored diff with line numbers before it is made; the agent's task list (`todo`) shows as
+  checkboxes; a `─` footer ends each turn with the models, tool calls, tokens (and how many were
+  cached) and time. Approvals are a card above the composer that takes one key: `y`, `a`
+  (always, this session), `n`; any other key is no, and what was typed before the question is
+  dropped. Without a terminal (a pipe, a script) it reads plain lines and prints plain text;
+  `NO_COLOR` turns color off.
+- **Steer while it works:** type while the agent works; Enter hands your words to the agent
+  before its next step ("use the existing helper instead"), and what arrives as it finishes
+  becomes the next request. A `/command` or `!command` sent then runs when the turn ends. Esc
+  (or ctrl+c on an empty composer) stops a turn; the conversation stays usable.
+- **Keys:** Enter sends; alt+enter or ctrl+j starts a new line (so does a `\` at the end of a
+  line); ↑/↓ bring back what you sent (or move between lines); ctrl+a/e start and end of line,
+  ctrl+w/u/k delete a word, to the start, to the end (ctrl+y puts it back), alt+b/f move by
+  words; ctrl+l clears the screen; ctrl+z suspends; ctrl+c clears the composer, and twice on an
+  empty one quits, as does ctrl+d. A long paste folds into `[pasted 120 lines]` and goes out in
+  full. `/help` lists the keys too.
 - **The project:** its `AGENTS.md`, `CLAUDE.md` or `.autobot/AGENTS.md` become part of the
   agent's instructions; in a git repository it works like a careful engineer (find, read, change
   in small edits, run the build and tests, never commit unless asked). `search` (regular
@@ -239,9 +253,10 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   shell command to approve; `read_file` reads long files in parts.
 - **Control:** `edits` approvals let changes in the project run without asking (commands still
   ask); `/undo` puts back every file the last turn changed and hands its request back to edit.
-  `@path` attaches a file (tab completes), `!command` runs one yourself and hands its output to
-  the next message, alt+enter starts a new line.
-- **Commands:** `/model` (list, or switch: a cloud model lets turns leave the machine, and the
+  `@path` attaches a file (typing `@` lists the project's files, matched as you type; tab
+  completes), `!command` runs one yourself and hands its output to the next message.
+- **Commands:** typing `/` opens a list of them with a line about each, narrowed as you type
+  (↑/↓ or tab to choose, Enter runs, esc closes): `/model` (list, or switch: a cloud model lets turns leave the machine, and the
   conversation sent per call grows with its context), `/approvals`, `/private`, `/tools`,
   `/context`, `/diff`, `/undo`, `/status`, `/new`, `/fork`, `/sessions`, `/resume`, `/memory`,
   `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
@@ -252,7 +267,8 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   project (or `~/.autobot/commands/`) is `/review`, its text the prompt, `$ARGUMENTS` (or `$1`…`$9`)
   what you type after it; a subdirectory makes a prefix (`git/pr.md` is `/git:pr`), and a
   `description:` in front matter shows in `/help`. Commands in `.claude/commands` work as they
-  are, so a project's Claude Code commands come along. `/commands` lists them; tab completes them.
+  are, so a project's Claude Code commands come along. `/commands` lists them; the `/` list has
+  them with the rest.
 - **Servers and watchers:** the agent starts what keeps running (`npm run dev`, `cargo watch`, a
   test database) with `terminal` and `background: true`, then reads its new output, waits for it
   or stops it with the `process` tool; stopping takes its whole process group. They end with the

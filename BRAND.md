@@ -64,6 +64,8 @@ Both CLIs and the installer speak one grammar:
 ▀█▄▄██    approvals  edits
           project    ~/src/app  main  AGENTS.md
 
+  tip: type while the agent works to steer it; esc stops the turn
+
 › fix the failing test
 
 ▪ Search parse_header
@@ -72,20 +74,40 @@ Both CLIs and the installer speak one grammar:
   │ test result: FAILED. 41 passed; 1 failed
   └ exit 101
 ▪ Change src/header.rs
-    -    let len = buf[0] as usize;
-    +    let len = usize::from(buf[0]);
+       2 -     let len = buf[0] as usize;
+       2 +     let len = usize::from(buf[0]);
   └ +1 −1
 
   ─ claude-sonnet (cloud) · 3 tool calls · 18.2k in · 412 out · 9.4s
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│ › ask for a change, / for commands, @ to attach a file                   │
+╰──────────────────────────────────────────────────────────────────────────╯
+  claude-sonnet (cloud) · approvals edits     / commands · @ files · ! shell
 ```
 
 - First lines: the symbol in half blocks (with color) beside `name version`, then quiet
   `label  value` rows; without color, `■ name version`.
 - `▪` (a smaller square) starts each step; `│` and `└` hang what it gave back, in faint ash.
-- The prompt `›` and the symbol are the only signal-colored characters at rest.
+  Outputs are short: the last lines of a command and its exit code, `… N more lines` for the
+  rest. Diffs carry line numbers, added and removed lines in their muted colors.
+- The prompt `›` and the symbol are the only signal-colored characters at rest. The signal also
+  marks what is happening or wants you now, and nothing else: the spinner (a pixel going round a
+  square, `▖ ▘ ▝ ▗`, beside the running step and its seconds), the `■` of a question, the chosen
+  row of a list. Never a paragraph.
+- Interactive: the scrollback stays the terminal's own (no alternate screen). Only the bottom is
+  drawn in place: what is happening, then the composer in a rounded box of faint ash, then one
+  status line (model, approvals, project and branch, context, tokens on the left; what the keys
+  do now on the right). A question is a card above the composer: `■ title`, what it is about
+  hanging under it, and `└ y yes   a always, this session   n no`.
+- Answers are Markdown, wrapped to the width: bold headings, `•` lists with hanging indents,
+  `▎` quotes, aligned tables, code in sand, code blocks framed `╭── lang ──` … `╰────` with a
+  light tint (keywords, strings, numbers; comments faint).
+- `─ model · N tool calls · in · out · time` closes each turn, in faint ash.
 - Truecolor when the terminal says so (`COLORTERM`), the nearest 256-color otherwise, nothing
-  when output is not a terminal or `NO_COLOR` is set. Errors print as `✗ message` on a terminal
-  and `invincible: message` in logs and scripts.
+  when output is not a terminal or `NO_COLOR` is set. Without a terminal there is no composer
+  or spinner: plain lines in, plain lines out. Errors print as `✗ message` on a terminal and
+  `invincible: message` in logs and scripts.
 
 ## In apps and on the web
 
