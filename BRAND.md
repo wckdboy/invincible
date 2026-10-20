@@ -17,15 +17,20 @@ This file is the reference. The Autobot app keeps the same rules in
 | | Invincible | Autobot |
 | --- | --- | --- |
 | What it is | The node you own: a gateway that routes, redacts, receipts and audits every model call | The agent: on your phone, and on your machine through the node |
-| Signal | **Orange** `#FF9A3D` (the symbol, on ink and on paper) · `#A85300` (text on paper) | **Lilac** `#5444BA` (on paper) · `#A99BF5` (on ink) |
+| Signal | **Signal orange** `#FF8A1E`, the same on ink and on paper | **Purple** `#7C5CFF`, the same on ink and on paper |
 | Character | Calm infrastructure: tables, receipts, states | A capable colleague: conversation, work in progress, questions |
 | Symbol | a pixel lowercase **i** | a pixel lowercase **a** |
 | Wordmark | the i, then `invincible` | the a, then `autobot` |
 
-Orange and lilac are a pair on purpose: complements, opposite each other on the wheel, the same
+Orange and purple are a pair on purpose: complements, opposite each other on the wheel, the same
 weight, both on the same warm paper. Invincible is the warm one (the node, steady, always on),
 Autobot the cool one (the agent, curious). A warning is yellow and an error red, so neither
 product's color ever means "something is wrong". Code in a terminal is sand, a warm neutral.
+
+The signals are vivid on purpose (high saturation, high brightness) and used only for marks: the
+symbol, the prompt, focus, selection, a running step. Text is never in the signal. Where an app
+needs readable purple for a button or a link, it uses lilac `#9373FF` on ink and `#5A36E6` on
+paper, both above 4.5:1 on every surface.
 
 ## What they share
 
@@ -35,7 +40,7 @@ product's color ever means "something is wrong". Code in a terminal is sand, a w
   the wordmarks); the platform's sans for prose and headings.
 - **The symbols.** A lowercase letter drawn in pixels, in the product's signal: an **a** for
   Autobot (6 × 6), an **i** for Invincible (2 × 6). Two-pixel strokes, square corners, nothing
-  else: the one pixel touch in a functional system. They are the app icons (the symbol on ink),
+  else: the one pixel touch in a functional system. They are the app icons (the symbol on white),
   the wordmarks' marks, and in a terminal three rows of half blocks beside the header.
   In running text a small square `■` in the signal stands for them, and the names are plain:
   Invincible, Autobot.
