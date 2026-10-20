@@ -185,6 +185,9 @@ pub struct AgentConfig {
     /// over it for what is worth keeping in memory or the owner's profile (0: never).
     #[serde(default = "nudge_every")]
     pub nudge_every: usize,
+    /// Commands and files on another machine ([crate::ssh]): `[agent.ssh] host = "me@box"`.
+    #[serde(default)]
+    pub ssh: Option<crate::ssh::Ssh>,
     /// The `browser` tool, when a Chrome, Chromium, Edge or Brave is installed ([crate::browser]).
     #[serde(default = "yes")]
     pub browser: bool,
@@ -234,6 +237,7 @@ impl Default for AgentConfig {
             stream: true,
             docker: None,
             nudge_every: nudge_every(),
+            ssh: None,
             browser: true,
         }
     }

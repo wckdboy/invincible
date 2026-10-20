@@ -32,6 +32,7 @@ pub mod service;
 pub mod session;
 pub mod setup;
 pub mod skills;
+pub mod ssh;
 pub mod team;
 pub mod telegram;
 pub mod tools;
@@ -55,7 +56,17 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
     let gateway = gateway::Gateway::new(&config.gateway.url, &token, &config.gateway.model, config.gateway.private)?
         .with_stream(config.agent.stream);
     let workdir = workdir.unwrap_or_else(|| config.agent.workdir(home));
-    std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
+    // On another machine: its working directory is there (by default the same path).
+    let workdir = match &config.agent.ssh {
+        Some(ssh) => {
+            ssh.check()?;
+            ssh.workdir.clone().unwrap_or(workdir)
+        }
+        None => {
+            std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
+            workdir
+        }
+    };
     let mut tools = tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout))
         .with_home(home.to_owned())
         .with_sandbox(config.agent.sandbox)
@@ -64,7 +75,13 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         tools = tools.with_context(kib);
     }
     if let Some(docker) = &config.agent.docker {
+        if config.agent.ssh.is_some() {
+            return Err("[agent.docker] and [agent.ssh] are both set; commands run in one place".to_owned());
+        }
         tools = tools.with_docker(docker.clone());
+    }
+    if let Some(ssh) = &config.agent.ssh {
+        tools = tools.with_ssh(ssh.clone());
     }
     if let Some(groups) = &config.agent.tools {
         if let Some(unknown) = groups.iter().find(|g| !tools::GROUPS.iter().any(|(n, _)| n == g)) {

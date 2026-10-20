@@ -29,6 +29,8 @@ pub struct Tools {
     docker: Option<std::sync::Arc<crate::docker::Docker>>,
     /// The `browser` tool is offered (when a browser is installed).
     browser: bool,
+    /// Commands and files on another machine ([crate::ssh]).
+    ssh: Option<std::sync::Arc<crate::ssh::Ssh>>,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -185,7 +187,19 @@ impl Tools {
             limit: RESULT_LIMIT,
             docker: None,
             browser: false,
+            ssh: None,
         }
+    }
+
+    /// Commands and files on another machine ([crate::ssh]).
+    pub fn with_ssh(mut self, ssh: crate::ssh::Ssh) -> Self {
+        self.ssh = Some(std::sync::Arc::new(ssh));
+        self
+    }
+
+    /// The machine commands and files are on, when it is another one.
+    pub fn ssh(&self) -> Option<&crate::ssh::Ssh> {
+        self.ssh.as_deref()
     }
 
     /// With the `browser` tool, when there is a browser to drive ([crate::browser::find]).
@@ -331,6 +345,7 @@ impl Tools {
         // The browser, where there is one to drive (and commands run here, not elsewhere).
         if self.browser
             && self.docker.is_none()
+            && self.ssh.is_none()
             && crate::browser::find().is_some()
             && let Some(list) = tools.as_array_mut()
         {
@@ -614,6 +629,11 @@ impl Tools {
     }
 
     pub async fn run(&self, call: &Call) -> String {
+        if let Some(ssh) = &self.ssh
+            && let Some(result) = self.remote(ssh, call).await
+        {
+            return cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit);
+        }
         let result = match call {
             Call::Terminal { command } => self.terminal(command).await,
             Call::Background { command } => self.background(command).await,
@@ -715,8 +735,59 @@ impl Tools {
         cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit)
     }
 
+    /// The file tools on the machine [ssh] reaches; None for the calls that run here anyway.
+    async fn remote(&self, ssh: &crate::ssh::Ssh, call: &Call) -> Option<Result<String, String>> {
+        let text = |bytes: Vec<u8>, path: &Path| -> Result<String, String> {
+            if bytes.iter().take(8192).any(|b| *b == 0) {
+                return Err(format!("{} is not a text file ({} bytes)", path.display(), bytes.len()));
+            }
+            Ok(String::from_utf8_lossy(&bytes).into_owned())
+        };
+        Some(match call {
+            Call::ReadFile { path, offset, limit } => {
+                ssh.read(path).await.and_then(|b| text(b, path)).map(|t| lines(&t, *offset, *limit))
+            }
+            Call::WriteFile { path, content } => ssh
+                .write(path, content.as_bytes())
+                .await
+                .map(|()| format!("wrote {} bytes to {}", content.len(), path.display())),
+            Call::EditFile { path, old, new, all } => {
+                let before = match ssh.read(path).await.and_then(|b| text(b, path)) {
+                    Ok(before) => before,
+                    Err(e) => return Some(Err(e)),
+                };
+                match edited(&before, old, new, *all, path) {
+                    Ok((after, found)) => ssh.write(path, after.as_bytes()).await.map(|()| {
+                        let n = if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") };
+                        format!("replaced {n} in {}", path.display())
+                    }),
+                    Err(e) => Err(e),
+                }
+            }
+            Call::ListDir { path } => ssh.list(path).await,
+            Call::Search { pattern, path, glob, ignore_case } => {
+                ssh.search(path, pattern, glob.as_deref(), *ignore_case).await
+            }
+            Call::FindFiles { pattern, path } => ssh.find(path, pattern).await,
+            _ => return None,
+        })
+    }
+
     /// [command] left running; its number, and what it printed in its first second.
     async fn background(&self, command: &str) -> Result<String, String> {
+        if let Some(ssh) = &self.ssh {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default();
+            let pidfile = format!("/tmp/autobot-bg-{stamp}.pid");
+            let child = ssh.background(command, &self.workdir, &pidfile);
+            let id = crate::procs::start(command, child, &std::env::temp_dir(), Some(ssh.stop_command(&pidfile)))?;
+            return Ok(format!(
+                "started background process {id} on {}; read its output with process {{\"action\": \"output\", \"id\": {id}}}, stop it with action stop",
+                ssh.host
+            ));
+        }
         std::fs::create_dir_all(&self.workdir).map_err(|e| format!("{}: {e}", self.workdir.display()))?;
         let mut stopper = None;
         let child = if let Some(docker) = &self.docker {
@@ -742,8 +813,12 @@ impl Tools {
     }
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
-        tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
-        let mut child = if let Some(docker) = &self.docker {
+        if self.ssh.is_none() {
+            tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
+        }
+        let mut child = if let Some(ssh) = &self.ssh {
+            ssh.command(command, &self.workdir, Some(self.timeout.as_secs()))
+        } else if let Some(docker) = &self.docker {
             let name = docker.ensure(&self.workdir).await?;
             docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
         } else if self.confined {
@@ -753,8 +828,10 @@ impl Tools {
             plain.arg("-c").arg(command);
             plain
         };
+        if self.ssh.is_none() {
+            child.current_dir(&self.workdir);
+        }
         let mut child = child
-            .current_dir(&self.workdir)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -799,19 +876,23 @@ impl Tools {
             }
             _ => {}
         }
-        let (path, after) = match call {
-            Call::WriteFile { path, content } => (path, content.clone()),
+        // What is there now: here, or on the machine commands run on.
+        let now = |path: &Path| match &self.ssh {
+            Some(ssh) => ssh.read_now(path),
+            None => std::fs::read_to_string(path).ok(),
+        };
+        let (path, after, before) = match call {
+            Call::WriteFile { path, content } => (path, content.clone(), now(path).unwrap_or_default()),
             Call::EditFile { path, old, new, all } => {
-                let text = std::fs::read_to_string(path).ok()?;
+                let text = now(path)?;
                 let found = text.matches(old.as_str()).count();
                 if old.is_empty() || found == 0 || (found > 1 && !all) {
                     return None;
                 }
-                (path, text.replace(old.as_str(), new))
+                (path, text.replace(old.as_str(), new), text)
             }
             _ => return None,
         };
-        let before = std::fs::read_to_string(path).unwrap_or_default();
         let label = path.strip_prefix(&self.workdir).unwrap_or(path).display().to_string();
         Some(crate::diff::unified(&before, &after, &label))
     }
@@ -819,6 +900,10 @@ impl Tools {
     /// The file a write or an edit changes and its bytes now (None: it does not exist), to put
     /// it back on undo; nothing when it cannot be read (then there is no undo for it).
     pub fn before(&self, call: &Call) -> Option<(PathBuf, Option<Vec<u8>>)> {
+        // Undo puts files back here; files on another machine have no undo.
+        if self.ssh.is_some() {
+            return None;
+        }
         match call {
             Call::WriteFile { path, .. } | Call::EditFile { path, .. } => match std::fs::read(path) {
                 Ok(bytes) => Some((path.clone(), Some(bytes))),
@@ -1010,28 +1095,32 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
     Ok(format!("wrote {} bytes to {}", content.len(), path.display()))
 }
 
+/// [text] with [old] replaced by [new]: exactly once unless [all]; and how many there were.
+fn edited(text: &str, old: &str, new: &str, all: bool, path: &Path) -> Result<(String, usize), String> {
+    if old.is_empty() {
+        return Err("old_text is empty".to_owned());
+    }
+    let found = text.matches(old).count();
+    match (found, all) {
+        (0, _) => Err(format!(
+            "old_text is not in {} (copy it exactly, spaces and line breaks included; read_file shows the file)",
+            path.display()
+        )),
+        (1, _) | (_, true) => Ok((text.replace(old, new), found)),
+        (n, false) => Err(format!(
+            "old_text is in {} {n} times; include more lines around it so it is unique, or set replace_all",
+            path.display()
+        )),
+    }
+}
+
 /// Replaces [old] with [new] in the file at [path]: exactly once unless [all].
 async fn edit(path: &Path, old: &str, new: &str, all: bool) -> Result<String, String> {
     if old.is_empty() {
         return Err("old_text is empty".to_owned());
     }
     let text = read(path).await?;
-    let found = text.matches(old).count();
-    let changed = match (found, all) {
-        (0, _) => {
-            return Err(format!(
-                "old_text is not in {} (copy it exactly, spaces and line breaks included; read_file shows the file)",
-                path.display()
-            ));
-        }
-        (1, _) | (_, true) => text.replace(old, new),
-        (n, false) => {
-            return Err(format!(
-                "old_text is in {} {n} times; include more lines around it so it is unique, or set replace_all",
-                path.display()
-            ));
-        }
-    };
+    let (changed, found) = edited(&text, old, new, all, path)?;
     write(path, &changed).await?;
     Ok(format!(
         "replaced {} in {}",

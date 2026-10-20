@@ -809,6 +809,13 @@ impl Agent {
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
         );
+        if let Some(ssh) = self.tools.ssh() {
+            prompt.push_str(&format!(
+                "\nCommands and the file tools run on another machine, {host}, over SSH (the working directory \
+                 is there); files there have no undo, so change them with care.",
+                host = ssh.host,
+            ));
+        }
         if let Some(docker) = self.tools.docker() {
             prompt.push_str(&format!(
                 "\nCommands run in a Linux container ({image}, network {net}) with the working directory \

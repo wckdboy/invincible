@@ -1432,3 +1432,69 @@ async fn the_browser_reads_types_clicks_and_shows_a_screenshot_asking_where_it_s
     assert!(autobot::session::is_request(&session.messages[0]));
     assert!(!session.messages.iter().skip(1).any(autobot::session::is_request));
 }
+
+/// A stand-in for `ssh`: it skips the options, notes the host, and runs the remote command here.
+fn fake_ssh(dir: &std::path::Path) -> String {
+    let path = dir.join("fake-ssh");
+    std::fs::write(
+        &path,
+        "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --) shift; break;; *) shift;; esac; done\n\
+         echo \"$1\" >> \"$(dirname \"$0\")/hosts\"; shift\nexec sh -c \"$*\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    path.display().to_string()
+}
+
+#[tokio::test]
+async fn with_ssh_commands_and_files_are_on_the_other_machine() {
+    let dir = temp("ssh");
+    let remote = dir.join("remote");
+    std::fs::create_dir_all(remote.join("src")).unwrap();
+    std::fs::write(remote.join("src/main.rs"), "fn main() {\n    println!(\"old\");\n}\n").unwrap();
+    let ssh = autobot::ssh::Ssh {
+        host: "me@build-box".into(),
+        workdir: Some(remote.clone()),
+        port: None,
+        identity: None,
+        args: vec![],
+        program: fake_ssh(&dir),
+    };
+    let tools = Tools::new(remote.clone(), Duration::from_secs(10)).with_ssh(ssh);
+    let run = |name: &str, args: Value| {
+        let call = tools.parse(name, &args.to_string()).unwrap();
+        let tools = tools.clone();
+        async move { tools.run(&call).await }
+    };
+    let out = run("terminal", json!({"command": "pwd; echo 'it''s'"})).await;
+    assert!(out.starts_with(&format!("{}\nits\n[exit code 0]", remote.display())), "{out}");
+    assert_eq!(
+        run("read_file", json!({"path": "src/main.rs", "offset": 2, "limit": 1})).await,
+        "    println!(\"old\");\n[lines 2-2 of 3]"
+    );
+    // A change shows its diff from what is there, and has no undo here.
+    let edit = tools
+        .parse("edit_file", &json!({"path": "src/main.rs", "old_text": "old", "new_text": "new"}).to_string())
+        .unwrap();
+    let diff = tools.preview(&edit).unwrap();
+    assert!(diff.contains("-    println!(\"old\");") && diff.contains("+    println!(\"new\");"), "{diff}");
+    assert!(tools.before(&edit).is_none());
+    assert!(tools.run(&edit).await.starts_with("replaced 1 occurrence"));
+    assert!(std::fs::read_to_string(remote.join("src/main.rs")).unwrap().contains("\"new\""));
+    assert!(run("write_file", json!({"path": "notes/a.txt", "content": "x'y\n"})).await.starts_with("wrote 4 bytes"));
+    assert_eq!(std::fs::read_to_string(remote.join("notes/a.txt")).unwrap(), "x'y\n");
+    std::os::unix::fs::symlink("/etc/hosts", remote.join("link")).unwrap();
+    assert!(run("write_file", json!({"path": "link", "content": "no"})).await.contains("symbolic link"));
+    assert_eq!(run("list_dir", json!({})).await, "link\nnotes/\nsrc/");
+    let found = run("search", json!({"pattern": "print"})).await;
+    assert!(found.contains("src/main.rs:2:"), "{found}");
+    assert_eq!(run("find_files", json!({"pattern": "**/*.rs"})).await, "src/main.rs");
+    assert!(run("read_file", json!({"path": "missing.txt"})).await.starts_with("error:"));
+    // Background processes run there and stop there.
+    let started = run("terminal", json!({"command": "echo up; sleep 30", "background": true})).await;
+    assert!(started.contains("on me@build-box"), "{started}");
+    autobot::procs::stop_all().await;
+    let hosts = std::fs::read_to_string(dir.join("hosts")).unwrap();
+    assert!(hosts.lines().all(|h| h == "me@build-box") && hosts.lines().count() >= 9);
+    assert!(!tools.definitions().to_string().contains("\"browser\""), "no local browser for a remote machine");
+}
