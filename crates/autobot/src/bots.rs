@@ -166,6 +166,12 @@ pub fn soul(home: &Path) -> Option<String> {
     (!text.is_empty()).then(|| text.chars().take(8000).collect())
 }
 
+/// Whether a named bot takes the `config.toml` section [section] (all but its channels, hooks,
+/// the API and `[bot]`).
+pub fn inherits(section: &str) -> bool {
+    !OWN.contains(&section)
+}
+
 pub fn dir(root: &Path) -> PathBuf {
     root.join("bots")
 }

@@ -103,6 +103,11 @@ pub trait Transport: Send + Sync {
     fn typing<'a>(&'a self, _chat: &'a str) -> BoxFuture<'a, ()> {
         Box::pin(async {})
     }
+    /// Sends a file the turn made ([crate::media]): a voice message, a picture. Whether this
+    /// platform could (the chat says where the file is when not).
+    fn send_file<'a>(&'a self, _chat: &'a str, _file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async { Ok(false) })
+    }
     /// Shows [question] in [chat]: buttons, or how to reply.
     fn ask<'a>(&'a self, chat: &'a str, question: &'a Question) -> BoxFuture<'a, Result<(), String>>;
     /// A team member's line, posted by its own account when it has one; whether it was.
@@ -362,6 +367,7 @@ pub fn help(bot: &str) -> String {
          /board: the team's background work (/board answer <id> <text>)\n\
          /actions: what I ran lately, and who allowed it\n\
          /memory: what I remember (/memory forget <id>)\n\
+         /recall <what>: what earlier conversations said about it\n\
          /skills: your how-to notes\n\
          /bots: the bots on this machine"
     )
@@ -453,6 +459,13 @@ async fn handle_inner(
             }),
             "bots" | "sethome" => Some("Only the owner can do that.".to_owned()),
             "model" => Some(model_command(runtime, args, owner).await),
+            // Every conversation of the bot, so the owner's only.
+            "recall" if owner && args.trim().is_empty() => Some("/recall <what to look for>".to_owned()),
+            "recall" if owner => {
+                let dir = home.join("sessions");
+                Some(crate::recall::recall(&runtime.agent(), &dir, args.trim(), &session, &|_| {}).await)
+            }
+            "recall" => Some("Only the owner can do that.".to_owned()),
             "stop" => Some(match runtime.conversations.slots.lock().expect("slots").get(&session) {
                 Some(slot) if slot.chat.try_lock().is_err() => {
                     slot.stop.notify_waiters();
@@ -546,12 +559,14 @@ async fn handle_inner(
         chat: chat.clone(),
         user: user.id.clone(),
     };
+    let outbox = crate::media::Outbox::default();
     let context = crate::tools::TurnContext {
         session: session.clone(),
         telegram_chat: (platform == "telegram").then(|| chat.parse().ok()).flatten(),
         discord_channel: (platform == "discord").then(|| chat.clone()),
         reply_to: Some(reply_to),
         inbox: Some(slot.inbox.clone()),
+        outbox: Some(outbox.clone()),
         ..Default::default()
     };
     runtime.turn_started();
@@ -586,6 +601,24 @@ async fn handle_inner(
         }
     };
     transport.answer(&chat, &reply).await?;
+    send_files(transport.as_ref(), &chat, &outbox).await
+}
+
+/// The files a turn made, after its answer: as the platform takes them, else where they are.
+pub async fn send_files(transport: &dyn Transport, chat: &str, outbox: &crate::media::Outbox) -> Result<(), String> {
+    let made = std::mem::take(&mut *outbox.lock().expect("outbox"));
+    for file in made {
+        match transport.send_file(chat, &file).await {
+            Ok(true) => {}
+            Ok(false) => {
+                transport.send(chat, &format!("(saved on the machine: {})", file.path.display())).await.map(drop)?
+            }
+            Err(e) => {
+                tracing::warn!("{}: file not sent: {e}", transport.platform());
+                transport.send(chat, &format!("✗ could not send {}: {e}", file.path.display())).await.map(drop)?;
+            }
+        }
+    }
     Ok(())
 }
 

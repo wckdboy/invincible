@@ -11,6 +11,7 @@ pub mod browser;
 pub mod channel;
 pub mod commands;
 pub mod config;
+pub mod context;
 pub mod cron;
 pub mod diff;
 pub mod discord;
@@ -22,6 +23,7 @@ pub mod gateway;
 pub mod heartbeat;
 pub mod homeassistant;
 pub mod hooks;
+pub mod hub;
 pub mod identity;
 pub mod images;
 pub mod insights;
@@ -30,6 +32,7 @@ pub mod manage;
 pub mod markdown;
 pub mod matrix;
 pub mod mcp;
+pub mod media;
 pub mod memory;
 pub mod migrate;
 pub mod net;
@@ -37,11 +40,13 @@ pub mod pairing;
 pub mod personality;
 pub mod procs;
 pub mod profile;
+pub mod recall;
 pub mod sandbox;
 pub mod script;
 pub mod search;
 pub mod service;
 pub mod session;
+pub mod settings;
 pub mod setup;
 pub mod signal;
 pub mod skills;
@@ -111,6 +116,10 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         }
         tools = tools.only(tools::tools_for(groups));
     }
+    if let Some(unknown) = config.agent.disabled_tools.iter().find(|t| settings::group_of(t).is_none()) {
+        return Err(format!("[agent] disabled_tools: unknown tool {unknown:?}"));
+    }
+    tools = tools.without(config.agent.disabled_tools.clone());
     Ok(agent::Agent {
         gateway,
         tools,
@@ -123,6 +132,7 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
             context_kib: config.agent.context_kib,
             nudge_every: config.agent.nudge_every,
             persona: persona(config),
+            recall_model: config.agent.recall_model.clone(),
             ..Default::default()
         },
     })

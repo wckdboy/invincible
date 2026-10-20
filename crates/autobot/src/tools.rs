@@ -20,6 +20,8 @@ pub struct Tools {
     home: Option<PathBuf>,
     /// Only these tools (by name), when set: a recipe's tool groups ([groups]).
     only: Option<Vec<String>>,
+    /// Never these tools (by name): turned off one by one ([crate::settings::set_tool]).
+    off: Vec<String>,
     sandbox: crate::sandbox::Mode,
     /// Commands run sandboxed now: always, or unattended in a run with nobody watching.
     confined: bool,
@@ -33,6 +35,8 @@ pub struct Tools {
     ssh: Option<std::sync::Arc<crate::ssh::Ssh>>,
     /// Home Assistant, for the `home` tool ([crate::homeassistant]).
     ha: Option<std::sync::Arc<crate::homeassistant::Home>>,
+    /// What speech and image backends the node has ([crate::media]).
+    media: crate::media::Cache,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
@@ -47,6 +51,9 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("terminal", &["terminal", "process", "execute_code"]),
     ("plan", &["todo"]),
     ("home", &["home"]),
+    ("schedule", &["schedule_task", "list_schedules", "cancel_schedule"]),
+    // Made by the node's speech and image backends.
+    ("media", &["speak", "generate_image"]),
 ];
 
 /// The tool names [groups] allow.
@@ -75,6 +82,8 @@ pub struct TurnContext {
     pub board_task: Option<String>,
     /// What the owner sent while the turn runs: taken in before its next step.
     pub inbox: Option<Inbox>,
+    /// Files the turn made (speech, images), to go with its answer in the chat ([crate::media]).
+    pub outbox: Option<crate::media::Outbox>,
 }
 
 /// Messages for a running turn ([TurnContext::inbox]).
@@ -186,6 +195,16 @@ pub enum Call {
     },
     /// Home Assistant ([crate::homeassistant]).
     Home(crate::homeassistant::HomeCall),
+    /// Speech from the node ([crate::media]); run by the agent.
+    Speak {
+        text: String,
+        voice: Option<String>,
+    },
+    /// A picture from the node ([crate::media]); run by the agent.
+    Image {
+        prompt: String,
+        size: Option<String>,
+    },
 }
 
 impl Tools {
@@ -195,6 +214,7 @@ impl Tools {
             timeout,
             home: None,
             only: None,
+            off: Vec::new(),
             sandbox: crate::sandbox::Mode::Off,
             confined: false,
             limit: RESULT_LIMIT,
@@ -202,7 +222,13 @@ impl Tools {
             browser: false,
             ssh: None,
             ha: None,
+            media: Default::default(),
         }
+    }
+
+    /// What the node can make, asked at most once a minute ([crate::media]).
+    pub fn media(&self) -> &crate::media::Cache {
+        &self.media
     }
 
     /// With the `home` tool on [ha].
@@ -276,13 +302,19 @@ impl Tools {
         self
     }
 
+    /// Never offers or runs [tools] (by name).
+    pub fn without(mut self, tools: Vec<String>) -> Self {
+        self.off = tools;
+        self
+    }
+
     /// Whether [name] is offered ("mcp" stands for every MCP tool).
     pub fn offers(&self, name: &str) -> bool {
         self.offered(name)
     }
 
     fn offered(&self, name: &str) -> bool {
-        self.only.as_ref().is_none_or(|only| only.iter().any(|t| t == name))
+        self.only.as_ref().is_none_or(|only| only.iter().any(|t| t == name)) && !self.off.iter().any(|t| t == name)
     }
 
     pub fn workdir(&self) -> &Path {
@@ -355,7 +387,7 @@ impl Tools {
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "search_sessions",
-                "description": "Search earlier conversations for what was said or decided (keywords).",
+                "description": "Recall earlier conversations: what was said, decided or left open about something (keywords). Gives a short summary of each conversation that matches best, then the matching messages.",
                 "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] },
             }}));
             list.push(json!({ "type": "function", "function": {
@@ -611,6 +643,14 @@ impl Tools {
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
             "browser" if self.browser => Call::Browser(crate::browser::Act::parse(&args)?),
             "home" if self.ha.is_some() => Call::Home(crate::homeassistant::HomeCall::parse(&args)?),
+            "speak" => Call::Speak {
+                text: text("text")?,
+                voice: args.get("voice").and_then(Value::as_str).map(str::to_owned).filter(|v| !v.trim().is_empty()),
+            },
+            "generate_image" => Call::Image {
+                prompt: text("prompt")?,
+                size: args.get("size").and_then(Value::as_str).map(str::to_owned).filter(|s| !s.trim().is_empty()),
+            },
             "execute_code" => Call::ExecuteCode {
                 language: crate::script::Language::parse(
                     args.get("language").and_then(Value::as_str).unwrap_or_default(),
@@ -683,6 +723,8 @@ impl Tools {
             | Call::CancelSchedule { .. }
             | Call::Process { .. }
             | Call::Todo { .. } => None,
+            // Asked for in the agent, when it leaves the machine ([crate::media]).
+            Call::Speak { .. } | Call::Image { .. } => None,
         }
     }
 
@@ -744,6 +786,7 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
             Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
+            Call::Speak { .. } | Call::Image { .. } => Err("speak and generate_image run in the agent".to_owned()),
             Call::Home(call) => match &self.ha {
                 Some(ha) => call.run(ha).await,
                 None => Err("Home Assistant is not set up here ([homeassistant] url)".to_owned()),
@@ -777,12 +820,12 @@ impl Tools {
             },
             Call::SearchSessions { query } => match &self.home {
                 Some(home) => {
-                    let found = crate::session::search(&home.join("sessions"), query, 8, &turn_context().session);
-                    Ok(if found.is_empty() {
-                        "nothing found".to_owned()
-                    } else {
-                        found.iter().map(|(s, snippet)| format!("[{s}] {snippet}")).collect::<Vec<_>>().join("\n")
+                    let (dir, query, skip) = (home.join("sessions"), query.clone(), turn_context().session);
+                    tokio::task::spawn_blocking(move || {
+                        crate::recall::plain(&crate::recall::search(&dir, &query, 8, &skip))
                     })
+                    .await
+                    .map_err(|e| e.to_string())
                 }
                 None => Err("no conversations here".to_owned()),
             },
@@ -984,21 +1027,40 @@ impl Tools {
         }
     }
 
-    /// The project's instructions for agents in the working directory (`AGENTS.md`,
-    /// `CLAUDE.md`, `.autobot/AGENTS.md`), with their names; at most 24 KiB in all.
+    /// The project's instructions for agents ([crate::context]): the working directory's
+    /// `AGENTS.md`, `CLAUDE.md`, `HERMES.md` …, and its repository's above it; with their names, at
+    /// most 24 KiB in all. None on another machine (they are read there by the agent itself).
     pub fn project_notes(&self) -> Option<String> {
-        let mut out = String::new();
-        for name in ["AGENTS.md", "CLAUDE.md", ".autobot/AGENTS.md"] {
-            let Ok(text) = std::fs::read_to_string(self.workdir.join(name)) else { continue };
-            let text = text.trim();
-            if text.is_empty() || out.len() >= 24 * 1024 {
-                continue;
-            }
-            let room = 24 * 1024 - out.len();
-            let cut = &text[..floor(text, text.len().min(room))];
-            out.push_str(&format!("--- {name} ---\n{cut}\n"));
+        if self.ssh.is_some() {
+            return None;
         }
-        (!out.is_empty()).then_some(out)
+        crate::context::prompt(&self.context_files())
+    }
+
+    /// The context files the start takes ([crate::context::project]).
+    pub fn context_files(&self) -> Vec<crate::context::File> {
+        if self.ssh.is_some() {
+            return Vec::new();
+        }
+        crate::context::project(&self.workdir)
+    }
+
+    /// The nested context files [call] reaches that [session] has not had, as they go with its
+    /// result ([crate::context::nested]); empty for other calls.
+    pub fn nested_notes(&self, call: &Call, session: &str) -> String {
+        let path = match call {
+            Call::ReadFile { path, .. }
+            | Call::WriteFile { path, .. }
+            | Call::EditFile { path, .. }
+            | Call::ListDir { path }
+            | Call::Search { path, .. }
+            | Call::FindFiles { path, .. } => path,
+            _ => return String::new(),
+        };
+        if self.ssh.is_some() || !path.starts_with(&self.workdir) {
+            return String::new();
+        }
+        crate::context::hint(&crate::context::nested(&self.workdir, path, session))
     }
 
     /// The git branch, when the working directory is a repository.

@@ -78,6 +78,32 @@ impl Bot {
         Ok(last)
     }
 
+    /// A voice message (speech) or a photo (an image), uploaded.
+    pub async fn send_file(&self, chat: i64, file: &crate::media::Made) -> Result<Value, String> {
+        let (method, field) = match file.kind {
+            crate::media::Kind::Speech => ("sendVoice", "voice"),
+            crate::media::Kind::Image => ("sendPhoto", "photo"),
+        };
+        let bytes = std::fs::read(&file.path).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        let name = file.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let (content_type, body) =
+            crate::media::multipart(&[("chat_id", &chat.to_string())], (field, &name, &file.mime, &bytes))?;
+        let response = self
+            .client
+            .post(format!("{}/{method}", self.base))
+            .header("content-type", content_type)
+            .body(body)
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| format!("Telegram {method}: {}", e.without_url()))?;
+        let reply: Value = response.json().await.map_err(|e| format!("Telegram {method}: {}", e.without_url()))?;
+        if reply["ok"] != true {
+            return Err(format!("Telegram {method}: {}", reply["description"].as_str().unwrap_or("failed")));
+        }
+        Ok(reply["result"].clone())
+    }
+
     async fn typing(&self, chat: i64) {
         let _ =
             self.call("sendChatAction", json!({ "chat_id": chat, "action": "typing" }), Duration::from_secs(10)).await;
@@ -237,6 +263,10 @@ impl Transport for Channel {
             let sent = self.bot.send(chat_id(chat)?, text).await?;
             Ok(sent["message_id"].as_i64().map(|id| id.to_string()))
         })
+    }
+
+    fn send_file<'a>(&'a self, chat: &'a str, file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move { self.bot.send_file(chat_id(chat)?, file).await.map(|_| true) })
     }
 
     /// In Telegram's HTML; a part it cannot read goes again as plain text.

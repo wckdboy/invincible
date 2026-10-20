@@ -74,7 +74,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/approvals", "show or set: ask, edits (changes in the project run), allowlist, trust"),
     ("/private", "on: local models only; off: cloud models allowed"),
     ("/tools", "show the tools, or keep only some groups: /tools files-read,terminal (or all)"),
-    ("/context", "how much of the conversation each call sends, or set it in KiB"),
+    ("/context", "the files in play (AGENTS.md, SOUL.md …) and how much each call sends; or set it in KiB"),
     ("/undo", "put back the files the last turn changed, and take the turn back"),
     ("/diff", "the project's uncommitted changes (git diff)"),
     ("/init", "write or improve the project's AGENTS.md"),
@@ -93,6 +93,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/copy", "copy the last answer (its Markdown) to the clipboard"),
     ("/image", "show the agent an image: /image <path> (or drag one in, ctrl+v, @shot.png)"),
     ("/memory", "what the agent remembered"),
+    ("/recall", "what earlier conversations said about something: /recall <what>"),
     ("/profile", "what the agent keeps about how you work (USER.md)"),
     ("/personality", "pick how it answers, or /personality <name> (none: SOUL.md only)"),
     ("/skills", "pick a skill to run; /skills accept|reject <name>; or /<skill> directly"),
@@ -101,6 +102,38 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/clear", "clear the screen"),
     ("/exit", "quit (ctrl+d)"),
 ];
+
+/// What `/context` lists: the instruction files in play, and what else goes with every call.
+fn context_rows(agent: &crate::agent::Agent, home: &Path, session: &str) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    let workdir = agent.tools.workdir();
+    let files: Vec<String> = agent.tools.context_files().iter().map(|f| f.shown.clone()).collect();
+    rows.push(("project".to_owned(), if files.is_empty() { "no AGENTS.md".to_owned() } else { files.join(", ") }));
+    let nested: Vec<String> = crate::context::given(session)
+        .iter()
+        .map(|p| p.strip_prefix(workdir).map(|r| r.display().to_string()).unwrap_or_else(|_| p.display().to_string()))
+        .collect();
+    if !nested.is_empty() {
+        rows.push(("taken on the way".to_owned(), nested.join(", ")));
+    }
+    let soul = crate::personality::soul_path(home);
+    if crate::personality::soul(home).is_some() {
+        rows.push(("persona".to_owned(), soul.display().to_string()));
+    }
+    if let Some(name) = agent.options.personality.clone().or_else(|| crate::personality::active(home))
+        && !crate::personality::is_none(&name)
+    {
+        rows.push(("personality".to_owned(), name));
+    }
+    let profile = crate::profile::entries(home).len();
+    if profile > 0 {
+        rows.push(("profile".to_owned(), format!("{profile} entries ({})", crate::profile::path(home).display())));
+    }
+    let facts = crate::memory::Memory::new(home).list().len();
+    let skills = crate::skills::list(home).len();
+    rows.push(("memory".to_owned(), format!("{facts} facts · {skills} skills listed")));
+    rows
+}
 
 /// The keys, for `/help`.
 const KEYS: &[(&str, &str)] = &[
@@ -1571,6 +1604,19 @@ impl Chat {
                     say(&format!("  {} {}", style::bold(&format!("/{:<10}", c.name)), style::gray(&c.description)));
                 }
             }
+            "/recall" => {
+                if arg.is_empty() {
+                    return Err("/recall <what to look for>".to_owned());
+                }
+                say(&style::gray("looking back…"));
+                let dir = self.home.join("sessions");
+                let text = crate::recall::recall(&self.agent, &dir, arg, &self.session.id, &|_| {}).await;
+                term::print(&format!("{}\n", text.trim_end()));
+                if text != "nothing found" {
+                    say(&style::gray("  ─ goes with your next message"));
+                    self.shell.push_str(&format!("(I recalled earlier conversations about \"{arg}\":)\n{text}\n"));
+                }
+            }
             "/clear" => term::clear(),
             "/stop" => say(&style::gray("nothing is running (esc stops a turn while it works)")),
             "/retry" => {
@@ -1747,6 +1793,9 @@ impl Chat {
                     budget / 1024,
                     if self.session.summary().is_some() { " · older part summarized" } else { "" }
                 ));
+                let rows = context_rows(&self.agent, &self.home, &self.session.id);
+                let rows: Vec<(&str, String)> = rows.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+                term::print(&invincible::brand::rows(&rows));
             }
             "/status" => {
                 let mut rows = vec![

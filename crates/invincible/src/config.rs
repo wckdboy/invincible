@@ -45,6 +45,55 @@ pub struct Config {
     /// Updates: none unless asked for (`invincible update`), or daily when `auto` is on.
     #[serde(default)]
     pub update: UpdateConfig,
+    /// Text-to-speech backends: `POST /v1/audio/speech` ([crate::synth]).
+    #[serde(default)]
+    pub speech: Vec<MediaConfig>,
+    /// Image generation backends: `POST /v1/images/generations` ([crate::synth]).
+    #[serde(default)]
+    pub images: Vec<MediaConfig>,
+}
+
+/// ```toml
+/// [[speech]]                                 # or [[images]]
+/// id = "kokoro"                              # what requests name
+/// base_url = "http://127.0.0.1:8880/v1"      # OpenAI-compatible; on loopback: the node's own
+/// upstream_model = "kokoro"                  # what the server calls it (default: id)
+/// voice = "af_heart"                         # speech: when a request names none
+/// api_key_file = "keys/openai"               # or api_key_env; none for a local server
+/// data_policy = "retention:30"               # off the machine: as for [[cloud]]
+/// ```
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaConfig {
+    pub id: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub upstream_model: Option<String>,
+    #[serde(default)]
+    pub voice: Option<String>,
+    #[serde(default)]
+    pub api_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub data_policy: Option<String>,
+}
+
+impl MediaConfig {
+    /// The API key, as for [CloudConfig::key].
+    pub fn key(&self, home: &Path) -> Result<Option<String>, String> {
+        CloudConfig {
+            id: self.id.clone(),
+            upstream_model: None,
+            base_url: self.base_url.clone(),
+            api_key_file: self.api_key_file.clone(),
+            api_key_env: self.api_key_env.clone(),
+            context: None,
+            data_policy: String::new(),
+            vision: None,
+        }
+        .key(home)
+    }
 }
 
 /// ```toml
@@ -324,6 +373,21 @@ impl Config {
                 return Err(format!("[[cloud]] {}: set api_key_file or api_key_env, not both", cloud.id));
             }
         }
+        for (section, list) in [("speech", &self.speech), ("images", &self.images)] {
+            let mut ids = std::collections::HashSet::new();
+            for m in list {
+                if m.id.is_empty() || m.id == "auto" {
+                    return Err(format!("[[{section}]] id {:?} is reserved", m.id));
+                }
+                if !ids.insert(&m.id) {
+                    return Err(format!("[[{section}]] id {:?} appears twice", m.id));
+                }
+                crate::egress::check(&m.base_url).map_err(|e| format!("[[{section}]] {}: {e}", m.id))?;
+                if m.api_key_file.is_some() && m.api_key_env.is_some() {
+                    return Err(format!("[[{section}]] {}: set api_key_file or api_key_env, not both", m.id));
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -401,6 +465,21 @@ mod tests {
         let mut engine = config.engine.clone();
         engine.extra_args = vec!["--mmproj".into(), "p.gguf".into()];
         assert_eq!(config.models[0].vision(&engine), None, "the engine's own arguments may give it one");
+    }
+
+    #[test]
+    fn speech_and_image_backends_are_checked() {
+        let ok = Config::parse(
+            "[[speech]]\nid = \"kokoro\"\nbase_url = \"http://127.0.0.1:8880/v1\"\nvoice = \"af\"\n[[images]]\nid = \"img\"\nbase_url = \"https://api.example.org/v1\"\napi_key_env = \"K\"\n",
+        )
+        .unwrap();
+        assert_eq!(ok.speech[0].voice.as_deref(), Some("af"));
+        assert_eq!(ok.images[0].id, "img");
+        let http = "[[images]]\nid = \"i\"\nbase_url = \"http://images.example.org/v1\"\n";
+        assert!(Config::parse(http).unwrap_err().contains("HTTPS"));
+        let twice = "[[speech]]\nid = \"a\"\nbase_url = \"http://127.0.0.1:1\"\n[[speech]]\nid = \"a\"\nbase_url = \"http://127.0.0.1:2\"\n";
+        assert!(Config::parse(twice).unwrap_err().contains("twice"));
+        assert!(Config::parse("[[speech]]\nid = \"auto\"\nbase_url = \"http://127.0.0.1:1\"\n").is_err());
     }
 
     #[test]

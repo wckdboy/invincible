@@ -1573,3 +1573,226 @@ print(len(hits.splitlines()), "TODOs in", len(files.splitlines()), "files; first
     let tools = tools.into_inner().unwrap();
     assert!(tools.iter().any(|t| t.starts_with("script → search")), "{tools:?}");
 }
+
+#[tokio::test]
+async fn search_sessions_recalls_earlier_conversations_with_a_cached_summary() {
+    let (url, script) = gateway(vec![
+        call("search_sessions", json!({"query": "billing database"})),
+        say("They chose Postgres 16 for billing; the migration was left open."),
+        say("Postgres 16, and the migration is still to do."),
+        // The second time, the summary comes from the cache: only the turn's two calls.
+        call("search_sessions", json!({"query": "database billing"})),
+        say("Postgres 16."),
+    ])
+    .await;
+    let dir = temp("recall");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    agent.options.recall_model = Some("small".into());
+    let mut earlier = Session::open(&dir.join("sessions"), "earlier").unwrap();
+    earlier.push(json!({"role": "user", "content": "Which database for the billing service?"})).unwrap();
+    earlier.push(json!({"role": "assistant", "content": "Postgres 16; the migration comes later."})).unwrap();
+    let owner = owner(Answer::Deny);
+    let mut now = Session::open(&dir.join("sessions"), "now").unwrap();
+    let outcome = agent.turn(&mut now, "What did we pick for billing?", &owner, &mut HashSet::new(), &quiet).await;
+    assert_eq!(outcome.unwrap().text, "Postgres 16, and the migration is still to do.");
+    {
+        let script = script.lock().unwrap();
+        let summary = &script.seen[1].1;
+        assert_eq!(summary["model"], "small", "the recall model");
+        assert!(summary["messages"][1]["content"].as_str().unwrap().contains("Postgres 16; the migration"));
+        let result = script.seen[2].1["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool").cloned();
+        let result = result.unwrap()["content"].as_str().unwrap().to_owned();
+        assert!(result.starts_with("[earlier · "), "{result}");
+        assert!(result.contains("They chose Postgres 16") && result.contains("user: Which database"), "{result}");
+    }
+    assert!(dir.join("sessions/.index/earlier.json").is_file());
+    assert_eq!(std::fs::read_dir(dir.join("sessions/.recall")).unwrap().count(), 1);
+    // In the same conversation (which is not searched), the same earlier one: from the cache.
+    agent.turn(&mut now, "And the database?", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    let script = script.lock().unwrap();
+    assert_eq!(script.seen.len(), 5, "no second summary call");
+    assert!(script.seen[4].1.to_string().contains("They chose Postgres 16"));
+}
+
+/// A gateway with speech on the node and images off it, besides the scripted chat.
+async fn media_gateway(answers: Vec<(u16, Value)>) -> (String, Shared, Arc<Mutex<Vec<(String, HeaderMap, Value)>>>) {
+    let script: Shared = Arc::new(Mutex::new(Script { answers: answers.into(), seen: Vec::new() }));
+    let made: Arc<Mutex<Vec<(String, HeaderMap, Value)>>> = Arc::default();
+    let (speech, images) = (made.clone(), made.clone());
+    let app = axum::Router::new()
+        .route("/v1/chat/completions", axum::routing::post(completions))
+        .with_state(script.clone())
+        .route(
+            "/v1/node",
+            axum::routing::get(|| async {
+                Json(json!({ "name": "n", "speech": [{ "id": "kokoro", "tier": "node", "host": "127.0.0.1", "healthy": true }],
+                    "images": [{ "id": "img", "tier": "cloud", "host": "api.images.example", "healthy": true }] }))
+            }),
+        )
+        .route(
+            "/v1/audio/speech",
+            axum::routing::post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                let made = speech.clone();
+                async move {
+                    made.lock().unwrap().push(("speech".into(), headers, body));
+                    let mut response = ([("content-type", "audio/mpeg")], b"ID3 spoken".to_vec()).into_response();
+                    response.headers_mut().insert("invincible-request-id", "tts1".parse().unwrap());
+                    response
+                }
+            }),
+        )
+        .route(
+            "/v1/images/generations",
+            axum::routing::post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                let made = images.clone();
+                async move {
+                    made.lock().unwrap().push(("images".into(), headers, body));
+                    Json(json!({ "data": [{ "b64_json": "iVBORw0KGgo=" }] })).into_response()
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (url, script, made)
+}
+
+#[tokio::test]
+async fn speech_on_the_node_is_made_without_asking_and_goes_to_the_chat() {
+    let (url, script, made) =
+        media_gateway(vec![call("speak", json!({"text": "The build is green.", "voice": "af"})), say("Said.")]).await;
+    let dir = temp("speak");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let owner = owner(Answer::Deny);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let outbox = autobot::media::Outbox::default();
+    let context = autobot::tools::TurnContext { outbox: Some(outbox.clone()), ..Default::default() };
+    let mut grants = HashSet::new();
+    let receipts = Mutex::new(Vec::new());
+    let events = |event: Event| {
+        if let Event::Receipt { id, .. } = event {
+            receipts.lock().unwrap().push(id.to_owned());
+        }
+    };
+    let turn = agent.turn(&mut session, "say it out loud", &owner, &mut grants, &events);
+    let outcome = autobot::tools::TURN.scope(context, turn).await.unwrap();
+    assert_eq!(outcome.text, "Said.");
+    assert!(owner.asked.lock().unwrap().is_empty(), "the node's own backend: nothing asked");
+    assert_eq!(*receipts.lock().unwrap(), ["req1", "tts1", "req2"], "the speech has its receipt");
+    let (what, headers, body) = made.lock().unwrap()[0].clone();
+    assert_eq!(what, "speech");
+    assert_eq!(headers["invincible-private"], "1", "a private turn's speech stays private");
+    assert_eq!(body, json!({ "input": "The build is green.", "voice": "af", "response_format": "mp3" }));
+    let files = outbox.lock().unwrap().clone();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].kind, autobot::media::Kind::Speech);
+    assert!(files[0].path.starts_with(dir.join("attachments")));
+    assert_eq!(std::fs::read(&files[0].path).unwrap(), b"ID3 spoken");
+    let script = script.lock().unwrap();
+    let names: Vec<&str> =
+        script.seen[0].1["tools"].as_array().unwrap().iter().filter_map(|t| t["function"]["name"].as_str()).collect();
+    assert!(names.contains(&"speak") && names.contains(&"generate_image"));
+    let result = script.seen[1].1["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool").cloned();
+    assert!(result.unwrap()["content"].as_str().unwrap().starts_with("spoke it: saved to "));
+}
+
+#[tokio::test]
+async fn an_image_off_the_machine_is_asked_for_first() {
+    let prompt = json!({"prompt": "a lighthouse at dusk"});
+    let (url, _, made) = media_gateway(vec![call("generate_image", prompt.clone()), say("No picture, then.")]).await;
+    let dir = temp("image-denied");
+    let mut denied = agent(&url, &dir, ApprovalMode::Ask, true);
+    denied.tools = denied.tools.clone().with_home(dir.clone());
+    let no = owner(Answer::Deny);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    denied.turn(&mut session, "draw a lighthouse", &no, &mut HashSet::new(), &quiet).await.unwrap();
+    let asked = no.asked.lock().unwrap().clone();
+    assert!(
+        matches!(&asked[..], [Action::Cloud(why)] if why.contains("api.images.example") && why.contains("a lighthouse")),
+        "{asked:?}"
+    );
+    assert!(made.lock().unwrap().is_empty(), "nothing sent");
+
+    let (url, _, made) = media_gateway(vec![call("generate_image", prompt), say("Here it is.")]).await;
+    let dir = temp("image-approved");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "draw a lighthouse", &owner(Answer::Once), &mut HashSet::new(), &quiet).await.unwrap();
+    let (what, headers, body) = made.lock().unwrap()[0].clone();
+    assert_eq!(what, "images");
+    assert_eq!(headers["invincible-confirmed"], "1");
+    assert!(headers.get("invincible-private").is_none(), "the owner let it leave");
+    assert_eq!(body["response_format"], "b64_json");
+    let saved: Vec<_> = std::fs::read_dir(dir.join("attachments")).unwrap().flatten().map(|e| e.path()).collect();
+    assert!(saved[0].extension().is_some_and(|e| e == "png"), "{saved:?}");
+}
+
+#[tokio::test]
+async fn without_media_backends_there_are_no_media_tools() {
+    let (url, script) = gateway(vec![say("hi")]).await;
+    let dir = temp("no-media");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "hello", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    let text = script.lock().unwrap().seen[0].1["tools"].to_string();
+    assert!(!text.contains("\"speak\"") && !text.contains("generate_image"));
+}
+
+#[tokio::test]
+async fn context_files_from_the_start_and_a_nested_one_on_the_way() {
+    let (url, script) = gateway(vec![
+        call("read_file", json!({"path": "pkg/lib.rs"})),
+        call("read_file", json!({"path": "pkg/lib.rs"})),
+        say("Read it."),
+    ])
+    .await;
+    let dir = temp("context");
+    let work = dir.join("work");
+    std::fs::create_dir_all(work.join("pkg")).unwrap();
+    std::fs::write(work.join("AGENTS.md"), "Use tabs.").unwrap();
+    std::fs::write(work.join("HERMES.md"), "Answer in English.").unwrap();
+    std::fs::write(work.join("pkg/AGENTS.md"), "In pkg: run make check after changes.").unwrap();
+    std::fs::write(work.join("pkg/lib.rs"), "pub fn f() {}\n").unwrap();
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let mut session = Session::open(&dir.join("sessions"), "ctx").unwrap();
+    agent.turn(&mut session, "read pkg/lib.rs", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    let script = script.lock().unwrap();
+    let system = script.seen[0].1["messages"][0]["content"].as_str().unwrap().to_owned();
+    assert!(
+        system.contains("--- AGENTS.md ---\nUse tabs.") && system.contains("--- HERMES.md ---\nAnswer in English.")
+    );
+    assert!(!system.contains("make check"), "the nested one waits until a tool gets there");
+    let results: Vec<String> = script.seen[2].1["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "tool")
+        .map(|m| m["content"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(results[0].contains("pub fn f()") && results[0].contains("from pkg/AGENTS.md"), "{results:?}");
+    assert!(results[0].contains("run make check"));
+    assert!(!results[1].contains("make check"), "once per conversation");
+    assert_eq!(autobot::context::given("ctx"), [work.join("pkg/AGENTS.md")]);
+}
+
+#[tokio::test]
+async fn a_change_in_a_directory_with_its_own_instructions_waits_for_them() {
+    let edit = json!({"path": "pkg/new.rs", "content": "fn x() {}\n"});
+    let (url, script) = gateway(vec![call("write_file", edit.clone()), call("write_file", edit), say("Done.")]).await;
+    let dir = temp("context-write");
+    let work = dir.join("work");
+    std::fs::create_dir_all(work.join("pkg")).unwrap();
+    std::fs::write(work.join("pkg/AGENTS.md"), "In pkg: four spaces.").unwrap();
+    let agent = agent(&url, &dir, ApprovalMode::Trust, true);
+    let mut session = Session::open(&dir.join("sessions"), "ctx-write").unwrap();
+    agent.turn(&mut session, "add pkg/new.rs", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    let script = script.lock().unwrap();
+    let first = script.seen[1].1["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "tool").cloned();
+    let first = first.unwrap()["content"].as_str().unwrap().to_owned();
+    assert!(first.starts_with("not changed yet") && first.contains("four spaces"), "{first}");
+    assert_eq!(std::fs::read_to_string(work.join("pkg/new.rs")).unwrap(), "fn x() {}\n", "the second call wrote it");
+}

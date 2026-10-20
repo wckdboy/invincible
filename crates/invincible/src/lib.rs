@@ -18,6 +18,7 @@ pub mod remote;
 pub mod server;
 pub mod service;
 pub mod sshsig;
+pub mod synth;
 pub mod term;
 pub mod token;
 pub mod update;

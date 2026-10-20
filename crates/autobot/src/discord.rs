@@ -97,6 +97,33 @@ impl Bot {
         })
     }
 
+    /// A file as an attachment in [channel].
+    pub async fn upload(&self, channel: &str, file: &crate::media::Made) -> Result<Value, String> {
+        let bytes = std::fs::read(&file.path).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        let name = file.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let payload = json!({ "attachments": [{ "id": 0, "filename": name }] }).to_string();
+        let (content_type, body) =
+            crate::media::multipart(&[("payload_json", &payload)], ("files[0]", &name, &file.mime, &bytes))?;
+        let path = format!("/channels/{channel}/messages");
+        let response = self
+            .client
+            .post(format!("{}{path}", self.api))
+            .header("authorization", format!("Bot {}", self.token))
+            .header("user-agent", "DiscordBot (https://github.com/wckdboy/invincible, 1)")
+            .header("content-type", content_type)
+            .body(body)
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| format!("Discord {path}: {}", e.without_url()))?;
+        let status = response.status();
+        let text = response.text().await.map_err(|e| format!("Discord {path}: {}", e.without_url()))?;
+        if !status.is_success() {
+            return Err(format!("Discord {path}: {status}: {}", text.chars().take(200).collect::<String>()));
+        }
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
     async fn call(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> Result<Value, String> {
         for attempt in 0..3 {
             let mut request = self
@@ -239,6 +266,10 @@ impl Transport for Channel {
 
     fn answer<'a>(&'a self, chat: &'a str, markdown: &'a str) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move { self.bot.send(chat, markdown).await.map(drop) })
+    }
+
+    fn send_file<'a>(&'a self, chat: &'a str, file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move { self.bot.upload(chat, file).await.map(|_| true) })
     }
 
     fn edit<'a>(&'a self, chat: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), String>> {

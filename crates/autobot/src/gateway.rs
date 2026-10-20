@@ -261,6 +261,51 @@ impl Gateway {
         Ok((text, request_id))
     }
 
+    /// Speech or a picture from the node (`/audio/speech`, `/images/generations`) for [body]:
+    /// the answer's bytes and type, the receipt id and the routing decision. [private] keeps it
+    /// on the machine; [confirmed] is the owner's yes to a backend off it.
+    pub async fn make(
+        &self,
+        path: &str,
+        body: &Value,
+        private: bool,
+        confirmed: bool,
+    ) -> Result<(Vec<u8>, String, Option<String>, Option<Value>), GatewayError> {
+        let mut request = self
+            .client
+            .post(format!("{}{path}", self.url))
+            .bearer_auth(&self.token)
+            .header(invincible::server::CLIENT_HEADER, "autobot-agent")
+            .timeout(Duration::from_secs(300))
+            .json(body);
+        if private {
+            request = request.header("invincible-private", "1");
+        }
+        if confirmed {
+            request = request.header("invincible-confirmed", "1");
+        }
+        let response = request.send().await.map_err(|e| GatewayError::Failed(self.unreachable(e)))?;
+        let status = response.status();
+        let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+        let request_id = header(invincible::receipts::REQUEST_ID_HEADER);
+        let decision = header(invincible::server::DECISION_HEADER).and_then(|d| serde_json::from_str(&d).ok());
+        let mime = header("content-type").unwrap_or_default();
+        let bytes = response.bytes().await.map_err(|e| GatewayError::Failed(format!("the gateway's answer: {e}")))?;
+        if !status.is_success() {
+            let parsed: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            let message = parsed["error"]["message"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| String::from_utf8_lossy(&bytes).chars().take(300).collect());
+            return Err(if status == reqwest::StatusCode::CONFLICT {
+                GatewayError::Confirm(message)
+            } else {
+                GatewayError::Failed(format!("the gateway refused ({status}): {message}"))
+            });
+        }
+        Ok((bytes.to_vec(), mime, request_id, decision))
+    }
+
     /// The models the gateway serves.
     pub async fn models(&self) -> Result<Vec<String>, String> {
         let reply = self.get("/models").await?;

@@ -186,6 +186,9 @@ pub struct AgentConfig {
     /// shorter tool list makes a small local model's calls faster.
     #[serde(default)]
     pub tools: Option<Vec<String>>,
+    /// Tools turned off one by one, in groups that are on (`autobot tools disable browser`).
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
     /// KiB of recent conversation sent per model call (default 48: small local models have small
     /// contexts). Frontier models take far more: `context_kib = 400`.
     #[serde(default)]
@@ -210,6 +213,10 @@ pub struct AgentConfig {
     /// Commands and files on another machine ([crate::ssh]): `[agent.ssh] host = "me@box"`.
     #[serde(default)]
     pub ssh: Option<crate::ssh::Ssh>,
+    /// The model that summarizes earlier conversations for `search_sessions` and `/recall`: a
+    /// small, quick one is enough [default: the bot's own]; `off` for the matching messages only.
+    #[serde(default)]
+    pub recall_model: Option<String>,
     /// The `browser` tool, when a Chrome, Chromium, Edge or Brave is installed ([crate::browser]).
     #[serde(default = "yes")]
     pub browser: bool,
@@ -253,6 +260,7 @@ impl Default for AgentConfig {
             command_timeout: command_timeout(),
             sandbox: Default::default(),
             tools: None,
+            disabled_tools: Vec::new(),
             heartbeat: heartbeat(),
             trajectories: false,
             context_kib: None,
@@ -260,6 +268,7 @@ impl Default for AgentConfig {
             docker: None,
             nudge_every: nudge_every(),
             ssh: None,
+            recall_model: None,
             browser: true,
         }
     }

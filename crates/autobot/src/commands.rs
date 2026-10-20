@@ -114,6 +114,7 @@ pub fn builtin(name: &str) -> bool {
             | "reset"
             | "profile"
             | "personality"
+            | "recall"
     )
 }
 

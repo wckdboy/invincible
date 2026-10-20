@@ -146,6 +146,67 @@ pub fn skills(home: &Path, action: Option<(&str, &str)>) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `skills install` takes [source] from the hub: not a directory here, not a git URL.
+pub fn from_hub(source: &str) -> bool {
+    let source = source.trim();
+    let git = ["https://", "http://", "git@", "ssh://", "file://"].iter().any(|p| source.starts_with(p))
+        || source.ends_with(".git");
+    let path = source.starts_with(['/', '.', '~']) || crate::config::expand(Path::new(source)).exists();
+    !git && !path && !source.is_empty()
+}
+
+/// `autobot skills search <query>`.
+pub async fn hub_search(query: &str, limit: usize) -> Result<(), String> {
+    if query.trim().is_empty() {
+        return Err("autobot skills search <what for>".to_owned());
+    }
+    let hub = crate::hub::Hub::public()?;
+    let found = hub.search(query, limit.clamp(1, 50)).await?;
+    if found.is_empty() {
+        println!("nothing in the hub for {query:?}");
+        return Ok(());
+    }
+    let width = found.iter().map(|f| f.id.chars().count()).max().unwrap_or(0);
+    for f in &found {
+        let about = if f.description.is_empty() { String::new() } else { format!("  {}", f.description) };
+        println!("{:<width$}  {} {}{about}", f.id, f.count, f.what);
+    }
+    println!(
+        "
+`autobot skills install <id>` shows a skill in full before it is installed"
+    );
+    Ok(())
+}
+
+/// `autobot skills install <name>` from the hub: fetched, shown, installed on a yes.
+pub async fn hub_install(home: &Path, id: &str, yes: bool) -> Result<(), String> {
+    let hub = crate::hub::Hub::public()?;
+    let fetched = hub.fetch(id, &std::env::temp_dir()).await?;
+    println!("{}", crate::hub::review(&fetched));
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    if !yes {
+        if !terminal {
+            return Err(format!("not installed: read it at {}, then run again with --yes", fetched.url));
+        }
+        let mut prompt = crate::setup::Prompt::new(std::io::stdin().lock());
+        if !prompt.yes(&format!("install {} (instructions the agent will follow)", fetched.name), false)? {
+            println!("not installed");
+            return Ok(());
+        }
+    }
+    let (installed, skipped) = crate::hub::install(home, &fetched)?;
+    for name in &installed {
+        println!("installed {name} in {}", home.join("skills").join(name).display());
+    }
+    for why in &skipped {
+        println!("left out {why}");
+    }
+    if installed.is_empty() {
+        return Err("nothing installed".to_owned());
+    }
+    Ok(())
+}
+
 /// `autobot usage [--session ID]`.
 pub fn usage(home: &Path, config: &Config, session: Option<&str>) -> Result<(), String> {
     let rows = crate::insights::usage(home, session, &config.prices);

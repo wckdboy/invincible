@@ -259,6 +259,23 @@ enum Command {
         #[arg(long)]
         with_secrets: bool,
     },
+    /// The tool groups and tools, on or off for the bot: list, enable or disable a group or a tool.
+    Tools {
+        #[command(subcommand)]
+        action: Option<ToolsAction>,
+    },
+    /// The bot's configuration (config.toml, or bots/<name>/bot.toml): show it, or get, set and
+    /// unset one dotted key (agent.max_steps, gateway.model). Checked before it is written.
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
+    /// The bot's default model: pick one of those the gateway serves, or set it (`auto`: the router
+    /// picks).
+    Model {
+        /// The model id; without it, pick from the list.
+        id: Option<String>,
+    },
     /// Webhooks that start tasks in `autobot serve` ([hooks] in the config): list them, or make
     /// a secret for a new one.
     Hooks {
@@ -277,14 +294,47 @@ enum Command {
 enum SkillsAction {
     /// List the skills and the proposals waiting.
     List,
-    /// Install skills from a git URL or a directory (one with a SKILL.md, or skill directories).
-    Install { source: String },
+    /// Find skills in the hub (skills.sh, the agentskills.io directory; else GitHub's
+    /// agent-skills topic).
+    Search {
+        query: Vec<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// Install skills: from the hub (a name, owner/repo/skill or owner/repo: shown first, installed
+    /// when you say yes), a git URL, or a directory.
+    Install {
+        source: String,
+        /// Install from the hub without asking (after reading it).
+        #[arg(long, short)]
+        yes: bool,
+    },
     /// Remove a skill.
     Remove { name: String },
     /// Keep a skill the agent proposed (or its improvement): it uses it from now on.
     Accept { name: String },
     /// Throw a proposed skill away.
     Reject { name: String },
+}
+
+#[derive(Subcommand)]
+enum ToolsAction {
+    /// Every group and tool, and whether it is on.
+    List,
+    /// Turn on a tool group (files-read, terminal, …) or one tool (browser).
+    Enable { name: String },
+    /// Turn off a tool group or one tool.
+    Disable { name: String },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Print a key's value as written (a named bot's own, else the one it inherits).
+    Get { key: String },
+    /// Set a key: VALUE is TOML (true, 24, ["ls"], "text") or else a plain string.
+    Set { key: String, value: String },
+    /// Take a key out: the default applies.
+    Unset { key: String },
 }
 
 #[derive(Subcommand)]
@@ -785,10 +835,19 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Skills { action: Some(SkillsAction::Search { query, limit }) } => {
+            runtime()?.block_on(autobot::manage::hub_search(&query.join(" "), limit))
+        }
+        Command::Skills { action: Some(SkillsAction::Install { source, yes }) }
+            if autobot::manage::from_hub(&source) =>
+        {
+            runtime()?.block_on(autobot::manage::hub_install(&home, &source, yes))
+        }
         Command::Skills { action } => {
             let action = match &action {
                 None | Some(SkillsAction::List) => None,
-                Some(SkillsAction::Install { source }) => Some(("install", source.as_str())),
+                Some(SkillsAction::Search { .. }) => None,
+                Some(SkillsAction::Install { source, .. }) => Some(("install", source.as_str())),
                 Some(SkillsAction::Remove { name }) => Some(("remove", name.as_str())),
                 Some(SkillsAction::Accept { name }) => Some(("accept", name.as_str())),
                 Some(SkillsAction::Reject { name }) => Some(("reject", name.as_str())),
@@ -800,6 +859,29 @@ fn run(mut cli: Cli) -> Result<(), String> {
             Some(PersonalityAction::Show { name }) => autobot::manage::personality(&home, "show", name.as_deref()),
             Some(PersonalityAction::Set { name }) => autobot::manage::personality(&home, "set", Some(&name)),
         },
+        Command::Tools { action } => match action {
+            None | Some(ToolsAction::List) => {
+                print!("{}", autobot::settings::tools_listing(&def));
+                Ok(())
+            }
+            Some(ToolsAction::Enable { name }) => {
+                println!("{}", autobot::settings::set_tool(&def, &name, true)?);
+                Ok(())
+            }
+            Some(ToolsAction::Disable { name }) => {
+                println!("{}", autobot::settings::set_tool(&def, &name, false)?);
+                Ok(())
+            }
+        },
+        Command::Config { action } => match &action {
+            None => autobot::settings::config(&def, None),
+            Some(ConfigAction::Get { key }) => autobot::settings::config(&def, Some(("get", key, None))),
+            Some(ConfigAction::Set { key, value }) => {
+                autobot::settings::config(&def, Some(("set", key, Some(value.as_str()))))
+            }
+            Some(ConfigAction::Unset { key }) => autobot::settings::config(&def, Some(("unset", key, None))),
+        },
+        Command::Model { id } => model_command(&def, id),
         Command::Profile { clear } => autobot::manage::profile(&home, clear),
         Command::Usage { session } => autobot::manage::usage(&home, &config, session.as_deref()),
         Command::Insights { days, json } => autobot::manage::insights(&home, &config, days, json),
@@ -942,6 +1024,50 @@ fn cron(action: CronAction, config: &Config, home: &std::path::Path) -> Result<(
             })?;
         }
     }
+    Ok(())
+}
+
+/// `autobot model [id]`.
+fn model_command(def: &autobot::bots::Def, id: Option<String>) -> Result<(), String> {
+    use autobot::settings;
+    let gateway = autobot::gateway::Gateway::new(
+        &def.config.gateway.url,
+        &def.config.gateway.token()?,
+        &def.config.gateway.model,
+        def.config.gateway.private,
+    )?;
+    let served = runtime()?.block_on(gateway.model_info());
+    if let Some(id) = id {
+        let models = match &served {
+            Ok(models) => Some(models.as_slice()),
+            Err(e) => {
+                eprintln!("the gateway did not answer ({e}); {id} is set without checking");
+                None
+            }
+        };
+        println!("{}", settings::set_model(def, &id, models)?);
+        return Ok(());
+    }
+    let models = served.map_err(|e| format!("the gateway's models: {e}"))?;
+    let rows = settings::model_rows(&models);
+    let current = def.config.gateway.model.as_str();
+    for (n, (id, what)) in rows.iter().enumerate() {
+        let mark =
+            if id == current { invincible::brand::paint(invincible::brand::LILAC, "›") } else { " ".to_owned() };
+        println!("{mark} {:>2}  {}  {}", n + 1, invincible::brand::bold(id), invincible::brand::ash(what));
+    }
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        println!("\n`autobot model <id>` sets one");
+        return Ok(());
+    }
+    let mut prompt = setup::Prompt::new(std::io::stdin().lock());
+    let answer = prompt.ask("\nmodel (number or id)", current)?;
+    let id = settings::pick(&answer, &rows).ok_or(format!("{answer:?} is not one of these"))?;
+    if id == current {
+        println!("model {id}, as it was");
+        return Ok(());
+    }
+    println!("{}", settings::set_model(def, &id, Some(&models))?);
     Ok(())
 }
 
