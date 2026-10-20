@@ -1000,6 +1000,20 @@ fn update_command(args: UpdateArgs) -> Result<(), String> {
                 say(brand::warn("the services run the old binaries until they restart"));
             } else if let Ok(platform) = invincible::service::Platform::current() {
                 let user = std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?);
+                // The new autobot brings the service definitions up to date (a newer release may
+                // write them differently). Not from the daily job: that would reload the job
+                // itself while it runs.
+                let installed = invincible::service::path(platform, &user, invincible::service::GATEWAY).exists();
+                if installed && !args.scheduled {
+                    let refreshed = std::process::Command::new(bin.join("autobot"))
+                        .args(["service", "install"])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status();
+                    if !refreshed.is_ok_and(|s| s.success()) {
+                        say(brand::warn("the service definitions did not update (`autobot service install` says why)"));
+                    }
+                }
                 let restarted = invincible::service::restart(
                     platform,
                     &user,
@@ -1040,6 +1054,14 @@ fn set_auto_update(config_path: &std::path::Path, home: &std::path::Path, auto: 
             ))
         ),
         None => println!("{}", brand::ok("automatic updates are off (`invincible update` updates by hand)")),
+    }
+    if channel.is_some() && Config::load(config_path).is_ok_and(|c| c.node.settings().network.is_offline()) {
+        println!(
+            "{}",
+            brand::warn(
+                "[node] network is \"offline\": the daily update cannot reach the releases until it is direct (or tor/socks5)"
+            )
+        );
     }
     Ok(())
 }
