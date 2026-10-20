@@ -6,7 +6,9 @@ pub mod agent;
 pub mod api;
 pub mod approval;
 pub mod board;
+pub mod bots;
 pub mod browser;
+pub mod channel;
 pub mod commands;
 pub mod config;
 pub mod cron;
@@ -14,16 +16,23 @@ pub mod diff;
 pub mod discord;
 pub mod docker;
 pub mod doctor;
+pub mod email;
 pub mod eval;
 pub mod gateway;
 pub mod heartbeat;
 pub mod hooks;
+pub mod identity;
 pub mod images;
 pub mod insights;
+pub mod mail;
 pub mod manage;
+pub mod markdown;
+pub mod matrix;
 pub mod mcp;
 pub mod memory;
 pub mod migrate;
+pub mod net;
+pub mod pairing;
 pub mod personality;
 pub mod procs;
 pub mod profile;
@@ -33,13 +42,16 @@ pub mod search;
 pub mod service;
 pub mod session;
 pub mod setup;
+pub mod signal;
 pub mod skills;
+pub mod slack;
 pub mod ssh;
 pub mod team;
 pub mod telegram;
 pub mod tools;
 pub mod trajectory;
 pub mod tui;
+pub mod voice;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -102,9 +114,17 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         options: agent::Options {
             context_kib: config.agent.context_kib,
             nudge_every: config.agent.nudge_every,
+            persona: persona(config),
             ..Default::default()
         },
     })
+}
+
+/// Who the bot is: its name, when it is not the default one (its `SOUL.md`, `USER.md` and skills
+/// are in its own home, [Tools::with_home](tools::Tools::with_home)).
+pub fn persona(config: &Config) -> Option<agent::Persona> {
+    let name = config.bot.name.clone().filter(|n| n != bots::DEFAULT);
+    name.is_some().then_some(agent::Persona { name })
 }
 
 /// Coding in a project (`autobot code`, `autobot run -C`): room for long tasks (at least 100

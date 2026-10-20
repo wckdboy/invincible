@@ -224,11 +224,54 @@ async fn finish(mut checks: Vec<Check>, config: &Config, home: &Path) -> Vec<Che
     if config.discord.enabled {
         match discord(config, home).await {
             Ok(name) => {
-                let users = crate::discord::Users::load(home).map(|u| u.allowed.len()).unwrap_or(0);
+                let users = crate::pairing::allowed(home, "discord").len();
                 checks.push(ok(format!("Discord bot {name} ({users} allowed users)")));
             }
             Err(e) => checks.push(bad(format!("Discord: {e}"))),
         }
+    }
+    if config.slack.enabled {
+        let checked = async {
+            let http = invincible::egress::client(&crate::network()?)?;
+            let app = config.slack.app_token(home)?;
+            let client = crate::slack::Client::new(http, &config.slack.api(), &app, &config.slack.bot_token(home)?)?;
+            client.me().await
+        };
+        match checked.await {
+            Ok(me) => {
+                let users = crate::pairing::allowed(home, "slack").len();
+                checks.push(ok(format!("Slack app {me} ({users} allowed users)")));
+            }
+            Err(e) => checks.push(bad(format!("Slack: {e}"))),
+        }
+    }
+    if config.email.enabled {
+        let e = &config.email;
+        match e.password(home) {
+            Ok(_) if !e.address.is_empty() && !e.imap.is_empty() && !e.smtp.is_empty() => {
+                let users = crate::pairing::allowed(home, "email").len().max(e.allow.len());
+                checks.push(ok(format!("email {} via {} and {} ({users} allowed senders)", e.address, e.imap, e.smtp)));
+            }
+            Ok(_) => checks.push(bad("email: [email] needs address, imap and smtp".to_owned())),
+            Err(err) => checks.push(bad(format!("email: {err}"))),
+        }
+    }
+    if config.signal.enabled {
+        let found = config.signal.url.is_some()
+            || config.signal.command.is_some()
+            || crate::find_on_path("signal-cli").is_some();
+        checks.push(if found && !config.signal.account.is_empty() {
+            ok(format!("Signal {} through signal-cli", config.signal.account))
+        } else {
+            bad("Signal: needs [signal] account and signal-cli (or [signal] url)".to_owned())
+        });
+    }
+    if config.matrix.enabled {
+        checks.push(match config.matrix.token(home) {
+            Ok(_) if !config.matrix.homeserver.is_empty() => ok(format!("Matrix on {}", config.matrix.homeserver)),
+            Ok(_) => bad("Matrix: [matrix] homeserver is missing".to_owned()),
+            Err(e) => bad(format!("Matrix: {e}")),
+        });
     }
     if config.telegram.enabled {
         match telegram(config, home).await {

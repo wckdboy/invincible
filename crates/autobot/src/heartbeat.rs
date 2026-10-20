@@ -41,29 +41,27 @@ pub async fn check(agent: &crate::agent::Agent, home: &Path, list: &str) -> Resu
     crate::tools::TURN.scope(context, run).await.map(|o| o.text)
 }
 
-/// Checks every [every] until the process stops; what needs the owner goes to the Telegram
-/// users allowed to use the bot.
-pub async fn run(
-    agent: std::sync::Arc<crate::agent::Agent>,
-    home: PathBuf,
-    every: Duration,
-    telegram: Option<crate::telegram::Bot>,
-) {
+/// Checks every [every] until the process stops; what needs the owner goes to the bot's home
+/// channel (`/sethome`), else to the Telegram users allowed to use the bot.
+pub async fn run(runtime: std::sync::Arc<crate::bots::Runtime>, every: Duration) {
+    let home: PathBuf = runtime.home.clone();
     loop {
         tokio::time::sleep(every).await;
         let Some(list) = checklist(&home) else { continue };
-        match check(&agent, &home, &list).await {
-            Ok(answer) if quiet(&answer) => tracing::info!("heartbeat: all quiet"),
+        match check(&runtime.agent(), &home, &list).await {
+            Ok(answer) if quiet(&answer) => tracing::info!(bot = %runtime.name, "heartbeat: all quiet"),
             Ok(answer) => {
-                tracing::info!("heartbeat: something needs the owner");
-                let Some(bot) = &telegram else { continue };
-                for user in crate::telegram::Users::load(&home).map(|u| u.allowed).unwrap_or_default() {
-                    if let Err(e) = bot.send(user.id, &format!("💓 {answer}")).await {
-                        tracing::warn!("heartbeat: Telegram: {e}");
-                    }
+                tracing::info!(bot = %runtime.name, "heartbeat: something needs the owner");
+                let text = format!("💓 {answer}");
+                match runtime.home_channel() {
+                    Some(address) => runtime.notify(&[address], &text).await,
+                    None => runtime.everyone("telegram", &text).await,
                 }
             }
-            Err(e) => tracing::warn!("heartbeat: {e}"),
+            Err(e) => {
+                tracing::warn!(bot = %runtime.name, "heartbeat: {e}");
+                runtime.error(&format!("heartbeat: {e}"));
+            }
         }
     }
 }

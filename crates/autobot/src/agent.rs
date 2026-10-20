@@ -38,6 +38,15 @@ pub struct Options {
     pub personality: Option<String>,
     /// Every this many turns, [Agent::nudge] looks for what to keep (0: never).
     pub nudge_every: usize,
+    /// Who this bot is, when it is not the default one ([crate::bots]). Its `SOUL.md` is in its
+    /// own home ([crate::personality]).
+    pub persona: Option<Persona>,
+}
+
+/// A bot's name.
+#[derive(Clone, Debug, Default)]
+pub struct Persona {
+    pub name: Option<String>,
 }
 
 /// What happens during a turn, for whoever is watching (a terminal, a chat).
@@ -823,8 +832,13 @@ impl Agent {
     }
 
     pub fn system_prompt(&self) -> String {
+        let persona = self.options.persona.as_ref();
+        let who = match persona.and_then(|p| p.name.as_deref()) {
+            Some(name) => format!("You are {name}, an Autobot agent"),
+            None => "You are Autobot, an agent".to_owned(),
+        };
         let mut prompt = format!(
-            "You are Autobot, an agent running on its owner's own machine ({os}). Your model is served by \
+            "{who} running on its owner's own machine ({os}). Your model is served by \
              Invincible Gateway on that machine.\n\
              Working directory: {dir}\n\
              You can run shell commands and read, write and list files with your tools. Commands, file \

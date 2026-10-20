@@ -50,6 +50,9 @@ pub struct Task {
     pub origin: String,
     #[serde(default)]
     pub notify: Option<i64>,
+    /// Where it was asked for on another platform (`slack:C1/1712.0001`): tell there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
     /// Unix seconds.
     pub created: i64,
     pub updated: i64,
@@ -175,6 +178,7 @@ impl Board {
                 receipts: Vec::new(),
                 origin: origin.to_owned(),
                 notify,
+                to: None,
                 created: at,
                 updated: at,
             });
@@ -379,6 +383,12 @@ pub fn plan_tool(home: &Path, team: &crate::team::Team, arguments: &str) -> Stri
     let turn = crate::tools::TURN.try_with(Clone::clone).ok().unwrap_or_default();
     let planned = Board::load(home).and_then(|mut board| {
         let made = board.plan(team, &args.tasks, &turn.session, turn.telegram_chat)?;
+        // Asked elsewhere than Telegram: the plan's questions and results go back by address.
+        if turn.telegram_chat.is_none() {
+            for task in board.tasks.iter_mut().filter(|t| t.plan == made.0) {
+                task.to.clone_from(&turn.reply_to);
+            }
+        }
         board.save(home)?;
         Ok(made)
     });
@@ -396,7 +406,7 @@ pub fn plan_tool(home: &Path, team: &crate::team::Team, arguments: &str) -> Stri
 pub async fn dispatcher(
     agent: std::sync::Arc<crate::agent::Agent>,
     home: PathBuf,
-    telegram: Option<(crate::telegram::Bot, std::sync::Arc<crate::telegram::Bots>)>,
+    runtime: Option<std::sync::Arc<crate::bots::Runtime>>,
 ) {
     // The tasks being worked on now (an answered task must not start twice while its last run ends).
     let running: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> = Default::default();
@@ -433,9 +443,9 @@ pub async fn dispatcher(
         }
         for task in starting {
             running.lock().expect("running").insert(task.id.clone());
-            let (agent, home, telegram, running) = (agent.clone(), home.clone(), telegram.clone(), running.clone());
+            let (agent, home, runtime, running) = (agent.clone(), home.clone(), runtime.clone(), running.clone());
             tokio::spawn(async move {
-                work(&agent, &home, &task, telegram.as_ref()).await;
+                work(&agent, &home, &task, runtime.as_deref()).await;
                 running.lock().expect("running").remove(&task.id);
             });
         }
@@ -443,12 +453,7 @@ pub async fn dispatcher(
 }
 
 /// One board task: the member works it, unattended; then the board says how it went.
-async fn work(
-    agent: &crate::agent::Agent,
-    home: &Path,
-    task: &Task,
-    telegram: Option<&(crate::telegram::Bot, std::sync::Arc<crate::telegram::Bots>)>,
-) {
+async fn work(agent: &crate::agent::Agent, home: &Path, task: &Task, runtime: Option<&crate::bots::Runtime>) {
     let Some(role) = agent.team.get(&task.agent).cloned() else {
         if let Ok(mut board) = Board::load(home) {
             board.set(
@@ -467,15 +472,18 @@ async fn work(
         unattended.approvals.mode = crate::config::ApprovalMode::Allowlist;
     }
     unattended.tools = unattended.tools.clone().unattended();
+    // To the plan's chat: a member with a bot of its own posts itself (Telegram).
     let post = |member: Option<&str>, text: String| {
-        let telegram = telegram.cloned();
-        let chat = task.notify;
+        let chat = task
+            .notify
+            .map(|c| ("telegram".to_owned(), c.to_string()))
+            .or_else(|| task.to.as_deref().and_then(|to| crate::channel::parse_address(to).ok()));
         let member = member.map(str::to_owned);
         async move {
-            let (Some((bot, bots)), Some(chat)) = (telegram, chat) else { return };
-            let own = member.as_ref().and_then(|m| bots.members.get(m));
-            if let Some(own) = own
-                && own.send(chat, &text).await.is_ok()
+            let (Some(runtime), Some((platform, chat))) = (runtime, chat) else { return };
+            let Some(transport) = runtime.transport(&platform) else { return };
+            if let Some(m) = &member
+                && transport.post_as(m, &chat, &text).await
             {
                 return;
             }
@@ -483,13 +491,19 @@ async fn work(
                 Some(m) => format!("[{m}] {text}"),
                 None => text,
             };
-            let _ = bot.send(chat, &text).await;
+            if let Err(e) = transport.answer(&chat, &text).await {
+                tracing::warn!("board: {e}");
+            }
         }
     };
     tracing::info!(task = %task.id, agent = %task.agent, "board: working");
     let session = format!("board-{}-{}", task.id, task.answers.len());
-    let context =
-        crate::tools::TurnContext { session: session.clone(), telegram_chat: task.notify, ..Default::default() };
+    let context = crate::tools::TurnContext {
+        session: session.clone(),
+        telegram_chat: task.notify,
+        reply_to: task.to.clone(),
+        ..Default::default()
+    };
     let run = unattended.run_member(&role, &session, &brief, &crate::approval::Refuse, &|_| {}, Some(task.id.clone()));
     let outcome = crate::tools::TURN.scope(context, run).await;
     let Ok(mut board) = Board::load(home) else { return };

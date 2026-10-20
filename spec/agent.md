@@ -28,24 +28,26 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 
 | Method and path | Body | Answer |
 |---|---|---|
-| `GET /v1/agent` | | `{"name", "model", "workdir", "approvals": "ask"\|"allowlist"\|"trust", "private": bool}` |
-| `GET /v1/agent/sessions` | | `{"sessions": [{"id", "modified"}]}`, newest first; `modified` in Unix seconds |
+| `GET /v1/agent` | | `{"name", "model", "workdir", "approvals": "ask"\|"edits"\|"allowlist"\|"trust", "private": bool, "bot", "bots": [names]}`: about the bot `?bot=` names (the default one without it) |
+| `GET /v1/agent/bots` | | `{"bots": [...]}`: every bot on the machine, running or not ([Bots](#bots)) |
+| `POST /v1/agent/bots/{name}/enable`, `POST /v1/agent/bots/{name}/disable` | | `{"ok": true}`, kept in the bot's config; `autobot serve` starts or stops it when it restarts. `404` (`unknown_bot`) |
+| `GET /v1/agent/sessions?bot=` | | `{"sessions": [{"id", "modified", "bot"}]}`: every bot's conversations (only `bot`'s with it), newest first; `modified` in Unix seconds |
 | `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape; a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
-| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn) | An event stream (below); `400` for an unknown personality |
+| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn) and `"bot"` | An event stream (below); `400` for an unknown personality. `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
 | `POST /v1/agent/sessions/{id}/retry` | `{}` | An event stream, like a turn: the last turn leaves the conversation and its request (with its images) runs again; files it changed stay. `404` when there is no turn to retry, `409` while one runs |
 | `POST /v1/agent/sessions/{id}/fork` | `{"to"?, "at"?}` | `{"id", "messages"}`: a new conversation starting as this one did, up to message `at` (rounded to the end of that turn; all of it by default) |
 | `POST /v1/agent/sessions/{id}/steer` | `{"text": "..."}` | `{"ok": true}`: a message for the turn running in the session, taken in before the agent's next step; `409` (`no_turn`) when none is running |
 | `POST /v1/agent/sessions/{id}/reset` | | `{"id"}`: the conversation starts over; the old one is kept on disk |
-| `GET /v1/agent/approvals` | | `{"approvals": [{"id", "session", "text", "action", "agent"?, "asked_at", "expires_at"}]}`: the questions waiting now, oldest first (times in Unix seconds) |
+| `GET /v1/agent/approvals` | | `{"approvals": [{"id", "session", "text", "action", "agent"?, "bot", "asked_at", "expires_at"}]}`: the questions waiting now, every bot's, oldest first (times in Unix seconds) |
 | `POST /v1/agent/approvals/{approval}` | `{"answer": "once"\|"always"\|"deny"}`, or `{"answer": "instead", "text"}` (no, and do this instead) | `{"ok": true}`, or `404` when no such question is waiting |
-| `GET /v1/agent/schedules` | | `{"schedules": [{"id", "when", "task", "telegram", "enabled", "running", "next", "last"}]}`, plus `name`, `tools` and `origin` when set; `next` in Unix seconds or null, `last` null or `{"at", "ok", "result"}` |
-| `POST /v1/agent/schedules` | `{"when", "task"}`, optional `"telegram"`, `"id"`, `"name"`, `"tools"`, `"enabled"` | `{"id"}`, or `400` when `when` does not parse. With `id`, creates or replaces that schedule (a recipe, below) |
+| `GET /v1/agent/schedules` | | `{"schedules": [{"id", "when", "task", "telegram", "enabled", "running", "next", "last"}]}`, plus `name`, `tools`, `origin` and `to` when set; `next` in Unix seconds or null, `last` null or `{"at", "ok", "result"}` |
+| `POST /v1/agent/schedules` | `{"when", "task"}`, optional `"telegram"`, `"to"` (addresses where answers go: `["slack:#ops", "email:me@example.com"]`), `"id"`, `"name"`, `"tools"`, `"enabled"` | `{"id"}`, or `400` when `when` does not parse. With `id`, creates or replaces that schedule (a recipe, below) |
 | `DELETE /v1/agent/schedules/{id}` | | `{"ok": true}`, or `404` |
 | `POST /v1/agent/schedules/{id}/run` | | `202 {"started": true}`: runs it now, in the background; `409` (`schedule_running`) if it is running |
 | `GET /v1/agent/schedules/{id}/runs?after=` | | `{"runs": [{"at", "finished", "ok", "result", "receipts", "trigger"}]}`: finished runs that started after `after` (Unix seconds), oldest first; the newest 100 are kept |
 | `GET /v1/agent/board` | | `{"tasks": [{"id", "plan", "agent", "goal", "context", "depends_on", "status", "result", "question", "answers", "receipts", "origin", "notify", "created", "updated"}]}`: the team board; `status` is `todo`, `running`, `blocked` (waiting for the owner's answer to `question`), `done` or `failed` |
 | `POST /v1/agent/board/{id}/answer` | `{"text": "…"}` | `{"ok": true}`: a blocked task runs again with the answer; `404` when it is not waiting |
-| `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by"}]}`: the action log ([audit.md](audit.md)), newest `limit` (default 100, at most 500), oldest first |
+| `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by", "bot"}]}`: the action log ([audit.md](audit.md)), newest `limit` (default 100, at most 500), oldest first |
 | `GET /v1/agent/memory` | | `{"facts": [{"id", "at", "text"}]}`: what the agent remembered (`remember`) |
 | `DELETE /v1/agent/memory/{id}` | | `{"ok": true}`, or `404` |
 | `GET /v1/agent/skills` | | `{"skills": [{"name", "description", "allowed_tools", "files"}], "proposed": [{"name", "description", "text", "improves", "diff"}]}`: the owner's skills in `$AUTOBOT_HOME/skills` (`files`: a skill directory's supporting files; `allowed_tools`: its front matter's, shown, never granted), and those the agent proposed (`create_skill`, or `improve_skill`: then `improves` is true and `diff` what it changes), which it does not use until accepted |
@@ -54,11 +56,47 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/personalities` | | `{"active", "soul", "personalities": [{"name", "description", "builtin"}]}`: the personality in use (null for none), SOUL.md's text (null when there is none), and the ones there are |
 | `POST /v1/agent/personality` | `{"name"}` (`"none"` or null for none) | `{"active"}`: the personality for every turn from now on; `400` for an unknown one |
 | `GET /v1/agent/profile` | | `{"entries": [...], "text"}`: what the agent keeps about how the owner works (`USER.md`) |
-| `GET /v1/agent/usage?session=` | | `{"today": totals, "session"?: totals}` from the turn log: `totals` is `{"turns", "calls", "cloud_calls", "input", "output", "cached", "cloud_tokens", "seconds", "cost", "unpriced"}` (`cost` in dollars for the models with a `[prices]` entry; `unpriced`: cloud models without one) |
-| `GET /v1/agent/insights?days=` | | What the agent did over the last `days` (default 7): `{"days", "turns", "seconds", "calls", "tokens", "cost", "unpriced", "local_share": {"calls", "tokens"}, "tools": [{"name", "count"}], "projects": [{"name", "count"}], "models": [{"model", "calls", "tokens", "cloud"}], "failures": {"errors", "stopped", "tool_errors", "refused"}}` |
+| `GET /v1/agent/usage?session=&bot=` | | `{"today": totals, "session"?: totals, "bot"}` from the bot's turn log (the default bot's without `bot`): `totals` is `{"turns", "calls", "cloud_calls", "input", "output", "cached", "cloud_tokens", "seconds", "cost", "unpriced"}` (`cost` in dollars for the models with a `[prices]` entry; `unpriced`: cloud models without one) |
+| `GET /v1/agent/insights?days=&bot=` | | What the bot did over the last `days` (default 7), with `"bot"`: `{"days", "turns", "seconds", "calls", "tokens", "cost", "unpriced", "local_share": {"calls", "tokens"}, "tools": [{"name", "count"}], "projects": [{"name", "count"}], "models": [{"model", "calls", "tokens", "cloud"}], "failures": {"errors", "stopped", "tool_errors", "refused"}}` |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
 already running one answers `409` with type `session_busy`.
+
+## Bots
+
+One `autobot serve` runs several bots, each with its own persona, model, memory, conversations
+and schedules (README, "Bots and channels"). Every path takes `?bot=<name>`; without it, a path
+under `/v1/agent/sessions/{id}` is for the bot that holds that conversation, and anything else for
+the default bot, named `default` (the configuration in `config.toml`). An unknown bot is `404` with
+code `unknown_bot`. A node from before bots answers `404` on `/v1/agent/bots`: one bot.
+
+`GET /v1/agent/bots` lists each bot as:
+
+| Field | Meaning |
+|---|---|
+| `name` | `default`, or the bot's directory name |
+| `persona` | The first non-empty line of its `SOUL.md`; `""` without one |
+| `model` | The model it uses now (`/model` can change it while it runs) |
+| `approvals` | `ask`, `edits`, `allowlist` or `trust` |
+| `enabled` | Whether `autobot serve` runs it |
+| `status` | `running`, `stopped` (disabled, or not started), or `error` (it could not start; `error` says why) |
+| `error`? | Why it could not start |
+| `channels` | `[{"kind", "account", "status", "error"?}]`: `kind` is `telegram`, `discord`, `slack`, `email`, `signal`, `matrix` or `api`; `account` what it is reached as (`@mybot`, `@U0BOT`, `bot@example.org`, `+15551234567`); `status` `connected`, `connecting` or `down` |
+| `sessions` | How many conversations it has |
+| `last_active` | When its newest conversation changed (Unix seconds), or null |
+| `queue` | Messages sent to running turns, not yet taken in |
+
+Running bots also carry `description`, `default`, `running` (turns now), `turns`, `uptime` (seconds),
+`waiting` (questions), `home_channel` and `last_error` (`{"at", "text"}` or null).
+
+## Addresses
+
+Where a schedule's answers (`to`), a hook's (`to`) or the bot's notices (its home channel,
+`/sethome`) go: `platform:where`. `telegram:<chat id>`, `discord:<channel id>`,
+`slack:<channel id or #name>` (`slack:C123/<thread ts>` for a thread), `email:<address>` (or the
+thread a conversation is in), `signal:<number>`, `matrix:<room id>`. A schedule with none of `to`,
+`telegram` or a chat that asked for it answers to the home channel; a phone's recipe never does
+(the phone collects its runs).
 
 ## Turn events
 

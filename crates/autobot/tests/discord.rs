@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use autobot::agent::Agent;
 use autobot::config::{ApprovalConfig, ApprovalMode};
-use autobot::discord::{Bot, Users, serve};
+use autobot::discord::{Bot, serve};
 use autobot::gateway::Gateway;
+use autobot::pairing::Users;
 use autobot::tools::Tools;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -190,13 +191,13 @@ async fn pairing_then_a_task_with_an_approval_by_button() {
     // A stranger gets a code, and nothing else.
     discord.lock().unwrap().events.push_back(dm("1", "7", "hello?"));
     let reply = called(&discord, |_, _, b| b["content"].as_str().is_some_and(|t| t.contains("approve"))).await;
-    let mut users = Users::load(&home).unwrap();
+    let mut users = Users::load(&home, "discord").unwrap();
     let code = users.pending[0].code.clone();
     assert!(reply["content"].as_str().unwrap().contains(&format!("autobot discord approve {code}")));
 
     // A server message from the stranger, even mentioning the bot, is ignored.
     users.approve(&code).unwrap();
-    users.save(&home).unwrap();
+    users.save(&home, "discord").unwrap();
     discord.lock().unwrap().events.push_back((
         "MESSAGE_CREATE".into(),
         json!({ "id": "2", "channel_id": "g1", "guild_id": "G", "content": "<@999> hi",

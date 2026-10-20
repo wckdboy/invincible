@@ -3,45 +3,45 @@
 //! - Long polling, so the machine needs no public address or webhook.
 //! - The Bot API is reached under Invincible Gateway's network mode (`[node] network`): direct,
 //!   Tor or SOCKS5, and never when the gateway is offline.
-//! - Private chats only. A stranger gets a one-time code; nobody gets in until the owner runs
-//!   `autobot telegram approve <code>` on the machine (Hermes-style DM pairing).
-//! - Approvals arrive as buttons in the chat.
+//! - Private chats, and in a group the messages for the bot. A stranger gets a one-time code;
+//!   nobody gets in until the owner runs `autobot telegram approve <code>` on the machine
+//!   (Hermes-style DM pairing).
+//! - Approvals arrive as buttons in the chat; voice notes are transcribed ([crate::voice]).
+//! - Everything else (commands, steering, the turn) is [crate::channel]'s.
 //!
 //! Telegram's servers see bot messages: chats with bots are not end-to-end encrypted. The private
 //! channel is the Autobot app, paired over Noise.
 
-use std::collections::{HashMap, HashSet};
-use std::future::Future;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
 
-use crate::agent::{Agent, Event};
-use crate::approval::{Action, Answer, Approver};
-use crate::session::Session;
+use crate::agent::Agent;
+use crate::approval::Answer;
+use crate::bots::Runtime;
+use crate::channel::{Asking, BoxFuture, Incoming, Pressed, Progress, Question, Transport};
 
 /// Telegram's limit for one message.
 const MESSAGE_LIMIT: usize = 4000;
 /// How long a pairing code works.
-const CODE_LIFETIME: u64 = 60 * 60;
-/// How long an approval waits for a tap.
-const APPROVAL_WAIT: Duration = Duration::from_secs(10 * 60);
+const CODE_LIFETIME: u64 = crate::pairing::CODE_LIFETIME;
 
 #[derive(Clone)]
 pub struct Bot {
     client: reqwest::Client,
     base: String,
+    files: String,
 }
 
 impl Bot {
     pub fn new(client: reqwest::Client, api: &str, token: &str) -> Result<Self, String> {
         invincible::egress::check(api)?;
-        Ok(Self { client, base: format!("{}/bot{token}", api.trim_end_matches('/')) })
+        let api = api.trim_end_matches('/');
+        Ok(Self { client, base: format!("{api}/bot{token}"), files: format!("{api}/file/bot{token}") })
     }
 
     async fn call(&self, method: &str, body: Value, timeout: Duration) -> Result<Value, String> {
@@ -81,6 +81,17 @@ impl Bot {
     async fn typing(&self, chat: i64) {
         let _ =
             self.call("sendChatAction", json!({ "chat_id": chat, "action": "typing" }), Duration::from_secs(10)).await;
+    }
+
+    /// A file a message carries (a voice note), by its id.
+    async fn file(&self, id: &str, mime: &str) -> Result<crate::voice::Audio, String> {
+        let file = self.call("getFile", json!({ "file_id": id }), Duration::from_secs(20)).await?;
+        if file["file_size"].as_u64().is_some_and(|n| n as usize > crate::voice::MAX_AUDIO) {
+            return Err("the audio is larger than 25 MB".to_owned());
+        }
+        let path = file["file_path"].as_str().ok_or("Telegram gave no file path")?;
+        let name = path.rsplit('/').next().unwrap_or("voice.ogg").to_owned();
+        crate::voice::download(&self.client, &format!("{}/{path}", self.files), None, mime, &name).await
     }
 }
 
@@ -123,10 +134,6 @@ pub struct Pending {
     pub expires: u64,
 }
 
-fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
-}
-
 impl Users {
     pub fn path(home: &Path) -> PathBuf {
         home.join("telegram-users.json")
@@ -151,7 +158,7 @@ impl Users {
 
     /// The code [user] should give the owner: their live one, or a new one.
     pub fn code_for(&mut self, user: &User) -> Result<String, String> {
-        let now = now();
+        let now = crate::pairing::now();
         self.pending.retain(|p| p.expires > now);
         if let Some(p) = self.pending.iter().find(|p| p.user.id == user.id) {
             return Ok(p.code.clone());
@@ -168,7 +175,7 @@ impl Users {
     /// Lets in the user who was given [code].
     pub fn approve(&mut self, code: &str) -> Result<User, String> {
         let wanted = normalize(code);
-        let now = now();
+        let now = crate::pairing::now();
         let at =
             self.pending.iter().position(|p| p.expires > now && normalize(&p.code) == wanted).ok_or_else(|| {
                 format!("no live pairing code {code:?} (codes work for {} minutes)", CODE_LIFETIME / 60)
@@ -187,33 +194,7 @@ impl Users {
     }
 }
 
-/// 8 characters from an alphabet without look-alikes (no 0/O, 1/I/L), shown as `ABCD-EFGH`.
-pub(crate) fn new_code() -> Result<String, String> {
-    const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-    let bytes = invincible::token::random::<8>()?;
-    let chars: String = bytes.iter().map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char).collect();
-    Ok(format!("{}-{}", &chars[..4], &chars[4..]))
-}
-
-pub(crate) fn normalize(code: &str) -> String {
-    code.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()).collect()
-}
-
-/// A conversation with one allowed user.
-struct Chat {
-    session: Session,
-    grants: HashSet<Action>,
-}
-
-/// A chat, and what was sent to it while a turn runs ([crate::tools::Inbox]).
-#[derive(Clone)]
-struct Slot {
-    chat: Arc<tokio::sync::Mutex<Chat>>,
-    inbox: crate::tools::Inbox,
-}
-
-/// Approvals waiting for a button, by number: the user who may press it, and where the answer goes.
-type Waiting = Arc<Mutex<HashMap<u64, (i64, oneshot::Sender<Answer>)>>>;
+pub(crate) use crate::pairing::{new_code, normalize};
 
 /// The bots the agent speaks through: its own, and optionally one per team member, so in a
 /// group the members show up as bots of their own. Telegram bots never see each other's
@@ -224,64 +205,161 @@ pub struct Bots {
     pub members: HashMap<String, Bot>,
 }
 
-struct ChatApprover {
+/// Telegram as [crate::channel] sees it.
+struct Channel {
     bot: Bot,
-    chat: i64,
-    /// Who may press the buttons: the user who asked (in a group, not everyone in it).
-    user: i64,
-    waiting: Waiting,
+    bots: Arc<Bots>,
 }
 
-impl Approver for ChatApprover {
-    fn channel(&self) -> &'static str {
+fn chat_id(chat: &str) -> Result<i64, String> {
+    chat.parse().map_err(|_| format!("not a Telegram chat: {chat:?}"))
+}
+
+impl Transport for Channel {
+    fn platform(&self) -> &'static str {
         "telegram"
     }
 
-    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+    fn limit(&self) -> usize {
+        MESSAGE_LIMIT
+    }
+
+    fn progress(&self) -> Progress {
+        Progress::Lines
+    }
+
+    fn asking(&self) -> Asking {
+        Asking::Buttons
+    }
+
+    fn send<'a>(&'a self, chat: &'a str, text: &'a str) -> BoxFuture<'a, Result<Option<String>, String>> {
         Box::pin(async move {
-            let id = u64::from_le_bytes(invincible::token::random::<8>().unwrap_or_default());
-            let (tx, rx) = oneshot::channel();
-            self.waiting.lock().expect("waiting").insert(id, (self.user, tx));
+            let sent = self.bot.send(chat_id(chat)?, text).await?;
+            Ok(sent["message_id"].as_i64().map(|id| id.to_string()))
+        })
+    }
+
+    /// In Telegram's HTML; a part it cannot read goes again as plain text.
+    fn answer<'a>(&'a self, chat: &'a str, markdown: &'a str) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            let chat = chat_id(chat)?;
+            for part in crate::markdown::split(markdown, MESSAGE_LIMIT - 400) {
+                let html = crate::markdown::to_html(&part);
+                let body = json!({ "chat_id": chat, "text": cut_line(&html), "parse_mode": "HTML" });
+                if let Err(e) = self.bot.call("sendMessage", body, Duration::from_secs(20)).await {
+                    tracing::info!("telegram: as plain text ({e})");
+                    self.bot.send(chat, &crate::markdown::to_plain(&part)).await?;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn edit<'a>(&'a self, chat: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            let body = json!({ "chat_id": chat_id(chat)?, "message_id": id.parse::<i64>().unwrap_or(0), "text": cut_line(text) });
+            self.bot.call("editMessageText", body, Duration::from_secs(10)).await.map(drop)
+        })
+    }
+
+    fn typing<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            if let Ok(chat) = chat_id(chat) {
+                self.bot.typing(chat).await;
+            }
+        })
+    }
+
+    fn ask<'a>(&'a self, chat: &'a str, question: &'a Question) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            let id = &question.id;
             let keyboard = json!({ "inline_keyboard": [[
                 { "text": "Allow", "callback_data": format!("{id}:once") },
                 { "text": "Always (this chat)", "callback_data": format!("{id}:always") },
                 { "text": "Deny", "callback_data": format!("{id}:deny") },
             ]]});
-            let text = format!("{}Approve? {}", crate::approval::asker(), action.describe());
-            let body = json!({ "chat_id": self.chat, "text": cut_line(&text), "reply_markup": keyboard });
-            if self.bot.call("sendMessage", body, Duration::from_secs(20)).await.is_err() {
-                self.waiting.lock().expect("waiting").remove(&id);
-                return Answer::Deny;
-            }
-            let answer = tokio::time::timeout(APPROVAL_WAIT, rx).await.ok().and_then(Result::ok);
-            self.waiting.lock().expect("waiting").remove(&id);
-            answer.unwrap_or(Answer::Deny)
+            let body = json!({ "chat_id": chat_id(chat)?, "text": cut_line(&question.text), "reply_markup": keyboard });
+            self.bot.call("sendMessage", body, Duration::from_secs(20)).await.map(drop)
+        })
+    }
+
+    fn post_as<'a>(&'a self, member: &'a str, chat: &'a str, text: &'a str) -> BoxFuture<'a, bool> {
+        Box::pin(async move {
+            let (Some(own), Ok(chat)) = (self.bots.members.get(member), chat_id(chat)) else { return false };
+            own.send(chat, text).await.is_ok()
         })
     }
 }
 
 fn cut_line(text: &str) -> String {
-    if text.chars().count() <= MESSAGE_LIMIT {
-        text.to_owned()
-    } else {
-        text.chars().take(MESSAGE_LIMIT).collect::<String>() + "…"
-    }
+    crate::channel::cut(text, MESSAGE_LIMIT)
 }
 
-/// Answers messages until the process stops.
+/// Answers messages until the process stops (one bot on its own: tests, and older callers).
 pub async fn serve(bot: Bot, bots: Arc<Bots>, agent: Arc<Agent>, home: PathBuf) {
-    let chats: Arc<Mutex<HashMap<i64, Slot>>> = Arc::default();
-    let waiting: Waiting = Arc::default();
+    let runtime = Runtime::standalone(crate::bots::DEFAULT, &home, agent);
+    serve_bot(bot, bots, runtime).await;
+}
+
+/// The Telegram channel of [runtime], as its config says: off (Err) when it cannot start.
+pub async fn run(runtime: Arc<Runtime>) -> Result<(), String> {
+    let (bot, bots) = connect(&runtime.config, &runtime.home).await?;
+    serve_bot(bot, bots, runtime).await;
+    Ok(())
+}
+
+/// The bot, and its team members' bots, checked with Telegram.
+pub async fn connect(config: &crate::config::Config, home: &Path) -> Result<(Bot, Arc<Bots>), String> {
+    let network = crate::network()?;
+    let client = invincible::egress::client(&network)
+        .map_err(|e| format!("Telegram needs the network: {e}; set [node] network in the gateway's config"))?;
+    let bot = Bot::new(client.clone(), &config.telegram.api(), &config.telegram.token(home)?)?;
+    let me = bot.me().await?;
+    let username = me["username"].as_str().unwrap_or_default().to_owned();
+    tracing::info!("Telegram bot @{username} answering (network: {})", invincible::egress::route(&network));
+    // Team members with bots of their own: they post; a broken one is skipped (the main bot
+    // posts for it).
+    let mut members = HashMap::new();
+    for (name, role) in &config.agents {
+        let Some(file) = &role.telegram_token_file else { continue };
+        let path = if file.is_absolute() { file.clone() } else { home.join(file) };
+        let member = std::fs::read_to_string(&path)
+            .map_err(|e| format!("{}: {e}", path.display()))
+            .and_then(|token| Bot::new(client.clone(), &config.telegram.api(), token.trim()));
+        let checked = match member {
+            Ok(member) => member.me().await.map(|me| (member, me)),
+            Err(e) => Err(e),
+        };
+        match checked {
+            Ok((member, me)) => {
+                tracing::info!("team member {name} posts as @{}", me["username"].as_str().unwrap_or("?"));
+                members.insert(name.clone(), member);
+            }
+            Err(e) => tracing::warn!("team member {name}: its Telegram bot is off: {e}"),
+        }
+    }
+    Ok((bot, Arc::new(Bots { username, members })))
+}
+
+/// Answers [runtime]'s messages through [bot] until the process stops.
+pub async fn serve_bot(bot: Bot, bots: Arc<Bots>, runtime: Arc<Runtime>) {
+    let channel: Arc<dyn Transport> = Arc::new(Channel { bot: bot.clone(), bots: bots.clone() });
+    runtime.register(channel.clone());
+    runtime.channel_account("telegram", &format!("@{}", bots.username));
     let mut offset = 0;
     let mut backoff = Duration::from_secs(1);
     loop {
         let updates = match bot.updates(offset).await {
             Ok(updates) => {
+                if backoff > Duration::from_secs(1) {
+                    runtime.channel_state("telegram", "connected");
+                }
                 backoff = Duration::from_secs(1);
                 updates
             }
             Err(e) => {
-                tracing::warn!("{e}; retrying in {}s", backoff.as_secs());
+                tracing::warn!(bot = %runtime.name, "{e}; retrying in {}s", backoff.as_secs());
+                runtime.channel_state("telegram", &format!("retrying: {e}"));
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(Duration::from_secs(60));
                 continue;
@@ -290,14 +368,13 @@ pub async fn serve(bot: Bot, bots: Arc<Bots>, agent: Arc<Agent>, home: PathBuf) 
         for update in updates {
             offset = offset.max(update["update_id"].as_i64().unwrap_or(0) + 1);
             if let Some(query) = update.get("callback_query") {
-                answer_button(&bot, query, &waiting).await;
+                answer_button(&bot, query, &runtime).await;
             } else if let Some(message) = update.get("message") {
-                let (bot, bots, agent, home, chats, waiting) =
-                    (bot.clone(), bots.clone(), agent.clone(), home.clone(), chats.clone(), waiting.clone());
+                let (bot, bots, runtime, channel) = (bot.clone(), bots.clone(), runtime.clone(), channel.clone());
                 let message = message.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle(&bot, &bots, &agent, &home, &chats, &waiting, &message).await {
-                        tracing::warn!("telegram: {e}");
+                    if let Err(e) = handle(&bot, &bots, &runtime, &channel, &message).await {
+                        tracing::warn!(bot = %runtime.name, "telegram: {e}");
                     }
                 });
             }
@@ -305,9 +382,9 @@ pub async fn serve(bot: Bot, bots: Arc<Bots>, agent: Arc<Agent>, home: PathBuf) 
     }
 }
 
-async fn answer_button(bot: &Bot, query: &Value, waiting: &Waiting) {
+async fn answer_button(bot: &Bot, query: &Value, runtime: &Runtime) {
     let data = query["data"].as_str().unwrap_or_default();
-    let from = query["from"]["id"].as_i64().unwrap_or(0);
+    let from = query["from"]["id"].as_i64().unwrap_or(0).to_string();
     let (id, choice) = data.split_once(':').unwrap_or_default();
     let answer = match choice {
         "once" => Some(Answer::Once),
@@ -316,30 +393,21 @@ async fn answer_button(bot: &Bot, query: &Value, waiting: &Waiting) {
         _ => None,
     };
     // Only the user who was asked can answer (in a group, not whoever else is in it).
-    let sender = id.parse::<u64>().ok().and_then(|id| {
-        let mut waiting = waiting.lock().expect("waiting");
-        match waiting.get(&id) {
-            Some((user, _)) if *user == from => waiting.remove(&id).map(|(_, tx)| tx),
-            _ => None,
-        }
-    });
-    let note = match (sender, answer) {
-        (Some(tx), Some(answer)) => {
-            let note = match answer {
-                Answer::Once => "Allowed",
-                Answer::Always => "Allowed for this chat",
-                Answer::Deny | Answer::Instead(_) => "Denied",
-            };
-            let _ = tx.send(answer);
-            note
-        }
-        _ => "This question has expired",
+    let pressed = match answer {
+        Some(answer) => runtime.conversations.press(id, &from, answer),
+        None => Pressed::Expired,
+    };
+    let note = match pressed {
+        Pressed::Done(note) => note,
+        Pressed::NotYours | Pressed::Expired => "This question has expired",
     };
     let _ = bot
         .call("answerCallbackQuery", json!({ "callback_query_id": query["id"], "text": note }), Duration::from_secs(10))
         .await;
-    if let (Some(chat), Some(message)) =
-        (query["message"]["chat"]["id"].as_i64(), query["message"]["message_id"].as_i64())
+    // The question shows what became of it (not when someone else pressed it).
+    if pressed != Pressed::NotYours
+        && let (Some(chat), Some(message)) =
+            (query["message"]["chat"]["id"].as_i64(), query["message"]["message_id"].as_i64())
     {
         let text = format!("{}\n→ {note}", query["message"]["text"].as_str().unwrap_or_default());
         let _ = bot
@@ -355,10 +423,8 @@ async fn answer_button(bot: &Bot, query: &Value, waiting: &Waiting) {
 async fn handle(
     bot: &Bot,
     bots: &Bots,
-    agent: &Arc<Agent>,
-    home: &Path,
-    chats: &Mutex<HashMap<i64, Slot>>,
-    waiting: &Waiting,
+    runtime: &Arc<Runtime>,
+    channel: &Arc<dyn Transport>,
     message: &Value,
 ) -> Result<(), String> {
     let kind = message["chat"]["type"].as_str().unwrap_or_default();
@@ -367,8 +433,8 @@ async fn handle(
         return Ok(());
     }
     let chat_id = message["chat"]["id"].as_i64().ok_or("a message without a chat")?;
-    let user = User {
-        id: message["from"]["id"].as_i64().ok_or("a message without a sender")?,
+    let user = crate::pairing::User {
+        id: message["from"]["id"].as_i64().ok_or("a message without a sender")?.to_string(),
         name: [
             message["from"]["username"].as_str().map(|u| format!("@{u}")),
             message["from"]["first_name"].as_str().map(str::to_owned),
@@ -378,188 +444,40 @@ async fn handle(
         .next()
         .unwrap_or_default(),
     };
-    let mut users = Users::load(home)?;
     // In a group: only allowed users, and only messages for this bot (an @mention, a reply to
     // it, or a command); strangers there get no pairing code.
-    if group && !users.allows(user.id) {
-        return Ok(());
-    }
     let mention = format!("@{}", bots.username);
-    let raw = message["text"].as_str().unwrap_or_default();
+    let raw = message["text"].as_str().or(message["caption"].as_str()).unwrap_or_default();
     if group {
+        if !crate::pairing::allows(&runtime.home, "telegram", &user.id)? {
+            return Ok(());
+        }
         let replied = message["reply_to_message"]["from"]["username"].as_str() == Some(bots.username.as_str());
         if !(raw.contains(&mention) || replied || raw.starts_with('/')) {
             return Ok(());
         }
     }
-    let cleaned = raw.replace(&mention, "");
-    if !users.allows(user.id) {
-        let code = users.code_for(&user)?;
-        users.save(home)?;
-        tracing::info!(user = user.id, name = %user.name, "telegram: pairing code {code} issued");
-        bot.send(
-            chat_id,
-            &format!(
-                "This agent is private. To let this account in, its owner runs on the machine:\n\nautobot telegram approve {code}\n\nThe code works for {} minutes.",
-                CODE_LIFETIME / 60
-            ),
-        )
-        .await?;
-        return Ok(());
-    }
-    let Some(text) = Some(cleaned.trim()).filter(|t| !t.is_empty()) else {
-        bot.send(chat_id, "Only text messages for now.").await?;
-        return Ok(());
+    // A voice note, or an audio file.
+    let voice =
+        ["voice", "audio"].iter().find_map(|k| message.get(*k).filter(|v| v["file_id"].is_string())).or_else(|| {
+            message.get("document").filter(|d| {
+                crate::voice::is_audio(d["mime_type"].as_str().unwrap_or(""), d["file_name"].as_str().unwrap_or(""))
+            })
+        });
+    let audio = voice.map(|v| {
+        let (bot, id) = (bot.clone(), v["file_id"].as_str().unwrap_or_default().to_owned());
+        let mime = v["mime_type"].as_str().unwrap_or("audio/ogg").to_owned();
+        Box::pin(async move { bot.file(&id, &mime).await }) as BoxFuture<'static, _>
+    });
+    let incoming = Incoming {
+        chat: chat_id.to_string(),
+        place: if group { format!("telegram-g{}", chat_id.unsigned_abs()) } else { format!("telegram-{chat_id}") },
+        user,
+        text: raw.replace(&mention, ""),
+        direct: !group,
+        audio,
     };
-    let slot = {
-        let mut chats = chats.lock().expect("chats");
-        match chats.get(&chat_id) {
-            Some(slot) => slot.clone(),
-            None => {
-                let name =
-                    if group { format!("telegram-g{}", chat_id.unsigned_abs()) } else { format!("telegram-{chat_id}") };
-                let session = Session::open(&home.join("sessions"), &name)?;
-                let slot = Slot {
-                    chat: Arc::new(tokio::sync::Mutex::new(Chat { session, grants: HashSet::new() })),
-                    inbox: Arc::default(),
-                };
-                chats.insert(chat_id, slot.clone());
-                slot
-            }
-        }
-    };
-    // A message while a turn runs steers it: taken in before the agent's next step.
-    let mut chat = match slot.chat.try_lock() {
-        Ok(chat) => chat,
-        Err(_) if !text.starts_with('/') => {
-            slot.inbox.lock().expect("inbox").push(text.to_owned());
-            bot.send(chat_id, "↪ Noted: I'll take that in before my next step.").await?;
-            return Ok(());
-        }
-        Err(_) => slot.chat.lock().await,
-    };
-    match text.split_whitespace().next().unwrap_or_default() {
-        "/start" | "/help" => {
-            bot.send(
-                chat_id,
-                "Autobot here, running on your own machine. Send a task, or ask for one later (\"remind me in 10 minutes to …\").\n\n/new: a new conversation\n/cron: scheduled tasks (/cron add <when> | <task>, /cron rm <id>)\n/board: the team's background work (/board answer <id> <text>)\n/actions: what I ran lately, and who allowed it\n/memory: what I remember (/memory forget <id>)\n/skills: your how-to notes",
-            )
-            .await?;
-            return Ok(());
-        }
-        "/new" => {
-            chat.session.reset()?;
-            chat.grants.clear();
-            bot.send(chat_id, "New conversation.").await?;
-            return Ok(());
-        }
-        "/cron" => {
-            bot.send(chat_id, &cron_command(home, text.trim_start_matches("/cron").trim(), chat_id)).await?;
-            return Ok(());
-        }
-        "/board" => {
-            bot.send(chat_id, &board_command(home, text.trim_start_matches("/board").trim())).await?;
-            return Ok(());
-        }
-        "/actions" => {
-            bot.send(chat_id, &actions_command(home)).await?;
-            return Ok(());
-        }
-        "/memory" => {
-            bot.send(chat_id, &memory_command(home, text.trim_start_matches("/memory").trim())).await?;
-            return Ok(());
-        }
-        "/skills" => {
-            bot.send(chat_id, &skills_command(home, text.trim_start_matches("/skills").trim())).await?;
-            return Ok(());
-        }
-        _ => {}
-    }
-
-    // Tool progress goes out as short messages, in order, from one task; a member with a bot
-    // of its own posts its lines itself.
-    let (progress, mut lines) = tokio::sync::mpsc::unbounded_channel::<(Option<String>, String)>();
-    let sender = {
-        let bot = bot.clone();
-        let members: HashMap<String, Bot> = bots.members.clone();
-        tokio::spawn(async move {
-            while let Some((member, line)) = lines.recv().await {
-                match member.as_ref().and_then(|m| members.get(m)) {
-                    Some(own) if own.send(chat_id, &line).await.is_ok() => {}
-                    _ => {
-                        let line = match &member {
-                            Some(m) => format!("[{m}] {line}"),
-                            None => line,
-                        };
-                        let _ = bot.send(chat_id, &line).await;
-                    }
-                }
-            }
-        })
-    };
-    // `[coder] run: …` from a member: (Some("coder"), "run: …").
-    let split = |text: &str| -> (Option<String>, String) {
-        if let Some(rest) = text.strip_prefix('[')
-            && let Some((name, line)) = rest.split_once("] ")
-            && agent.team.get(name).is_some()
-        {
-            return (Some(name.to_owned()), line.to_owned());
-        }
-        (None, text.to_owned())
-    };
-    let typing = {
-        let bot = bot.clone();
-        tokio::spawn(async move {
-            loop {
-                bot.typing(chat_id).await;
-                tokio::time::sleep(Duration::from_secs(4)).await;
-            }
-        })
-    };
-    let last_route = Mutex::new(None::<String>);
-    let events = |event: Event| match event {
-        Event::Tool(what) => {
-            let (member, line) = split(what);
-            let _ = progress.send((member, format!("› {}", cut_line(&line))));
-        }
-        Event::Refused(why) => {
-            let (member, line) = split(why);
-            let _ = progress.send((member, format!("✗ {}", cut_line(&line))));
-        }
-        Event::Member { name, text } => {
-            let _ = progress.send((Some(name.to_owned()), cut_line(&format!("→ {text}"))));
-        }
-        Event::Text(_) | Event::Reasoning(_) | Event::Diff(_) | Event::Output { .. } | Event::Usage { .. } => {}
-        Event::Receipt { id, model, tier } => {
-            *last_route.lock().expect("route") = Some(format!(
-                "{} · {} · receipt {}",
-                model.unwrap_or("?"),
-                tier.unwrap_or("?"),
-                &id[..id.len().min(8)]
-            ));
-        }
-    };
-    let approver = ChatApprover { bot: bot.clone(), chat: chat_id, user: user.id, waiting: waiting.clone() };
-    let Chat { session, grants } = &mut *chat;
-    let context = crate::tools::TurnContext {
-        session: session.id.clone(),
-        telegram_chat: Some(chat_id),
-        inbox: Some(slot.inbox.clone()),
-        ..Default::default()
-    };
-    let result = crate::tools::TURN.scope(context, agent.turn(session, text, &approver, grants, &events)).await;
-    typing.abort();
-    drop(progress);
-    let _ = sender.await;
-    let reply = match result {
-        Ok(outcome) => match last_route.lock().expect("route").take() {
-            Some(route) => format!("{}\n\n— {route}", outcome.text),
-            None => outcome.text,
-        },
-        Err(e) => format!("✗ {e}"),
-    };
-    bot.send(chat_id, &reply).await?;
-    Ok(())
+    crate::channel::handle(runtime, channel, incoming).await
 }
 
 /// `/actions`: the newest entries of the action log.
@@ -659,57 +577,10 @@ pub fn memory_command(home: &Path, args: &str) -> String {
     facts.iter().map(|f| format!("#{} {}", f.id, f.text)).collect::<Vec<_>>().join("\n")
 }
 
-/// `/cron`, `/cron add <when> | <task>`, `/cron rm <id>`. Tasks added here report back here.
+/// `/cron`, `/cron add <when> | <task>`, `/cron rm <id>` from a Telegram chat: tasks added here
+/// report back here.
 pub fn cron_command(home: &Path, args: &str, chat_id: i64) -> String {
-    let result = (|| -> Result<String, String> {
-        if let Some(rest) = args.strip_prefix("add") {
-            let (when, task) = rest.split_once('|').ok_or(
-                "/cron add <when> | <task>, for example: /cron add 0 8 * * 1-5 | summarize the overnight logs",
-            )?;
-            let mut schedules = crate::cron::Schedules::load(home)?;
-            let id = schedules.add_for(when, task, false, Some(format!("telegram:{chat_id}")), Some(chat_id))?;
-            schedules.save(home)?;
-            return Ok(format!("Added {id}. Answers come here. It runs with allowlisted commands only."));
-        }
-        if let Some(id) = args.strip_prefix("rm").map(str::trim) {
-            let mut schedules = crate::cron::Schedules::load(home)?;
-            if !schedules.remove(id) {
-                return Err(format!("No scheduled task {id:?}."));
-            }
-            schedules.save(home)?;
-            return Ok(format!("Removed {id}."));
-        }
-        let listing = crate::cron::listing(home)?;
-        let lines: Vec<String> = listing["schedules"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|s| {
-                let next = s["next"]
-                    .as_i64()
-                    .map(|t| crate::cron::local(t).format("%a %H:%M").to_string())
-                    .unwrap_or("-".into());
-                // A recipe from the phone goes by its name.
-                let what = s["name"].as_str().map_or_else(
-                    || s["task"].as_str().unwrap_or("").to_owned(),
-                    |name| {
-                        format!(
-                            "{name} (from {})",
-                            s["origin"].as_str().unwrap_or("the app").trim_start_matches("device:")
-                        )
-                    },
-                );
-                let off = if s["enabled"] == false { " (off)" } else { "" };
-                format!(
-                    "{} [{}] {what}{off} (next {next})",
-                    s["id"].as_str().unwrap_or("?"),
-                    s["when"].as_str().unwrap_or("?")
-                )
-            })
-            .collect();
-        Ok(if lines.is_empty() { "No scheduled tasks. /cron add <when> | <task>".to_owned() } else { lines.join("\n") })
-    })();
-    result.unwrap_or_else(|e| format!("✗ {e}"))
+    crate::channel::cron_command(home, args, "telegram", &chat_id.to_string())
 }
 
 #[cfg(test)]
@@ -728,6 +599,10 @@ mod tests {
         assert!(crate::cron::Schedules::load(&home).unwrap().schedules[0].notify == Some(7));
         assert_eq!(cron_command(&home, "rm t1", 7), "Removed t1.");
         assert!(cron_command(&home, "rm t1", 7).starts_with("✗"));
+        // From another platform: the answer goes back by address.
+        assert!(crate::channel::cron_command(&home, "add every 2h | x", "slack", "C1/171.2").starts_with("Added t1"));
+        let s = &crate::cron::Schedules::load(&home).unwrap().schedules[0];
+        assert_eq!((s.notify, s.to.clone()), (None, vec!["slack:C1/171.2".to_owned()]));
         std::fs::remove_dir_all(home).unwrap();
     }
 

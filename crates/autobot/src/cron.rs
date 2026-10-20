@@ -280,6 +280,9 @@ pub struct Schedule {
     /// The Discord channel that asked for it: its answers go there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discord: Option<String>,
+    /// Where else its answers go: `slack:#ops`, `email:me@example.com` ([crate::channel::parse_address]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub to: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -301,6 +304,9 @@ pub struct ScheduleSpec {
     pub tools: Option<Vec<String>>,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Where its answers go (`slack:#ops`, `email:me@example.com`).
+    #[serde(default)]
+    pub to: Vec<String>,
 }
 
 /// One finished run, as `runs/<id>.jsonl` keeps it.
@@ -430,6 +436,7 @@ impl Schedules {
             enabled: true,
             notify,
             discord: None,
+            to: Vec::new(),
         });
         Ok(id)
     }
@@ -457,6 +464,9 @@ impl Schedules {
                 .find(|id| !self.schedules.iter().any(|s| &s.id == id))
                 .expect("a free id"),
         };
+        for address in &spec.to {
+            crate::channel::parse_address(address)?;
+        }
         if origin.is_some() && spec.tools.is_none() {
             return Err("a schedule from a device names its tools (\"tools\": [...])".to_owned());
         }
@@ -481,6 +491,7 @@ impl Schedules {
             enabled: spec.enabled,
             notify: None,
             discord: None,
+            to: spec.to,
         });
         Ok(id)
     }
@@ -552,7 +563,7 @@ pub fn listing(home: &Path) -> Result<serde_json::Value, String> {
                 "task": s.task,
                 "telegram": s.telegram,
                 "enabled": s.enabled,
-                "running": RUNNING.lock().expect("running").contains(&s.id),
+                "running": RUNNING.lock().expect("running").contains(&running_key(home, &s.id)),
                 "next": next.map(|t| t.timestamp()),
                 "last": last.map(|r| serde_json::json!({ "at": r.at, "ok": r.ok, "result": r.result })),
             });
@@ -560,6 +571,7 @@ pub fn listing(home: &Path) -> Result<serde_json::Value, String> {
                 ("name", s.name.clone().map(serde_json::Value::from)),
                 ("origin", s.origin.clone().map(serde_json::Value::from)),
                 ("tools", s.tools.clone().map(serde_json::Value::from)),
+                ("to", (!s.to.is_empty()).then(|| serde_json::Value::from(s.to.clone()))),
             ] {
                 if let Some(value) = value {
                     item[key] = value;
@@ -569,6 +581,11 @@ pub fn listing(home: &Path) -> Result<serde_json::Value, String> {
         })
         .collect();
     Ok(serde_json::json!({ "schedules": list }))
+}
+
+/// A schedule's key in [RUNNING]: two bots may each have a `t1`.
+fn running_key(home: &Path, id: &str) -> String {
+    format!("{}\0{id}", home.display())
 }
 
 /// Schedules running now, here (the scheduler's and "run now"'s together).
@@ -599,15 +616,16 @@ pub async fn run(agent: &crate::agent::Agent, home: &Path, schedule: &Schedule) 
 }
 
 /// Starts [schedule] in the background unless it is already running (false then): marks it in
-/// the state, runs it, records the run, and sends the answer to Telegram when the schedule asks.
+/// the state, runs it, records the run, and sends the answer where the schedule says ([targets]).
 pub fn start(
     agent: std::sync::Arc<crate::agent::Agent>,
     home: PathBuf,
     schedule: Schedule,
     trigger: &'static str,
-    telegram: Option<crate::telegram::Bot>,
+    runtime: Option<std::sync::Arc<crate::bots::Runtime>>,
 ) -> bool {
-    if !RUNNING.lock().expect("running").insert(schedule.id.clone()) {
+    let key = running_key(&home, &schedule.id);
+    if !RUNNING.lock().expect("running").insert(key.clone()) {
         return false;
     }
     let now = Local::now().timestamp();
@@ -652,45 +670,64 @@ pub fn start(
             if result.ok { "" } else { "✗ " },
             result.result
         );
-        if let Some(channel) = &schedule.discord {
-            crate::discord::notify(channel, &text).await;
+        if let Some(runtime) = runtime {
+            deliver(&runtime, &home, &schedule, &text).await;
         }
-        if let Some(bot) = telegram {
-            // The chat that asked for it, else (with `telegram`) every allowed user.
-            let allowed = crate::telegram::Users::load(&home).map(|u| u.allowed).unwrap_or_default();
-            let chats: Vec<i64> = match schedule.notify {
-                Some(chat) if allowed.iter().any(|u| u.id == chat) => vec![chat],
-                Some(_) => Vec::new(),
-                None if schedule.telegram => allowed.iter().map(|u| u.id).collect(),
-                None => Vec::new(),
-            };
-            for chat in chats {
-                if let Err(e) = bot.send(chat, &text).await {
-                    tracing::warn!("cron: Telegram: {e}");
-                }
-            }
-        }
-        RUNNING.lock().expect("running").remove(&schedule.id);
+        RUNNING.lock().expect("running").remove(&key);
     });
     true
 }
 
-/// Runs schedules as they come due until the process stops. Re-reads `schedules.json` each round,
-/// so `autobot cron add` / `remove` take effect without a restart.
-pub async fn scheduler(
-    agent: std::sync::Arc<crate::agent::Agent>,
-    home: PathBuf,
-    telegram: Option<crate::telegram::Bot>,
-) {
+/// Where [schedule]'s answers go: the Telegram chat or Discord channel that asked for it, and
+/// its `to` addresses. The flag: also every allowed Telegram user (`telegram`, with no chat of
+/// its own). With none of these, the bot's home channel (`/sethome`), except for a phone's
+/// recipe, whose results the phone collects.
+pub fn targets(schedule: &Schedule, home: &Path) -> (Vec<String>, bool, bool) {
+    let mut to = Vec::new();
+    if let Some(chat) = schedule.notify {
+        // Only while that chat may still use the bot.
+        let allowed = crate::telegram::Users::load(home).map(|u| u.allowed).unwrap_or_default();
+        if allowed.iter().any(|u| u.id == chat) {
+            to.push(format!("telegram:{chat}"));
+        }
+    }
+    if let Some(channel) = &schedule.discord {
+        to.push(format!("discord:{channel}"));
+    }
+    for address in &schedule.to {
+        if !to.contains(address) {
+            to.push(address.clone());
+        }
+    }
+    let everyone = schedule.notify.is_none() && schedule.telegram;
+    let from_phone = schedule.origin.as_deref().is_some_and(|o| o.starts_with("device:"));
+    let home_channel = to.is_empty() && !everyone && schedule.notify.is_none() && !from_phone;
+    (to, everyone, home_channel)
+}
+
+async fn deliver(runtime: &crate::bots::Runtime, home: &Path, schedule: &Schedule, text: &str) {
+    let (to, everyone, home_channel) = targets(schedule, home);
+    if everyone {
+        runtime.everyone("telegram", text).await;
+    }
+    if !to.is_empty() || home_channel {
+        runtime.notify(&to, text).await;
+    }
+}
+
+/// Runs [runtime]'s schedules as they come due until the process stops. Re-reads
+/// `schedules.json` each round, so `autobot cron add` / `remove` take effect without a restart.
+pub async fn scheduler(runtime: std::sync::Arc<crate::bots::Runtime>) {
+    let home = runtime.home.clone();
     loop {
         let now = Local::now();
         match (Schedules::load(&home), State::load(&home)) {
             (Ok(schedules), Ok(state)) => {
                 for schedule in due(&schedules, &state, now) {
-                    start(agent.clone(), home.clone(), schedule, "schedule", telegram.clone());
+                    start(runtime.agent(), home.clone(), schedule, "schedule", Some(runtime.clone()));
                 }
             }
-            (Err(e), _) | (_, Err(e)) => tracing::warn!("cron: {e}"),
+            (Err(e), _) | (_, Err(e)) => tracing::warn!(bot = %runtime.name, "cron: {e}"),
         }
         // Wake at the start of each minute (cron's resolution), a second in.
         let wait = 61 - Local::now().second() as u64;

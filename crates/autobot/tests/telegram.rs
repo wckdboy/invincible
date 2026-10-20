@@ -41,6 +41,12 @@ async fn bot_api(
         }
         return Json(json!({ "ok": true, "result": [] }));
     }
+    if method == "getFile" {
+        assert_eq!(body["file_id"], "VOICE1");
+        return Json(
+            json!({ "ok": true, "result": { "file_id": "VOICE1", "file_path": "voice/file_1.oga", "file_size": 7 } }),
+        );
+    }
     let mut t = t.lock().unwrap();
     t.next_id += 1;
     let id = t.next_id;
@@ -256,5 +262,84 @@ async fn a_team_works_in_a_group_each_member_on_its_own_bot() {
     assert_eq!(by("botMEMBER"), ["› ← Find the status", "→ Status: kernel in progress."]);
     assert!(by("botTOKEN").iter().all(|t| !t.contains("lunch") && !t.contains("approve")), "{:?}", by("botTOKEN"));
     assert_eq!(by("botTOKEN").len(), 1, "only the lead's answer: {:?}", by("botTOKEN"));
+    std::fs::remove_dir_all(home).unwrap();
+}
+
+#[tokio::test]
+async fn a_voice_note_is_heard_and_answered() {
+    let home = std::env::temp_dir().join(format!("autobot-tg-voice-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let mut users = Users::load(&home).unwrap();
+    users.code_for(&autobot::telegram::User { id: 7, name: "@ann".into() }).unwrap();
+    let code = users.pending[0].code.clone();
+    users.approve(&code).unwrap();
+    users.save(&home).unwrap();
+
+    // The model sees the transcript as the owner's words.
+    let asked: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let gateway_url = listen(
+        axum::Router::new()
+            .route(
+                "/v1/chat/completions",
+                axum::routing::post(|State(asked): State<Arc<Mutex<Vec<Value>>>>, Json(body): Json<Value>| async move {
+                    asked.lock().unwrap().push(body);
+                    Json(json!({ "choices": [{ "message": { "role": "assistant", "content": "The disk is fine." } }] }))
+                }),
+            )
+            .with_state(asked.clone()),
+    )
+    .await;
+    let telegram: Shared = Arc::default();
+    let api = listen(
+        axum::Router::new()
+            .route("/{bot}/{method}", axum::routing::post(bot_api))
+            .route(
+                "/file/{bot}/{*path}",
+                axum::routing::get(|Path((bot, path)): Path<(String, String)>| async move {
+                    assert_eq!((bot.as_str(), path.as_str()), ("botTOKEN", "voice/file_1.oga"));
+                    &b"OggS..."[..]
+                }),
+            )
+            .with_state(telegram.clone()),
+    )
+    .await;
+    // Speech-to-text on this machine.
+    let stt = listen(axum::Router::new().route(
+        "/v1/audio/transcriptions",
+        axum::routing::post(|body: axum::body::Bytes| async move {
+            assert!(String::from_utf8_lossy(&body).contains("OggS..."));
+            Json(json!({ "text": "how full is the disk" }))
+        }),
+    ))
+    .await;
+    let config = autobot::config::Config::parse(&format!("[voice]\nurl = \"{stt}/v1/audio/transcriptions\"")).unwrap();
+    let def =
+        autobot::bots::Def { name: "default".into(), root: home.clone(), home: home.clone(), config, default: true };
+    let agent = Agent {
+        gateway: Gateway::new(&format!("{gateway_url}/v1"), "t", "auto", true).unwrap(),
+        tools: Tools::new(home.join("work"), Duration::from_secs(5)),
+        approvals: ApprovalConfig { mode: ApprovalMode::Ask, allow: Vec::new() },
+        max_steps: 5,
+        team: Default::default(),
+        mcp: Default::default(),
+        trajectories: None,
+        options: Default::default(),
+    };
+    let runtime = autobot::bots::Runtime::new(&def, agent);
+    let bot = Bot::new(reqwest::Client::new(), &api, "TOKEN").unwrap();
+    let bots = Arc::new(Bots { username: "test_bot".into(), members: Default::default() });
+    tokio::spawn(autobot::telegram::serve_bot(bot, bots, runtime));
+
+    telegram.lock().unwrap().updates.push_back(json!({ "update_id": 1, "message": {
+        "message_id": 1, "from": { "id": 7, "first_name": "Ann" }, "chat": { "id": 7, "type": "private" },
+        "voice": { "file_id": "VOICE1", "mime_type": "audio/ogg", "duration": 2 },
+    } }));
+    let heard = sent(&telegram, |m, b| m == "sendMessage" && b["text"].as_str().unwrap().starts_with("heard:")).await;
+    assert_eq!(heard["text"], "heard: \"how full is the disk\"");
+    sent(&telegram, |m, b| m == "sendMessage" && b["text"] == "The disk is fine.").await;
+    let asked = asked.lock().unwrap();
+    assert_eq!(asked[0]["messages"].as_array().unwrap().last().unwrap()["content"], "how full is the disk");
+    drop(asked);
     std::fs::remove_dir_all(home).unwrap();
 }
