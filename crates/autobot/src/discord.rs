@@ -336,7 +336,7 @@ pub async fn run(runtime: Arc<Runtime>) -> Result<(), String> {
         bot = %runtime.name,
         "Discord bot {} answering (network: {})",
         me["username"].as_str().unwrap_or("?"),
-        invincible::egress::route(&network)
+        invincible::egress::label(&network)
     );
     serve_bot(bot, runtime).await;
     Ok(())

@@ -346,7 +346,7 @@ pub async fn connect(config: &crate::config::Config, home: &Path) -> Result<(Bot
     let bot = Bot::new(client.clone(), &config.telegram.api(), &config.telegram.token(home)?)?;
     let me = bot.me().await?;
     let username = me["username"].as_str().unwrap_or_default().to_owned();
-    tracing::info!("Telegram bot @{username} answering (network: {})", invincible::egress::route(&network));
+    tracing::info!("Telegram bot @{username} answering (network: {})", invincible::egress::label(&network));
     // Team members with bots of their own: they post; a broken one is skipped (the main bot
     // posts for it).
     let mut members = HashMap::new();

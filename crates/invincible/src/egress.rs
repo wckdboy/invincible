@@ -70,6 +70,11 @@ pub fn route(mode: &NetworkMode, host: &str) -> &'static str {
     if invincible_policy::is_loopback(host) && !mode.is_offline() {
         return "direct";
     }
+    label(mode)
+}
+
+/// The mode's name, for logs: `offline`, `direct`, `tor`, `socks5`.
+pub fn label(mode: &NetworkMode) -> &'static str {
     match mode {
         NetworkMode::Offline => "offline",
         NetworkMode::Direct => "direct",
