@@ -679,10 +679,20 @@ impl Agent {
                 );
             }
         }
-        if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
-            events(Event::Diff(&diff));
-            if let Some((path, before, after)) = self.tools.change(&call) {
-                events(Event::Change { path: &path, before: &before, after: &after });
+        // What a write or an edit changes, from the file as it will find it (an editor's buffer,
+        // [crate::acp]); the profile and skills from their own previews.
+        match self.tools.change_now(&call).await {
+            Some((path, before, after)) => {
+                let diff = self.tools.diff(&path, &before, &after);
+                if !diff.is_empty() {
+                    events(Event::Diff(&diff));
+                    events(Event::Change { path: &path, before: &before, after: &after });
+                }
+            }
+            None => {
+                if let Some(diff) = self.tools.preview(&call).filter(|d| !d.is_empty()) {
+                    events(Event::Diff(&diff));
+                }
             }
         }
         if let Some(action) = self.tools.action(&call) {

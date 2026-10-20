@@ -77,9 +77,18 @@ impl Conn {
 
     /// Asks the editor [method]; its result, or its error's message.
     async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+        // Gone from the waiting list however this ends: answered, or dropped with a cancelled
+        // turn (an editor need not answer those).
+        struct Waiting<'a>(&'a Conn, u64);
+        impl Drop for Waiting<'_> {
+            fn drop(&mut self) {
+                self.0.waiting.lock().expect("waiting").remove(&self.1);
+            }
+        }
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.waiting.lock().expect("waiting").insert(id, tx);
+        let _waiting = Waiting(self, id);
         self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
         rx.await.map_err(|_| "the editor went away".to_owned())?
     }
@@ -104,6 +113,8 @@ struct Open {
     agent: Mutex<Arc<Agent>>,
     state: Arc<tokio::sync::Mutex<(Session, HashSet<Action>)>>,
     running: Mutex<Option<tokio::task::AbortHandle>>,
+    /// Tool calls shown so far ([Turn::next_id]).
+    calls: Arc<AtomicU64>,
 }
 
 struct Acp {
@@ -231,9 +242,11 @@ impl Acp {
     }
 
     fn notified(&self, method: &str, params: &Value) {
+        // Stopped, and still registered until its prompt has answered: no second prompt starts
+        // in between.
         if method == "session/cancel"
             && let Some(open) = params["sessionId"].as_str().and_then(|id| self.open(id).ok())
-            && let Some(running) = open.running.lock().expect("running").take()
+            && let Some(running) = open.running.lock().expect("running").as_ref()
         {
             running.abort();
         }
@@ -283,6 +296,7 @@ impl Acp {
             agent: Mutex::new(Arc::new(self.agent(id, cwd, mode)?)),
             state: Arc::new(tokio::sync::Mutex::new((session, HashSet::new()))),
             running: Mutex::new(None),
+            calls: Arc::default(),
         });
         self.sessions.lock().expect("sessions").insert(id.to_owned(), open.clone());
         Ok(open)
@@ -313,6 +327,16 @@ impl Acp {
         if !dir.join(format!("{id}.jsonl")).is_file() {
             return Err((INVALID_PARAMS, format!("no session {id:?}")));
         }
+        // Open here already: told again from what is in memory, not opened a second time; not
+        // while a prompt runs in it.
+        if let Ok(open) = self.open(id) {
+            let state = open
+                .state
+                .try_lock()
+                .map_err(|_| (INVALID_REQUEST, "a prompt is running in this session".to_owned()))?;
+            replay(&self.conn, id, &state.0.messages);
+            return Ok(json!({ "modes": modes(*open.mode.lock().expect("mode")) }));
+        }
         let session = Session::open(&dir, id).map_err(|e| (INVALID_PARAMS, e))?;
         replay(&self.conn, id, &session.messages);
         let open = self.start(id, &cwd, session)?;
@@ -342,7 +366,7 @@ impl Acp {
             return Err((INVALID_PARAMS, "the prompt is empty".to_owned()));
         }
         let agent = open.agent.lock().expect("agent").clone();
-        let turn = Arc::new(Mutex::new(Turn::default()));
+        let turn = Arc::new(Mutex::new(Turn::new(open.calls.clone())));
         let (conn, id, state) = (self.conn.clone(), open.id.clone(), open.state.clone());
         let task = {
             let turn = turn.clone();
@@ -377,11 +401,12 @@ impl Acp {
             Ok(Err(e)) => return Err((INTERNAL, e)),
             Ok(Ok(outcome)) => outcome,
         };
-        // Not streamed (or a stop note): the answer whole.
-        if !turn.lock().expect("turn").streamed {
+        // Not streamed, or the agent's own note that it stopped: the answer whole.
+        let stopped = outcome.text.starts_with("Stopped after ");
+        if stopped || !turn.lock().expect("turn").streamed {
             self.conn.update(&open.id, chunk("agent_message_chunk", &outcome.text));
         }
-        let stop = if outcome.text.starts_with("Stopped after ") { "max_turn_requests" } else { "end_turn" };
+        let stop = if stopped { "max_turn_requests" } else { "end_turn" };
         Ok(json!({ "stopReason": stop }))
     }
 }
@@ -456,7 +481,25 @@ fn replay(conn: &Conn, session: &str, messages: &[Value]) {
         }
         let text = m["content"].as_str().unwrap_or_default();
         match m["role"].as_str().unwrap_or_default() {
-            "user" if !text.is_empty() => conn.update(session, chunk("user_message_chunk", text)),
+            "user" => {
+                if !text.is_empty() {
+                    conn.update(session, chunk("user_message_chunk", text));
+                }
+                // Its images, from their files (a note for one that is gone).
+                for image in crate::images::of(m) {
+                    let content = match std::fs::read(&image.path) {
+                        Ok(bytes) => {
+                            use base64::Engine as _;
+                            let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+                            json!({ "type": "image", "data": data, "mimeType": image.mime })
+                        }
+                        Err(_) => {
+                            json!({ "type": "text", "text": format!("[image: {}, no longer on disk]", image.name) })
+                        }
+                    };
+                    conn.update(session, json!({ "sessionUpdate": "user_message_chunk", "content": content }));
+                }
+            }
             "assistant" => {
                 if !text.trim().is_empty() {
                     conn.update(session, chunk("agent_message_chunk", text));
@@ -518,10 +561,10 @@ fn action_kind(action: &Action) -> &'static str {
 }
 
 /// The tool call the editor is shown for what the agent does now.
-#[derive(Default)]
 struct Turn {
     current: Option<Call>,
-    count: u64,
+    /// The session's tool calls so far: each gets an id of its own, in every turn.
+    calls: Arc<AtomicU64>,
     /// Text streamed since the last tool call (else the answer is sent whole at the end).
     streamed: bool,
 }
@@ -533,9 +576,12 @@ struct Call {
 }
 
 impl Turn {
+    fn new(calls: Arc<AtomicU64>) -> Self {
+        Self { current: None, calls, streamed: false }
+    }
+
     fn next_id(&mut self) -> String {
-        self.count += 1;
-        format!("tool-{}", self.count)
+        format!("tool-{}", self.calls.fetch_add(1, Ordering::Relaxed) + 1)
     }
 }
 

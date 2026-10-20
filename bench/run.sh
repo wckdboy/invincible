@@ -15,14 +15,19 @@ cd "$(dirname "$0")/.."
 filter="${1:-}"
 cargo build --release --locked --quiet
 out=$(mktemp)
-trap 'rm -f "$out"' EXIT
 dir="${BENCH_BIN_DIR:-target/release}"
 for bin in invincible autobot; do
   bytes=$(wc -c < "$dir/$bin" | tr -d ' ')
   awk -v b="$bytes" -v n="$bin" 'BEGIN { printf "BENCH size.%s %.3f MiB\n", n, b / 1048576 }' >> "$out"
 done
-cargo test --release --locked --quiet -p autobot --test perf -- --ignored --nocapture --test-threads 1 $filter \
-  | grep -o 'BENCH .*' >> "$out"
+log=$(mktemp)
+trap 'rm -f "$out" "$log"' EXIT
+# A benchmark that fails fails the run (its output shown), numbers or not.
+if ! cargo test --release --locked --quiet -p autobot --test perf -- --ignored --nocapture --test-threads 1 $filter > "$log" 2>&1; then
+  cat "$log"
+  exit 1
+fi
+grep -o 'BENCH .*' "$log" >> "$out"
 
 sed 's/^BENCH //' "$out"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

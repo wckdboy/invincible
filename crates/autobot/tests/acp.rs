@@ -318,6 +318,29 @@ async fn an_editor_runs_sessions_with_approvals_its_own_files_modes_and_cancel()
     let user = sent["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "user").unwrap().clone();
     assert!(user["content"].as_str().unwrap().contains(&notes), "the link is in the prompt: {user}");
 
+    // An edit is shown, and made, against the buffer as it is (the text exists only there).
+    editor.answer = Answer::Allow;
+    script.lock().unwrap().answers.extend([
+        (
+            Duration::ZERO,
+            call(
+                "e1",
+                "edit_file",
+                json!({ "path": "notes.txt", "old_text": "from the buffer", "new_text": "edited" }),
+            ),
+        ),
+        (Duration::ZERO, say("Edited.")),
+    ]);
+    let from = editor.updates.len();
+    let done = editor
+        .request("session/prompt", json!({ "sessionId": session, "prompt": [{ "type": "text", "text": "edit it" }] }))
+        .await;
+    assert_eq!(done["result"]["stopReason"], "end_turn", "{done}");
+    let edit = &editor.updates_of(from, "tool_call")[0];
+    assert_eq!(edit["content"][0]["oldText"], "hello from the buffer\n", "{edit}");
+    assert_eq!(edit["content"][0]["newText"], "hello edited\n");
+    assert_eq!(editor.buffers[&notes], "hello edited\n");
+
     // 3. A command the editor rejects does not run, and the call fails.
     editor.answer = Answer::Reject;
     let marker = project.join("ran");
@@ -368,6 +391,18 @@ async fn an_editor_runs_sessions_with_approvals_its_own_files_modes_and_cancel()
     let cancelled = editor.until(id).await;
     assert_eq!(cancelled["result"]["stopReason"], "cancelled", "{cancelled}");
     assert!(started.elapsed() < Duration::from_secs(5));
+
+    // Every tool call of the session has an id of its own, across its turns.
+    let ids: Vec<String> =
+        editor.updates_of(0, "tool_call").iter().map(|u| u["toolCallId"].as_str().unwrap().to_owned()).collect();
+    let unique: std::collections::HashSet<&String> = ids.iter().collect();
+    assert_eq!(unique.len(), ids.len(), "{ids:?}");
+    // Loaded again in the same editor (idle): told again from memory.
+    let from = editor.updates.len();
+    let reloaded =
+        editor.request("session/load", json!({ "sessionId": session, "cwd": project, "mcpServers": [] })).await;
+    assert!(reloaded.get("result").is_some(), "{reloaded}");
+    assert_eq!(editor.updates_of(from, "user_message_chunk")[0]["content"]["text"], "write hello to notes.txt");
 
     // 6. The session again, in a new editor: told from its start.
     drop(editor);

@@ -1040,8 +1040,44 @@ impl Tools {
             _ => {}
         }
         let (path, before, after) = self.change(call)?;
-        let label = path.strip_prefix(&self.workdir).unwrap_or(&path).display().to_string();
-        Some(crate::diff::unified(&before, &after, &label))
+        Some(self.diff(&path, &before, &after))
+    }
+
+    /// [before] to [after] of [path] as a unified diff, the path relative to the working
+    /// directory.
+    pub fn diff(&self, path: &Path, before: &str, after: &str) -> String {
+        let label = path.strip_prefix(&self.workdir).unwrap_or(path).display().to_string();
+        crate::diff::unified(before, after, &label)
+    }
+
+    /// [Tools::change], from the file as the write or edit will find it: through [Files] (an
+    /// editor's buffer, unsaved changes included) when they are set, else as [Tools::change]
+    /// reads it.
+    pub async fn change_now(&self, call: &Call) -> Option<(PathBuf, String, String)> {
+        let Some(files) = &self.files else { return self.change(call) };
+        let (path, now) = match call {
+            Call::WriteFile { path, .. } | Call::EditFile { path, .. } => (path, files.read(path).await),
+            _ => return None,
+        };
+        let text = match now {
+            Some(Ok(text)) => text,
+            // A new file, for a write; an edit there would fail.
+            Some(Err(_)) if matches!(call, Call::WriteFile { .. }) => String::new(),
+            Some(Err(_)) => return None,
+            None => return self.change(call),
+        };
+        match call {
+            Call::WriteFile { content, .. } => Some((path.clone(), text, content.clone())),
+            Call::EditFile { old, new, all, .. } => {
+                let found = text.matches(old.as_str()).count();
+                if old.is_empty() || found == 0 || (found > 1 && !all) {
+                    return None;
+                }
+                let after = text.replace(old.as_str(), new);
+                Some((path.clone(), text, after))
+            }
+            _ => None,
+        }
     }
 
     /// The file a write or an edit changes and its bytes now (None: it does not exist), to put
