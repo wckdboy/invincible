@@ -1134,11 +1134,17 @@ impl Chat {
         }
     }
 
-    /// The nudge, when it is time ([Agent::nudge]): in the background, its lines on
-    /// [Chat::kept].
-    fn nudge(&self) {
+    /// The nudge, when it is time ([Agent::nudge]): on a terminal in the background, its lines
+    /// on [Chat::kept]; without one (nothing to keep drawing), before the next line is read.
+    async fn nudge(&self, tty: bool) {
         let every = self.agent.options.nudge_every;
         if every == 0 {
+            return;
+        }
+        if !tty {
+            for line in self.agent.nudge(&self.session.messages, &|_| {}).await {
+                say(&style::faint(&format!("  ↳ kept {line}")));
+            }
             return;
         }
         let (agent, messages, tx) = (self.agent.clone(), self.session.messages.clone(), self.kept.0.clone());
@@ -1351,7 +1357,7 @@ impl Chat {
             Some(Ok(outcome)) => {
                 ui.answer(&outcome.text);
                 ui.end(None);
-                self.nudge();
+                self.nudge(tty).await;
                 // Typed while it finished: the agent never saw it, so it is the next request.
                 let unread: Vec<String> = std::mem::take(&mut *inbox.lock().expect("inbox"));
                 if !unread.is_empty() {
@@ -1953,7 +1959,11 @@ fn skill_picker(home: &Path) -> Picker {
     let all: Vec<Item> = crate::skills::list(home)
         .into_iter()
         .map(|s| {
-            let files = s.dir().map_or(String::new(), |_| " · with files".to_owned());
+            let files = match s.files().len() {
+                0 => String::new(),
+                1 => " · 1 file".to_owned(),
+                n => format!(" · {n} files"),
+            };
             Item { text: s.name, detail: format!("{}{files}", s.description) }
         })
         .collect();
@@ -2323,11 +2333,12 @@ mod tests {
         std::fs::create_dir_all(home.join("skills/deploy")).unwrap();
         std::fs::write(home.join("skills/deploy/SKILL.md"), "---\nname: deploy\ndescription: Ship it\n---\nGo.")
             .unwrap();
+        std::fs::write(home.join("skills/deploy/run.sh"), "echo go").unwrap();
         std::fs::write(home.join("skills/retry.md"), "# A skill named like a command\n").unwrap();
         let picker = super::skill_picker(&home);
         assert_eq!(picker.command, "/skills");
         assert_eq!(picker.all[0].text, "deploy");
-        assert_eq!(picker.all[0].detail, "Ship it · with files");
+        assert_eq!(picker.all[0].detail, "Ship it · 1 file");
         let mut a = app(&[]);
         a.open_picker(picker);
         assert_eq!(

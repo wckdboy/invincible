@@ -154,6 +154,33 @@ pub fn usage(home: &Path, config: &Config, session: Option<&str>) -> Result<(), 
     Ok(())
 }
 
+/// `autobot migrate hermes|openclaw [--from DIR] [--dry-run] [--with-secrets]`.
+pub async fn migrate(
+    home: &Path,
+    config: &Config,
+    source: &str,
+    from: Option<std::path::PathBuf>,
+    dry_run: bool,
+    with_secrets: bool,
+) -> Result<(), String> {
+    let source = crate::migrate::Source::parse(source)?;
+    let from = from.or_else(|| source.root()).ok_or("HOME is not set; say where with --from")?;
+    // The gateway says which models it serves; without it, the model is only named.
+    let models = match crate::agent(config, home) {
+        Ok(agent) => agent.gateway.models().await.ok(),
+        Err(_) => None,
+    };
+    let options = crate::migrate::Options { dry_run, with_secrets, models, workdir: config.agent.workdir(home) };
+    let report = crate::migrate::run(source, &from, home, config, &options)?;
+    for line in report.lines {
+        println!("{line}");
+    }
+    if !dry_run {
+        println!("\n`autobot memory`, `autobot profile` and `autobot skills` show what came over");
+    }
+    Ok(())
+}
+
 /// `autobot insights [--days N] [--json]`.
 pub fn insights(home: &Path, config: &Config, days: u32, json: bool) -> Result<(), String> {
     let report = crate::insights::insights(home, days, &config.prices);

@@ -212,6 +212,30 @@ struct Browser {
     session: String,
     next: u64,
     profile: PathBuf,
+    /// When it was last used: an idle browser is closed ([IDLE]).
+    used: std::time::Instant,
+}
+
+/// How long the browser stays open unused (in `autobot serve` the process lives on).
+const IDLE: Duration = Duration::from_secs(10 * 60);
+
+/// Closes the browser once it has been idle for [IDLE]; ends with it.
+async fn reap() {
+    loop {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let mut slot = slot().lock().await;
+        match slot.as_ref() {
+            None => return,
+            Some(b) if b.used.elapsed() > IDLE => {
+                if let Some(browser) = slot.take() {
+                    set_current(None);
+                    browser.close().await;
+                }
+                return;
+            }
+            Some(_) => {}
+        }
+    }
 }
 
 static BROWSER: OnceLock<tokio::sync::Mutex<Option<Browser>>> = OnceLock::new();
@@ -295,7 +319,8 @@ impl Browser {
         let stream = tokio::net::TcpStream::connect(&address).await.map_err(|e| format!("DevTools {address}: {e}"))?;
         let (socket, _) =
             tokio_tungstenite::client_async(url.as_str(), stream).await.map_err(|e| format!("DevTools: {e}"))?;
-        let mut browser = Self { child, socket, session: String::new(), next: 0, profile };
+        let mut browser =
+            Self { child, socket, session: String::new(), next: 0, profile, used: std::time::Instant::now() };
         let target = browser.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
         let target = target["targetId"].as_str().ok_or("no page")?.to_owned();
         let attached =
@@ -439,8 +464,10 @@ pub async fn run(act: &Act, shots: &Path, limit: usize) -> Result<(String, Optio
         )?;
         let network = crate::network().unwrap_or_default();
         *slot = Some(Browser::launch(&program, &network).await?);
+        tokio::spawn(reap());
     }
     let browser = slot.as_mut().expect("started");
+    browser.used = std::time::Instant::now();
     let result = act_on(browser, act, shots, limit).await;
     // A browser that went away is started again next time.
     if result.as_ref().is_err_and(|e| e.contains("the browser went away") || e.starts_with("DevTools")) {

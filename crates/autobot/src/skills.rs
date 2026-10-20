@@ -29,6 +29,11 @@ impl Skill {
     pub fn dir(&self) -> Option<&Path> {
         (self.path.file_name().is_some_and(|n| n == "SKILL.md")).then(|| self.path.parent()).flatten()
     }
+
+    /// Its supporting files (relative), besides SKILL.md.
+    pub fn files(&self) -> Vec<String> {
+        self.dir().map(files_of).unwrap_or_default()
+    }
 }
 
 /// Longest skill handed to the model (characters).

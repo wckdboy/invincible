@@ -1494,7 +1494,10 @@ async fn with_ssh_commands_and_files_are_on_the_other_machine() {
     // Background processes run there and stop there.
     let started = run("terminal", json!({"command": "echo up; sleep 30", "background": true})).await;
     assert!(started.contains("on me@build-box"), "{started}");
-    autobot::procs::stop_all().await;
+    // Stopped by its number (stop_all would also close the browser another test uses).
+    let id: u64 = started.split_whitespace().nth(3).unwrap().parse().unwrap();
+    let stopped = run("process", json!({"action": "stop", "id": id})).await;
+    assert!(!stopped.starts_with("error"), "{stopped}");
     let hosts = std::fs::read_to_string(dir.join("hosts")).unwrap();
     assert!(hosts.lines().all(|h| h == "me@build-box") && hosts.lines().count() >= 9);
     assert!(!tools.definitions().to_string().contains("\"browser\""), "no local browser for a remote machine");

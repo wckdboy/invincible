@@ -202,7 +202,7 @@ async fn a_turn_through_the_gateway_with_an_approval() {
     assert_eq!(get("/v1/agent/memory").await["facts"][0]["text"], "Backups run at 02:00.");
     assert_eq!(
         get("/v1/agent/skills").await["skills"],
-        json!([{ "name": "deploy", "description": "Deploy the site", "allowed_tools": [], "files": false }])
+        json!([{ "name": "deploy", "description": "Deploy the site", "allowed_tools": [], "files": [] }])
     );
     let forget = client.delete(format!("{gateway}/v1/agent/memory/1")).bearer_auth(TOKEN).send().await.unwrap();
     assert_eq!(forget.status(), 200);

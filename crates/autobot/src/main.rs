@@ -200,6 +200,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Bring over another agent's SOUL.md, memory, profile, skills, allowlist and model:
+    /// `hermes` (Hermes Agent, ~/.hermes) or `openclaw` (~/.openclaw).
+    Migrate {
+        source: String,
+        /// Its directory [default: ~/.hermes ($HERMES_HOME), ~/.openclaw].
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Say what would be done; change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also copy API keys and bot tokens, into Autobot's secret files (0600).
+        #[arg(long)]
+        with_secrets: bool,
+    },
     /// Webhooks that start tasks in `autobot serve` ([hooks] in the config): list them, or make
     /// a secret for a new one.
     Hooks {
@@ -651,6 +665,9 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Profile { clear } => autobot::manage::profile(&home, clear),
         Command::Usage { session } => autobot::manage::usage(&home, &config, session.as_deref()),
         Command::Insights { days, json } => autobot::manage::insights(&home, &config, days, json),
+        Command::Migrate { source, from, dry_run, with_secrets } => {
+            runtime()?.block_on(autobot::manage::migrate(&home, &config, &source, from, dry_run, with_secrets))
+        }
         Command::Trajectories { from, out, format, clean, model, since, agent } => {
             use autobot::trajectory;
             let all = match &from {

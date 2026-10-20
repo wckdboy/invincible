@@ -23,6 +23,7 @@ pub mod insights;
 pub mod manage;
 pub mod mcp;
 pub mod memory;
+pub mod migrate;
 pub mod personality;
 pub mod procs;
 pub mod profile;

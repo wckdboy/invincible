@@ -483,7 +483,7 @@ async fn skills(State(state): State<Arc<ApiState>>) -> Json<Value> {
     let skills: Vec<Value> = crate::skills::list(&state.home)
         .into_iter()
         .map(|s| {
-            json!({ "name": s.name, "description": s.description, "allowed_tools": s.allowed_tools, "files": s.dir().is_some() })
+            json!({ "name": s.name, "description": s.description, "allowed_tools": s.allowed_tools, "files": s.files() })
         })
         .collect();
     let proposed: Vec<Value> = crate::skills::proposals(&state.home)
