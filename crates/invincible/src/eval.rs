@@ -363,9 +363,179 @@ fn percent(n: usize, of: usize) -> usize {
     if of == 0 { 0 } else { n * 100 / of }
 }
 
+/// One run of a suite, kept in `$INVINCIBLE_HOME/evals/history.jsonl` so the gap between the
+/// node's models and the cloud's can be followed over time.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Run {
+    /// When it ran (RFC 3339).
+    pub at: String,
+    /// The task file's name, without its extension (`projects`).
+    pub suite: String,
+    /// The tasks as written, hashed ([digest]): runs of the same tasks compare; a task that
+    /// changed starts anew.
+    pub digest: String,
+    pub tasks: usize,
+    /// `answers` (`invincible eval`) or `agent` (`autobot eval`).
+    #[serde(default = "answers")]
+    pub kind: String,
+    /// The version that ran it.
+    pub version: String,
+    pub models: Vec<ModelRun>,
+}
+
+fn answers() -> String {
+    "answers".to_owned()
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelRun {
+    pub model: String,
+    /// `node`, `cloud`, …, as the gateway lists it (None: not listed, `auto` for one).
+    #[serde(default)]
+    pub tier: Option<String>,
+    pub passed: usize,
+    pub total: usize,
+    #[serde(default)]
+    pub median_ms: Option<u64>,
+    /// Tasks it gave no answer to (refused, unreachable, failed): it is left out of the gap then.
+    #[serde(default)]
+    pub errors: usize,
+}
+
+/// The digest of the tasks [ids] in the task file [text]: each one as written (its prompt,
+/// checks, files, limits), in the file's order, as JSON with sorted keys, one per line.
+pub fn digest(text: &str, ids: &[&str]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let Ok(task) = serde_json::from_str::<Value>(line) else { continue };
+        if task["id"].as_str().is_some_and(|id| ids.contains(&id)) {
+            hasher.update(task.to_string().as_bytes());
+            hasher.update(b"\n");
+        }
+    }
+    crate::token::hex(&hasher.finalize()[..6])
+}
+
+/// A model's line in a [Run]: how many passed and the median time of those that answered.
+pub fn model_run(model: &str, tier: Option<String>, outcomes: &[Outcome]) -> ModelRun {
+    let mut latencies: Vec<u128> = outcomes.iter().filter(|o| o.error.is_none()).map(|o| o.latency_ms).collect();
+    latencies.sort_unstable();
+    ModelRun {
+        model: model.to_owned(),
+        tier,
+        passed: outcomes.iter().filter(|o| o.pass).count(),
+        total: outcomes.len(),
+        median_ms: latencies.get(latencies.len() / 2).map(|ms| *ms as u64),
+        errors: outcomes.iter().filter(|o| o.error.is_some()).count(),
+    }
+}
+
+/// Where the history is.
+pub fn history_path(home: &std::path::Path) -> std::path::PathBuf {
+    home.join("evals").join("history.jsonl")
+}
+
+/// Adds [run] to the history in [home].
+pub fn record(home: &std::path::Path, run: &Run) -> Result<(), String> {
+    use std::io::Write as _;
+    let path = history_path(home);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let line = serde_json::to_string(run).map_err(|e| e.to_string())?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    writeln!(file, "{line}").map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The runs in [home]'s history, oldest first (lines that do not read are skipped).
+pub fn history(home: &std::path::Path) -> Vec<Run> {
+    std::fs::read_to_string(history_path(home))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+fn rate(m: &ModelRun) -> f64 {
+    if m.total == 0 { 0.0 } else { m.passed as f64 / m.total as f64 }
+}
+
+/// The best model on this machine and the best in the cloud in [run], when it had both (that
+/// answered every task): the gap is the second's pass rate less the first's.
+pub fn gap(run: &Run) -> Option<(&ModelRun, &ModelRun)> {
+    let best = |tier: &str| {
+        run.models
+            .iter()
+            .filter(|m| m.tier.as_deref() == Some(tier) && m.errors == 0)
+            .max_by(|a, b| rate(a).total_cmp(&rate(b)))
+    };
+    Some((best("node")?, best("cloud")?))
+}
+
+/// `invincible eval --history`: each suite's runs, oldest first, every model's score, and the
+/// gap between the best local and the best cloud model; [suite] for one suite only.
+pub fn history_report(runs: &[Run], suite: Option<&str>) -> String {
+    let mut groups: BTreeMap<(&str, &str, &str), Vec<&Run>> = BTreeMap::new();
+    // A file's runs include those of some of its tasks (`name#tag`), unless a tag is asked for.
+    let wanted = |r: &Run| {
+        suite.is_none_or(|s| {
+            r.suite == s || (!s.contains('#') && r.suite.strip_prefix(s).is_some_and(|t| t.starts_with('#')))
+        })
+    };
+    for run in runs.iter().filter(|r| wanted(r)) {
+        groups.entry((run.kind.as_str(), run.suite.as_str(), run.digest.as_str())).or_default().push(run);
+    }
+    if groups.is_empty() {
+        return match suite {
+            Some(s) => format!("no runs of {s} yet"),
+            None => "no runs yet: `invincible eval FILE --model …` keeps each one".to_owned(),
+        };
+    }
+    let mut out = String::new();
+    for ((kind, name, digest), runs) in groups {
+        let tasks = runs[0].tasks;
+        let what = if kind == "agent" { "agent tasks" } else { "tasks" };
+        out.push_str(&format!("{name} ({tasks} {what}, {digest})\n"));
+        for run in &runs {
+            let day = run.at.get(..16).unwrap_or(&run.at).replace('T', " ");
+            let cells: Vec<String> = run
+                .models
+                .iter()
+                .map(|m| {
+                    let tier = m.tier.as_deref().map(|t| format!(" [{t}]")).unwrap_or_default();
+                    let errors = if m.errors > 0 { format!(" ({} unanswered)", m.errors) } else { String::new() };
+                    format!("{}{tier} {}/{}{errors}", m.model, m.passed, m.total)
+                })
+                .collect();
+            let gap = gap(run)
+                .map(|(local, cloud)| {
+                    let points = ((rate(cloud) - rate(local)) * 100.0).round() as i64;
+                    format!("  gap {points:+} points ({} → {})", local.model, cloud.model)
+                })
+                .unwrap_or_default();
+            out.push_str(&format!("  {day}  {}{gap}\n", cells.join(" · ")));
+        }
+        // Across the runs that had both: where it started and where it is.
+        let gaps: Vec<i64> =
+            runs.iter().filter_map(|r| gap(r).map(|(l, c)| ((rate(c) - rate(l)) * 100.0).round() as i64)).collect();
+        if gaps.len() > 1 {
+            out.push_str(&format!("  the gap: {:+} points then, {:+} now\n", gaps[0], gaps[gaps.len() - 1]));
+        }
+        out.push('\n');
+    }
+    out.trim_end().to_owned()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Check, check, clean, parse_tasks, report};
+    use super::{
+        Check, ModelRun, Run, check, clean, digest, gap, history, history_report, parse_tasks, record, report,
+    };
     use serde_json::json;
 
     fn c(v: serde_json::Value) -> Check {
@@ -441,5 +611,70 @@ mod tests {
         assert!(text.contains("local    1/2    50%  1.5 s"), "{text}");
         assert!(text.contains("t              local 1/2 · cloud 2/2"), "{text}");
         assert!(text.contains("b: local ✗, cloud ✓"), "{text}");
+    }
+
+    const TASKS: &str = "{\"id\": \"a\", \"prompt\": \"2 + 2?\", \"checks\": []}\n{\"id\": \"b\", \"prompt\": \"3 + 3?\", \"checks\": []}";
+
+    #[test]
+    fn history_keeps_runs_and_the_gap() {
+        let home = std::env::temp_dir().join(format!("invincible-eval-history-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let m = |model: &str, tier: Option<&str>, passed| ModelRun {
+            model: model.into(),
+            tier: tier.map(str::to_owned),
+            passed,
+            total: 50,
+            median_ms: Some(200),
+            errors: 0,
+        };
+        let run = |at: &str, local: usize| Run {
+            at: at.into(),
+            suite: "projects".into(),
+            digest: digest(TASKS, &["a", "b"]),
+            tasks: 50,
+            kind: "answers".into(),
+            version: "0.0.18".into(),
+            models: vec![m("qwen3.5-4b", Some("node"), local), m("deepseek", Some("cloud"), 45), m("auto", None, 40)],
+        };
+        assert!(history(&home).is_empty());
+        assert!(history_report(&[], None).starts_with("no runs yet"));
+        record(&home, &run("2026-10-01T10:00:00+02:00", 30)).unwrap();
+        record(&home, &run("2026-10-20T10:00:00+02:00", 35)).unwrap();
+        // A changed suite is a suite of its own.
+        let mut other = run("2026-10-21T10:00:00+02:00", 1);
+        other.digest = digest(TASKS, &["a"]);
+        record(&home, &other).unwrap();
+        let runs = history(&home);
+        assert_eq!(runs.len(), 3);
+        let (local, cloud) = gap(&runs[0]).unwrap();
+        assert_eq!((local.model.as_str(), cloud.model.as_str()), ("qwen3.5-4b", "deepseek"));
+        let text = history_report(&runs, Some("projects"));
+        assert!(text.contains("gap +30 points (qwen3.5-4b → deepseek)"), "{text}");
+        assert!(text.contains("gap +20 points"), "{text}");
+        assert!(text.contains("the gap: +30 points then, +20 now"), "{text}");
+        assert!(text.contains("auto 40/50") && !text.contains("auto ["), "{text}");
+        assert_eq!(text.matches("projects (50 tasks").count(), 2, "two suites by digest: {text}");
+        assert_eq!(history_report(&runs, Some("seed")), "no runs of seed yet");
+        // A task that changed (same id) is a suite of its own; a comment or another task is not.
+        let edited = TASKS.replace("2 + 2?", "2 + 3?");
+        assert_ne!(digest(&edited, &["a", "b"]), digest(TASKS, &["a", "b"]));
+        let more = format!("# a comment\n{TASKS}\n{{\"id\": \"c\", \"prompt\": \"x\"}}");
+        assert_eq!(digest(&more, &["a", "b"]), digest(TASKS, &["a", "b"]));
+        // Tagged runs come with their file's, unless a tag is asked for.
+        let mut tagged = run("2026-10-23T10:00:00+02:00", 30);
+        tagged.suite = "projects#rust".into();
+        let with = [runs.clone(), vec![tagged]].concat();
+        assert!(history_report(&with, Some("projects")).contains("projects#rust"));
+        assert!(!history_report(&with, Some("projects#rust")).contains("projects (50"));
+        // A cloud model that did not answer is no side of a gap.
+        let mut refused = run("2026-10-24T10:00:00+02:00", 30);
+        refused.models[1].errors = 50;
+        assert!(gap(&refused).is_none());
+        assert!(history_report(&[refused], None).contains("(50 unanswered)"));
+        // Without a model of both kinds: no gap.
+        let mut local_only = run("2026-10-22T10:00:00+02:00", 30);
+        local_only.models.remove(1);
+        assert!(gap(&local_only).is_none());
+        std::fs::remove_dir_all(home).unwrap();
     }
 }

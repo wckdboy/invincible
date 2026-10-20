@@ -31,7 +31,7 @@ Early, and used daily. What is built, and what is not yet:
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
-| Evals | 50 tasks from real code run on local models; the comparison with a frontier model is still to do |
+| Evals | 50 tasks from real code and 26 agent tasks, on local models and a frontier one (DeepSeek V3): 30/50 against 45/50 on the code tasks; every run kept, so the gap is followed over time |
 
 Work is tracked in Plane (project **INV**). Invincible and Autobot are made by
 [Sovware](https://sovware.io).
@@ -1083,7 +1083,15 @@ invincible eval evals/seed.jsonl --model qwen3.5-4b --thinking --tag reasoning  
 ```
 
 It prints the pass rate and median time per model and per tag, and the tasks where the models
-differ; `--out results.json` keeps every answer, check and receipt id. Thinking models are asked
+differ; `--out results.json` keeps every answer, check and receipt id. Every run is kept in
+`~/.invincible/evals/history.jsonl` (`--no-record` leaves one out), `autobot eval`'s too, and
+`invincible eval --history` shows each suite's runs and the gap between the best local and the
+best cloud model, then and now:
+
+```
+projects (50 tasks, 3f9a1c2b7d01)
+  2026-10-20 21:00  qwen3.5-4b [node] 30/50 · deepseek [cloud] 45/50  gap +30 points (qwen3.5-4b → deepseek)
+``` Thinking models are asked
 to answer directly unless you pass `--thinking` (then they get an 8192-token budget), and an
 answer that runs out of tokens says so instead of counting as wrong. Cloud models go through the
 gateway like any request: redacted, receipted, and only with `--confirm`.
