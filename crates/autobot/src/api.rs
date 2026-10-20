@@ -36,6 +36,8 @@ pub struct ApiState {
     /// Messages for a session's running turn (`…/steer`).
     inboxes: Mutex<HashMap<String, crate::tools::Inbox>>,
     waiting: Waiting,
+    /// For costs in `/usage` and `/insights` (`[prices]` in the config).
+    prices: crate::insights::Prices,
 }
 
 /// The questions turns are waiting on, by id: where to send the answer, and the question as
@@ -65,7 +67,14 @@ impl ApiState {
             open: Mutex::default(),
             inboxes: Mutex::default(),
             waiting: Arc::default(),
+            prices: Default::default(),
         }
+    }
+
+    /// With the config's prices, for costs.
+    pub fn with_prices(mut self, prices: crate::insights::Prices) -> Self {
+        self.prices = prices;
+        self
     }
 }
 
@@ -78,6 +87,7 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/sessions", get(sessions))
         .route("/v1/agent/sessions/{id}", get(history))
         .route("/v1/agent/sessions/{id}/turns", post(turn))
+        .route("/v1/agent/sessions/{id}/retry", post(retry))
         .route("/v1/agent/sessions/{id}/reset", post(reset))
         .route("/v1/agent/sessions/{id}/steer", post(steer))
         .route("/v1/agent/sessions/{id}/fork", post(fork))
@@ -95,6 +105,11 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/skills", get(skills))
         .route("/v1/agent/skills/{name}/accept", post(accept_skill))
         .route("/v1/agent/skills/{name}/reject", post(reject_skill))
+        .route("/v1/agent/personalities", get(personalities))
+        .route("/v1/agent/personality", post(set_personality))
+        .route("/v1/agent/profile", get(profile))
+        .route("/v1/agent/usage", get(usage))
+        .route("/v1/agent/insights", get(insights))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     health.merge(guarded).with_state(state)
 }
@@ -201,6 +216,9 @@ async fn reset(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Re
 #[derive(Deserialize)]
 struct TurnBody {
     text: String,
+    /// A personality for this turn (`none` for none); the one in use otherwise.
+    #[serde(default)]
+    personality: Option<String>,
 }
 
 /// `POST …/fork {"to"?, "at"?}`: a new conversation that starts as this one did (up to
@@ -223,7 +241,7 @@ async fn fork(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
 /// `POST …/steer {"text"}`: a message for the turn running in the session, taken in before
 /// the agent's next step; `409` when no turn is running.
 async fn steer(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
-    let Ok(TurnBody { text }) = serde_json::from_slice(&body) else {
+    let Ok(TurnBody { text, .. }) = serde_json::from_slice(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
     };
     let open = match state.open(&id) {
@@ -241,11 +259,32 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let Ok(TurnBody { text }) = serde_json::from_slice(&body) else {
+    let Ok(TurnBody { text, personality }) = serde_json::from_slice(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
     };
     if text.trim().is_empty() {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the text is empty");
+    }
+    if let Some(name) = personality.as_deref().filter(|p| !crate::personality::is_none(p))
+        && let Err(e) = crate::personality::text(&state.home, name)
+    {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e);
+    }
+    let open = match state.open(&id) {
+        Ok(open) => open,
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    let Ok(guard) = open.clone().try_lock_owned() else {
+        return error(StatusCode::CONFLICT, "session_busy", "a turn is running in this session");
+    };
+    stream_turn(&state, id, guard, text, Vec::new(), personality)
+}
+
+/// `POST …/retry`: the last turn leaves the conversation and its request runs again, streamed
+/// like a turn; `404` when there is no turn to retry.
+async fn retry(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
     let open = match state.open(&id) {
         Ok(open) => open,
@@ -254,10 +293,33 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
     let Ok(mut guard) = open.clone().try_lock_owned() else {
         return error(StatusCode::CONFLICT, "session_busy", "a turn is running in this session");
     };
+    let request = match guard.session.take_back() {
+        Ok(request) => request,
+        Err(e) => return error(StatusCode::NOT_FOUND, "not_found", &e),
+    };
+    let text = request["content"].as_str().unwrap_or_default().to_owned();
+    stream_turn(&state, id, guard, text, crate::images::of(&request), None)
+}
 
+/// Runs a turn on its own task and streams its events.
+fn stream_turn(
+    state: &Arc<ApiState>,
+    id: String,
+    mut guard: tokio::sync::OwnedMutexGuard<Open>,
+    text: String,
+    images: Vec<crate::images::Attachment>,
+    personality: Option<String>,
+) -> Response {
     let inbox = state.inbox(&id);
     let (tx, rx) = mpsc::unbounded_channel::<Value>();
-    let agent = state.agent.clone();
+    let agent = match personality {
+        Some(personality) => {
+            let mut agent = (*state.agent).clone();
+            agent.options.personality = Some(personality);
+            Arc::new(agent)
+        }
+        None => state.agent.clone(),
+    };
     let waiting = state.waiting.clone();
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
@@ -283,8 +345,8 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
         };
         let Open { session, grants } = &mut *guard;
         let context = crate::tools::TurnContext { inbox: Some(inbox), ..Default::default() };
-        let last = match crate::tools::TURN.scope(context, agent.turn(session, &text, &approver, grants, &events)).await
-        {
+        let turn = agent.turn_with(session, &text, &images, &approver, grants, &events);
+        let last = match crate::tools::TURN.scope(context, turn).await {
             Ok(outcome) => json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts }),
             Err(e) => json!({ "type": "error", "text": e }),
         };
@@ -420,16 +482,73 @@ async fn forget(State(state): State<Arc<ApiState>>, Path(id): Path<u64>) -> Resp
 async fn skills(State(state): State<Arc<ApiState>>) -> Json<Value> {
     let skills: Vec<Value> = crate::skills::list(&state.home)
         .into_iter()
-        .map(|s| json!({ "name": s.name, "description": s.description }))
+        .map(|s| {
+            json!({ "name": s.name, "description": s.description, "allowed_tools": s.allowed_tools, "files": s.dir().is_some() })
+        })
         .collect();
     let proposed: Vec<Value> = crate::skills::proposals(&state.home)
         .into_iter()
         .map(|s| {
             let text = std::fs::read_to_string(&s.path).unwrap_or_default();
-            json!({ "name": s.name, "description": s.description, "text": text })
+            let diff = crate::skills::proposal_diff(&state.home, &s.name);
+            json!({ "name": s.name, "description": s.description, "text": text, "improves": s.improves, "diff": diff })
         })
         .collect();
     Json(json!({ "skills": skills, "proposed": proposed }))
+}
+
+async fn personalities(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    let list: Vec<Value> = crate::personality::list(&state.home)
+        .into_iter()
+        .map(|p| json!({ "name": p.name, "description": p.description, "builtin": p.path.is_none() }))
+        .collect();
+    Json(json!({
+        "active": crate::personality::active(&state.home),
+        "soul": crate::personality::soul(&state.home),
+        "personalities": list,
+    }))
+}
+
+/// `POST /v1/agent/personality {"name"}`: the one in use from now on (`none`, or null, for none).
+async fn set_personality(State(state): State<Arc<ApiState>>, body: Bytes) -> Response {
+    let Ok(args) = serde_json::from_slice::<Value>(&body) else {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is {\"name\": \"…\"}");
+    };
+    let name = args["name"].as_str().unwrap_or("none");
+    match crate::personality::set(&state.home, name) {
+        Ok(()) => Json(json!({ "active": crate::personality::active(&state.home) })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+async fn profile(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    Json(json!({ "entries": crate::profile::entries(&state.home), "text": crate::profile::read(&state.home) }))
+}
+
+#[derive(Deserialize)]
+struct UsageQuery {
+    session: Option<String>,
+}
+
+/// Today (and one conversation): turns, model calls, tokens, time, cost.
+async fn usage(State(state): State<Arc<ApiState>>, Query(q): Query<UsageQuery>) -> Json<Value> {
+    use crate::insights::{Log, today, totals};
+    let log = Log::new(&state.home);
+    let mut out = json!({ "today": totals(&log.read(today()), &state.prices) });
+    if let Some(session) = q.session.filter(|s| valid(s)) {
+        let mine: Vec<_> = log.read(0).into_iter().filter(|r| r.session == session).collect();
+        out["session"] = json!(totals(&mine, &state.prices));
+    }
+    Json(out)
+}
+
+#[derive(Deserialize)]
+struct InsightsQuery {
+    days: Option<u32>,
+}
+
+async fn insights(State(state): State<Arc<ApiState>>, Query(q): Query<InsightsQuery>) -> Json<Value> {
+    Json(crate::insights::insights(&state.home, q.days.unwrap_or(7).clamp(1, 3650), &state.prices))
 }
 
 async fn accept_skill(State(state): State<Arc<ApiState>>, Path(name): Path<String>) -> Response {

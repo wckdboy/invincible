@@ -202,7 +202,7 @@ async fn a_turn_through_the_gateway_with_an_approval() {
     assert_eq!(get("/v1/agent/memory").await["facts"][0]["text"], "Backups run at 02:00.");
     assert_eq!(
         get("/v1/agent/skills").await["skills"],
-        json!([{ "name": "deploy", "description": "Deploy the site" }])
+        json!([{ "name": "deploy", "description": "Deploy the site", "allowed_tools": [], "files": false }])
     );
     let forget = client.delete(format!("{gateway}/v1/agent/memory/1")).bearer_auth(TOKEN).send().await.unwrap();
     assert_eq!(forget.status(), 200);
@@ -439,4 +439,79 @@ async fn an_approval_answered_with_what_to_do_instead() {
         .await
         .unwrap();
     assert_eq!(actions["actions"][0]["ran"], json!(false), "{actions}");
+}
+
+#[tokio::test]
+async fn retry_personalities_profile_usage_and_insights() {
+    let (gateway, _, dir) = stack(
+        "parity",
+        vec![
+            json!({ "role": "assistant", "content": "First answer." }),
+            json!({ "role": "assistant", "content": "Second answer." }),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let get = async |path: &str| -> Value {
+        client.get(format!("{gateway}{path}")).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap()
+    };
+    let events = turn(&client, &format!("{gateway}/v1/agent/sessions/p1/turns"), "say something", async |_| {}).await;
+    assert_eq!(events.last().unwrap()["text"], "First answer.");
+    // Retry: the last answer goes, the same request runs again.
+    let response = client
+        .post(format!("{gateway}/v1/agent/sessions/p1/retry"))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains("Second answer."), "{body}");
+    let history = get("/v1/agent/sessions/p1").await;
+    let messages = history["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert_eq!(messages[0]["content"], "say something");
+    assert_eq!(messages[1]["content"], "Second answer.");
+    let none = client
+        .post(format!("{gateway}/v1/agent/sessions/empty/retry"))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(none.status(), 404);
+
+    // Personalities: listed, one set for every turn, a bad one refused.
+    let list = get("/v1/agent/personalities").await;
+    assert!(list["active"].is_null());
+    assert!(list["personalities"].as_array().unwrap().iter().any(|p| p["name"] == "concise" && p["builtin"] == true));
+    let set = |name: Value| {
+        let client = client.clone();
+        let url = format!("{gateway}/v1/agent/personality");
+        async move { client.post(url).bearer_auth(TOKEN).json(&json!({ "name": name })).send().await.unwrap() }
+    };
+    assert_eq!(set(json!("teacher")).await.status(), 200);
+    assert_eq!(autobot::personality::active(&dir).as_deref(), Some("teacher"));
+    assert_eq!(set(json!("nope")).await.status(), 400);
+    assert_eq!(set(Value::Null).await.status(), 200);
+    assert!(autobot::personality::active(&dir).is_none());
+    let bad = client
+        .post(format!("{gateway}/v1/agent/sessions/p2/turns"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "text": "hi", "personality": "nope" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+
+    autobot::profile::update(&dir, &autobot::profile::Change::Add("Likes tables".into())).unwrap();
+    assert_eq!(get("/v1/agent/profile").await["entries"], json!(["Likes tables"]));
+    let usage = get("/v1/agent/usage?session=p1").await;
+    assert_eq!(usage["today"]["turns"], 2);
+    assert_eq!(usage["session"]["turns"], 2);
+    let insights = get("/v1/agent/insights?days=1").await;
+    assert_eq!(insights["turns"], 2);
+    assert_eq!(insights["local_share"]["calls"], 1.0);
 }

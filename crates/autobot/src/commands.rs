@@ -75,7 +75,7 @@ fn collect(dir: &Path, prefix: &str, depth: usize, out: &mut Vec<(String, PathBu
 }
 
 /// Names the chat itself answers to: a file cannot take them over.
-fn builtin(name: &str) -> bool {
+pub fn builtin(name: &str) -> bool {
     matches!(
         name,
         "help"
@@ -107,6 +107,13 @@ fn builtin(name: &str) -> bool {
             | "commands"
             | "copy"
             | "image"
+            | "usage"
+            | "insights"
+            | "retry"
+            | "stop"
+            | "reset"
+            | "profile"
+            | "personality"
     )
 }
 

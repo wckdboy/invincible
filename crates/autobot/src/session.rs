@@ -116,6 +116,16 @@ impl Session {
         })
     }
 
+    /// Takes the last turn out of the conversation (`/retry`): its request comes back as it was
+    /// sent (text, and image references), to run again. Files it changed stay as they are; their
+    /// undo log stays too, so `/undo` after the retried turn still goes back to before both.
+    pub fn take_back(&mut self) -> Result<Value, String> {
+        let start = self.last_turn().ok_or("nothing to retry yet")?;
+        let request = self.messages[start].clone();
+        self.truncate(start)?;
+        Ok(request)
+    }
+
     /// Undoes the last turn: files it wrote or edited go back to what they were (or are removed,
     /// when it created them), and the turn leaves the conversation. Its request and the files
     /// put back.

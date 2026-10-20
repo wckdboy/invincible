@@ -18,9 +18,13 @@ pub mod gateway;
 pub mod heartbeat;
 pub mod hooks;
 pub mod images;
+pub mod insights;
+pub mod manage;
 pub mod mcp;
 pub mod memory;
+pub mod personality;
 pub mod procs;
+pub mod profile;
 pub mod sandbox;
 pub mod search;
 pub mod service;
@@ -74,7 +78,11 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),
         mcp: std::sync::Arc::new(mcp::Hub::new(config.mcp.clone())?),
         trajectories: config.agent.trajectories.then(|| std::sync::Arc::new(trajectory::Recorder::dir(home))),
-        options: agent::Options { context_kib: config.agent.context_kib, vision: None },
+        options: agent::Options {
+            context_kib: config.agent.context_kib,
+            nudge_every: config.agent.nudge_every,
+            ..Default::default()
+        },
     })
 }
 

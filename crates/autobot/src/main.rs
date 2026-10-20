@@ -170,10 +170,35 @@ enum Command {
         #[arg(long, default_value_t = 30)]
         limit: usize,
     },
-    /// The owner's skills: how-to notes for the agent, one Markdown file each in $AUTOBOT_HOME/skills.
+    /// The owner's skills: how-to notes for the agent in $AUTOBOT_HOME/skills (agentskills.io
+    /// SKILL.md directories, or a Markdown file each): list, install, remove, accept proposals.
     Skills {
         #[command(subcommand)]
         action: Option<SkillsAction>,
+    },
+    /// Who the agent is: SOUL.md, and the personality in use (list, show, set).
+    Personality {
+        #[command(subcommand)]
+        action: Option<PersonalityAction>,
+    },
+    /// What the agent keeps about how you work ($AUTOBOT_HOME/USER.md).
+    Profile {
+        /// Empty it.
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Tokens, time and cost today (and in one conversation), from the turn log.
+    Usage {
+        /// Also this conversation.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// What the agent did lately: turns, tools, projects, failures, local against cloud.
+    Insights {
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+        #[arg(long)]
+        json: bool,
     },
     /// Webhooks that start tasks in `autobot serve` ([hooks] in the config): list them, or make
     /// a secret for a new one.
@@ -191,10 +216,26 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SkillsAction {
-    /// Keep a skill the agent proposed: it uses it from now on.
+    /// List the skills and the proposals waiting.
+    List,
+    /// Install skills from a git URL or a directory (one with a SKILL.md, or skill directories).
+    Install { source: String },
+    /// Remove a skill.
+    Remove { name: String },
+    /// Keep a skill the agent proposed (or its improvement): it uses it from now on.
     Accept { name: String },
     /// Throw a proposed skill away.
     Reject { name: String },
+}
+
+#[derive(Subcommand)]
+enum PersonalityAction {
+    /// The personalities: yours, the built-in ones, and which is in use.
+    List,
+    /// SOUL.md and the one in use, or the text of NAME.
+    Show { name: Option<String> },
+    /// Use NAME in every conversation from now on (none: no personality).
+    Set { name: String },
 }
 
 #[derive(Subcommand)]
@@ -593,37 +634,23 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Skills { action } => {
-            match action {
-                Some(SkillsAction::Accept { name }) => {
-                    autobot::skills::accept(&home, &name)?;
-                    println!("kept {name}: the agent uses it from now on");
-                    return Ok(());
-                }
-                Some(SkillsAction::Reject { name }) => {
-                    if !autobot::skills::reject(&home, &name)? {
-                        return Err(format!("there is no proposed skill {name:?}"));
-                    }
-                    println!("threw {name} away");
-                    return Ok(());
-                }
-                None => {}
-            }
-            let skills = autobot::skills::list(&home);
-            if skills.is_empty() {
-                println!("no skills yet: put Markdown files in {}", home.join("skills").display());
-            }
-            for skill in skills {
-                println!("{}  {}", skill.name, skill.description);
-            }
-            let proposals = autobot::skills::proposals(&home);
-            if !proposals.is_empty() {
-                println!("\nproposed by the agent (`autobot skills accept <name>`, or reject):");
-                for skill in proposals {
-                    println!("{}  {}  ({})", skill.name, skill.description, skill.path.display());
-                }
-            }
-            Ok(())
+            let action = match &action {
+                None | Some(SkillsAction::List) => None,
+                Some(SkillsAction::Install { source }) => Some(("install", source.as_str())),
+                Some(SkillsAction::Remove { name }) => Some(("remove", name.as_str())),
+                Some(SkillsAction::Accept { name }) => Some(("accept", name.as_str())),
+                Some(SkillsAction::Reject { name }) => Some(("reject", name.as_str())),
+            };
+            autobot::manage::skills(&home, action)
         }
+        Command::Personality { action } => match action {
+            None | Some(PersonalityAction::List) => autobot::manage::personality(&home, "list", None),
+            Some(PersonalityAction::Show { name }) => autobot::manage::personality(&home, "show", name.as_deref()),
+            Some(PersonalityAction::Set { name }) => autobot::manage::personality(&home, "set", Some(&name)),
+        },
+        Command::Profile { clear } => autobot::manage::profile(&home, clear),
+        Command::Usage { session } => autobot::manage::usage(&home, &config, session.as_deref()),
+        Command::Insights { days, json } => autobot::manage::insights(&home, &config, days, json),
         Command::Trajectories { from, out, format, clean, model, since, agent } => {
             use autobot::trajectory;
             let all = match &from {
@@ -875,7 +902,10 @@ async fn serve(config: &Config, home: PathBuf) -> Result<(), String> {
         "approvals": format!("{:?}", config.approvals.mode).to_lowercase(),
         "private": config.gateway.private,
     });
-    let state = Arc::new(autobot::api::ApiState::new(agent.clone(), config.gateway.token()?, home.clone(), info));
+    let state = Arc::new(
+        autobot::api::ApiState::new(agent.clone(), config.gateway.token()?, home.clone(), info)
+            .with_prices(config.prices.clone()),
+    );
     let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("listen on {listen}: {e}"))?;
     tracing::info!(
         "agent API on http://{listen} ({}; paired apps reach it through the gateway)",

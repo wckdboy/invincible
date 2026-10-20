@@ -82,14 +82,20 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/ps", "background processes: /ps, /ps <n> (its output), /ps stop <n>"),
     ("/commands", "your own commands (.autobot/commands, .claude/commands, ~/.autobot/commands)"),
     ("/status", "model, approvals, session, context"),
-    ("/new", "start the conversation over"),
+    ("/usage", "tokens, time and cost: this conversation and today"),
+    ("/insights", "what the agent did lately: /insights [--days N]"),
+    ("/retry", "run the last request again, without its answer"),
+    ("/stop", "stop the turn (like esc)"),
+    ("/new", "start the conversation over (also /reset)"),
     ("/fork", "continue in a copy of this conversation: /fork [name]"),
     ("/sessions", "the saved conversations"),
     ("/resume", "pick a conversation to continue, or /resume <name>"),
     ("/copy", "copy the last answer (its Markdown) to the clipboard"),
     ("/image", "show the agent an image: /image <path> (or drag one in, ctrl+v, @shot.png)"),
     ("/memory", "what the agent remembered"),
-    ("/skills", "the owner's skills"),
+    ("/profile", "what the agent keeps about how you work (USER.md)"),
+    ("/personality", "pick how it answers, or /personality <name> (none: SOUL.md only)"),
+    ("/skills", "pick a skill to run; /skills accept|reject <name>; or /<skill> directly"),
     ("/team", "the team members it can delegate to"),
     ("/board", "the team's plans and tasks"),
     ("/clear", "clear the screen"),
@@ -229,6 +235,8 @@ struct Chat {
     code: bool,
     /// Images for the next message, attached without a composer (`/image` in line mode).
     pending: Vec<Attachment>,
+    /// What a nudge kept, from the background ([Agent::nudge]): printed as quiet lines.
+    kept: (tokio::sync::mpsc::UnboundedSender<String>, tokio::sync::mpsc::UnboundedReceiver<String>),
 }
 
 /// What a key asks for.
@@ -291,11 +299,18 @@ struct App {
 impl App {
     fn new(home: &Path, workdir: &Path, code: bool) -> Self {
         let history = home.join("history");
-        let commands: Vec<(String, String)> = COMMANDS
+        let mut commands: Vec<(String, String)> = COMMANDS
             .iter()
             .map(|(c, d)| ((*c).to_owned(), (*d).to_owned()))
             .chain(crate::commands::list(workdir, home).into_iter().map(|c| (format!("/{}", c.name), c.description)))
             .collect();
+        // Skills run as commands of their own (`/deploy`), when no command has the name.
+        for skill in crate::skills::list(home) {
+            let name = format!("/{}", skill.name);
+            if !commands.iter().any(|(c, _)| *c == name) && !crate::commands::builtin(&skill.name) {
+                commands.push((name, format!("skill: {}", skill.description)));
+            }
+        }
         let files = Arc::new(OnceLock::new());
         {
             let (files, workdir) = (files.clone(), workdir.to_owned());
@@ -911,6 +926,7 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
         shell: String::new(),
         code: false,
         pending: Vec::new(),
+        kept: tokio::sync::mpsc::unbounded_channel(),
     };
     chat.agent.options.vision = crate::vision(&chat.models, chat.agent.gateway.model());
     if let Some(model) = &options.model {
@@ -956,6 +972,10 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
                         _ => continue,
                     }
                 }
+                Some(line) = chat.kept.1.recv() => {
+                    say(&style::faint(&format!("  ↳ kept {line}")));
+                    continue;
+                }
                 _ = tick.tick() => continue,
             }
         } else {
@@ -985,6 +1005,8 @@ enum Next {
     Send(String),
     /// Open this picker (a command with nothing after it).
     Pick(Picker),
+    /// Run this request again as it was sent (`/retry`).
+    Retry(String, Vec<Attachment>),
 }
 impl Chat {
     fn model_label(&self) -> String {
@@ -1046,7 +1068,7 @@ impl Chat {
         };
         let header = format!("{name} {}", style::faint("· via invincible"));
         let private = if self.agent.gateway.private() { style::faint("  private") } else { String::new() };
-        let rows = [
+        let mut rows = vec![
             ("model", format!("{}{private}", self.model_label())),
             ("approvals", self.approvals().to_owned()),
             ("project", format!("{shown}{branch}{notes}")),
@@ -1059,6 +1081,9 @@ impl Chat {
                 ),
             ),
         ];
+        if let Some(character) = self.character() {
+            rows.push(("personality", character));
+        }
         // The symbol beside the first three lines (only with color; half blocks need it).
         let lines: Vec<String> =
             std::iter::once(header).chain(invincible::brand::rows(&rows).lines().map(str::to_owned)).collect();
@@ -1080,6 +1105,38 @@ impl Chat {
         let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as usize);
         out.push_str(&format!("\n{}\n", style::faint(&format!("  tip: {}", tips[n % tips.len()]))));
         term::print(&out);
+    }
+
+    /// The personality in use and whether SOUL.md shapes it: `concise · SOUL.md`; None for
+    /// neither.
+    fn character(&self) -> Option<String> {
+        let name = match self.agent.options.personality.as_deref() {
+            Some(p) if crate::personality::is_none(p) => None,
+            Some(p) => Some(p.to_owned()),
+            None => crate::personality::active(&self.home),
+        };
+        let soul = crate::personality::soul(&self.home).map(|_| style::faint("SOUL.md"));
+        match (name, soul) {
+            (None, None) => None,
+            (Some(n), None) => Some(n),
+            (None, Some(s)) => Some(s),
+            (Some(n), Some(s)) => Some(format!("{n} {} {s}", style::faint("·"))),
+        }
+    }
+
+    /// The nudge, when it is time ([Agent::nudge]): in the background, its lines on
+    /// [Chat::kept].
+    fn nudge(&self) {
+        let every = self.agent.options.nudge_every;
+        if every == 0 {
+            return;
+        }
+        let (agent, messages, tx) = (self.agent.clone(), self.session.messages.clone(), self.kept.0.clone());
+        tokio::spawn(async move {
+            for line in agent.nudge(&messages, &|_| {}).await {
+                let _ = tx.send(line);
+            }
+        });
     }
 
     /// What the status line says now.
@@ -1132,6 +1189,7 @@ impl Chat {
         if text.starts_with('/') {
             match self.command(text).await {
                 Ok(Some(Next::Send(text))) => self.turn(app, &text, Vec::new()).await,
+                Ok(Some(Next::Retry(text, images))) => self.run_turn(app, text, images, String::new()).await,
                 Ok(next) => return next,
                 Err(e) => say(&style::red(&e)),
             }
@@ -1209,6 +1267,12 @@ impl Chat {
         if !shell.is_empty() {
             request = format!("{shell}\n\n{request}");
         }
+        self.run_turn(app, request, images, shell).await;
+    }
+
+    /// Runs [request] as it is (mentions expanded, the shell's output in it); [shell]: that
+    /// output, handed to the next request if the turn is stopped.
+    async fn run_turn(&mut self, app: &mut App, request: String, images: Vec<Attachment>, shell: String) {
         let ui = self.ui.clone();
         ui.begin();
         let started = Instant::now();
@@ -1240,6 +1304,8 @@ impl Chat {
                         Did::Answer(answer) => {
                             ui.respond(answer);
                         }
+                        // `/stop` is esc, typed.
+                        Did::Submit(_, sent) if sent.trim() == "/stop" => break None,
                         Did::Submit(shown, sent) => {
                             // An image cannot be read in mid-turn: it goes as the next message.
                             let image = !app.editor.images_in(&sent).1.is_empty();
@@ -1275,6 +1341,7 @@ impl Chat {
             Some(Ok(outcome)) => {
                 ui.answer(&outcome.text);
                 ui.end(None);
+                self.nudge();
                 // Typed while it finished: the agent never saw it, so it is the next request.
                 let unread: Vec<String> = std::mem::take(&mut *inbox.lock().expect("inbox"));
                 if !unread.is_empty() {
@@ -1485,7 +1552,74 @@ impl Chat {
                 }
             }
             "/clear" => term::clear(),
-            "/new" => {
+            "/stop" => say(&style::gray("nothing is running (esc stops a turn while it works)")),
+            "/retry" => {
+                let request = self.session.take_back()?;
+                let text = request["content"].as_str().unwrap_or_default().to_owned();
+                let images = images::of(&request);
+                let first = text.lines().next().unwrap_or_default();
+                say(&style::gray(&format!(
+                    "  └ again: {} {}",
+                    truncate(first, style::columns().saturating_sub(30).max(20)),
+                    style::faint("(files it changed stay; /undo puts them back)")
+                )));
+                return Ok(Some(Next::Retry(text, images)));
+            }
+            "/usage" => {
+                let mut rows = crate::insights::usage(&self.home, Some(&self.session.id), &self.config.prices);
+                let (input, output) = self.ui.total_tokens();
+                if input > 0 {
+                    rows.insert(
+                        0,
+                        (
+                            "this chat".to_owned(),
+                            format!("{} in · {} out", super::ui::short(input), super::ui::short(output)),
+                        ),
+                    );
+                }
+                let rows: Vec<(&str, String)> = rows.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+                term::print(&invincible::brand::rows(&rows));
+            }
+            "/insights" => {
+                let days = crate::insights::days_arg(arg).map_err(|e| format!("/insights {e}"))?;
+                let report = crate::insights::insights(&self.home, days, &self.config.prices);
+                let rows = crate::insights::insights_rows(&report);
+                let rows: Vec<(&str, String)> = rows.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+                term::print(&invincible::brand::rows(&rows));
+            }
+            "/profile" => {
+                let entries = crate::profile::entries(&self.home);
+                if entries.is_empty() {
+                    say(&style::gray("nothing yet: the agent keeps how you work here as it learns it (USER.md)"));
+                }
+                for entry in entries {
+                    say(&format!("  {} {entry}", style::faint("•")));
+                }
+                say(&style::faint(&format!("  {} · edit it freely", crate::profile::path(&self.home).display())));
+            }
+            "/personality" => {
+                if arg.is_empty() {
+                    if term::active() {
+                        let current = self.agent.options.personality.clone();
+                        return Ok(Some(Next::Pick(personality_picker(&self.home, current.as_deref()))));
+                    }
+                    for p in crate::personality::list(&self.home) {
+                        say(&format!("  {} {}", style::bold(&p.name), style::gray(&p.description)));
+                    }
+                    return Ok(None);
+                }
+                if !crate::personality::is_none(arg) {
+                    crate::personality::text(&self.home, arg)?;
+                }
+                self.agent.options.personality = Some(arg.to_owned());
+                let what = if crate::personality::is_none(arg) { "no personality".to_owned() } else { arg.to_owned() };
+                say(&format!(
+                    "{} {what} {}",
+                    style::gray("personality"),
+                    style::faint("for this conversation (`autobot personality set` keeps one)")
+                ));
+            }
+            "/new" | "/reset" => {
                 self.session.reset()?;
                 self.grants.clear();
                 say(&style::gray("a new conversation"));
@@ -1702,6 +1836,28 @@ impl Chat {
                     say(&format!("  {} {}", style::gray(&format!("#{}", fact.id)), fact.text));
                 }
             }
+            "/skills" if arg.starts_with("accept ") || arg.starts_with("reject ") => {
+                let (what, name) = arg.split_once(' ').unwrap_or_default();
+                let name = name.trim();
+                if what == "accept" {
+                    crate::skills::accept(&self.home, name)?;
+                    say(&style::gray(&format!("kept {name}: the agent uses it from now on (/{name} runs it)")));
+                } else if crate::skills::reject(&self.home, name)? {
+                    say(&style::gray(&format!("threw {name} away")));
+                } else {
+                    return Err(format!("there is no proposed skill {name:?}"));
+                }
+            }
+            "/skills" if !arg.is_empty() => {
+                let (name, rest) = arg.split_once(' ').map_or((arg, ""), |(n, r)| (n, r.trim()));
+                return self.run_skill(name, rest).map(Some);
+            }
+            "/skills" if term::active() && !crate::skills::list(&self.home).is_empty() => {
+                for skill in crate::skills::proposals(&self.home) {
+                    self.show_proposal(&skill);
+                }
+                return Ok(Some(Next::Pick(skill_picker(&self.home))));
+            }
             "/skills" => {
                 let skills = crate::skills::list(&self.home);
                 if skills.is_empty() {
@@ -1711,12 +1867,7 @@ impl Chat {
                     say(&format!("  {} {}", style::bold(&skill.name), style::gray(&skill.description)));
                 }
                 for skill in crate::skills::proposals(&self.home) {
-                    say(&format!(
-                        "  {} {} {}",
-                        style::yellow("proposed"),
-                        style::bold(&skill.name),
-                        style::gray(&skill.description)
-                    ));
+                    self.show_proposal(&skill);
                 }
             }
             "/team" => {
@@ -1750,6 +1901,11 @@ impl Chat {
             other => {
                 let custom = crate::commands::list(self.agent.tools.workdir(), &self.home);
                 let Some(command) = custom.iter().find(|c| other.strip_prefix('/') == Some(c.name.as_str())) else {
+                    // A skill, run by its name.
+                    if let Some(name) = other.strip_prefix('/').filter(|n| crate::skills::find(&self.home, n).is_some())
+                    {
+                        return self.run_skill(name, arg).map(Some);
+                    }
                     return Err(format!("{other}: not a command (/help)"));
                 };
                 let prompt = crate::commands::expand(command, arg)?;
@@ -1759,6 +1915,54 @@ impl Chat {
         }
         Ok(None)
     }
+}
+
+impl Chat {
+    /// `/<skill> [what for]`: the skill's instructions as the request, with what was typed.
+    fn run_skill(&self, name: &str, task: &str) -> Result<Next, String> {
+        let skill = crate::skills::find(&self.home, name).ok_or(format!("there is no skill {name:?} (/skills)"))?;
+        let body = crate::skills::body(&self.home, name)?;
+        let task = if task.is_empty() { "Do what the skill describes, here." } else { task };
+        say(&style::gray(&format!("  └ skill {} ({} characters)", skill.name, body.len())));
+        Ok(Next::Send(format!(
+            "Use the skill {name} for this. Its instructions:\n\n{body}\n\n(read_skill with file reads its other files.)\n\nTask: {task}"
+        )))
+    }
+
+    /// A proposal waiting for the owner, with what an improvement changes.
+    fn show_proposal(&self, skill: &crate::skills::Skill) {
+        let kind = if skill.improves { "improves" } else { "proposed" };
+        say(&format!("  {} {} {}", style::yellow(kind), style::bold(&skill.name), style::gray(&skill.description)));
+        if let Some(diff) = crate::skills::proposal_diff(&self.home, &skill.name) {
+            term::print(&render_diff(&diff, 40));
+        }
+        say(&style::faint(&format!("    /skills accept {0} keeps it, /skills reject {0} throws it away", skill.name)));
+    }
+}
+
+/// The owner's skills to pick from (enter runs one).
+fn skill_picker(home: &Path) -> Picker {
+    let all: Vec<Item> = crate::skills::list(home)
+        .into_iter()
+        .map(|s| {
+            let files = s.dir().map_or(String::new(), |_| " · with files".to_owned());
+            Item { text: s.name, detail: format!("{}{files}", s.description) }
+        })
+        .collect();
+    Picker { command: "/skills".into(), noun: "skills".into(), all, current: 0 }
+}
+
+/// The personalities to pick from: none, then the owner's and the built-in ones.
+fn personality_picker(home: &Path, current: Option<&str>) -> Picker {
+    let current = current.map(str::to_owned).or_else(|| crate::personality::active(home));
+    let mut all = vec![Item { text: "none".into(), detail: "SOUL.md only (or the plain agent)".into() }];
+    for p in crate::personality::list(home) {
+        let mine = if p.path.is_some() { " · yours" } else { "" };
+        all.push(Item { text: p.name, detail: format!("{}{mine}", p.description) });
+    }
+    let at = current.as_deref().filter(|c| !crate::personality::is_none(c));
+    let current = at.and_then(|c| all.iter().position(|i| i.text == c)).unwrap_or(0);
+    Picker { command: "/personality".into(), noun: "personalities".into(), all, current }
 }
 
 /// The models to pick from: the gateway's, then `auto`; the current one chosen.
@@ -2102,6 +2306,40 @@ mod tests {
             a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None),
             Did::Submit("/model auto".into(), "/model auto".into())
         );
+    }
+
+    #[test]
+    fn skills_and_personalities_are_picked_and_skills_are_commands() {
+        let home = std::env::temp_dir().join(format!("autobot-chat-pick-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("skills/deploy")).unwrap();
+        std::fs::write(home.join("skills/deploy/SKILL.md"), "---\nname: deploy\ndescription: Ship it\n---\nGo.")
+            .unwrap();
+        std::fs::write(home.join("skills/retry.md"), "# A skill named like a command\n").unwrap();
+        let picker = super::skill_picker(&home);
+        assert_eq!(picker.command, "/skills");
+        assert_eq!(picker.all[0].text, "deploy");
+        assert_eq!(picker.all[0].detail, "Ship it · with files");
+        let mut a = app(&[]);
+        a.open_picker(picker);
+        assert_eq!(
+            a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None),
+            Did::Submit("/skills deploy".into(), "/skills deploy".into())
+        );
+        // The palette offers a skill as /<name>, but never over a built-in command.
+        let work = home.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let commands = App::new(&home, &work, false).commands;
+        assert!(commands.iter().any(|(c, d)| c == "/deploy" && d == "skill: Ship it"));
+        assert_eq!(commands.iter().filter(|(c, _)| c == "/retry").count(), 1);
+        assert!(crate::commands::builtin("retry") && crate::commands::builtin("personality"));
+        crate::personality::set(&home, "teacher").unwrap();
+        let picker = super::personality_picker(&home, None);
+        assert_eq!(picker.all[0].text, "none");
+        assert_eq!(picker.all[picker.current].text, "teacher", "the one in use is chosen");
+        assert_eq!(super::personality_picker(&home, Some("none")).current, 0);
+        let _ = std::fs::remove_file(&a.history);
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

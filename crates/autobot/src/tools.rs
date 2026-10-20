@@ -37,7 +37,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     // Every MCP server's tools.
     ("mcp", &["mcp"]),
     ("files-write", &["write_file", "edit_file"]),
-    ("memory", &["remember", "search_sessions", "propose_skill"]),
+    ("memory", &["remember", "search_sessions", "create_skill", "improve_skill", "update_user_profile"]),
     ("terminal", &["terminal", "process"]),
     ("plan", &["todo"]),
 ];
@@ -115,17 +115,31 @@ pub enum Call {
     },
     ReadSkill {
         name: String,
+        /// One of its supporting files instead of its SKILL.md.
+        file: Option<String>,
     },
     Schedule {
         when: String,
         task: String,
         name: Option<String>,
     },
-    ProposeSkill {
+    /// A new skill, proposed to the owner (`create_skill`; `propose_skill` before).
+    CreateSkill {
         name: String,
         description: String,
         steps: String,
+        /// Supporting files: (relative path, text).
+        files: Vec<(String, String)>,
     },
+    /// A change to an existing skill, proposed to the owner: a new body, or one exact edit.
+    ImproveSkill {
+        name: String,
+        description: Option<String>,
+        body: Option<String>,
+        edit: Option<(String, String)>,
+    },
+    /// A small change to the owner's profile (USER.md).
+    UpdateProfile(crate::profile::Change),
     /// Run by the agent itself (it has the gateway).
     Fetch {
         url: String,
@@ -250,13 +264,34 @@ impl Tools {
                 }, "required": ["when", "task"] },
             }}));
             list.push(json!({ "type": "function", "function": {
-                "name": "propose_skill",
-                "description": "After a multi-step task that worked and will come up again, write down how to do it as a skill. The owner reviews it before you can use it.",
+                "name": "create_skill",
+                "description": "After a task that took many steps, worked, and will come up again, write down how to do it as a skill (an agentskills.io SKILL.md, with optional supporting files such as a script). The owner reviews it before you can use it. Never put secrets in it.",
                 "parameters": { "type": "object", "properties": {
                     "name": { "type": "string", "description": "short-name-with-dashes" },
-                    "description": { "type": "string", "description": "One line: what it is for" },
-                    "steps": { "type": "string", "description": "The steps, commands and paths, in Markdown" },
+                    "description": { "type": "string", "description": "One line: what it is for and when to use it" },
+                    "steps": { "type": "string", "description": "The instructions: steps, commands and paths, in Markdown" },
+                    "files": { "type": "object", "description": "Optional supporting files: relative path to text (e.g. scripts/check.sh)", "additionalProperties": { "type": "string" } },
                 }, "required": ["name", "description", "steps"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "improve_skill",
+                "description": "Improve one of the owner's skills after using it (a step was wrong, missing or out of date): either one exact edit (old_text, new_text) or the whole new body. The owner sees the diff and decides.",
+                "parameters": { "type": "object", "properties": {
+                    "name": { "type": "string" },
+                    "old_text": { "type": "string", "description": "Exactly as in the skill, once." },
+                    "new_text": { "type": "string" },
+                    "body": { "type": "string", "description": "Instead of an edit: the whole new instructions." },
+                    "description": { "type": "string", "description": "A new one-line description (optional)." },
+                }, "required": ["name"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "update_user_profile",
+                "description": "Keep the owner's profile (USER.md, in your instructions) current: how they work and want things done (preferences, tools, style, recurring context). One small change per call: add an entry, replace the one containing old_text, or remove it. Never secrets or personal data; the owner sees every change.",
+                "parameters": { "type": "object", "properties": {
+                    "action": { "type": "string", "enum": ["add", "replace", "remove"] },
+                    "text": { "type": "string", "description": "The entry (add, replace): one short line." },
+                    "old_text": { "type": "string", "description": "Part of the entry to replace or remove." },
+                }, "required": ["action"] },
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "search_sessions",
@@ -275,8 +310,11 @@ impl Tools {
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "read_skill",
-                "description": "Read one of the owner's skills (how-to notes listed in your instructions) by name.",
-                "parameters": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] },
+                "description": "Read one of the owner's skills (how-to notes listed in your instructions) by name; with file, one of its supporting files.",
+                "parameters": { "type": "object", "properties": {
+                    "name": { "type": "string" },
+                    "file": { "type": "string", "description": "A supporting file the skill lists (relative path)." },
+                }, "required": ["name"] },
             }}));
         }
         if let Some(list) = tools.as_array_mut() {
@@ -395,6 +433,8 @@ impl Tools {
         } else {
             serde_json::from_str(arguments).map_err(|e| format!("the arguments are not JSON: {e}"))?
         };
+        // The old name of create_skill, for models (and trajectories) that know it.
+        let name = if name == "propose_skill" { "create_skill" } else { name };
         if !self.offered(name) {
             return Err(format!("the tool {name:?} is not allowed in this task"));
         }
@@ -444,15 +484,46 @@ impl Tools {
                 path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())),
             },
             "remember" if self.home.is_some() => Call::Remember { text: text("text")? },
-            "read_skill" if self.home.is_some() => Call::ReadSkill { name: text("name")? },
+            "read_skill" if self.home.is_some() => Call::ReadSkill {
+                name: text("name")?,
+                file: args.get("file").and_then(Value::as_str).map(str::to_owned).filter(|f| !f.trim().is_empty()),
+            },
             "schedule_task" if self.home.is_some() => Call::Schedule {
                 when: text("when")?,
                 task: text("task")?,
                 name: args.get("name").and_then(Value::as_str).map(str::to_owned).filter(|n| !n.trim().is_empty()),
             },
             "list_schedules" if self.home.is_some() => Call::ListSchedules,
-            "propose_skill" if self.home.is_some() => {
-                Call::ProposeSkill { name: text("name")?, description: text("description")?, steps: text("steps")? }
+            "create_skill" if self.home.is_some() => Call::CreateSkill {
+                name: text("name")?,
+                description: text("description")?,
+                steps: text("steps")?,
+                files: args
+                    .get("files")
+                    .and_then(Value::as_object)
+                    .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
+                    .unwrap_or_default(),
+            },
+            "improve_skill" if self.home.is_some() => {
+                let opt = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+                let edit = match (opt("old_text"), opt("new_text")) {
+                    (Some(old), Some(new)) => Some((old, new)),
+                    _ => None,
+                };
+                let body = opt("body").filter(|b| !b.trim().is_empty());
+                if edit.is_none() && body.is_none() {
+                    return Err("give old_text and new_text, or the whole body".to_owned());
+                }
+                Call::ImproveSkill { name: text("name")?, description: opt("description"), body, edit }
+            }
+            "update_user_profile" if self.home.is_some() => {
+                use crate::profile::Change;
+                Call::UpdateProfile(match text("action")?.as_str() {
+                    "add" => Change::Add(text("text")?),
+                    "replace" => Change::Replace(text("old_text")?, text("text")?),
+                    "remove" => Change::Remove(text("old_text")?),
+                    other => return Err(format!("unknown action {other:?} (add, replace or remove)")),
+                })
             }
             "search_sessions" if self.home.is_some() => Call::SearchSessions { query: text("query")? },
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
@@ -488,7 +559,9 @@ impl Tools {
             Call::Remember { .. }
             | Call::ReadSkill { .. }
             | Call::Schedule { .. }
-            | Call::ProposeSkill { .. }
+            | Call::CreateSkill { .. }
+            | Call::ImproveSkill { .. }
+            | Call::UpdateProfile(_)
             | Call::SearchSessions { .. }
             | Call::ListSchedules
             | Call::CancelSchedule { .. }
@@ -532,12 +605,17 @@ impl Tools {
                     .map_err(|e| e.to_string())
                     .and_then(|r| r)
             }
-            Call::Remember { text } => match &self.home {
-                Some(home) => crate::memory::Memory::current(home).add(text).map(|id| format!("remembered (#{id})")),
-                None => Err("no memory here".to_owned()),
+            Call::Remember { text } => match (&self.home, crate::profile::sensitive(text)) {
+                (Some(_), Some(why)) => {
+                    Err(format!("not remembered: it contains {why}; memory is never for secrets or personal data"))
+                }
+                (Some(home), None) => {
+                    crate::memory::Memory::current(home).add(text).map(|id| format!("remembered (#{id})"))
+                }
+                (None, _) => Err("no memory here".to_owned()),
             },
-            Call::ReadSkill { name } => match &self.home {
-                Some(home) => crate::skills::read(home, name),
+            Call::ReadSkill { name, file } => match &self.home {
+                Some(home) => crate::skills::read_with(home, name, file.as_deref()),
                 None => Err("no skills here".to_owned()),
             },
             Call::Schedule { when, task, name } => match &self.home {
@@ -545,9 +623,27 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
             Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
-            Call::ProposeSkill { name, description, steps } => match &self.home {
-                Some(home) => crate::skills::propose(home, name, description, steps),
+            Call::CreateSkill { name, description, steps, files } => match &self.home {
+                Some(home) => crate::skills::propose(home, name, description, steps, files),
                 None => Err("no skills here".to_owned()),
+            },
+            Call::ImproveSkill { name, description, body, edit } => match &self.home {
+                Some(home) => crate::skills::improve(
+                    home,
+                    name,
+                    description.as_deref(),
+                    body.as_deref(),
+                    edit.as_ref().map(|(o, n)| (o.as_str(), n.as_str())),
+                ),
+                None => Err("no skills here".to_owned()),
+            },
+            Call::UpdateProfile(change) => match &self.home {
+                // A team member does not change the owner's profile: it reports to the lead.
+                Some(_) if turn_context().agent.is_some() => {
+                    Err("only the lead agent keeps the owner's profile; tell the lead instead".to_owned())
+                }
+                Some(home) => crate::profile::update(home, change),
+                None => Err("no profile here".to_owned()),
             },
             Call::SearchSessions { query } => match &self.home {
                 Some(home) => {
@@ -644,6 +740,18 @@ impl Tools {
     /// What a write or an edit would change, as a unified diff (paths relative to the working
     /// directory); None for other calls, or an edit that would fail.
     pub fn preview(&self, call: &Call) -> Option<String> {
+        // The owner's profile and skills: what changes, before it does.
+        match (call, self.home.as_deref()) {
+            (Call::UpdateProfile(change), Some(home)) => return crate::profile::preview(home, change),
+            (Call::ImproveSkill { name, description, body, edit }, Some(home)) => {
+                let edit = edit.as_ref().map(|(o, n)| (o.as_str(), n.as_str()));
+                let (before, after) =
+                    crate::skills::improved(home, name, description.as_deref(), body.as_deref(), edit).ok()?;
+                let after = after.replacen("proposed: improvement\n", "", 1);
+                return Some(crate::diff::unified(&before, &after, &format!("skills/{name}/SKILL.md (proposed)")));
+            }
+            _ => {}
+        }
         let (path, after) = match call {
             Call::WriteFile { path, content } => (path, content.clone()),
             Call::EditFile { path, old, new, all } => {

@@ -405,7 +405,9 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
             "list_dir",
             "remember",
             "schedule_task",
-            "propose_skill",
+            "create_skill",
+            "improve_skill",
+            "update_user_profile",
             "search_sessions",
             "list_schedules",
             "cancel_schedule",
@@ -1220,4 +1222,134 @@ async fn images_go_as_parts_while_the_session_and_trajectories_keep_references()
     let kept = recorder.take();
     assert_eq!(kept.len(), 4);
     assert!(!serde_json::to_string(&kept).unwrap().contains("base64,"), "trajectories keep references too");
+}
+
+#[tokio::test]
+async fn soul_personality_and_profile_shape_the_prompt_and_the_profile_changes_in_diffs() {
+    let (url, script) = gateway(vec![
+        call("update_user_profile", json!({"action": "add", "text": "Prefers answers with the command first"})),
+        call("update_user_profile", json!({"action": "add", "text": "my key is sk-abcdefghijklmnopqrstuvwxyz"})),
+        say("Noted."),
+        say("Again."),
+    ])
+    .await;
+    let dir = temp("soul");
+    std::fs::write(dir.join("SOUL.md"), "Calm, direct, never gushing.").unwrap();
+    autobot::personality::set(&dir, "concise").unwrap();
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let diffs = Mutex::new(Vec::new());
+    let events = |e: Event| {
+        if let Event::Diff(d) = e {
+            diffs.lock().unwrap().push(d.to_owned());
+        }
+    };
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let owner = owner(Answer::Deny);
+    agent.turn(&mut session, "I like commands first", &owner, &mut HashSet::new(), &events).await.unwrap();
+    assert!(owner.asked.lock().unwrap().is_empty(), "the profile is the agent's own to keep");
+    let diffs = diffs.into_inner().unwrap();
+    assert_eq!(diffs.len(), 1, "the refused change shows no diff");
+    assert!(diffs[0].contains("+- Prefers answers with the command first"), "{}", diffs[0]);
+    assert_eq!(autobot::profile::entries(&dir), ["Prefers answers with the command first"]);
+    // A personality for this conversation only, then the next turn's prompt has everything.
+    agent.options.personality = Some("teacher".into());
+    agent.turn(&mut session, "again", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+
+    let script = script.lock().unwrap();
+    let system = |n: usize| script.seen[n].1["messages"][0]["content"].as_str().unwrap().to_owned();
+    let first = system(0);
+    assert!(first.contains("Calm, direct, never gushing."), "SOUL.md");
+    assert!(first.contains("Your personality now (concise"), "the one in use");
+    assert!(script.seen[2].1.to_string().contains("not kept: it contains an API key"));
+    let later = system(3);
+    assert!(later.contains("Your personality now (teacher"));
+    assert!(later.contains("About the owner") && later.contains("- Prefers answers with the command first"));
+    // The approval rules come first: a personality never replaces them.
+    assert!(later.find("need the owner's approval").unwrap() < later.find("Calm, direct").unwrap());
+}
+
+#[tokio::test]
+async fn skills_are_created_and_improved_as_proposals_and_turns_are_logged() {
+    let (url, _script) = gateway(vec![
+        call(
+            "create_skill",
+            json!({"name": "rotate-logs", "description": "Rotate the app's logs", "steps": "1. run scripts/rotate.sh", "files": {"scripts/rotate.sh": "logrotate -f app.conf\n"}}),
+        ),
+        call("improve_skill", json!({"name": "deploy", "old_text": "pull the code", "new_text": "pull the code, fast-forward only"})),
+        // The old name still works.
+        call("propose_skill", json!({"name": "old-name", "description": "d", "steps": "s"})),
+        say("Proposed."),
+    ])
+    .await;
+    let dir = temp("skill-create");
+    std::fs::create_dir_all(dir.join("skills")).unwrap();
+    std::fs::write(dir.join("skills/deploy.md"), "---\ndescription: Deploy\n---\n1. pull the code\n2. restart")
+        .unwrap();
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let diffs = Mutex::new(Vec::new());
+    let events = |e: Event| {
+        if let Event::Diff(d) = e {
+            diffs.lock().unwrap().push(d.to_owned());
+        }
+    };
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "write it down", &owner(Answer::Deny), &mut HashSet::new(), &events).await.unwrap();
+    let names: Vec<String> = autobot::skills::proposals(&dir).into_iter().map(|s| s.name).collect();
+    assert_eq!(names, ["deploy", "old-name", "rotate-logs"]);
+    let diffs = diffs.into_inner().unwrap();
+    assert_eq!(diffs.len(), 1, "the improvement shows its diff");
+    assert!(diffs[0].contains("+1. pull the code, fast-forward only"), "{}", diffs[0]);
+    assert!(autobot::skills::read(&dir, "deploy").unwrap().contains("1. pull the code\n"), "not used until kept");
+    autobot::skills::accept(&dir, "deploy").unwrap();
+    autobot::skills::accept(&dir, "rotate-logs").unwrap();
+    assert!(autobot::skills::read(&dir, "deploy").unwrap().contains("fast-forward only"));
+    assert_eq!(
+        autobot::skills::read_with(&dir, "rotate-logs", Some("scripts/rotate.sh")).unwrap(),
+        "logrotate -f app.conf\n"
+    );
+    // The turn went into the log with its tools and calls.
+    let turns = autobot::insights::Log::new(&dir).read(0);
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].outcome, "answer");
+    assert_eq!(turns[0].calls.len(), 4);
+    assert_eq!(turns[0].calls[0].model, "qwen");
+    assert_eq!((turns[0].tools["create_skill"], turns[0].tools["improve_skill"]), (1, 1));
+    assert_eq!(turns[0].project, "work");
+}
+
+#[tokio::test]
+async fn every_few_turns_a_nudge_keeps_what_is_worth_keeping() {
+    let (url, script) = gateway(vec![
+        say("First."),
+        say("Second."),
+        say(
+            r#"Here: {"profile": ["Works on Nightfall in Rust"], "memory": ["Builds run on the VPS at night", "the token is ghp_abcdefghijklmnopqrstuvwxyz0123"]}"#,
+        ),
+    ])
+    .await;
+    let dir = temp("nudge");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    agent.options.nudge_every = 2;
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let owner = owner(Answer::Deny);
+    agent.turn(&mut session, "I work on Nightfall", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    assert!(agent.nudge(&session.messages, &quiet).await.is_empty(), "not yet: no call made");
+    agent.turn(&mut session, "builds run at night", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    let kept = agent.nudge(&session.messages, &quiet).await;
+    assert_eq!(kept, ["profile: Works on Nightfall in Rust", "memory: Builds run on the VPS at night"]);
+    assert_eq!(autobot::profile::entries(&dir), ["Works on Nightfall in Rust"]);
+    let facts: Vec<String> = autobot::memory::Memory::new(&dir).list().into_iter().map(|f| f.text).collect();
+    assert_eq!(facts, ["Builds run on the VPS at night"], "never a secret");
+    {
+        let script = script.lock().unwrap();
+        assert_eq!(script.seen.len(), 3);
+        let ask = script.seen[2].1["messages"][1]["content"].as_str().unwrap();
+        assert!(ask.contains("user: I work on Nightfall") && ask.contains("assistant: Second."));
+        assert_eq!(script.seen[2].0["invincible-private"], "1", "a nudge is as private as the turns");
+    }
+    agent.options.nudge_every = 0;
+    assert!(agent.nudge(&session.messages, &quiet).await.is_empty());
 }
