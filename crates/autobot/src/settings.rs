@@ -191,8 +191,11 @@ pub fn group_of(name: &str) -> Option<&'static str> {
     crate::tools::GROUPS.iter().find(|(_, tools)| tools.contains(&name)).map(|(g, _)| *g)
 }
 
-/// Whether each group, and each tool in it, is on for [config]: (group, on, [(tool, on)]).
-pub fn tool_states(config: &Config) -> Vec<(&'static str, bool, Vec<(&'static str, bool)>)> {
+/// A tool group, whether it is on, and each of its tools with whether it is on.
+pub type GroupState = (&'static str, bool, Vec<(&'static str, bool)>);
+
+/// Whether each group, and each tool in it, is on for [config].
+pub fn tool_states(config: &Config) -> Vec<GroupState> {
     let off = &config.agent.disabled_tools;
     crate::tools::GROUPS
         .iter()
