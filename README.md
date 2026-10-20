@@ -549,6 +549,8 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   run on the bot's model, or a smaller one with `[agent] recall_model = "qwen3.5-4b"` (`off`
   for the matching messages only), as private as the turns. `/recall <what>` does the same for
   you, in the terminal (the result goes with your next message) and, for the owner, in a chat.
+  On a node that runs for months, `autobot sessions prune --days 90` removes the conversations
+  untouched that long, with their undo logs and recall index (`--dry-run` says which first).
 - **Speech and pictures:** when the node has a speech or an image backend
   ([below](#speech-and-images-optional)), the agent has `speak` (text to an audio file) and
   `generate_image`. They go with the answer in the platform's own way: a voice message and a photo

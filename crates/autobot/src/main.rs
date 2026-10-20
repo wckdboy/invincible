@@ -152,8 +152,11 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// List the saved conversations.
-    Sessions,
+    /// The saved conversations: list them, or prune the old ones.
+    Sessions {
+        #[command(subcommand)]
+        action: Option<SessionsAction>,
+    },
     /// What the agent remembered between conversations (`remember`): list, or forget one.
     Memory {
         /// The id of a fact to forget.
@@ -287,6 +290,21 @@ enum Command {
     Cron {
         #[command(subcommand)]
         action: CronAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionsAction {
+    /// List the saved conversations, newest first.
+    List,
+    /// Remove the conversations untouched for DAYS days or more (with their undo logs and the
+    /// rest kept beside them). They are gone for `recall` too.
+    Prune {
+        #[arg(long)]
+        days: u64,
+        /// Only say which would go.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -956,11 +974,24 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Sessions => {
+        Command::Sessions { action: None | Some(SessionsAction::List) } => {
             for (name, modified) in autobot::session::list(&home.join("sessions")) {
                 let ago = modified.elapsed().map(|d| d.as_secs()).unwrap_or(0);
                 println!("{name}  {}", human(ago));
             }
+            Ok(())
+        }
+        Command::Sessions { action: Some(SessionsAction::Prune { days, dry_run }) } => {
+            if days == 0 {
+                return Err("--days 1 at least".to_owned());
+            }
+            let age = std::time::Duration::from_secs(days * 86400);
+            let gone = autobot::session::prune(&home.join("sessions"), age, dry_run)?;
+            let bytes: u64 = gone.iter().map(|(_, b)| b).sum();
+            for (name, _) in &gone {
+                println!("{}{name}", if dry_run { "would remove " } else { "removed " });
+            }
+            println!("{} conversations, {} KiB, untouched for {days} days or more", gone.len(), bytes.div_ceil(1024));
             Ok(())
         }
     }
