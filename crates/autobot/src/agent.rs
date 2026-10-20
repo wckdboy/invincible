@@ -376,7 +376,10 @@ impl Agent {
             }
             messages[0] = json!({ "role": "system", "content": system });
             messages.extend(session.window());
-            sent.clone_from(&messages);
+            // What was sent, kept only for a trajectory.
+            if self.trajectories.is_some() {
+                sent.clone_from(&messages);
+            }
             let streamed = |delta: crate::gateway::Delta| match delta {
                 crate::gateway::Delta::Text(text) => events(Event::Text(text)),
                 crate::gateway::Delta::Reasoning(text) => events(Event::Reasoning(text)),
@@ -384,15 +387,17 @@ impl Agent {
             // Images go as parts, read from their files now; the session and trajectories keep
             // only their references.
             // (Reading and scaling them is slow work: off the task that draws the terminal.)
-            let wire = if crate::images::any(&messages) {
+            let expanded;
+            let wire: &[Value] = if crate::images::any(&messages) {
                 let (owned, vision) = (messages.clone(), self.options.vision);
-                tokio::task::spawn_blocking(move || crate::images::expand(&owned, vision))
+                expanded = tokio::task::spawn_blocking(move || crate::images::expand(&owned, vision))
                     .await
-                    .map_err(|e| format!("the images: {e}"))?
+                    .map_err(|e| format!("the images: {e}"))?;
+                &expanded
             } else {
-                messages.clone()
+                &messages
             };
-            let reply = match self.gateway.chat_with(&wire, &definitions, confirmed, &streamed).await {
+            let reply = match self.gateway.chat_with(wire, &definitions, confirmed, &streamed).await {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
                     let action = Action::Cloud(why);

@@ -768,12 +768,12 @@ fn stream_turn(
             Ok(outcome) => json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts }),
             Err(e) => json!({ "type": "error", "text": e }),
         };
-        let messages = guard.session.messages.clone();
+        // The nudge, when it is time, on its own copy: the conversation is free again; what it
+        // kept follows the answer as `kept` events before the stream ends.
+        let nudge = runtime.nudge(agent, &guard.session.messages);
         drop(guard);
         let _ = tx.send(last);
-        // The nudge, when it is time: the conversation is free again; what it kept follows the
-        // answer as `kept` events before the stream ends.
-        if let Some(nudge) = runtime.nudge(agent, messages)
+        if let Some(nudge) = nudge
             && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
         {
             for line in kept {
