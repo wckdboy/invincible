@@ -85,7 +85,9 @@ enum Line {
         headers: BTreeMap<String, String>,
         /// The server's `Mcp-Session-Id`, once it gave one.
         session: Option<String>,
-        initialized: bool,
+        /// The protocol version the server agreed to, once it did: sent with every request
+        /// after `initialize`.
+        version: Option<String>,
     },
 }
 
@@ -134,13 +136,10 @@ impl Running {
             Line::Stdio { stdin, .. } => {
                 stdin.write_all(format!("{message}\n").as_bytes()).await.map_err(|e| e.to_string())
             }
-            line @ Line::Http { .. } => {
-                let sent = tokio::time::timeout(TIMEOUT, post(line, &message, None)).await;
-                if let Line::Http { initialized, .. } = line {
-                    *initialized = true;
-                }
-                sent.map_err(|_| format!("{method}: no answer in {}s", TIMEOUT.as_secs()))?.map(drop)
-            }
+            line @ Line::Http { .. } => tokio::time::timeout(TIMEOUT, post(line, &message, None))
+                .await
+                .map_err(|_| format!("{method}: no answer in {}s", TIMEOUT.as_secs()))?
+                .map(drop),
         }
     }
 }
@@ -148,7 +147,7 @@ impl Running {
 /// Posts [message] to an HTTP server: the answer with [id] (JSON, or an event of the stream it
 /// opens), or nothing for a notification.
 async fn post(line: &mut Line, message: &Value, id: Option<u64>) -> Result<Value, String> {
-    let Line::Http { client, url, headers, session, initialized } = line else {
+    let Line::Http { client, url, headers, session, version } = line else {
         return Err("not an HTTP server".to_owned());
     };
     let mut request = client
@@ -162,8 +161,8 @@ async fn post(line: &mut Line, message: &Value, id: Option<u64>) -> Result<Value
     if let Some(session) = session.as_deref() {
         request = request.header("mcp-session-id", session);
     }
-    if *initialized {
-        request = request.header("mcp-protocol-version", PROTOCOL);
+    if let Some(version) = version.as_deref() {
+        request = request.header("mcp-protocol-version", version);
     }
     let response = request.send().await.map_err(|e| e.without_url().to_string())?;
     let status = response.status();
@@ -190,21 +189,27 @@ async fn post(line: &mut Line, message: &Value, id: Option<u64>) -> Result<Value
         };
         return found.ok_or_else(|| "the server answered something else".to_owned());
     }
-    // Server-sent events: `data:` lines, an empty line ending each event.
+    // Server-sent events: `data:` lines, an empty line ending each event. Bytes are kept until
+    // a line is whole, so a character or a line ending split between chunks stays whole.
     use futures_util::StreamExt as _;
     let mut stream = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut pending: Vec<u8> = Vec::new();
+    let mut data: Vec<String> = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| e.without_url().to_string())?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
-        while let Some(end) = buffer.find("\n\n") {
-            let event: String = buffer.drain(..end + 2).collect();
-            let data: Vec<&str> = event
-                .lines()
-                .filter_map(|l| l.strip_prefix("data:"))
-                .map(|d| d.strip_prefix(' ').unwrap_or(d))
-                .collect();
-            if let Ok(message) = serde_json::from_str::<Value>(&data.join("\n"))
+        pending.extend_from_slice(&chunk);
+        while let Some(end) = pending.iter().position(|b| *b == b'\n') {
+            let raw: Vec<u8> = pending.drain(..=end).collect();
+            let line = String::from_utf8_lossy(&raw[..end]);
+            let line = line.strip_suffix('\r').unwrap_or(&line);
+            if !line.is_empty() {
+                if let Some(d) = line.strip_prefix("data:") {
+                    data.push(d.strip_prefix(' ').unwrap_or(d).to_owned());
+                }
+                continue;
+            }
+            // The event is whole.
+            if let Ok(message) = serde_json::from_str::<Value>(&std::mem::take(&mut data).join("\n"))
                 && ours(&message)
             {
                 return Ok(message);
@@ -267,7 +272,7 @@ impl Hub {
                 url: url.clone(),
                 headers: config.headers.clone(),
                 session: None,
-                initialized: false,
+                version: None,
             });
         }
         let mut command = tokio::process::Command::new(crate::config::expand(std::path::Path::new(&config.command)));
@@ -294,13 +299,17 @@ impl Hub {
         let config = self.configs.get(name).ok_or(format!("no MCP server {name:?}"))?;
         let line = Self::connect(name, config).await?;
         let mut server = Running { line, next_id: 0, tools: Vec::new() };
-        server
+        let agreed = server
             .request(
                 "initialize",
                 json!({ "protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": { "name": "autobot", "version": invincible::version::VERSION } }),
             )
             .await
             .map_err(|e| format!("MCP server {name}: initialize: {e}"))?;
+        // From here on, every request says which version (`notifications/initialized` too).
+        if let Line::Http { version, .. } = &mut server.line {
+            *version = Some(agreed["protocolVersion"].as_str().unwrap_or(PROTOCOL).to_owned());
+        }
         server.notify("notifications/initialized").await.map_err(|e| format!("MCP server {name}: {e}"))?;
         let listed = server.request("tools/list", json!({})).await.map_err(|e| format!("MCP server {name}: {e}"))?;
         server.tools = listed["tools"]

@@ -553,5 +553,17 @@ async fn an_editor_lends_its_terminal_and_mcp_servers_and_has_commands() {
     assert_eq!(done["result"]["stopReason"], "end_turn", "{done}");
     assert!(editor.text_since(from).contains("/recall"), "{}", editor.text_since(from));
     assert_eq!(script.lock().unwrap().seen.len(), calls, "no model call");
+
+    // 4. Stop works on a command too: a /compact waiting for a slow model.
+    script.lock().unwrap().answers.push_back((Duration::from_secs(30), say("a summary, too late")));
+    let id = editor
+        .send("session/prompt", json!({ "sessionId": session, "prompt": [{ "type": "text", "text": "/compact yes" }] }))
+        .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    editor.write(&json!({ "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": session } })).await;
+    let started = std::time::Instant::now();
+    let cancelled = editor.until(id).await;
+    assert_eq!(cancelled["result"]["stopReason"], "cancelled", "{cancelled}");
+    assert!(started.elapsed() < Duration::from_secs(5));
     let _ = std::fs::remove_dir_all(dir);
 }

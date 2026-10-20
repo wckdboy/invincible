@@ -121,6 +121,10 @@ pub fn available(config: &VoiceConfig, home: &Path) -> bool {
         return true;
     }
     let command = match &config.command {
+        // A bare name is looked up on PATH, as running it does.
+        Some(command) if command.components().count() == 1 => {
+            command.to_str().is_some_and(|name| crate::find_on_path(name).is_some())
+        }
         Some(command) => crate::config::expand(command).is_file(),
         None => ["whisper-cli", "whisper-cpp", "whisper"].iter().any(|n| crate::find_on_path(n).is_some()),
     };

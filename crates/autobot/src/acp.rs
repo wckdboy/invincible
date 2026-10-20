@@ -666,6 +666,7 @@ impl Acp {
                 let mut state = open.state.try_lock().map_err(|_| busy())?;
                 state.0.reset()?;
                 state.1.clear();
+                open.recalled.lock().expect("recalled").clear();
                 "A new conversation: what is above is no longer sent.".to_owned()
             }
             "retry" => {
@@ -764,8 +765,44 @@ impl Acp {
         Ok(Command::Reply(reply))
     }
 
-    async fn prompt(&self, params: &Value) -> Result<Value, Failure> {
+    /// A prompt, whole (what its audio says, a slash command, the turn) on one task that
+    /// `session/cancel` stops wherever it is.
+    async fn prompt(self: &Arc<Self>, params: &Value) -> Result<Value, Failure> {
         let open = self.open(string(params, "sessionId")?)?;
+        let turn = Arc::new(Mutex::new(Turn::new(open.calls.clone())));
+        let task = {
+            let mut running = open.running.lock().expect("running");
+            if running.is_some() {
+                return Err((INVALID_REQUEST, "a prompt is running in this session".to_owned()));
+            }
+            let (acp, open, params, turn) = (self.clone(), open.clone(), params.clone(), turn.clone());
+            let task = tokio::spawn(async move { acp.answer(&open, &params, turn).await });
+            *running = Some(task.abort_handle());
+            task
+        };
+        let result = task.await;
+        open.running.lock().expect("running").take();
+        open.turn.lock().expect("turn").take();
+        match result {
+            Err(e) if e.is_cancelled() => {
+                // The call it was in stops with it.
+                if let Some(call) = turn.lock().expect("turn").current.take()
+                    && !call.hidden
+                {
+                    self.conn.update(
+                        &open.id,
+                        json!({ "sessionUpdate": "tool_call_update", "toolCallId": call.id, "status": "failed" }),
+                    );
+                }
+                Ok(json!({ "stopReason": "cancelled" }))
+            }
+            Err(e) => Err((INTERNAL, format!("the turn failed: {e}"))),
+            Ok(answered) => answered,
+        }
+    }
+
+    /// What [prompt] does, on its task.
+    async fn answer(&self, open: &Arc<Open>, params: &Value, turn: Arc<Mutex<Turn>>) -> Result<Value, Failure> {
         let hears = self.hears().then_some(&self.config.voice);
         let prompt = prompt_text(&params["prompt"], &self.home, hears).await?;
         if prompt.text.trim().is_empty() && prompt.images.is_empty() {
@@ -774,11 +811,8 @@ impl Acp {
         for heard in &prompt.heard {
             self.conn.update(&open.id, chunk("agent_thought_chunk", &format!("heard: \"{heard}\"\n")));
         }
-        if open.running.lock().expect("running").is_some() {
-            return Err((INVALID_REQUEST, "a prompt is running in this session".to_owned()));
-        }
         let (mut text, mut images) = (prompt.text, prompt.images);
-        match self.command(&open, &text).await {
+        match self.command(open, &text).await {
             Some(Command::Reply(reply)) => {
                 self.conn.update(&open.id, chunk("agent_message_chunk", &reply));
                 return Ok(json!({ "stopReason": "end_turn" }));
@@ -793,7 +827,7 @@ impl Acp {
         if !recalled.is_empty() {
             text = format!("{recalled}\n{text}");
         }
-        self.turn(&open, text, images).await
+        self.turn(open, text, images, turn).await
     }
 
     /// One turn of [open] for [text] and [images].
@@ -802,46 +836,16 @@ impl Acp {
         open: &Arc<Open>,
         text: String,
         images: Vec<crate::images::Attachment>,
+        turn: Arc<Mutex<Turn>>,
     ) -> Result<Value, Failure> {
         let agent = open.agent.lock().expect("agent").clone();
-        let turn = Arc::new(Mutex::new(Turn::new(open.calls.clone())));
-        let (conn, id, state) = (self.conn.clone(), open.id.clone(), open.state.clone());
-        let task = {
-            let turn = turn.clone();
-            let mut running = open.running.lock().expect("running");
-            if running.is_some() {
-                return Err((INVALID_REQUEST, "a prompt is running in this session".to_owned()));
-            }
-            *open.turn.lock().expect("turn") = Some(turn.clone());
-            let task = tokio::spawn(async move {
-                let mut guard = state.lock().await;
-                let (session, grants) = &mut *guard;
-                let approver = EditorApprover { conn: conn.clone(), session: id.clone(), turn: turn.clone() };
-                let events = |event: Event| on_event(&conn, &id, &turn, event);
-                agent.turn_with(session, &text, &images, &approver, grants, &events).await
-            });
-            *running = Some(task.abort_handle());
-            task
-        };
-        let result = task.await;
-        open.running.lock().expect("running").take();
-        open.turn.lock().expect("turn").take();
-        let outcome = match result {
-            Err(e) if e.is_cancelled() => {
-                // The call it was in stops with it.
-                if let Some(call) = turn.lock().expect("turn").current.take()
-                    && !call.hidden
-                {
-                    self.conn.update(
-                        &open.id,
-                        json!({ "sessionUpdate": "tool_call_update", "toolCallId": call.id, "status": "failed" }),
-                    );
-                }
-                return Ok(json!({ "stopReason": "cancelled" }));
-            }
-            Err(e) => return Err((INTERNAL, format!("the turn failed: {e}"))),
-            Ok(Err(e)) => return Err((INTERNAL, e)),
-            Ok(Ok(outcome)) => outcome,
+        *open.turn.lock().expect("turn") = Some(turn.clone());
+        let outcome = {
+            let mut guard = open.state.lock().await;
+            let (session, grants) = &mut *guard;
+            let approver = EditorApprover { conn: self.conn.clone(), session: open.id.clone(), turn: turn.clone() };
+            let events = |event: Event| on_event(&self.conn, &open.id, &turn, event);
+            agent.turn_with(session, &text, &images, &approver, grants, &events).await.map_err(|e| (INTERNAL, e))?
         };
         // Not streamed, or the agent's own note that it stopped: the answer whole.
         let stopped = outcome.text.starts_with("Stopped after ");
@@ -1336,16 +1340,25 @@ impl EditorFiles {
     /// [command] in an editor's terminal: what it printed and how it ended, as the `terminal`
     /// tool says it; None when the editor could not open one.
     async fn run(&self, command: &str, cwd: &Path, timeout: Duration, limit: usize) -> Option<Result<String, String>> {
-        let created = self
-            .conn
-            .request(
-                "terminal/create",
-                json!({
-                    "sessionId": self.session, "command": "sh", "args": ["-c", command],
-                    "cwd": cwd.display().to_string(), "outputByteLimit": limit,
-                }),
-            )
-            .await;
+        let params = json!({
+            "sessionId": self.session, "command": "sh", "args": ["-c", command],
+            "cwd": cwd.display().to_string(), "outputByteLimit": limit,
+        });
+        // Asked on a task of its own: a terminal the editor opens after the turn was cancelled
+        // is still killed and released.
+        let (tx, rx) = oneshot::channel();
+        let (conn, session) = (self.conn.clone(), self.session.clone());
+        tokio::spawn(async move {
+            let created = conn.request("terminal/create", params).await;
+            if let Err(Ok(result)) = tx.send(created)
+                && let Some(id) = result["terminalId"].as_str()
+            {
+                let params = json!({ "sessionId": session, "terminalId": id });
+                let _ = conn.request("terminal/kill", params.clone()).await;
+                let _ = conn.request("terminal/release", params).await;
+            }
+        });
+        let created = rx.await.unwrap_or_else(|_| Err("the editor went away".to_owned()));
         let id = match created.map(|r| r["terminalId"].as_str().map(str::to_owned)) {
             Ok(Some(id)) => id,
             Ok(None) | Err(_) => {
