@@ -35,8 +35,12 @@ pub struct ApiState {
     open: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Open>>>>,
     /// Messages for a session's running turn (`…/steer`).
     inboxes: Mutex<HashMap<String, crate::tools::Inbox>>,
-    waiting: Arc<Mutex<HashMap<String, oneshot::Sender<Answer>>>>,
+    waiting: Waiting,
 }
+
+/// The questions turns are waiting on, by id: where to send the answer, and the question as
+/// `GET /v1/agent/approvals` lists it.
+type Waiting = Arc<Mutex<HashMap<String, (oneshot::Sender<Answer>, Value)>>>;
 
 /// A conversation and what the owner said "always" to in it.
 struct Open {
@@ -74,6 +78,7 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/sessions/{id}/reset", post(reset))
         .route("/v1/agent/sessions/{id}/steer", post(steer))
         .route("/v1/agent/sessions/{id}/fork", post(fork))
+        .route("/v1/agent/approvals", get(approvals))
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
         .route("/v1/agent/schedules/{id}", axum::routing::delete(remove_schedule))
@@ -253,7 +258,7 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
     let waiting = state.waiting.clone();
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
-        let approver = ApiApprover { events: tx.clone(), waiting };
+        let approver = ApiApprover { events: tx.clone(), waiting, session: id.clone() };
         let events = {
             let tx = tx.clone();
             move |event: Event| {
@@ -296,17 +301,34 @@ async fn turn(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: 
 #[derive(Deserialize)]
 struct ApproveBody {
     answer: String,
+    /// With `"instead"`: what the owner wants done instead.
+    #[serde(default)]
+    text: String,
+}
+
+/// The questions waiting for the owner now, oldest first.
+async fn approvals(State(state): State<Arc<ApiState>>) -> Response {
+    let mut list: Vec<Value> = state.waiting.lock().expect("waiting").values().map(|(_, q)| q.clone()).collect();
+    list.sort_by_key(|q| q["asked_at"].as_u64().unwrap_or(0));
+    Json(json!({ "approvals": list })).into_response()
 }
 
 async fn approve(State(state): State<Arc<ApiState>>, Path(id): Path<String>, body: Bytes) -> Response {
-    let answer = match serde_json::from_slice::<ApproveBody>(&body).map(|b| b.answer) {
-        Ok(a) if a == "once" => Answer::Once,
-        Ok(a) if a == "always" => Answer::Always,
-        Ok(a) if a == "deny" => Answer::Deny,
-        _ => return error(StatusCode::BAD_REQUEST, "invalid_request_error", "answer must be once, always or deny"),
+    let answer = match serde_json::from_slice::<ApproveBody>(&body) {
+        Ok(b) if b.answer == "once" => Answer::Once,
+        Ok(b) if b.answer == "always" => Answer::Always,
+        Ok(b) if b.answer == "deny" => Answer::Deny,
+        Ok(b) if b.answer == "instead" && !b.text.trim().is_empty() => Answer::Instead(b.text.trim().to_owned()),
+        _ => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "answer must be once, always, deny, or instead with a text",
+            );
+        }
     };
     match state.waiting.lock().expect("waiting").remove(&id) {
-        Some(tx) => {
+        Some((tx, _)) => {
             let _ = tx.send(answer);
             Json(json!({ "ok": true })).into_response()
         }
@@ -471,7 +493,9 @@ async fn remove_schedule(State(state): State<Arc<ApiState>>, Path(id): Path<Stri
 /// Asks through the turn's event stream; the answer comes back on `POST /v1/agent/approvals/{id}`.
 struct ApiApprover {
     events: mpsc::UnboundedSender<Value>,
-    waiting: Arc<Mutex<HashMap<String, oneshot::Sender<Answer>>>>,
+    waiting: Waiting,
+    /// The conversation the turn runs in.
+    session: String,
 }
 
 impl Approver for ApiApprover {
@@ -484,7 +508,6 @@ impl Approver for ApiApprover {
             let Ok(bytes) = invincible::token::random::<16>() else { return Answer::Deny };
             let id = invincible::token::hex(&bytes);
             let (tx, rx) = oneshot::channel();
-            self.waiting.lock().expect("waiting").insert(id.clone(), tx);
             let mut event = json!({
                 "type": "approval",
                 "id": id,
@@ -495,6 +518,15 @@ impl Approver for ApiApprover {
             if let Some(agent) = crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten() {
                 event["agent"] = json!(agent);
             }
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let mut question = event.clone();
+            if let Some(q) = question.as_object_mut() {
+                q.remove("type");
+                q.insert("session".into(), json!(self.session));
+                q.insert("asked_at".into(), json!(now));
+                q.insert("expires_at".into(), json!(now + APPROVAL_WAIT.as_secs()));
+            }
+            self.waiting.lock().expect("waiting").insert(id.clone(), (tx, question));
             let _ = self.events.send(event);
             let answer = tokio::time::timeout(APPROVAL_WAIT, rx).await.ok().and_then(Result::ok);
             self.waiting.lock().expect("waiting").remove(&id);

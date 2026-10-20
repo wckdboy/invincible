@@ -116,6 +116,14 @@ async fn a_turn_through_the_gateway_with_an_approval() {
         turn(&client, &format!("{gateway}/v1/agent/sessions/phone-1/turns"), "make a file", async |event: &Value| {
             if event["type"] == "approval" {
                 assert_eq!(event["action"], json!({ "kind": "command", "command": "echo hi > out.txt" }));
+                // The question is also listed, for a client that was not watching the stream.
+                let waiting: Value =
+                    client.get(&approvals).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap();
+                let listed = &waiting["approvals"][0];
+                assert_eq!(waiting["approvals"].as_array().unwrap().len(), 1, "{waiting}");
+                assert_eq!((&listed["id"], &listed["session"]), (&event["id"], &json!("phone-1")));
+                assert_eq!(listed["action"], event["action"]);
+                assert!(listed["expires_at"].as_u64().unwrap() > listed["asked_at"].as_u64().unwrap());
                 let url = format!("{approvals}/{}", event["id"].as_str().unwrap());
                 let reply =
                     client.post(&url).bearer_auth(TOKEN).json(&json!({ "answer": "once" })).send().await.unwrap();
@@ -124,6 +132,9 @@ async fn a_turn_through_the_gateway_with_an_approval() {
                 let again =
                     client.post(&url).bearer_auth(TOKEN).json(&json!({ "answer": "once" })).send().await.unwrap();
                 assert_eq!(again.status(), 404);
+                let waiting: Value =
+                    client.get(&approvals).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap();
+                assert_eq!(waiting["approvals"], json!([]), "answered: no longer listed");
             }
         })
         .await;
@@ -373,4 +384,49 @@ async fn a_recipe_is_handed_over_run_now_and_its_runs_collected() {
         .unwrap();
     assert_eq!(form.status(), 415);
     assert!(dir.join("runs/r-disk.jsonl").exists());
+}
+
+#[tokio::test]
+async fn an_approval_answered_with_what_to_do_instead() {
+    let (gateway, _, _dir) = stack(
+        "instead",
+        vec![
+            json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": "c1", "type": "function",
+                "function": { "name": "terminal", "arguments": "{\"command\":\"rm -rf build\"}" } }] }),
+            json!({ "role": "assistant", "content": "Left build alone." }),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let approvals = format!("{gateway}/v1/agent/approvals");
+    let events =
+        turn(&client, &format!("{gateway}/v1/agent/sessions/phone-2/turns"), "clean up", async |event: &Value| {
+            if event["type"] == "approval" {
+                let url = format!("{approvals}/{}", event["id"].as_str().unwrap());
+                let empty =
+                    client.post(&url).bearer_auth(TOKEN).json(&json!({ "answer": "instead" })).send().await.unwrap();
+                assert_eq!(empty.status(), 400, "instead needs a text");
+                let reply = client
+                    .post(&url)
+                    .bearer_auth(TOKEN)
+                    .json(&json!({ "answer": "instead", "text": "only delete build/tmp" }))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(reply.status(), 200);
+            }
+        })
+        .await;
+    assert_eq!(events.last().unwrap()["text"], "Left build alone.");
+    let actions: Value = client
+        .get(format!("{gateway}/v1/agent/actions"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(actions["actions"][0]["ran"], json!(false), "{actions}");
 }
