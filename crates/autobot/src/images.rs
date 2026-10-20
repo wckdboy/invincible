@@ -230,6 +230,56 @@ pub fn data_url(image: &Attachment) -> Result<Arc<String>, Unsent> {
     Ok(url)
 }
 
+/// Images one request to the agent's API carries at most.
+pub const MAX_SENT_IMAGES: usize = 4;
+/// Bytes of one image sent to the agent's API at most (decoded).
+pub const MAX_SENT_IMAGE: usize = 10 * 1024 * 1024;
+
+/// An image sent as a `data:` URL (`data:image/jpeg;base64,…`, as the app sends it), kept in
+/// [dir] as a file of its own and attached from there, so the conversation holds a reference like
+/// any other image's.
+pub fn from_data_url(url: &str, dir: &Path) -> Result<Attachment, String> {
+    let rest = url.trim().strip_prefix("data:").ok_or("an image is a data: URL (data:image/jpeg;base64,…)")?;
+    let (head, data) = rest.split_once(',').ok_or("the data: URL has no data")?;
+    if !head.split(';').any(|p| p.eq_ignore_ascii_case("base64")) {
+        return Err("the image's data: URL is not base64".to_owned());
+    }
+    if data.len() > MAX_SENT_IMAGE / 3 * 4 + 4 {
+        return Err(format!("an image is larger than {} MiB", MAX_SENT_IMAGE >> 20));
+    }
+    let bytes = STANDARD.decode(data.trim()).map_err(|e| format!("the image is not base64: {e}"))?;
+    if bytes.len() > MAX_SENT_IMAGE {
+        return Err(format!("an image is larger than {} MiB", MAX_SENT_IMAGE >> 20));
+    }
+    let (_, mime) = sniff(&bytes).ok_or("an image is not a PNG, JPEG, WebP or GIF")?;
+    let ext = match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/webp" => "webp",
+        _ => "gif",
+    };
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let random = invincible::token::hex(&invincible::token::random::<4>()?);
+    let path = dir.join(format!("sent-{stamp}-{random}.{ext}"));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::io::Write::write_all(&mut file, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    attach(&path)
+}
+
+/// Whether a model's error says it cannot take images (a router that picked one that cannot see).
+pub fn refuses_images(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    ["image", "vision", "multimodal", "multi-modal"].iter().any(|w| error.contains(w))
+        && ["not support", "unsupported", "cannot", "can't", "does not", "doesn't", "not allowed", "invalid"]
+            .iter()
+            .any(|w| error.contains(w))
+}
+
 /// The images a message carries (from the session file).
 pub fn of(message: &Value) -> Vec<Attachment> {
     message.get(KEY).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default()
@@ -524,6 +574,32 @@ pub mod tests {
         let gone = expand(std::slice::from_ref(&stored), None);
         assert!(gone[0]["content"].as_str().unwrap().ends_with("not sent: no longer on disk)"));
         assert_eq!(of(&gone[0]), vec![]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn images_sent_as_data_urls_are_kept_and_attached() {
+        let dir = dir("data-url");
+        let jpeg = picture(30, 20, ImageFormat::Jpeg);
+        let url = format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg));
+        let image = from_data_url(&url, &dir).unwrap();
+        assert_eq!((image.mime.as_str(), image.width, image.height), ("image/jpeg", 30, 20));
+        assert!(image.name.starts_with("sent-") && image.name.ends_with(".jpg"));
+        assert_eq!(std::fs::read(&image.path).unwrap(), jpeg);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&image.path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        // Its type is its bytes', whatever the URL says; not base64, not an image: refused.
+        let png = format!("data:image/jpeg;base64,{}", STANDARD.encode(picture(2, 2, ImageFormat::Png)));
+        assert_eq!(from_data_url(&png, &dir).unwrap().mime, "image/png");
+        assert!(from_data_url("data:image/png,raw", &dir).unwrap_err().contains("not base64"));
+        assert!(from_data_url("data:image/png;base64,aGVsbG8=", &dir).unwrap_err().contains("not a PNG"));
+        assert!(from_data_url("https://x.org/a.png", &dir).is_err());
+        assert!(refuses_images("upstream: 400: model does not support image input"));
+        assert!(refuses_images("This model can't see images (vision)"));
+        assert!(!refuses_images("upstream: 500: overloaded"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

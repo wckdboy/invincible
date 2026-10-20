@@ -534,8 +534,11 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   you, in the terminal (the result goes with your next message) and, for the owner, in a chat.
 - **Speech and pictures:** when the node has a speech or an image backend
   ([below](#speech-and-images-optional)), the agent has `speak` (text to an audio file) and
-  `generate_image`. On Telegram the speech goes as a voice message and a picture as a photo, on
-  Discord as an attachment; elsewhere the chat says where the file is (`~/.autobot/attachments`).
+  `generate_image`. They go with the answer in the platform's own way: a voice message and a photo
+  on Telegram, an attachment on Discord, Signal and email, a file in the thread on Slack (the app
+  needs `files:write`), uploaded media on Matrix (a voice message, a picture), an audio or image
+  message on WhatsApp (MP3, OGG, AAC, PNG, JPEG). What a platform cannot take, the chat names with
+  its path (`~/.autobot/attachments`).
   A backend on the node runs without asking; one off the machine is asked for first, like a cloud
   model, and then the text goes out redacted, with a receipt.
 - **A team of agents:** define members in `config.toml`, and the agent hands them work with its
@@ -634,7 +637,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
   device can therefore start turns, watch their events (tool runs, receipts, approval questions,
-  the answer) and answer approvals, all inside its Noise session. Nothing new is exposed: the
+  the answer) and answer approvals, all inside its Noise session. A turn may carry up to four
+  images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
+  that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
   agent is reachable only from this machine and from devices you paired.
 
 ## Bots and channels

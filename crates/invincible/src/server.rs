@@ -33,6 +33,9 @@ pub const CLIENT_HEADER: &str = "invincible-client";
 /// The largest inference request taken: room for a conversation with several images (a
 /// downscaled screenshot is a few hundred KiB in base64; providers take up to 20 MB each).
 pub const MAX_REQUEST: usize = 32 * 1024 * 1024;
+/// The largest agent turn passed through: its text and a few images in base64 (the agent takes
+/// four of 10 MiB at most).
+const AGENT_TURN_BODY: usize = 64 * 1024 * 1024;
 
 pub struct AppState {
     pub engines: Vec<Engine>,
@@ -184,7 +187,10 @@ async fn agent(
     }
     let method = request.method().clone();
     let content_type = request.headers().get(header::CONTENT_TYPE).cloned();
-    let body = match axum::body::to_bytes(request.into_body(), 1 << 20).await {
+    // A turn may carry images (the agent caps them itself); anything else is small.
+    let turn = path.split('?').next().is_some_and(|p| p.ends_with("/turns"));
+    let limit = if turn { AGENT_TURN_BODY } else { 1 << 20 };
+    let body = match axum::body::to_bytes(request.into_body(), limit).await {
         Ok(body) => body,
         Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error", "the body is too large"),
     };

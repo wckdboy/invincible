@@ -1,6 +1,7 @@
 //! WhatsApp, through Meta's WhatsApp Business Cloud API: messages come to a webhook on the hooks
 //! listener, answers go out through the Graph API. Direct messages, approvals by reply buttons,
-//! voice notes transcribed. Off unless turned on.
+//! voice notes transcribed, speech and pictures the agent makes sent as audio and image messages
+//! (MP3/OGG/AAC and PNG/JPEG; another type is left on the machine). Off unless turned on.
 //!
 //! ```toml
 //! [whatsapp]
@@ -192,6 +193,39 @@ impl Client {
         Ok((bytes.to_vec(), mime))
     }
 
+    /// A file the turn made, sent to [to] as an audio or image message (uploaded to the Cloud
+    /// API's media first). Ok(false) for a type WhatsApp does not take that way (a WAV, a WebP).
+    pub async fn send_file(&self, to: &str, file: &crate::media::Made) -> Result<bool, String> {
+        let mime = file.mime.split(';').next().unwrap_or_default().trim();
+        let (kind, takes) = match file.kind {
+            crate::media::Kind::Speech => {
+                ("audio", ["audio/mpeg", "audio/ogg", "audio/aac", "audio/mp4", "audio/amr"].contains(&mime))
+            }
+            crate::media::Kind::Image => ("image", ["image/jpeg", "image/png"].contains(&mime)),
+        };
+        if !takes {
+            return Ok(false);
+        }
+        let bytes = file.bytes()?;
+        let (content_type, body) = crate::media::multipart(
+            &[("messaging_product", "whatsapp"), ("type", mime)],
+            ("file", &file.name(), mime, &bytes),
+        )?;
+        let url = format!("{}/{}/media", self.api, self.phone);
+        let request = self.http.post(url).header("content-type", content_type).body(body);
+        let uploaded = self.json(request, "media upload").await?;
+        let id = uploaded["id"].as_str().ok_or("WhatsApp media upload: no id")?;
+        self.message(json!({
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": kind,
+            (kind): { "id": id },
+        }))
+        .await?;
+        Ok(true)
+    }
+
     /// The number as WhatsApp shows it (`+1 555-0100`), which also checks the token.
     pub async fn me(&self) -> Result<String, String> {
         let url = format!("{}/{}?fields=display_phone_number,verified_name", self.api, self.phone);
@@ -228,6 +262,10 @@ impl Transport for Channel {
 
     fn send<'a>(&'a self, chat: &'a str, text: &'a str) -> BoxFuture<'a, Result<Option<String>, String>> {
         Box::pin(async move { self.client.send(chat, text).await })
+    }
+
+    fn send_file<'a>(&'a self, chat: &'a str, file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move { self.client.send_file(chat, file).await })
     }
 
     fn ask<'a>(&'a self, chat: &'a str, question: &'a Question) -> BoxFuture<'a, Result<(), String>> {

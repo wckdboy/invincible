@@ -10,7 +10,8 @@
 //!   `always` or `no` (or `no, <what to do instead>`) in a reply that keeps the code.
 //! - Auto-replies, lists and bulk mail are never answered, and the agent's own mails are marked
 //!   `Auto-Submitted`, so no two robots write to each other forever.
-//! - Audio attachments (a voice memo) are transcribed ([crate::voice]).
+//! - Audio attachments (a voice memo) are transcribed ([crate::voice]); speech and pictures the
+//!   agent makes are attached to its answer (up to 18 MB in all).
 //! - IMAP and SMTP go under the node's network mode (Tor included), over TLS (port 993 and
 //!   465), or STARTTLS (143, 587); plain only to this machine (a local bridge).
 //!
@@ -427,6 +428,30 @@ pub fn thread_key(thread: &str) -> String {
     invincible::token::hex(&<sha2::Sha256 as sha2::Digest>::digest(thread.as_bytes())[..6])
 }
 
+/// Bytes attached to one mail at most: most servers take 25 MB, and base64 makes a third more.
+const MAX_ATTACHED: u64 = 18 * 1024 * 1024;
+
+/// [files] read as attachments, up to [MAX_ATTACHED] in all; those left over (too large, or
+/// unreadable: they go on their own, or are said where they are).
+fn attachments(files: Vec<crate::media::Made>) -> (Vec<crate::mail::Attachment>, Vec<crate::media::Made>) {
+    let (mut taken, mut rest, mut total) = (Vec::new(), Vec::new(), 0u64);
+    for file in files {
+        let size = std::fs::metadata(&file.path).map(|m| m.len()).unwrap_or(u64::MAX);
+        if total.saturating_add(size) > MAX_ATTACHED {
+            rest.push(file);
+            continue;
+        }
+        match file.bytes() {
+            Ok(bytes) => {
+                total += bytes.len() as u64;
+                taken.push(crate::mail::Attachment { name: file.name(), mime: file.mime.clone(), bytes });
+            }
+            _ => rest.push(file),
+        }
+    }
+    (taken, rest)
+}
+
 /// Email as [crate::channel] sees it.
 struct Channel {
     config: EmailConfig,
@@ -452,6 +477,17 @@ impl Channel {
     /// Sends [text] in the thread [chat], or as a new mail to [chat] when it is an address; with
     /// [subject] instead of the thread's.
     async fn mail(&self, chat: &str, text: &str, subject: Option<&str>) -> Result<Option<String>, String> {
+        self.mail_with(chat, text, subject, &[]).await
+    }
+
+    /// [Channel::mail] with files attached.
+    async fn mail_with(
+        &self,
+        chat: &str,
+        text: &str,
+        subject: Option<&str>,
+        attachments: &[crate::mail::Attachment],
+    ) -> Result<Option<String>, String> {
         let domain = self.config.address.rsplit('@').next().unwrap_or("localhost");
         let id = format!("<{}@{domain}>", invincible::token::hex(&invincible::token::random::<12>()?));
         let (to, thread_subject, parent, references, quoted) = match self.thread(chat) {
@@ -483,6 +519,7 @@ impl Channel {
             in_reply_to: parent.as_deref(),
             references: &references,
             message_id: &id,
+            attachments,
         });
         send_mail(&self.config, &self.password, &self.network, &to, &message).await?;
         // The next answer follows this one in the thread.
@@ -533,6 +570,32 @@ impl Transport for Channel {
     /// One mail per answer, however long.
     fn answer<'a>(&'a self, chat: &'a str, markdown: &'a str) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move { self.mail(chat, &crate::markdown::to_plain(markdown), None).await.map(drop) })
+    }
+
+    /// The answer with the turn's files attached, up to [MAX_ATTACHED] in all; the rest after it.
+    fn answer_with<'a>(
+        &'a self,
+        chat: &'a str,
+        markdown: &'a str,
+        files: Vec<crate::media::Made>,
+    ) -> BoxFuture<'a, Result<Vec<crate::media::Made>, String>> {
+        Box::pin(async move {
+            let (attachments, rest) = attachments(files);
+            self.mail_with(chat, &crate::markdown::to_plain(markdown), None, &attachments).await?;
+            Ok(rest)
+        })
+    }
+
+    /// A file on its own: a mail in the thread with it attached.
+    fn send_file<'a>(&'a self, chat: &'a str, file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move {
+            let attachment =
+                crate::mail::Attachment { name: file.name(), mime: file.mime.clone(), bytes: file.bytes()? };
+            if attachment.bytes.len() as u64 > MAX_ATTACHED {
+                return Ok(false);
+            }
+            self.mail_with(chat, &format!("Attached: {}", file.name()), None, &[attachment]).await.map(|_| true)
+        })
     }
 
     fn ask<'a>(&'a self, chat: &'a str, question: &'a Question) -> BoxFuture<'a, Result<(), String>> {

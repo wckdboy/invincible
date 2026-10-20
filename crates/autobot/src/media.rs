@@ -1,7 +1,8 @@
 //! `speak` and `generate_image`: speech and pictures made by the node's backends (Invincible's
 //! `/v1/audio/speech` and `/v1/images/generations`, spec/agent.md), saved in
-//! `$AUTOBOT_HOME/attachments`, and sent with the answer on a channel that can carry them (a
-//! Telegram voice message or photo, a Discord attachment).
+//! `$AUTOBOT_HOME/attachments`, and sent with the answer on a channel that can carry them: a
+//! Telegram voice message or photo, a Discord or email attachment, a Slack file, a Signal
+//! attachment, Matrix media, a WhatsApp audio or image message.
 //!
 //! The tools are offered only when the node has such a backend. A backend on the node is used
 //! without asking; one off the machine is asked for first, like a cloud model, and then the
@@ -213,6 +214,25 @@ pub fn multipart(fields: &[(&str, &str)], file: (&str, &str, &str, &[u8])) -> Re
     body.extend_from_slice(bytes);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
     Ok((format!("multipart/form-data; boundary={boundary}"), body))
+}
+
+/// The most a file sent to a chat can be (each platform has its own limit below this).
+pub const MAX_SEND: u64 = 50 * 1024 * 1024;
+
+impl Made {
+    /// Its file name, as a platform shows it.
+    pub fn name(&self) -> String {
+        self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".to_owned())
+    }
+
+    /// Its bytes, for sending: at most [MAX_SEND].
+    pub fn bytes(&self) -> Result<Vec<u8>, String> {
+        let size = std::fs::metadata(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?.len();
+        if size > MAX_SEND {
+            return Err(format!("{} is larger than {} MB", self.path.display(), MAX_SEND >> 20));
+        }
+        std::fs::read(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))
+    }
 }
 
 /// Hands [made] to the turn's chat, when the turn came from one.

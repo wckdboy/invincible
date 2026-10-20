@@ -6,7 +6,8 @@
 //! - A stranger who messages the app gets a one-time code; nobody gets in until the owner runs
 //!   `autobot slack approve <code>` on the machine. In channels, only allowed users are answered.
 //! - Approvals are Block Kit buttons only the person asked can press; progress is one message,
-//!   edited as the agent works; answers are in Slack's mrkdwn; audio files are transcribed.
+//!   edited as the agent works; answers are in Slack's mrkdwn; audio files are transcribed;
+//!   speech and pictures the agent makes are uploaded as files in the thread.
 //! - Commands: `!status`, `!new` … in a message (Slack keeps `/` for registered commands), or a
 //!   slash command registered for the app (`/autobot status`, or `/status` itself).
 //!
@@ -16,7 +17,8 @@
 //! ```
 //!
 //! The app needs Socket Mode on, an app-level token with `connections:write`, and a bot token
-//! with `chat:write`, `im:history`, `app_mentions:read`, `files:read` (for voice), with the
+//! with `chat:write`, `im:history`, `app_mentions:read`, `files:read` (for voice),
+//! `files:write` (for speech and pictures), with the
 //! `message.im` and `app_mention` events and Interactivity on. Slack's servers see the messages.
 
 use std::path::{Path, PathBuf};
@@ -156,11 +158,75 @@ impl Client {
         Ok(reply["ts"].as_str().map(str::to_owned))
     }
 
+    /// A form-encoded Web API call (for the methods that take no JSON); its answer.
+    async fn call_form(&self, method: &str, fields: &[(&str, &str)]) -> Result<Value, String> {
+        let response = self
+            .http
+            .post(format!("{}/{method}", self.api))
+            .bearer_auth(&self.bot_token)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(form(fields))
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|e| format!("Slack {method}: {}", e.without_url()))?;
+        let reply: Value = response.json().await.map_err(|e| format!("Slack {method}: {}", e.without_url()))?;
+        if reply["ok"] != true {
+            return Err(format!("Slack {method}: {}", reply["error"].as_str().unwrap_or("failed")));
+        }
+        Ok(reply)
+    }
+
+    /// A file the turn made, shared in [chat] (and its thread): Slack's upload in three steps (an
+    /// address for it, the bytes there, then shared). Needs the `files:write` scope.
+    pub async fn upload(&self, chat: &str, file: &crate::media::Made) -> Result<(), String> {
+        let (channel, thread) = place(chat);
+        let bytes = file.bytes()?;
+        let name = file.name();
+        let length = bytes.len().to_string();
+        let reply = self.call_form("files.getUploadURLExternal", &[("filename", &name), ("length", &length)]).await?;
+        let (Some(url), Some(id)) = (reply["upload_url"].as_str(), reply["file_id"].as_str()) else {
+            return Err("Slack files.getUploadURLExternal: no upload address".to_owned());
+        };
+        // The bytes go only to Slack's own hosts (or to the stand-in the API is).
+        let host = reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default();
+        let api_host = reqwest::Url::parse(&self.api).ok().and_then(|u| u.host_str().map(str::to_owned));
+        if !(host == "slack.com" || host.ends_with(".slack.com") || Some(&host) == api_host.as_ref()) {
+            return Err(format!("Slack gave an upload address off Slack ({host})"));
+        }
+        invincible::egress::check(url)?;
+        let response = self
+            .http
+            .post(url)
+            .header("content-type", if file.mime.is_empty() { "application/octet-stream" } else { &file.mime })
+            .body(bytes)
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| format!("Slack upload: {}", e.without_url()))?;
+        if !response.status().is_success() {
+            return Err(format!("Slack upload: {}", response.status()));
+        }
+        let files = json!([{ "id": id, "title": name }]).to_string();
+        let mut fields = vec![("files", files.as_str()), ("channel_id", channel)];
+        if let Some(thread) = thread {
+            fields.push(("thread_ts", thread));
+        }
+        self.call_form("files.completeUploadExternal", &fields).await.map(drop)
+    }
+
     async fn update(&self, channel: &str, ts: &str, text: &str, blocks: Value) -> Result<(), String> {
         self.call("chat.update", json!({ "channel": channel, "ts": ts, "text": text, "blocks": blocks }))
             .await
             .map(drop)
     }
+}
+
+/// [fields] as an `application/x-www-form-urlencoded` body.
+fn form(fields: &[(&str, &str)]) -> String {
+    let mut url = reqwest::Url::parse("http://form.invalid/").expect("a valid address");
+    url.query_pairs_mut().extend_pairs(fields);
+    url.query().unwrap_or_default().to_owned()
 }
 
 /// `C123/1712.0001` → (`C123`, Some(`1712.0001`)).
@@ -210,6 +276,10 @@ impl Transport for Channel {
             }
             Ok(())
         })
+    }
+
+    fn send_file<'a>(&'a self, chat: &'a str, file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move { self.client.upload(chat, file).await.map(|()| true) })
     }
 
     fn edit<'a>(&'a self, chat: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), String>> {
@@ -556,6 +626,10 @@ mod tests {
         assert_eq!(escape("a < b & c"), "a &lt; b &amp; c");
         assert_eq!(place("C1/1.2"), ("C1", Some("1.2")));
         assert_eq!(place("#ops"), ("#ops", None));
+        assert_eq!(
+            form(&[("filename", "a b.mp3"), ("files", "[{\"id\":\"F1\"}]")]),
+            "filename=a+b.mp3&files=%5B%7B%22id%22%3A%22F1%22%7D%5D"
+        );
     }
 
     #[test]

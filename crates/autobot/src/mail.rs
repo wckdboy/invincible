@@ -354,10 +354,62 @@ pub struct Outgoing<'a> {
     pub in_reply_to: Option<&'a str>,
     pub references: &'a [String],
     pub message_id: &'a str,
+    /// Files that go with it (speech, a picture the agent made).
+    pub attachments: &'a [Attachment],
 }
 
-/// [mail] as the bytes SMTP's DATA takes (CRLF lines, dots not yet doubled).
+/// A file attached to a mail.
+pub struct Attachment {
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
+/// [bytes] in base64, lines of 76.
+fn encode_base64(bytes: &[u8]) -> String {
+    let text = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let mut out = String::with_capacity(text.len() + text.len() / 38 + 2);
+    for line in text.as_bytes().chunks(76) {
+        out.push_str(std::str::from_utf8(line).unwrap_or_default());
+        out.push_str("\r\n");
+    }
+    out
+}
+
+/// [mail] as the bytes SMTP's DATA takes (CRLF lines, dots not yet doubled): plain text, or
+/// with attachments `multipart/mixed` (the text first).
 pub fn compose(mail: &Outgoing) -> String {
+    let mut text = compose_text(mail);
+    if mail.attachments.is_empty() {
+        return text;
+    }
+    let digest = <sha2::Sha256 as sha2::Digest>::digest(mail.message_id.as_bytes());
+    let boundary = format!("autobot-{}", invincible::token::hex(&digest[..12]));
+    let at = text.find("\r\n\r\n").unwrap_or(text.len());
+    let body = text.split_off(at + 4);
+    text.truncate(at);
+    let head = text.replace(
+        "Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable",
+        &format!("Content-Type: multipart/mixed; boundary=\"{boundary}\""),
+    );
+    let mut out = format!(
+        "{head}\r\n\r\n--{boundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n{body}"
+    );
+    for file in mail.attachments {
+        let name: String = file.name.chars().filter(|c| c.is_ascii_alphanumeric() || ".-_".contains(*c)).collect();
+        let mime: String =
+            file.mime.chars().filter(|c| c.is_ascii_alphanumeric() || "/.+-_".contains(*c)).collect::<String>();
+        let mime = if mime.is_empty() { "application/octet-stream".to_owned() } else { mime };
+        out.push_str(&format!(
+            "--{boundary}\r\nContent-Type: {mime}; name=\"{name}\"\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{}",
+            encode_base64(&file.bytes)
+        ));
+    }
+    out.push_str(&format!("--{boundary}--\r\n"));
+    out
+}
+
+fn compose_text(mail: &Outgoing) -> String {
     let date = chrono::Local::now().to_rfc2822();
     let name = mail.from_name.replace(['"', '\\', '\r', '\n'], "");
     let mut head = vec![
@@ -475,6 +527,7 @@ T2dnUw==\r\n\
             in_reply_to: Some("<m2@example.com>"),
             references: &refs,
             message_id: "<r1@example.org>",
+            attachments: &[],
         });
         assert!(text.contains("From: \"Ops bot\" <bot@example.org>\r\n"));
         assert!(text.contains("Subject: =?UTF-8?B?"));
@@ -487,5 +540,33 @@ T2dnUw==\r\n\
         assert!(back.automatic, "the bot's own mail is marked, so no bot answers it");
         assert_eq!(reply_subject("Re: x"), "Re: x");
         assert_eq!(reply_subject("x"), "Re: x");
+    }
+
+    #[test]
+    fn files_go_as_attachments() {
+        let speech = vec![7u8; 200];
+        let attachments = [
+            Attachment { name: "speech 1.mp3".into(), mime: "audio/mpeg".into(), bytes: speech.clone() },
+            Attachment { name: "image-1.png".into(), mime: "image/png".into(), bytes: b"\x89PNG".to_vec() },
+        ];
+        let text = compose(&Outgoing {
+            from: "bot@example.org",
+            from_name: "Ops",
+            to: "ann@example.com",
+            subject: "Re: hi",
+            text: "Here it is.",
+            in_reply_to: None,
+            references: &[],
+            message_id: "<r2@example.org>",
+            attachments: &attachments,
+        });
+        assert!(text.contains("Content-Type: multipart/mixed; boundary=\"autobot-"), "{text}");
+        assert!(!text.split("\r\n\r\n").next().unwrap().contains("text/plain"), "the head is multipart");
+        assert!(text.contains("Content-Disposition: attachment; filename=\"speech1.mp3\""));
+        assert!(text.contains("Content-Type: image/png; name=\"image-1.png\""));
+        assert!(text.lines().all(|l| l.len() <= 78));
+        let back = parse(text.as_bytes());
+        assert_eq!(back.text, "Here it is.");
+        assert_eq!(back.audio, Some(("audio/mpeg".into(), "speech1.mp3".into(), speech)));
     }
 }

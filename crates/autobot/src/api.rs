@@ -31,6 +31,8 @@ use crate::session::Session;
 const APPROVAL_WAIT: Duration = Duration::from_secs(10 * 60);
 /// How long a turn's stream stays open after its answer for what the nudge kept.
 const NUDGE_WAIT: Duration = Duration::from_secs(30);
+/// A turn's body at most: its text and [crate::images::MAX_SENT_IMAGES] images in base64.
+const TURN_BODY_LIMIT: usize = crate::images::MAX_SENT_IMAGES * crate::images::MAX_SENT_IMAGE / 3 * 4 + 1024 * 1024;
 
 pub struct ApiState {
     token: String,
@@ -362,7 +364,8 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/openai/v1/chat/completions", post(openai_chat))
         .route("/v1/agent/sessions", get(sessions))
         .route("/v1/agent/sessions/{id}", get(history))
-        .route("/v1/agent/sessions/{id}/turns", post(turn))
+        // A turn may carry images (base64: a third larger than they are).
+        .route("/v1/agent/sessions/{id}/turns", post(turn).layer(axum::extract::DefaultBodyLimit::max(TURN_BODY_LIMIT)))
         .route("/v1/agent/sessions/{id}/retry", post(retry))
         .route("/v1/agent/sessions/{id}/reset", post(reset))
         .route("/v1/agent/sessions/{id}/steer", post(steer))
@@ -608,6 +611,55 @@ struct TurnBody {
     /// A personality for this turn (`none` for none); the one in use otherwise.
     #[serde(default)]
     personality: Option<String>,
+    /// Images beside the text, as OpenAI-style parts:
+    /// `{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,…"}}`.
+    #[serde(default)]
+    images: Vec<Value>,
+}
+
+/// The data: URL of an image part (`image_url` an object with `url`, or the URL itself).
+fn image_url(part: &Value) -> Option<&str> {
+    part["image_url"]["url"].as_str().or(part["image_url"].as_str()).or(part["url"].as_str())
+}
+
+/// The turn's images, kept in the bot's attachments; why not, when one is not an image, too
+/// large, or there are too many.
+fn sent_images(bot: &BotApi, parts: &[Value]) -> Result<Vec<crate::images::Attachment>, String> {
+    if parts.len() > crate::images::MAX_SENT_IMAGES {
+        return Err(format!("at most {} images in a turn", crate::images::MAX_SENT_IMAGES));
+    }
+    let urls = parts
+        .iter()
+        .map(|part| {
+            image_url(part).ok_or_else(|| {
+                "an image is {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/…;base64,…\"}}".to_owned()
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let dir = bot.home().join("attachments");
+    urls.into_iter().map(|url| crate::images::from_data_url(url, &dir)).collect()
+}
+
+/// What one turn changes in its bot's agent.
+#[derive(Default)]
+struct Overrides {
+    personality: Option<String>,
+    vision: Option<bool>,
+}
+
+/// Whether the bot's model can see images, as the gateway says (None: not known, or the gateway
+/// did not answer in time).
+async fn sees(agent: &Agent) -> Option<bool> {
+    let infos = tokio::time::timeout(Duration::from_secs(3), agent.gateway.model_info()).await.ok()?.ok()?;
+    crate::vision(&infos, agent.gateway.model())
+}
+
+fn cannot_see(model: &str) -> Response {
+    error(
+        StatusCode::BAD_REQUEST,
+        "model_cannot_see_images",
+        &format!("{model} can't see images; pick a model that can (`autobot model`), or send the text alone"),
+    )
 }
 
 /// `POST …/fork {"to"?, "at"?}`: a new conversation that starts as this one did (up to
@@ -653,7 +705,7 @@ async fn turn(
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let Ok(TurnBody { text, bot: named, personality }) = serde_json::from_slice(&body) else {
+    let Ok(TurnBody { text, bot: named, personality, images }) = serde_json::from_slice(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
     };
     // A new conversation may name its bot; one that exists keeps the bot it has.
@@ -665,7 +717,7 @@ async fn turn(
         },
         None => bot,
     };
-    if text.trim().is_empty() {
+    if text.trim().is_empty() && images.is_empty() {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the text is empty");
     }
     if let Some(name) = personality.as_deref().filter(|p| !crate::personality::is_none(p))
@@ -673,6 +725,20 @@ async fn turn(
     {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e);
     }
+    // Images: only to a model that can see (as far as the gateway knows), and within the caps.
+    let vision = if images.is_empty() {
+        None
+    } else {
+        let agent = bot.agent();
+        let vision = match agent.options.vision {
+            Some(known) => Some(known),
+            None => sees(&agent).await,
+        };
+        if vision == Some(false) {
+            return cannot_see(agent.gateway.model());
+        }
+        vision
+    };
     let open = match bot.open(&id) {
         Ok(open) => open,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
@@ -680,7 +746,11 @@ async fn turn(
     let Ok(guard) = open.clone().try_lock_owned() else {
         return error(StatusCode::CONFLICT, "session_busy", "a turn is running in this session");
     };
-    stream_turn(&state, bot, id, guard, text, Vec::new(), personality)
+    let images = match sent_images(&bot, &images) {
+        Ok(images) => images,
+        Err(e) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    };
+    stream_turn(&state, bot, id, guard, text, images, Overrides { personality, vision })
 }
 
 /// `POST …/retry`: the last turn leaves the conversation and its request runs again, streamed
@@ -701,7 +771,7 @@ async fn retry(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Path(id): P
         Err(e) => return error(StatusCode::NOT_FOUND, "not_found", &e),
     };
     let text = request["content"].as_str().unwrap_or_default().to_owned();
-    stream_turn(&state, bot, id, guard, text, crate::images::of(&request), None)
+    stream_turn(&state, bot, id, guard, text, crate::images::of(&request), Overrides::default())
 }
 
 /// Runs a turn of [bot] on its own task and streams its events.
@@ -712,18 +782,23 @@ fn stream_turn(
     mut guard: tokio::sync::OwnedMutexGuard<Open>,
     text: String,
     images: Vec<crate::images::Attachment>,
-    personality: Option<String>,
+    Overrides { personality, vision }: Overrides,
 ) -> Response {
     let inbox = bot.inbox(&id);
     let (tx, rx) = mpsc::unbounded_channel::<Value>();
-    let agent = match personality {
-        Some(personality) => {
-            let mut agent = (*bot.agent()).clone();
-            agent.options.personality = Some(personality);
-            Arc::new(agent)
+    let agent = if personality.is_some() || vision.is_some() {
+        let mut agent = (*bot.agent()).clone();
+        if personality.is_some() {
+            agent.options.personality = personality;
         }
-        None => bot.agent(),
+        if vision.is_some() {
+            agent.options.vision = vision;
+        }
+        Arc::new(agent)
+    } else {
+        bot.agent()
     };
+    let with_images = !images.is_empty();
     let waiting = state.waiting.clone();
     let runtime = bot.runtime.clone();
     // The turn runs on its own: a client that goes away does not stop it.
@@ -753,6 +828,10 @@ fn stream_turn(
         let turn = agent.turn_with(session, &text, &images, &approver, grants, &events);
         let last = match crate::tools::TURN.scope(context, turn).await {
             Ok(outcome) => json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts }),
+            // The router picked a model that cannot see, found out only now.
+            Err(e) if with_images && crate::images::refuses_images(&e) => {
+                json!({ "type": "error", "code": "model_cannot_see_images", "text": e })
+            }
             Err(e) => json!({ "type": "error", "text": e }),
         };
         let messages = guard.session.messages.clone();

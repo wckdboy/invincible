@@ -1,7 +1,9 @@
 //! Matrix, through the client-server API: the bot long-polls `/sync`, so it needs no public
 //! address. It answers direct rooms (two members), and in larger rooms the messages that
 //! mention it; it joins rooms it is invited to directly. Approvals by replying; progress is one
-//! message, edited (`m.replace`); answers carry HTML; voice messages (`m.audio`) are transcribed.
+//! message, edited (`m.replace`); answers carry HTML; voice messages (`m.audio`) are transcribed;
+//! speech and pictures the agent makes are uploaded to the homeserver and sent as `m.audio` (a
+//! voice message) and `m.image`.
 //!
 //! ```toml
 //! [matrix]
@@ -139,6 +141,49 @@ impl Client {
         Ok(reply["event_id"].as_str().map(str::to_owned))
     }
 
+    /// [file] in the homeserver's media store; its `mxc://` address.
+    pub async fn upload(&self, file: &crate::media::Made) -> Result<String, String> {
+        let bytes = file.bytes()?;
+        let mime = if file.mime.is_empty() { "application/octet-stream" } else { file.mime.as_str() };
+        let url = format!("{}/_matrix/media/v3/upload?filename={}", self.base, escape(&file.name()));
+        let response = self
+            .http
+            .post(url)
+            .bearer_auth(&self.token)
+            .header("content-type", mime)
+            .body(bytes)
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| format!("Matrix upload: {}", e.without_url()))?;
+        let status = response.status();
+        let value: Value = response.json().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!("Matrix upload: {}", value["error"].as_str().unwrap_or(status.as_str())));
+        }
+        value["content_uri"].as_str().map(str::to_owned).ok_or_else(|| "Matrix upload: no content address".to_owned())
+    }
+
+    /// A file the turn made, in [room]: uploaded, then sent as an audio message (a voice
+    /// message, where the client shows those) or a picture; the event's id.
+    pub async fn send_file(&self, room: &str, file: &crate::media::Made) -> Result<Option<String>, String> {
+        let uri = self.upload(file).await?;
+        let size = std::fs::metadata(&file.path).map(|m| m.len()).unwrap_or(0);
+        let mut content = json!({
+            "msgtype": match file.kind {
+                crate::media::Kind::Speech => "m.audio",
+                crate::media::Kind::Image => "m.image",
+            },
+            "body": file.name(),
+            "url": uri,
+            "info": { "mimetype": file.mime, "size": size },
+        });
+        if file.kind == crate::media::Kind::Speech {
+            content["org.matrix.msc3245.voice"] = json!({});
+        }
+        self.send_event(room, content).await
+    }
+
     async fn download(&self, url: &str, mime: &str, name: &str) -> Result<crate::voice::Audio, String> {
         let rest = url.strip_prefix("mxc://").ok_or("not a Matrix media address")?;
         let (server, id) = rest.split_once('/').ok_or("not a Matrix media address")?;
@@ -199,6 +244,10 @@ impl Transport for Channel {
             });
             self.client.send_event(chat, content).await.map(drop)
         })
+    }
+
+    fn send_file<'a>(&'a self, chat: &'a str, file: &'a crate::media::Made) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move { self.client.send_file(chat, file).await.map(|_| true) })
     }
 
     fn typing<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, ()> {
