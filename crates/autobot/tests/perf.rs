@@ -5,6 +5,9 @@
 //! Everything runs against stand-ins on loopback (a llama.cpp-like engine, a gateway) with
 //! isolated homes; nothing here touches a real node.
 
+// The terminal benchmarks run on a pseudo-terminal.
+#![cfg(unix)]
+
 mod support;
 
 use std::collections::HashSet;

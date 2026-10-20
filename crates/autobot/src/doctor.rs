@@ -525,8 +525,15 @@ pub fn free_space(path: &Path) -> Option<u64> {
     while !dir.exists() {
         dir = dir.parent()?;
     }
-    let stat = rustix::fs::statvfs(dir).ok()?;
-    Some(stat.f_bavail.saturating_mul(stat.f_frsize))
+    #[cfg(unix)]
+    {
+        let stat = rustix::fs::statvfs(dir).ok()?;
+        Some(stat.f_bavail.saturating_mul(stat.f_frsize))
+    }
+    #[cfg(windows)]
+    {
+        fs4::available_space(dir).ok()
+    }
 }
 
 /// Whether the clock follows network time (receipts, schedules and TLS need it right).

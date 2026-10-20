@@ -488,7 +488,10 @@ impl Tools {
         json!([
             function(
                 "terminal",
-                "Run a shell command (sh -c) in the working directory and return its output and exit code. For something that keeps running (a dev server, a watcher, a long build), set background: it returns at once with a process number for the process tool.",
+                &format!(
+                    "Run a shell command ({}) in the working directory and return its output and exit code. For something that keeps running (a dev server, a watcher, a long build), set background: it returns at once with a process number for the process tool.",
+                    if cfg!(windows) { "PowerShell" } else { "sh -c" }
+                ),
                 json!({
                     "command": { "type": "string", "description": "The command line." },
                     "background": { "type": "boolean", "description": "Leave it running and return at once (default false)." },
@@ -980,9 +983,7 @@ impl Tools {
         } else if self.confined {
             crate::sandbox::command(command, &self.workdir)?
         } else {
-            let mut plain = tokio::process::Command::new("sh");
-            plain.arg("-c").arg(command);
-            plain
+            crate::shell::command(command)
         };
         let id = crate::procs::start(command, child, &self.workdir, stopper)?;
         Ok(format!(
@@ -1036,9 +1037,7 @@ impl Tools {
         } else if self.confined {
             crate::sandbox::command(command, &self.workdir)?
         } else {
-            let mut plain = tokio::process::Command::new("sh");
-            plain.arg("-c").arg(command);
-            plain
+            crate::shell::command(command)
         };
         if self.ssh.is_none() {
             child.current_dir(&self.workdir);
@@ -1330,14 +1329,13 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
         tokio::fs::create_dir_all(dir).await.map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     // Never through a link: the approval was for this path, not where a link points.
-    if let Ok(meta) = tokio::fs::symlink_metadata(path).await {
-        if meta.file_type().is_symlink() {
-            return Err(format!("{} is a symbolic link; not writing through it", path.display()));
-        }
-        #[cfg(unix)]
-        if std::os::unix::fs::MetadataExt::nlink(&meta) > 1 {
-            return Err(format!("{} has other hard links; not writing to it", path.display()));
-        }
+    let meta = tokio::fs::symlink_metadata(path).await.ok();
+    if meta.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
+        return Err(format!("{} is a symbolic link; not writing through it", path.display()));
+    }
+    #[cfg(unix)]
+    if meta.as_ref().is_some_and(|m| std::os::unix::fs::MetadataExt::nlink(m) > 1) {
+        return Err(format!("{} has other hard links; not writing to it", path.display()));
     }
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -1501,6 +1499,8 @@ mod tests {
         assert_eq!(tools.resolve("/etc/hosts"), std::path::PathBuf::from("/etc/hosts"));
     }
 
+    // Symbolic links and Unix paths.
+    #[cfg(unix)]
     #[test]
     fn reads_outside_the_workdir_need_approval() {
         let (tools, dir) = tools();
@@ -1543,6 +1543,8 @@ mod tests {
         assert!(matches!(tools.action(&call), Some(Action::Write { bytes: 2, inside: true, .. })));
     }
 
+    // Symbolic links and Unix paths.
+    #[cfg(unix)]
     #[tokio::test]
     async fn writes_never_go_through_links_or_into_dot_names_unseen() {
         let (tools, dir) = tools();

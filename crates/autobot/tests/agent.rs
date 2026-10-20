@@ -1520,6 +1520,8 @@ async fn the_browser_reads_types_clicks_and_shows_a_screenshot_asking_where_it_s
     assert!(!session.messages.iter().skip(1).any(autobot::session::is_request));
 }
 
+// A shell-script stand-in for ssh, and a symbolic link.
+#[cfg(unix)]
 /// A stand-in for `ssh`: it skips the options, notes the host, and runs the remote command here.
 fn fake_ssh(dir: &std::path::Path) -> String {
     let path = dir.join("fake-ssh");
@@ -1533,6 +1535,8 @@ fn fake_ssh(dir: &std::path::Path) -> String {
     path.display().to_string()
 }
 
+// A shell-script stand-in for ssh, and a symbolic link.
+#[cfg(unix)]
 #[tokio::test]
 async fn with_ssh_commands_and_files_are_on_the_other_machine() {
     let dir = temp("ssh");

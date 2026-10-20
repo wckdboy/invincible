@@ -1,6 +1,8 @@
 //! `invincible update` end to end against a release server on loopback: signed SHA256SUMS,
 //! VERSION, an archive with stand-in programs; up to date, update, check, go back, and a release
 //! that is not signed with the pinned key.
+// The stand-in programs are shell scripts.
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

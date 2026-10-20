@@ -263,12 +263,8 @@ fn verify(check: &Check, work: &Path, answer: &str, called: &[String]) -> Result
             if text.contains(value.as_str()) { Err(format!("{path} still contains {value:?}")) } else { Ok(()) }
         }
         Check::CommandOk { command } => {
-            let out = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .current_dir(work)
-                .output()
-                .map_err(|e| format!("{command}: {e}"))?;
+            let out =
+                crate::shell::std_command(command).current_dir(work).output().map_err(|e| format!("{command}: {e}"))?;
             if out.status.success() {
                 Ok(())
             } else {

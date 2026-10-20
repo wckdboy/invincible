@@ -67,6 +67,7 @@ impl Ssh {
 
     /// The shared connection's socket: in a private directory here (short, for the socket
     /// path limit).
+    #[cfg(unix)]
     fn control_path() -> PathBuf {
         let uid = rustix::process::getuid().as_raw();
         std::env::temp_dir().join(format!("autobot-ssh-{uid}"))
@@ -74,17 +75,23 @@ impl Ssh {
 
     /// `ssh` with the options and the host; the remote command comes after.
     pub fn base(&self) -> tokio::process::Command {
-        let dir = Self::control_path();
-        if std::fs::create_dir_all(&dir).is_ok() {
-            use std::os::unix::fs::PermissionsExt as _;
-            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-        }
         let mut command = tokio::process::Command::new(&self.program);
-        command
-            .args(["-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPersist=600"])
-            .arg("-o")
-            .arg(format!("ControlPath={}/%C", dir.display()))
-            .args(["-o", "ServerAliveInterval=30", "-o", "ConnectTimeout=15"]);
+        command.args(["-o", "BatchMode=yes"]);
+        // One shared connection for every call. Windows' OpenSSH cannot share one: each call
+        // connects on its own there.
+        #[cfg(unix)]
+        {
+            let dir = Self::control_path();
+            if std::fs::create_dir_all(&dir).is_ok() {
+                use std::os::unix::fs::PermissionsExt as _;
+                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            }
+            command
+                .args(["-o", "ControlMaster=auto", "-o", "ControlPersist=600"])
+                .arg("-o")
+                .arg(format!("ControlPath={}/%C", dir.display()));
+        }
+        command.args(["-o", "ServerAliveInterval=30", "-o", "ConnectTimeout=15"]);
         if let Some(port) = self.port {
             command.arg("-p").arg(port.to_string());
         }

@@ -3,6 +3,9 @@
 //! HOME: installing twice changes nothing the second time, a changed definition is reloaded,
 //! status reads how a service last stopped, uninstall removes everything.
 
+// launchd and systemd, with shell-script stand-ins.
+#![cfg(unix)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

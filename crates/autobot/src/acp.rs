@@ -1340,8 +1340,9 @@ impl EditorFiles {
     /// [command] in an editor's terminal: what it printed and how it ended, as the `terminal`
     /// tool says it; None when the editor could not open one.
     async fn run(&self, command: &str, cwd: &Path, timeout: Duration, limit: usize) -> Option<Result<String, String>> {
+        let (program, args) = crate::shell::argv(command);
         let params = json!({
-            "sessionId": self.session, "command": "sh", "args": ["-c", command],
+            "sessionId": self.session, "command": program, "args": args,
             "cwd": cwd.display().to_string(), "outputByteLimit": limit,
         });
         // Asked on a task of its own: a terminal the editor opens after the turn was cancelled

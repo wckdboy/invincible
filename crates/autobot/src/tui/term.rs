@@ -8,6 +8,7 @@
 //! back; the window's title says `autobot · <project>` while the chat runs, and is put back too.
 
 use std::io::Write;
+#[cfg(unix)]
 use std::os::fd::AsFd;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -211,11 +212,17 @@ pub struct Terminal {
 fn raw_on() -> std::io::Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     // Output processing back on: a stray newline (a library's message) still starts its line.
-    let fd = std::io::stdout();
-    if let Ok(mut modes) = rustix::termios::tcgetattr(fd.as_fd()) {
-        modes.output_modes.insert(rustix::termios::OutputModes::OPOST | rustix::termios::OutputModes::ONLCR);
-        let _ = rustix::termios::tcsetattr(fd.as_fd(), rustix::termios::OptionalActions::Now, &modes);
+    #[cfg(unix)]
+    {
+        let fd = std::io::stdout();
+        if let Ok(mut modes) = rustix::termios::tcgetattr(fd.as_fd()) {
+            modes.output_modes.insert(rustix::termios::OutputModes::OPOST | rustix::termios::OutputModes::ONLCR);
+            let _ = rustix::termios::tcsetattr(fd.as_fd(), rustix::termios::OptionalActions::Now, &modes);
+        }
     }
+    // The console reads the escape sequences everything here is drawn with.
+    #[cfg(windows)]
+    let _ = crossterm::ansi_support::supports_ansi();
     let mut out = String::from("\x1b[?2004h");
     out.push_str(osc::FOCUS_ON);
     if KITTY.load(Ordering::SeqCst) {
@@ -320,10 +327,14 @@ impl Terminal {
     }
 
     /// ctrl+z: stops the process the way a shell expects, and takes the terminal back on `fg`.
+    /// Windows has no job control: nothing happens there.
     pub fn stop(&self) {
-        suspend();
-        let _ = rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TSTP);
-        resume();
+        #[cfg(unix)]
+        {
+            suspend();
+            let _ = rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TSTP);
+            resume();
+        }
     }
 }
 
