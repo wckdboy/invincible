@@ -116,6 +116,8 @@ jobs:
           autobot service status
           # Again: converges; the services keep running (the binaries did not change).
           INVINCIBLE_FROM_SOURCE=1 INVINCIBLE_REF=${{ github.event.pull_request.head.sha || github.sha }} sh install.sh --no-setup
+          # (Reloaded if its PATH changed: give it a moment.)
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:7777/healthz && break; sleep 2; done
           curl -sf http://127.0.0.1:7777/healthz
           autobot service status
           autobot doctor || true

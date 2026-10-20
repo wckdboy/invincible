@@ -560,9 +560,12 @@ if [ "$NO_SERVICE" = 1 ]; then
     :
 elif services_installed; then
     # Brought up to date (only what changed is rewritten), restarted on new binaries.
-    "$BIN/autobot" service install >/dev/null 2>&1 || warn "the services did not update (\`autobot service install\` says why)"
+    # (A definition changes with the binaries' path or the PATH services are given.)
+    refreshed=$("$BIN/autobot" service install 2>&1) || warn "the services did not update (\`autobot service install\` says why)"
     if [ "$CHANGED" = 1 ]; then
         "$BIN/autobot" service restart >/dev/null 2>&1 && ok "restarted the services on the new binaries"
+    elif printf '%s\n' "$refreshed" | grep -qE '^(started|reloaded) '; then
+        ok "updated the service definitions and restarted what changed"
     else
         ok "the services are up to date"
     fi
