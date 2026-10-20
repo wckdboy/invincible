@@ -38,7 +38,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use crate::bots::Runtime;
 use crate::channel::{Asking, BoxFuture, Incoming, Progress, Question, Transport};
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EmailConfig {
     #[serde(default)]

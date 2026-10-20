@@ -39,7 +39,7 @@ const MESSAGE_LIMIT: usize = 1900;
 /// message-content intent).
 const INTENTS: u64 = (1 << 12) | (1 << 9);
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiscordConfig {
     #[serde(default)]

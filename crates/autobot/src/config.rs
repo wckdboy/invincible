@@ -30,7 +30,7 @@ use serde::Deserialize;
 /// [terminal]
 /// notify = "auto"                    # a long turn ended, a question waits: auto, bell, off
 /// ```
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
@@ -83,7 +83,7 @@ pub struct Config {
     pub homeassistant: crate::homeassistant::HomeAssistantConfig,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TerminalConfig {
     /// How the terminal tells you a turn longer than 10 seconds ended or a question waits, while
@@ -92,7 +92,7 @@ pub struct TerminalConfig {
     pub notify: NotifyMode,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NotifyMode {
     /// A desktop notification where the terminal shows them (iTerm2, Ghostty, WezTerm, kitty),
@@ -103,7 +103,7 @@ pub enum NotifyMode {
     Off,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServeConfig {
     /// Where the agent API listens; the gateway passes `/v1/agent` through to it.
@@ -121,7 +121,7 @@ impl Default for ServeConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayConfig {
     #[serde(default = "gateway_url")]
@@ -168,7 +168,7 @@ impl GatewayConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentConfig {
     #[serde(default)]
@@ -282,7 +282,7 @@ impl AgentConfig {
 }
 
 /// How tool calls that change things (commands, file writes) are approved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ApprovalMode {
     /// Ask, unless allowlisted. The default.
@@ -298,7 +298,7 @@ pub enum ApprovalMode {
     Trust,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApprovalConfig {
     #[serde(default = "ask")]
@@ -317,7 +317,7 @@ impl Default for ApprovalConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TelegramConfig {
     #[serde(default)]

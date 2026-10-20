@@ -30,7 +30,7 @@ use crate::channel::{Asking, BoxFuture, Incoming, Progress, Question, Transport}
 /// Signal sends longer texts as an attachment; parts of this size read as messages.
 const MESSAGE_LIMIT: usize = 2000;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SignalConfig {
     #[serde(default)]

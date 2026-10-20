@@ -34,7 +34,7 @@ use crate::bots::Runtime;
 /// Most entities one listing shows.
 const LISTED: usize = 300;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HomeAssistantConfig {
     /// Home Assistant's address; none: no `home` tool.

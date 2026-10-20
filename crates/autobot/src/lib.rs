@@ -20,6 +20,7 @@ pub mod doctor;
 pub mod email;
 pub mod eval;
 pub mod gateway;
+pub mod guard;
 pub mod heartbeat;
 pub mod homeassistant;
 pub mod hooks;

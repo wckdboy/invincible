@@ -41,7 +41,7 @@ const MESSAGE_LIMIT: usize = 4096;
 /// An interactive message's body.
 const BUTTON_TEXT_LIMIT: usize = 1024;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WhatsAppConfig {
     #[serde(default)]

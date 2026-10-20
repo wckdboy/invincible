@@ -14,7 +14,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Docker {
     pub image: String,

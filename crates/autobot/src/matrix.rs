@@ -28,7 +28,7 @@ use crate::channel::{Asking, BoxFuture, Incoming, Progress, Question, Transport}
 
 const MESSAGE_LIMIT: usize = 16_000;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MatrixConfig {
     #[serde(default)]

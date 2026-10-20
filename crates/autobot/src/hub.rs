@@ -12,12 +12,20 @@
 //! written without the executable bit, and a script is a file the agent may read and, like any
 //! command, ask to run.
 //!
+//! Every install is pinned: `.source` in the skill's directory keeps its repository, the commit
+//! it came from, its directory's tree on GitHub and a digest of its files. `autobot skills check`
+//! asks GitHub whether that directory changed since (and whether the files here were edited);
+//! `update` fetches the new one and shows it the same way, with what changed, before it replaces
+//! the old. Every review carries the skills guard's scan and trust level ([crate::guard]).
+//!
 //! Every request follows the node's network mode (offline: no hub).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 /// Files fetched for one skill at most.
 pub const MAX_FILES: usize = 64;
@@ -62,7 +70,125 @@ pub struct Fetched {
     pub files: Vec<(String, u64, bool)>,
     /// Files left out (too many, too large).
     pub left_out: Vec<String>,
+    /// Where it is pinned: repository, revision, directory and its tree.
+    pub pin: Source,
     root: PathBuf,
+}
+
+/// Where an installed skill came from (its `.source`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Source {
+    /// The directory on GitHub, at the revision installed.
+    pub source: String,
+    /// `owner/repo/skill` or `owner/repo`: what `install` and `update` take.
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub repo: String,
+    /// The skill's directory in the repository ("" for its root).
+    #[serde(default)]
+    pub path: String,
+    /// The commit installed.
+    #[serde(default)]
+    pub rev: String,
+    /// The directory's tree id at that commit: the same while the skill is.
+    #[serde(default)]
+    pub tree: String,
+    /// The files' digest when installed ([digest]).
+    #[serde(default)]
+    pub digest: String,
+    #[serde(default)]
+    pub installed: String,
+}
+
+impl Source {
+    /// One from before pins were kept: only the URL, which says the rest.
+    fn fill(mut self) -> Self {
+        if self.owner.is_empty()
+            && let Some(rest) = self.source.strip_prefix("https://github.com/")
+        {
+            let mut parts = rest.splitn(5, '/');
+            if let (Some(owner), Some(repo), Some("tree"), Some(rev)) =
+                (parts.next(), parts.next(), parts.next(), parts.next())
+            {
+                let path = parts.next().unwrap_or_default().trim_end_matches('/').to_owned();
+                self.id = match path.rsplit('/').next() {
+                    Some(last) if !last.is_empty() => format!("{owner}/{repo}/{last}"),
+                    _ => format!("{owner}/{repo}"),
+                };
+                (self.owner, self.repo, self.rev, self.path) = (owner.into(), repo.into(), rev.into(), path);
+            }
+        }
+        self
+    }
+}
+
+/// Where the installed skill [name] came from; None for one not from the hub.
+pub fn source(home: &Path, name: &str) -> Option<Source> {
+    let text = std::fs::read_to_string(home.join("skills").join(name).join(".source")).ok()?;
+    let source: Source = serde_json::from_str(&text).ok()?;
+    let source = source.fill();
+    (!source.owner.is_empty()).then_some(source)
+}
+
+/// A digest of [dir]'s files (their paths and contents, `.source` left out): changed by any edit.
+pub fn digest(dir: &Path) -> String {
+    fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<(String, Vec<u8>)>) {
+        if depth > 4 {
+            return;
+        }
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
+                walk(root, &entry.path(), depth + 1, out);
+            } else if kind.is_file() {
+                let rel = entry.path().strip_prefix(root).map(|r| r.display().to_string()).unwrap_or(name);
+                out.push((rel, std::fs::read(entry.path()).unwrap_or_default()));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(dir, dir, 0, &mut files);
+    files.sort();
+    let mut hash = Sha256::new();
+    for (rel, bytes) in files {
+        hash.update((rel.len() as u64).to_le_bytes());
+        hash.update(rel.as_bytes());
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(&bytes);
+    }
+    invincible::token::hex(&hash.finalize())
+}
+
+/// What `autobot skills check` found for an installed skill.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// Its directory is as installed (the repository may have moved on).
+    Current,
+    /// Its directory changed at this commit.
+    Changed(String),
+    /// Its directory is no longer there.
+    Gone,
+    /// Not installed from the hub: nothing to check against.
+    Unpinned,
+    /// GitHub could not say.
+    Failed(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct Checked {
+    pub name: String,
+    pub status: Status,
+    /// Its files were edited here since it was installed.
+    pub modified: bool,
+    pub trust: crate::guard::Trust,
+    pub source: Option<Source>,
 }
 
 impl Drop for Fetched {
@@ -217,17 +343,56 @@ impl Hub {
         }
     }
 
+    /// The repository's latest commit.
+    async fn head(&self, owner: &str, repo: &str) -> Result<String, String> {
+        let commit = self.json(&format!("{}/repos/{owner}/{repo}/commits/HEAD", self.github)).await?;
+        Ok(commit["sha"]
+            .as_str()
+            .filter(|s| s.len() >= 7 && s.chars().all(|c| c.is_ascii_hexdigit()))
+            .ok_or(format!("{owner}/{repo}: GitHub gave no revision"))?
+            .to_owned())
+    }
+
+    async fn tree(&self, owner: &str, repo: &str, rev: &str) -> Result<Value, String> {
+        self.json(&format!("{}/repos/{owner}/{repo}/git/trees/{rev}?recursive=1", self.github)).await
+    }
+
+    /// Whether the skill pinned at [pin] changed on GitHub since.
+    pub async fn status(&self, pin: &Source) -> Status {
+        let result: Result<Status, String> = async {
+            let rev = self.head(&pin.owner, &pin.repo).await?;
+            if rev == pin.rev {
+                return Ok(Status::Current);
+            }
+            let tree = self.tree(&pin.owner, &pin.repo, &rev).await?;
+            let now = if pin.path.is_empty() {
+                tree["sha"].as_str().map(str::to_owned)
+            } else {
+                tree["tree"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|e| e["type"] == "tree" && e["path"].as_str() == Some(pin.path.as_str()))
+                    .and_then(|e| e["sha"].as_str().map(str::to_owned))
+            };
+            Ok(match now {
+                None => Status::Gone,
+                // Pinned before trees were kept: only the commit says.
+                Some(_) if pin.tree.is_empty() => Status::Changed(rev),
+                Some(now) if now == pin.tree => Status::Current,
+                Some(_) => Status::Changed(rev),
+            })
+        }
+        .await;
+        result.unwrap_or_else(Status::Failed)
+    }
+
     /// Fetches [id]'s directory from GitHub into a fresh directory under [scratch], for review.
     pub async fn fetch(&self, id: &str, scratch: &Path) -> Result<Fetched, String> {
         let (owner, repo, skill) = self.resolve(id).await?;
         // One revision for the tree and every file, so they belong together.
-        let commit = self.json(&format!("{}/repos/{owner}/{repo}/commits/HEAD", self.github)).await?;
-        let rev = commit["sha"]
-            .as_str()
-            .filter(|s| s.len() >= 7 && s.chars().all(|c| c.is_ascii_hexdigit()))
-            .ok_or(format!("{owner}/{repo}: GitHub gave no revision"))?
-            .to_owned();
-        let tree = self.json(&format!("{}/repos/{owner}/{repo}/git/trees/{rev}?recursive=1", self.github)).await?;
+        let rev = self.head(&owner, &repo).await?;
+        let tree = self.tree(&owner, &repo, &rev).await?;
         let blobs: Vec<(String, u64, String)> = tree["tree"]
             .as_array()
             .into_iter()
@@ -237,6 +402,14 @@ impl Hub {
                 Some((e["path"].as_str()?.to_owned(), e["size"].as_u64().unwrap_or(0), e["mode"].as_str()?.to_owned()))
             })
             .collect();
+        let trees: Vec<(String, String)> = tree["tree"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|e| e["type"] == "tree")
+            .filter_map(|e| Some((e["path"].as_str()?.to_owned(), e["sha"].as_str()?.to_owned())))
+            .collect();
+        let root_tree = tree["sha"].as_str().unwrap_or_default().to_owned();
         let skill_dirs: Vec<String> = blobs
             .iter()
             .filter_map(|(p, _, _)| match p.rsplit_once('/') {
@@ -276,9 +449,27 @@ impl Hub {
         let root = scratch.join(format!("autobot-hub-{stamp}"));
         let target = root.join(&name);
         std::fs::create_dir_all(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+        let dir_tree = if dir.is_empty() {
+            root_tree
+        } else {
+            trees.iter().find(|(p, _)| *p == dir).map(|(_, s)| s.clone()).unwrap_or_default()
+        };
+        let url = format!("https://github.com/{owner}/{repo}/tree/{rev}/{dir}");
+        let pin = Source {
+            source: url.clone(),
+            id: if dir.is_empty() { format!("{owner}/{repo}") } else { format!("{owner}/{repo}/{name}") },
+            owner: owner.clone(),
+            repo: repo.clone(),
+            path: dir.clone(),
+            rev: rev.clone(),
+            tree: dir_tree,
+            digest: String::new(),
+            installed: String::new(),
+        };
         let mut fetched = Fetched {
             name: name.clone(),
-            url: format!("https://github.com/{owner}/{repo}/tree/{rev}/{dir}"),
+            url,
+            pin,
             dir: target.clone(),
             skill_md: String::new(),
             files: Vec::new(),
@@ -337,6 +528,36 @@ impl Hub {
     }
 }
 
+/// `autobot skills check`: every installed skill (or [only]) against where it is pinned, on
+/// [hub] (or why it cannot be reached).
+pub async fn check(hub: Result<&Hub, &str>, home: &Path, only: Option<&str>) -> Result<Vec<Checked>, String> {
+    let skills: Vec<crate::skills::Skill> =
+        crate::skills::list(home).into_iter().filter(|s| only.is_none_or(|o| s.name == o)).collect();
+    if let Some(name) = only
+        && skills.is_empty()
+    {
+        return Err(format!("there is no skill {name:?}"));
+    }
+    let mut out = Vec::new();
+    for skill in skills {
+        let pin = source(home, &skill.name);
+        let modified = match (&pin, skill.dir()) {
+            (Some(pin), Some(dir)) if !pin.digest.is_empty() => digest(dir) != pin.digest,
+            _ => false,
+        };
+        let status = match &pin {
+            Some(pin) => match hub {
+                Ok(hub) => hub.status(pin).await,
+                Err(why) => Status::Failed(why.to_owned()),
+            },
+            None => Status::Unpinned,
+        };
+        let trust = crate::guard::Trust::of(pin.as_ref().map(|p| p.owner.as_str()));
+        out.push(Checked { name: skill.name, status, modified, trust, source: pin });
+    }
+    Ok(out)
+}
+
 fn host(url: &str) -> String {
     reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_else(|| url.to_owned())
 }
@@ -366,6 +587,54 @@ pub fn review(fetched: &Fetched) -> String {
     for line in fetched.skill_md.lines() {
         out.push_str(&format!("  │ {line}\n"));
     }
+    out.push_str(&format!("\n{}", guard(fetched)));
+    out
+}
+
+/// The skills guard's word on [fetched]: its trust level and what its files may do.
+pub fn guard(fetched: &Fetched) -> String {
+    crate::guard::report(fetched.trust(), &crate::guard::audit(&fetched.dir), 20)
+}
+
+impl Fetched {
+    pub fn trust(&self) -> crate::guard::Trust {
+        crate::guard::Trust::of(Some(&self.pin.owner))
+    }
+
+    /// Whether going in unasked needs `--force`: something dangerous, not from an official source.
+    pub fn needs_force(&self) -> bool {
+        crate::guard::needs_force(self.trust(), &crate::guard::audit(&self.dir))
+    }
+}
+
+/// What an update of the installed skill [name] to [fetched] changes: files added, removed and
+/// changed, and SKILL.md's diff.
+pub fn changes(home: &Path, name: &str, fetched: &Fetched) -> String {
+    let here = home.join("skills").join(name);
+    let mut out = format!("{name}: what changes\n");
+    let old: Vec<String> = crate::skills::find(home, name).map(|s| s.files()).unwrap_or_default().into_iter().collect();
+    let new: Vec<&str> = fetched.files.iter().map(|(p, _, _)| p.as_str()).filter(|p| *p != "SKILL.md").collect();
+    for path in &new {
+        match std::fs::read(here.join(path)) {
+            Err(_) => out.push_str(&format!("    added    {path}\n")),
+            Ok(bytes) if std::fs::read(fetched.dir.join(path)).ok().as_deref() != Some(&bytes[..]) => {
+                out.push_str(&format!("    changed  {path}\n"))
+            }
+            Ok(_) => {}
+        }
+    }
+    for path in old.iter().filter(|p| !new.contains(&p.as_str())) {
+        out.push_str(&format!("    removed  {path}\n"));
+    }
+    let before = std::fs::read_to_string(here.join("SKILL.md")).unwrap_or_default();
+    let diff = crate::diff::unified(&before, &fetched.skill_md, "SKILL.md");
+    if diff.is_empty() {
+        out.push_str("    SKILL.md is the same\n");
+    } else {
+        for line in diff.lines() {
+            out.push_str(&format!("  │ {line}\n"));
+        }
+    }
     out
 }
 
@@ -373,10 +642,50 @@ pub fn review(fetched: &Fetched) -> String {
 pub fn install(home: &Path, fetched: &Fetched) -> Result<(Vec<String>, Vec<String>), String> {
     let (installed, skipped) = crate::skills::install(home, &fetched.dir.display().to_string())?;
     for name in &installed {
-        let source = serde_json::json!({ "source": fetched.url, "installed": chrono::Local::now().to_rfc3339() });
-        let _ = std::fs::write(home.join("skills").join(name).join(".source"), source.to_string());
+        pin(home, name, fetched)?;
     }
     Ok((installed, skipped))
+}
+
+/// Writes the installed skill [name]'s `.source`: where [fetched] came from, and its digest now.
+fn pin(home: &Path, name: &str, fetched: &Fetched) -> Result<(), String> {
+    let dir = home.join("skills").join(name);
+    let pin = Source { digest: digest(&dir), installed: chrono::Local::now().to_rfc3339(), ..fetched.pin.clone() };
+    let text = serde_json::to_string_pretty(&pin).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(".source"), text).map_err(|e| format!("{}: {e}", dir.display()))
+}
+
+/// Replaces the installed skill [name] with [fetched] (after the owner's yes): the old one is
+/// kept aside until the new one is in, and put back if it does not go in.
+pub fn update(home: &Path, name: &str, fetched: &Fetched) -> Result<(), String> {
+    let dir = home.join("skills").join(name);
+    if !dir.join("SKILL.md").is_file() {
+        return Err(format!("{name} is not a skill directory from the hub"));
+    }
+    let aside = home.join(format!(".skill-update-{name}"));
+    let _ = std::fs::remove_dir_all(&aside);
+    std::fs::rename(&dir, &aside).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let result = crate::skills::install(home, &fetched.dir.display().to_string());
+    let back = |why: String| {
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::rename(&aside, &dir);
+        Err(why)
+    };
+    match result {
+        Ok((installed, _)) if installed == [name] => {}
+        Ok((installed, skipped)) => {
+            for other in installed.iter().filter(|n| *n != name) {
+                let _ = crate::skills::remove(home, other);
+            }
+            return back(format!("the new version is not {name:?}: {}", [installed, skipped].concat().join("; ")));
+        }
+        Err(e) => return back(e),
+    }
+    if let Err(e) = pin(home, name, fetched) {
+        return back(e);
+    }
+    let _ = std::fs::remove_dir_all(&aside);
+    Ok(())
 }
 
 #[cfg(test)]

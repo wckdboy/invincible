@@ -37,7 +37,7 @@ use crate::channel::{BoxFuture, Incoming, Pressed, Progress, Question, Transport
 /// Slack takes up to 40,000 characters, but shows long messages badly; parts of this size.
 const MESSAGE_LIMIT: usize = 3900;
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SlackConfig {
     #[serde(default)]

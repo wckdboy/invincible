@@ -45,7 +45,7 @@ const OWN: &[&str] =
     &["telegram", "discord", "slack", "email", "signal", "matrix", "whatsapp", "hooks", "serve", "bot"];
 
 /// `[bot]`: about this bot.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BotConfig {
     /// The default bot's name (a named bot is called as its directory).

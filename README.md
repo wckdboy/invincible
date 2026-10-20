@@ -489,9 +489,20 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   files (scripts marked) and its SKILL.md in full, and installs it only when you say yes
   (`--yes` after reading). Nothing in it runs: files are written plain, and a script is
   something the agent may ask to run like any command. The hub follows the node's network mode.
+  Every review carries a scan of the skill's files (scripts that download and run code, read
+  keys or send them away, delete beyond the skill, start themselves at login, open a shell to
+  somewhere; text in its Markdown that looks like a prompt injection) and its trust level:
+  `official` (Autobot's own, or the format's authors), `known publisher` (an organization
+  publishing skills for its own product), `community` (anyone else), `local` (from a path or a
+  git URL). With `--yes`, a skill the scan calls dangerous from anyone but an official source
+  needs `--force` too. An install is pinned (`.source`: repository, commit, the directory's tree,
+  a digest of its files): `autobot skills check` says which skills changed upstream and which you
+  edited here, `autobot skills update [name]` shows what an update changes (files added, removed
+  and changed, SKILL.md's diff, the scan) and replaces the skill when you say yes (an edited one
+  is left alone under `--yes`), and `autobot skills audit [name]` scans what is installed.
   `autobot skills install <git-url|path>`
   adds the skills in a repository or directory (regular files only, never over one you have),
-  `autobot skills` lists them, `autobot skills remove <name>`. The agent writes skills itself:
+  `autobot skills` lists them, `autobot skills uninstall <name>` (or `remove`). The agent writes skills itself:
   after a task that took many steps and worked, `create_skill`; when a skill it followed was
   wrong, `improve_skill`, shown to you as a diff. Neither is used until you keep it
   (`autobot skills accept <name>`, `/skills accept <name>` in the terminal or Telegram, or the
@@ -513,7 +524,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (`[agent] disabled_tools`), `autobot tools disable terminal` a whole group (`[agent] tools`),
   `enable` turns them back on.
 - **Configuration from the command line:** `autobot config` shows the bot's file;
-  `autobot config get agent.max_steps`, `autobot config set approvals.mode edits`,
+  `autobot config get agent.max_steps` shows the value the bot runs with, defaults included
+  (`24  (default)`, `40  (set in config.toml)`, `inherited from config.toml` for a named bot);
+  `autobot config set approvals.mode edits` and
   `autobot config unset gateway.model` change one dotted key in `config.toml` (or a bot's
   `bot.toml`), with its comments kept. A change that would not load (an unknown key, a value of
   the wrong kind, a tool group that does not exist) is refused and the file stays as it was;
