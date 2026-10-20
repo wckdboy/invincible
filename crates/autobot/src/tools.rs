@@ -27,18 +27,22 @@ pub struct Tools {
     limit: usize,
     /// Commands run in this container instead of here ([crate::docker]).
     docker: Option<std::sync::Arc<crate::docker::Docker>>,
+    /// The `browser` tool is offered (when a browser is installed).
+    browser: bool,
+    /// Commands and files on another machine ([crate::ssh]).
+    ssh: Option<std::sync::Arc<crate::ssh::Ssh>>,
 }
 
 /// Tool groups, as Autobot recipes name them, and the tools each allows here. Groups the node has
 /// no tools for (`web`, `vault`) allow nothing.
 pub const GROUPS: &[(&str, &[&str])] = &[
     ("files-read", &["read_file", "list_dir", "search", "find_files", "read_skill"]),
-    ("web", &["web_fetch"]),
+    ("web", &["web_fetch", "browser"]),
     // Every MCP server's tools.
     ("mcp", &["mcp"]),
     ("files-write", &["write_file", "edit_file"]),
-    ("memory", &["remember", "search_sessions", "propose_skill"]),
-    ("terminal", &["terminal", "process"]),
+    ("memory", &["remember", "search_sessions", "create_skill", "improve_skill", "update_user_profile"]),
+    ("terminal", &["terminal", "process", "execute_code"]),
     ("plan", &["todo"]),
 ];
 
@@ -115,17 +119,31 @@ pub enum Call {
     },
     ReadSkill {
         name: String,
+        /// One of its supporting files instead of its SKILL.md.
+        file: Option<String>,
     },
     Schedule {
         when: String,
         task: String,
         name: Option<String>,
     },
-    ProposeSkill {
+    /// A new skill, proposed to the owner (`create_skill`; `propose_skill` before).
+    CreateSkill {
         name: String,
         description: String,
         steps: String,
+        /// Supporting files: (relative path, text).
+        files: Vec<(String, String)>,
     },
+    /// A change to an existing skill, proposed to the owner: a new body, or one exact edit.
+    ImproveSkill {
+        name: String,
+        description: Option<String>,
+        body: Option<String>,
+        edit: Option<(String, String)>,
+    },
+    /// A small change to the owner's profile (USER.md).
+    UpdateProfile(crate::profile::Change),
     /// Run by the agent itself (it has the gateway).
     Fetch {
         url: String,
@@ -153,6 +171,13 @@ pub enum Call {
     Todo {
         items: Value,
     },
+    /// The headless browser ([crate::browser]).
+    Browser(crate::browser::Act),
+    /// A script that can call the read-only tools ([crate::script]); run by the agent.
+    ExecuteCode {
+        language: crate::script::Language,
+        code: String,
+    },
 }
 
 impl Tools {
@@ -166,7 +191,26 @@ impl Tools {
             confined: false,
             limit: RESULT_LIMIT,
             docker: None,
+            browser: false,
+            ssh: None,
         }
+    }
+
+    /// Commands and files on another machine ([crate::ssh]).
+    pub fn with_ssh(mut self, ssh: crate::ssh::Ssh) -> Self {
+        self.ssh = Some(std::sync::Arc::new(ssh));
+        self
+    }
+
+    /// The machine commands and files are on, when it is another one.
+    pub fn ssh(&self) -> Option<&crate::ssh::Ssh> {
+        self.ssh.as_deref()
+    }
+
+    /// With the `browser` tool, when there is a browser to drive ([crate::browser::find]).
+    pub fn with_browser(mut self, on: bool) -> Self {
+        self.browser = on;
+        self
     }
 
     /// Commands in a container ([crate::docker]).
@@ -229,6 +273,16 @@ impl Tools {
         self.home.as_deref()
     }
 
+    /// How long a command may run.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// Most text one result hands back.
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
     /// The tools this agent has, in the OpenAI `tools` shape.
     pub fn definitions(&self) -> Value {
         let mut tools = Self::base_definitions();
@@ -250,13 +304,34 @@ impl Tools {
                 }, "required": ["when", "task"] },
             }}));
             list.push(json!({ "type": "function", "function": {
-                "name": "propose_skill",
-                "description": "After a multi-step task that worked and will come up again, write down how to do it as a skill. The owner reviews it before you can use it.",
+                "name": "create_skill",
+                "description": "After a task that took many steps, worked, and will come up again, write down how to do it as a skill (an agentskills.io SKILL.md, with optional supporting files such as a script). The owner reviews it before you can use it. Never put secrets in it.",
                 "parameters": { "type": "object", "properties": {
                     "name": { "type": "string", "description": "short-name-with-dashes" },
-                    "description": { "type": "string", "description": "One line: what it is for" },
-                    "steps": { "type": "string", "description": "The steps, commands and paths, in Markdown" },
+                    "description": { "type": "string", "description": "One line: what it is for and when to use it" },
+                    "steps": { "type": "string", "description": "The instructions: steps, commands and paths, in Markdown" },
+                    "files": { "type": "object", "description": "Optional supporting files: relative path to text (e.g. scripts/check.sh)", "additionalProperties": { "type": "string" } },
                 }, "required": ["name", "description", "steps"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "improve_skill",
+                "description": "Improve one of the owner's skills after using it (a step was wrong, missing or out of date): either one exact edit (old_text, new_text) or the whole new body. The owner sees the diff and decides.",
+                "parameters": { "type": "object", "properties": {
+                    "name": { "type": "string" },
+                    "old_text": { "type": "string", "description": "Exactly as in the skill, once." },
+                    "new_text": { "type": "string" },
+                    "body": { "type": "string", "description": "Instead of an edit: the whole new instructions." },
+                    "description": { "type": "string", "description": "A new one-line description (optional)." },
+                }, "required": ["name"] },
+            }}));
+            list.push(json!({ "type": "function", "function": {
+                "name": "update_user_profile",
+                "description": "Keep the owner's profile (USER.md, in your instructions) current: how they work and want things done (preferences, tools, style, recurring context). One small change per call: add an entry, replace the one containing old_text, or remove it. Never secrets or personal data; the owner sees every change.",
+                "parameters": { "type": "object", "properties": {
+                    "action": { "type": "string", "enum": ["add", "replace", "remove"] },
+                    "text": { "type": "string", "description": "The entry (add, replace): one short line." },
+                    "old_text": { "type": "string", "description": "Part of the entry to replace or remove." },
+                }, "required": ["action"] },
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "search_sessions",
@@ -275,9 +350,21 @@ impl Tools {
             }}));
             list.push(json!({ "type": "function", "function": {
                 "name": "read_skill",
-                "description": "Read one of the owner's skills (how-to notes listed in your instructions) by name.",
-                "parameters": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] },
+                "description": "Read one of the owner's skills (how-to notes listed in your instructions) by name; with file, one of its supporting files.",
+                "parameters": { "type": "object", "properties": {
+                    "name": { "type": "string" },
+                    "file": { "type": "string", "description": "A supporting file the skill lists (relative path)." },
+                }, "required": ["name"] },
             }}));
+        }
+        // The browser, where there is one to drive (and commands run here, not elsewhere).
+        if self.browser
+            && self.docker.is_none()
+            && self.ssh.is_none()
+            && crate::browser::find().is_some()
+            && let Some(list) = tools.as_array_mut()
+        {
+            list.push(crate::browser::definition());
         }
         if let Some(list) = tools.as_array_mut() {
             list.retain(|t| self.offered(t["function"]["name"].as_str().unwrap_or_default()));
@@ -287,6 +374,14 @@ impl Tools {
 
     /// The tools every agent has.
     fn base_definitions() -> Value {
+        let mut all = Self::plain_definitions();
+        if let Some(list) = all.as_array_mut() {
+            list.insert(2, crate::script::definition());
+        }
+        all
+    }
+
+    fn plain_definitions() -> Value {
         let function = |name: &str, description: &str, properties: Value, required: &[&str]| {
             json!({
                 "type": "function",
@@ -395,6 +490,8 @@ impl Tools {
         } else {
             serde_json::from_str(arguments).map_err(|e| format!("the arguments are not JSON: {e}"))?
         };
+        // The old name of create_skill, for models (and trajectories) that know it.
+        let name = if name == "propose_skill" { "create_skill" } else { name };
         if !self.offered(name) {
             return Err(format!("the tool {name:?} is not allowed in this task"));
         }
@@ -444,18 +541,56 @@ impl Tools {
                 path: self.resolve(&text("path").unwrap_or_else(|_| ".".to_owned())),
             },
             "remember" if self.home.is_some() => Call::Remember { text: text("text")? },
-            "read_skill" if self.home.is_some() => Call::ReadSkill { name: text("name")? },
+            "read_skill" if self.home.is_some() => Call::ReadSkill {
+                name: text("name")?,
+                file: args.get("file").and_then(Value::as_str).map(str::to_owned).filter(|f| !f.trim().is_empty()),
+            },
             "schedule_task" if self.home.is_some() => Call::Schedule {
                 when: text("when")?,
                 task: text("task")?,
                 name: args.get("name").and_then(Value::as_str).map(str::to_owned).filter(|n| !n.trim().is_empty()),
             },
             "list_schedules" if self.home.is_some() => Call::ListSchedules,
-            "propose_skill" if self.home.is_some() => {
-                Call::ProposeSkill { name: text("name")?, description: text("description")?, steps: text("steps")? }
+            "create_skill" if self.home.is_some() => Call::CreateSkill {
+                name: text("name")?,
+                description: text("description")?,
+                steps: text("steps")?,
+                files: args
+                    .get("files")
+                    .and_then(Value::as_object)
+                    .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
+                    .unwrap_or_default(),
+            },
+            "improve_skill" if self.home.is_some() => {
+                let opt = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+                let edit = match (opt("old_text"), opt("new_text")) {
+                    (Some(old), Some(new)) => Some((old, new)),
+                    _ => None,
+                };
+                let body = opt("body").filter(|b| !b.trim().is_empty());
+                if edit.is_none() && body.is_none() {
+                    return Err("give old_text and new_text, or the whole body".to_owned());
+                }
+                Call::ImproveSkill { name: text("name")?, description: opt("description"), body, edit }
+            }
+            "update_user_profile" if self.home.is_some() => {
+                use crate::profile::Change;
+                Call::UpdateProfile(match text("action")?.as_str() {
+                    "add" => Change::Add(text("text")?),
+                    "replace" => Change::Replace(text("old_text")?, text("text")?),
+                    "remove" => Change::Remove(text("old_text")?),
+                    other => return Err(format!("unknown action {other:?} (add, replace or remove)")),
+                })
             }
             "search_sessions" if self.home.is_some() => Call::SearchSessions { query: text("query")? },
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
+            "browser" if self.browser => Call::Browser(crate::browser::Act::parse(&args)?),
+            "execute_code" => Call::ExecuteCode {
+                language: crate::script::Language::parse(
+                    args.get("language").and_then(Value::as_str).unwrap_or_default(),
+                )?,
+                code: text("code")?,
+            },
             other => return Err(format!("there is no tool named {other:?}")),
         })
     }
@@ -464,6 +599,30 @@ impl Tools {
     pub fn action(&self, call: &Call) -> Option<Action> {
         match call {
             Call::Terminal { command } | Call::Background { command } => Some(Action::Command(command.clone())),
+            Call::ExecuteCode { language, code } => Some(Action::Command(crate::script::shown(*language, code))),
+            Call::Browser(act) => {
+                use crate::browser::{Act, current_url, origin};
+                let page = || current_url().unwrap_or_else(|| "about:blank".to_owned());
+                match act {
+                    // A new site is an outside read, like a fetch; the page's own site is not.
+                    Act::Navigate { url } => match origin(url) {
+                        Some(to) if current_url().and_then(|c| origin(&c)).as_deref() != Some(to.as_str()) => {
+                            Some(Action::Fetch(to))
+                        }
+                        _ => None,
+                    },
+                    Act::Type { target, text, submit } => Some(Action::Type {
+                        page: page(),
+                        field: target.describe(),
+                        text: text.clone(),
+                        submit: *submit,
+                    }),
+                    Act::Submit { target } => {
+                        Some(Action::Type { page: page(), field: target.describe(), text: String::new(), submit: true })
+                    }
+                    _ => None,
+                }
+            }
             Call::Fetch { url } => Some(Action::Fetch(url.clone())),
             Call::WriteFile { path, content } => Some(Action::Write {
                 path: path.clone(),
@@ -488,7 +647,9 @@ impl Tools {
             Call::Remember { .. }
             | Call::ReadSkill { .. }
             | Call::Schedule { .. }
-            | Call::ProposeSkill { .. }
+            | Call::CreateSkill { .. }
+            | Call::ImproveSkill { .. }
+            | Call::UpdateProfile(_)
             | Call::SearchSessions { .. }
             | Call::ListSchedules
             | Call::CancelSchedule { .. }
@@ -498,6 +659,11 @@ impl Tools {
     }
 
     pub async fn run(&self, call: &Call) -> String {
+        if let Some(ssh) = &self.ssh
+            && let Some(result) = self.remote(ssh, call).await
+        {
+            return cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit);
+        }
         let result = match call {
             Call::Terminal { command } => self.terminal(command).await,
             Call::Background { command } => self.background(command).await,
@@ -532,12 +698,17 @@ impl Tools {
                     .map_err(|e| e.to_string())
                     .and_then(|r| r)
             }
-            Call::Remember { text } => match &self.home {
-                Some(home) => crate::memory::Memory::current(home).add(text).map(|id| format!("remembered (#{id})")),
-                None => Err("no memory here".to_owned()),
+            Call::Remember { text } => match (&self.home, crate::profile::sensitive(text)) {
+                (Some(_), Some(why)) => {
+                    Err(format!("not remembered: it contains {why}; memory is never for secrets or personal data"))
+                }
+                (Some(home), None) => {
+                    crate::memory::Memory::current(home).add(text).map(|id| format!("remembered (#{id})"))
+                }
+                (None, _) => Err("no memory here".to_owned()),
             },
-            Call::ReadSkill { name } => match &self.home {
-                Some(home) => crate::skills::read(home, name),
+            Call::ReadSkill { name, file } => match &self.home {
+                Some(home) => crate::skills::read_with(home, name, file.as_deref()),
                 None => Err("no skills here".to_owned()),
             },
             Call::Schedule { when, task, name } => match &self.home {
@@ -545,9 +716,32 @@ impl Tools {
                 None => Err("no scheduler here".to_owned()),
             },
             Call::Fetch { .. } => Err("web_fetch runs in the agent".to_owned()),
-            Call::ProposeSkill { name, description, steps } => match &self.home {
-                Some(home) => crate::skills::propose(home, name, description, steps),
+            Call::ExecuteCode { .. } => Err("execute_code runs in the agent".to_owned()),
+            Call::Browser(act) => {
+                let shots = self.home.as_ref().map_or_else(std::env::temp_dir, |h| h.join("attachments"));
+                crate::browser::run(act, &shots, self.limit).await.map(|(text, _)| text)
+            }
+            Call::CreateSkill { name, description, steps, files } => match &self.home {
+                Some(home) => crate::skills::propose(home, name, description, steps, files),
                 None => Err("no skills here".to_owned()),
+            },
+            Call::ImproveSkill { name, description, body, edit } => match &self.home {
+                Some(home) => crate::skills::improve(
+                    home,
+                    name,
+                    description.as_deref(),
+                    body.as_deref(),
+                    edit.as_ref().map(|(o, n)| (o.as_str(), n.as_str())),
+                ),
+                None => Err("no skills here".to_owned()),
+            },
+            Call::UpdateProfile(change) => match &self.home {
+                // A team member does not change the owner's profile: it reports to the lead.
+                Some(_) if turn_context().agent.is_some() => {
+                    Err("only the lead agent keeps the owner's profile; tell the lead instead".to_owned())
+                }
+                Some(home) => crate::profile::update(home, change),
+                None => Err("no profile here".to_owned()),
             },
             Call::SearchSessions { query } => match &self.home {
                 Some(home) => {
@@ -572,8 +766,59 @@ impl Tools {
         cut_to(result.unwrap_or_else(|e| format!("error: {e}")), self.limit)
     }
 
+    /// The file tools on the machine [ssh] reaches; None for the calls that run here anyway.
+    async fn remote(&self, ssh: &crate::ssh::Ssh, call: &Call) -> Option<Result<String, String>> {
+        let text = |bytes: Vec<u8>, path: &Path| -> Result<String, String> {
+            if bytes.iter().take(8192).any(|b| *b == 0) {
+                return Err(format!("{} is not a text file ({} bytes)", path.display(), bytes.len()));
+            }
+            Ok(String::from_utf8_lossy(&bytes).into_owned())
+        };
+        Some(match call {
+            Call::ReadFile { path, offset, limit } => {
+                ssh.read(path).await.and_then(|b| text(b, path)).map(|t| lines(&t, *offset, *limit))
+            }
+            Call::WriteFile { path, content } => ssh
+                .write(path, content.as_bytes())
+                .await
+                .map(|()| format!("wrote {} bytes to {}", content.len(), path.display())),
+            Call::EditFile { path, old, new, all } => {
+                let before = match ssh.read(path).await.and_then(|b| text(b, path)) {
+                    Ok(before) => before,
+                    Err(e) => return Some(Err(e)),
+                };
+                match edited(&before, old, new, *all, path) {
+                    Ok((after, found)) => ssh.write(path, after.as_bytes()).await.map(|()| {
+                        let n = if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") };
+                        format!("replaced {n} in {}", path.display())
+                    }),
+                    Err(e) => Err(e),
+                }
+            }
+            Call::ListDir { path } => ssh.list(path).await,
+            Call::Search { pattern, path, glob, ignore_case } => {
+                ssh.search(path, pattern, glob.as_deref(), *ignore_case).await
+            }
+            Call::FindFiles { pattern, path } => ssh.find(path, pattern).await,
+            _ => return None,
+        })
+    }
+
     /// [command] left running; its number, and what it printed in its first second.
     async fn background(&self, command: &str) -> Result<String, String> {
+        if let Some(ssh) = &self.ssh {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default();
+            let pidfile = format!("/tmp/autobot-bg-{stamp}.pid");
+            let child = ssh.background(command, &self.workdir, &pidfile);
+            let id = crate::procs::start(command, child, &std::env::temp_dir(), Some(ssh.stop_command(&pidfile)))?;
+            return Ok(format!(
+                "started background process {id} on {}; read its output with process {{\"action\": \"output\", \"id\": {id}}}, stop it with action stop",
+                ssh.host
+            ));
+        }
         std::fs::create_dir_all(&self.workdir).map_err(|e| format!("{}: {e}", self.workdir.display()))?;
         let mut stopper = None;
         let child = if let Some(docker) = &self.docker {
@@ -599,19 +844,8 @@ impl Tools {
     }
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
-        tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
-        let mut child = if let Some(docker) = &self.docker {
-            let name = docker.ensure(&self.workdir).await?;
-            docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
-        } else if self.confined {
-            crate::sandbox::command(command, &self.workdir)?
-        } else {
-            let mut plain = tokio::process::Command::new("sh");
-            plain.arg("-c").arg(command);
-            plain
-        };
+        let mut child = self.shell_command(command).await?;
         let mut child = child
-            .current_dir(&self.workdir)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -641,22 +875,62 @@ impl Tools {
         }
     }
 
+    /// What runs [command] (`sh -c`) where commands run: here (sandboxed when confined), in the
+    /// container, or on the SSH machine; stopped there after the timeout.
+    pub async fn shell_command(&self, command: &str) -> Result<tokio::process::Command, String> {
+        if self.ssh.is_none() {
+            tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
+        }
+        let mut child = if let Some(ssh) = &self.ssh {
+            ssh.command(command, &self.workdir, Some(self.timeout.as_secs()))
+        } else if let Some(docker) = &self.docker {
+            let name = docker.ensure(&self.workdir).await?;
+            docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
+        } else if self.confined {
+            crate::sandbox::command(command, &self.workdir)?
+        } else {
+            let mut plain = tokio::process::Command::new("sh");
+            plain.arg("-c").arg(command);
+            plain
+        };
+        if self.ssh.is_none() {
+            child.current_dir(&self.workdir);
+        }
+        Ok(child)
+    }
+
     /// What a write or an edit would change, as a unified diff (paths relative to the working
     /// directory); None for other calls, or an edit that would fail.
     pub fn preview(&self, call: &Call) -> Option<String> {
-        let (path, after) = match call {
-            Call::WriteFile { path, content } => (path, content.clone()),
+        // The owner's profile and skills: what changes, before it does.
+        match (call, self.home.as_deref()) {
+            (Call::UpdateProfile(change), Some(home)) => return crate::profile::preview(home, change),
+            (Call::ImproveSkill { name, description, body, edit }, Some(home)) => {
+                let edit = edit.as_ref().map(|(o, n)| (o.as_str(), n.as_str()));
+                let (before, after) =
+                    crate::skills::improved(home, name, description.as_deref(), body.as_deref(), edit).ok()?;
+                let after = after.replacen("proposed: improvement\n", "", 1);
+                return Some(crate::diff::unified(&before, &after, &format!("skills/{name}/SKILL.md (proposed)")));
+            }
+            _ => {}
+        }
+        // What is there now: here, or on the machine commands run on.
+        let now = |path: &Path| match &self.ssh {
+            Some(ssh) => ssh.read_now(path),
+            None => std::fs::read_to_string(path).ok(),
+        };
+        let (path, after, before) = match call {
+            Call::WriteFile { path, content } => (path, content.clone(), now(path).unwrap_or_default()),
             Call::EditFile { path, old, new, all } => {
-                let text = std::fs::read_to_string(path).ok()?;
+                let text = now(path)?;
                 let found = text.matches(old.as_str()).count();
                 if old.is_empty() || found == 0 || (found > 1 && !all) {
                     return None;
                 }
-                (path, text.replace(old.as_str(), new))
+                (path, text.replace(old.as_str(), new), text)
             }
             _ => return None,
         };
-        let before = std::fs::read_to_string(path).unwrap_or_default();
         let label = path.strip_prefix(&self.workdir).unwrap_or(path).display().to_string();
         Some(crate::diff::unified(&before, &after, &label))
     }
@@ -664,6 +938,10 @@ impl Tools {
     /// The file a write or an edit changes and its bytes now (None: it does not exist), to put
     /// it back on undo; nothing when it cannot be read (then there is no undo for it).
     pub fn before(&self, call: &Call) -> Option<(PathBuf, Option<Vec<u8>>)> {
+        // Undo puts files back here; files on another machine have no undo.
+        if self.ssh.is_some() {
+            return None;
+        }
         match call {
             Call::WriteFile { path, .. } | Call::EditFile { path, .. } => match std::fs::read(path) {
                 Ok(bytes) => Some((path.clone(), Some(bytes))),
@@ -855,28 +1133,32 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
     Ok(format!("wrote {} bytes to {}", content.len(), path.display()))
 }
 
+/// [text] with [old] replaced by [new]: exactly once unless [all]; and how many there were.
+fn edited(text: &str, old: &str, new: &str, all: bool, path: &Path) -> Result<(String, usize), String> {
+    if old.is_empty() {
+        return Err("old_text is empty".to_owned());
+    }
+    let found = text.matches(old).count();
+    match (found, all) {
+        (0, _) => Err(format!(
+            "old_text is not in {} (copy it exactly, spaces and line breaks included; read_file shows the file)",
+            path.display()
+        )),
+        (1, _) | (_, true) => Ok((text.replace(old, new), found)),
+        (n, false) => Err(format!(
+            "old_text is in {} {n} times; include more lines around it so it is unique, or set replace_all",
+            path.display()
+        )),
+    }
+}
+
 /// Replaces [old] with [new] in the file at [path]: exactly once unless [all].
 async fn edit(path: &Path, old: &str, new: &str, all: bool) -> Result<String, String> {
     if old.is_empty() {
         return Err("old_text is empty".to_owned());
     }
     let text = read(path).await?;
-    let found = text.matches(old).count();
-    let changed = match (found, all) {
-        (0, _) => {
-            return Err(format!(
-                "old_text is not in {} (copy it exactly, spaces and line breaks included; read_file shows the file)",
-                path.display()
-            ));
-        }
-        (1, _) | (_, true) => text.replace(old, new),
-        (n, false) => {
-            return Err(format!(
-                "old_text is in {} {n} times; include more lines around it so it is unique, or set replace_all",
-                path.display()
-            ));
-        }
-    };
+    let (changed, found) = edited(&text, old, new, all, path)?;
     write(path, &changed).await?;
     Ok(format!(
         "replaced {} in {}",

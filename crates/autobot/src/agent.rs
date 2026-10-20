@@ -33,6 +33,11 @@ pub struct Options {
     pub context_kib: Option<usize>,
     /// Whether the model takes images (None: not known); images are not sent when it does not.
     pub vision: Option<bool>,
+    /// The personality for this conversation (`/personality`); None: the one in use
+    /// ([crate::personality::active]); `none` for none.
+    pub personality: Option<String>,
+    /// Every this many turns, [Agent::nudge] looks for what to keep (0: never).
+    pub nudge_every: usize,
 }
 
 /// What happens during a turn, for whoever is watching (a terminal, a chat).
@@ -99,8 +104,112 @@ impl Agent {
     ) -> Result<Outcome, String> {
         // Tools that act later know which conversation (and Telegram chat) this turn is for.
         let outer = crate::tools::TURN.try_with(Clone::clone).ok().unwrap_or_default();
+        // The main agent's turns go into the turn log ([crate::insights]); one that is stopped
+        // (dropped mid-way) is logged as stopped.
+        let pending = TurnLog {
+            log: self.tools.home().filter(|_| outer.agent.is_none()).map(crate::insights::Log::new),
+            tally: crate::insights::Tally::default(),
+            session: session.id.clone(),
+            project: self.tools.workdir().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            started: std::time::Instant::now(),
+            done: false,
+        };
+        let seen = |event: Event| {
+            pending.tally.see(&event);
+            events(event)
+        };
         let context = crate::tools::TurnContext { session: session.id.clone(), ..outer };
-        crate::tools::TURN.scope(context, self.turn_inner(session, text, images, approver, grants, events)).await
+        let result =
+            crate::tools::TURN.scope(context, self.turn_inner(session, text, images, approver, grants, &seen)).await;
+        let mut pending = pending;
+        pending.finish(match &result {
+            Ok(outcome) if outcome.text.starts_with("Stopped after ") => "stopped",
+            Ok(_) => "answer",
+            Err(_) => "error",
+        });
+        result
+    }
+
+    /// The short look back every [Options::nudge_every] turns: one cheap call over the recent
+    /// conversation for durable facts about the owner and their work, kept in the profile
+    /// (USER.md) and memory through the same checks as the tools (never secrets or personal data).
+    /// What it kept, a line each (`profile: …`, `memory: …`); nothing when it is not time, the
+    /// call fails, or nothing is worth keeping.
+    pub async fn nudge(&self, messages: &[Value], events: &(dyn Fn(Event) + Send + Sync)) -> Vec<String> {
+        let Some(home) = self.tools.home() else { return Vec::new() };
+        let every = self.options.nudge_every;
+        let turns: Vec<usize> =
+            messages.iter().enumerate().filter(|(_, m)| crate::session::is_request(m)).map(|(i, _)| i).collect();
+        if every == 0 || turns.is_empty() || !turns.len().is_multiple_of(every) {
+            return Vec::new();
+        }
+        let from = turns[turns.len().saturating_sub(every)];
+        let mut transcript = String::new();
+        for m in &messages[from..] {
+            let (Some(role @ ("user" | "assistant")), Some(text)) = (m["role"].as_str(), m["content"].as_str()) else {
+                continue;
+            };
+            if !text.trim().is_empty() {
+                transcript.push_str(&format!("{role}: {}\n", text.chars().take(1500).collect::<String>()));
+            }
+        }
+        let known_profile = crate::profile::prompt(home).unwrap_or_else(|| "(empty)".into());
+        let known_memory = crate::memory::Memory::new(home).prompt().unwrap_or_else(|| "(empty)".into());
+        let ask = [
+            json!({ "role": "system", "content": "You keep an assistant's long-term notes about its owner. From the conversation, pick at most 3 durable things worth keeping that are not known yet: how the owner works or wants things done (\"profile\": preferences, tools, style), or facts about their machine, projects and decisions (\"memory\"). Skip one-off details, anything already known, secrets and personal data. Each item is one short line. Answer with JSON only: {\"profile\": [...], \"memory\": [...]}, empty lists when nothing is worth keeping." }),
+            json!({ "role": "user", "content": format!(
+                "Known profile:\n{known_profile}\n\nKnown memory:\n{known_memory}\n\nConversation:\n{}",
+                transcript.chars().take(16_000).collect::<String>()
+            ) }),
+        ];
+        let reply = match self.gateway.chat(&ask, &json!([]), false).await {
+            Ok(reply) => reply,
+            Err(e) => {
+                tracing::debug!("no nudge: {e}");
+                return Vec::new();
+            }
+        };
+        if let Some(id) = &reply.request_id {
+            let decision = reply.decision.as_ref();
+            events(Event::Receipt {
+                id,
+                model: decision.and_then(|d| d["model"].as_str()),
+                tier: decision.and_then(|d| d["tier"].as_str()),
+            });
+        }
+        let text = reply.message["content"].as_str().unwrap_or_default();
+        let Some(found) = text
+            .find('{')
+            .zip(text.rfind('}'))
+            .and_then(|(a, b)| (a < b).then(|| serde_json::from_str::<Value>(&text[a..=b]).ok()).flatten())
+        else {
+            return Vec::new();
+        };
+        let items = |key: &str| -> Vec<String> {
+            found[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(|s| s.trim().to_owned()))
+                .filter(|s| !s.is_empty())
+                .take(3)
+                .collect()
+        };
+        let mut kept = Vec::new();
+        for entry in items("profile") {
+            let change = crate::profile::Change::Add(entry.clone());
+            if crate::profile::update(home, &change).is_ok_and(|r| !r.starts_with("already")) {
+                kept.push(format!("profile: {entry}"));
+            }
+        }
+        let memory = crate::memory::Memory::new(home);
+        for fact in items("memory") {
+            let known = memory.list().iter().any(|f| f.text == fact);
+            if !known && crate::profile::sensitive(&fact).is_none() && memory.add(&fact).is_ok() {
+                kept.push(format!("memory: {fact}"));
+            }
+        }
+        kept
     }
 
     async fn turn_inner(
@@ -310,6 +419,7 @@ impl Agent {
             }
             // Reads that need no approval, next to each other, run at the same time; the rest in
             // order. Results go back in the order the model asked.
+            let mut screenshots: Vec<crate::images::Attachment> = Vec::new();
             let mut rest = own.into_iter().peekable();
             while let Some(first) = rest.next() {
                 let mut batch = vec![first];
@@ -343,6 +453,19 @@ impl Agent {
                 let result = self.call(&session.id, at, &name, &arguments, approver, grants, events).await;
                 events(Event::Output { name: &name, text: &result });
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
+                // A browser screenshot is shown to a model that can see (a tool result cannot
+                // carry an image; a message of its own can).
+                if name == "browser"
+                    && self.options.vision != Some(false)
+                    && let Some(path) = result.strip_prefix("saved a screenshot").and_then(|r| r.rsplit_once(": "))
+                    && let Ok(image) = crate::images::attach(std::path::Path::new(path.1.trim()))
+                {
+                    screenshots.push(image);
+                }
+            }
+            if !screenshots.is_empty() {
+                let note = format!("{}: what the page looks like now)", crate::session::SCREENSHOT_NOTE);
+                session.push(crate::images::message(&note, &std::mem::take(&mut screenshots)))?;
             }
         }
     }
@@ -521,6 +644,9 @@ impl Agent {
         } else {
             events(Event::Tool(&format!("{name} {arguments}")));
         }
+        if let crate::tools::Call::ExecuteCode { language, code } = &call {
+            return self.execute(session, *language, code, approver, grants, events).await;
+        }
         if let crate::tools::Call::Fetch { url } = &call {
             return match self.gateway.fetch(url).await {
                 Ok((text, receipt)) => {
@@ -539,6 +665,35 @@ impl Agent {
             tracing::warn!("no undo for {}: {e}", path.display());
         }
         self.tools.run(&call).await
+    }
+
+    /// `execute_code`, approved already: the script runs where commands run, and its calls to
+    /// the read-only tools are answered here (reads outside the working directory refused,
+    /// fetches asked for like any fetch).
+    #[allow(clippy::too_many_arguments)]
+    async fn execute(
+        &self,
+        session: &str,
+        language: crate::script::Language,
+        code: &str,
+        approver: &dyn Approver,
+        grants: &mut HashSet<Action>,
+        events: &(dyn Fn(Event) + Send + Sync),
+    ) -> String {
+        let command = match crate::script::command_line(language, code) {
+            Ok(line) => self.tools.shell_command(&line).await,
+            Err(e) => Err(e),
+        };
+        let command = match command {
+            Ok(command) => command,
+            Err(e) => return format!("error: {e}"),
+        };
+        let mut rpc = ScriptCalls { agent: self, session, approver, grants, events };
+        let timeout = self.tools.timeout();
+        match crate::script::run(command, language, timeout, self.tools.limit(), &mut rpc).await {
+            Ok(text) => text,
+            Err(e) => format!("error: {e}"),
+        }
     }
 
     /// Summarizes what left the window, so it is not simply forgotten. On the gateway like any
@@ -678,12 +833,21 @@ impl Agent {
              do that).\n\
              To do something later or regularly (a reminder, a check), use schedule_task, never the \
              system crontab, at or launchd. When the owner refers to something from before, \
-             search_sessions finds it. After a multi-step task that worked and will come up again, \
-             propose_skill writes down how. \
+             search_sessions finds it. After a task that took many steps, worked, and will come up \
+             again, write down how with create_skill before you answer; when a skill you followed was \
+             wrong or out of date, fix it with improve_skill. When you learn how the owner likes to \
+             work (a preference, their tools, their style), keep it with update_user_profile. \
              Work step by step, check results, and answer briefly in plain text.",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
         );
+        if let Some(ssh) = self.tools.ssh() {
+            prompt.push_str(&format!(
+                "\nCommands and the file tools run on another machine, {host}, over SSH (the working directory \
+                 is there); files there have no undo, so change them with care.",
+                host = ssh.host,
+            ));
+        }
         if let Some(docker) = self.tools.docker() {
             prompt.push_str(&format!(
                 "\nCommands run in a Linux container ({image}, network {net}) with the working directory \
@@ -699,6 +863,14 @@ impl Agent {
         );
         // A member: who it is, before the rest; it reports back to the lead.
         let member = crate::tools::TURN.try_with(|t| t.agent.clone()).ok().flatten();
+        // The lead's character: SOUL.md and the personality, after the rules they cannot change.
+        if member.is_none()
+            && let Some(home) = self.tools.home()
+            && let Some(soul) = crate::personality::prompt(home, self.options.personality.as_deref())
+        {
+            prompt.push_str("\n\n");
+            prompt.push_str(&soul);
+        }
         if let Some(role) = member.as_deref().and_then(|name| self.team.get(name)) {
             let mut lead = format!(
                 "You are {}, a member of Autobot's team on the owner's machine: {}. The lead agent gave you \
@@ -748,12 +920,93 @@ impl Agent {
                 prompt.push_str("\n\nWhat you remembered from your earlier tasks (keep new facts with `remember`):\n");
                 prompt.push_str(&own);
             }
+            if member.is_none()
+                && let Some(profile) = crate::profile::prompt(home)
+            {
+                prompt.push_str(
+                    "\n\nAbout the owner (their profile, USER.md; keep it current with update_user_profile):\n",
+                );
+                prompt.push_str(&profile);
+            }
             if let Some(skills) = crate::skills::prompt(home) {
                 prompt.push_str("\n\nThe owner's skills (read one with `read_skill` when it fits the task):\n");
                 prompt.push_str(&skills);
             }
         }
         prompt
+    }
+}
+
+/// What answers a script's calls ([Agent::execute]): the read-only tools, under the turn's
+/// approvals.
+struct ScriptCalls<'a> {
+    agent: &'a Agent,
+    session: &'a str,
+    approver: &'a dyn Approver,
+    grants: &'a mut HashSet<Action>,
+    events: &'a (dyn Fn(Event) + Send + Sync),
+}
+
+impl crate::script::Rpc for ScriptCalls<'_> {
+    fn call<'a>(
+        &'a mut self,
+        tool: String,
+        args: Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let (agent, events) = (self.agent, self.events);
+            let call = agent.tools.parse(&tool, &args.to_string())?;
+            let shown: String = format!("{tool} {args}").chars().take(160).collect();
+            events(Event::Tool(&format!("script → {shown}")));
+            if let crate::tools::Call::Fetch { url } = &call {
+                let action = Action::Fetch(url.clone());
+                if let Err(instead) = agent.allowed(self.session, &action, self.approver, self.grants, events).await {
+                    return Err(refusal(&action, instead));
+                }
+                let (text, receipt) = agent.gateway.fetch(url).await?;
+                if let Some(id) = &receipt {
+                    events(Event::Receipt { id, model: Some("fetch"), tier: Some("web") });
+                }
+                return Ok(crate::tools::cut(text));
+            }
+            if let Some(action) = agent.tools.action(&call) {
+                return Err(format!("{}: not from a script; ask with the tool itself", action.describe()));
+            }
+            let result = agent.tools.run(&call).await;
+            match result.strip_prefix("error: ") {
+                Some(e) => Err(e.to_owned()),
+                None => Ok(result),
+            }
+        })
+    }
+}
+
+/// A turn on its way into the turn log: written when it ends, or as stopped when it is dropped.
+struct TurnLog {
+    log: Option<crate::insights::Log>,
+    tally: crate::insights::Tally,
+    session: String,
+    project: String,
+    started: std::time::Instant,
+    done: bool,
+}
+
+impl TurnLog {
+    fn finish(&mut self, outcome: &str) {
+        if std::mem::replace(&mut self.done, true) {
+            return;
+        }
+        let Some(log) = &self.log else { return };
+        let record = self.tally.finish(&self.session, &self.project, self.started.elapsed().as_secs_f64(), outcome);
+        if let Err(e) = log.append(&record) {
+            tracing::warn!("turn log not written: {e}");
+        }
+    }
+}
+
+impl Drop for TurnLog {
+    fn drop(&mut self) {
+        self.finish("stopped");
     }
 }
 

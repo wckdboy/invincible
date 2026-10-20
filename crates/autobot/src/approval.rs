@@ -30,6 +30,13 @@ pub enum Action {
         tool: String,
         arguments: String,
     },
+    /// Type into a web page in the browser (or submit its form): what, where, on which page.
+    Type {
+        page: String,
+        field: String,
+        text: String,
+        submit: bool,
+    },
 }
 
 impl Action {
@@ -42,6 +49,7 @@ impl Action {
             Self::Cloud(_) => "cloud",
             Self::Fetch(_) => "fetch",
             Self::Mcp { .. } => "mcp",
+            Self::Type { .. } => "type",
         }
     }
 
@@ -55,6 +63,14 @@ impl Action {
             Self::Fetch(url) => format!("fetch {url}"),
             Self::Mcp { tool, arguments } => {
                 format!("use {tool} {}", arguments.chars().take(300).collect::<String>())
+            }
+            Self::Type { page, field, text, submit } => {
+                let text: String = text.chars().take(200).collect();
+                match (text.is_empty(), submit) {
+                    (true, _) => format!("submit the form at {field} on {page}"),
+                    (false, false) => format!("type \"{text}\" into {field} on {page}"),
+                    (false, true) => format!("type \"{text}\" into {field} on {page}, and send it"),
+                }
             }
         }
     }

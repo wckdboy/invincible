@@ -130,8 +130,8 @@ async fn an_approved_command_runs_and_its_output_goes_back() {
     assert_eq!(headers["invincible-private"], "1", "agent turns are private by default");
     assert_eq!(
         first["tools"].as_array().unwrap().len(),
-        10,
-        "terminal, process, read, todo, write, edit, fetch, search, find, list"
+        11,
+        "terminal, process, execute_code, read, todo, write, edit, fetch, search, find, list"
     );
     assert_eq!(first["messages"][0]["role"], "system");
     // The second call carries the tool call and its result, without the reasoning.
@@ -395,6 +395,7 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
         [
             "terminal",
             "process",
+            "execute_code",
             "read_file",
             "todo",
             "write_file",
@@ -405,7 +406,9 @@ async fn the_agent_remembers_and_reads_skills_from_its_home() {
             "list_dir",
             "remember",
             "schedule_task",
-            "propose_skill",
+            "create_skill",
+            "improve_skill",
+            "update_user_profile",
             "search_sessions",
             "list_schedules",
             "cancel_schedule",
@@ -603,7 +606,7 @@ async fn the_lead_hands_work_to_its_team_in_parallel() {
         "the lead's conversation stays with the lead"
     );
     let coder = member("coder");
-    assert_eq!(names(&coder), ["terminal", "process"]);
+    assert_eq!(names(&coder), ["terminal", "process", "execute_code"]);
     assert_eq!(coder["model"], "auto");
     // Both answers went back to the lead, by name.
     let back = seen[3].1["messages"].to_string();
@@ -1024,7 +1027,7 @@ async fn a_finished_turn_is_kept_as_a_trajectory_with_what_the_model_saw() {
     let roles: Vec<&str> = t["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
     assert_eq!(roles, ["system", "user", "assistant", "tool", "assistant", "tool", "assistant"]);
     assert_eq!(t["messages"][6]["content"], "It is ok.");
-    assert_eq!(t["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(t["tools"].as_array().unwrap().len(), 11);
     assert_eq!(t["meta"]["outcome"], "answer");
     assert_eq!(t["meta"]["refused"], 1, "rm was not allowlisted");
     assert_eq!(t["meta"]["models"], json!(["qwen"]));
@@ -1220,4 +1223,346 @@ async fn images_go_as_parts_while_the_session_and_trajectories_keep_references()
     let kept = recorder.take();
     assert_eq!(kept.len(), 4);
     assert!(!serde_json::to_string(&kept).unwrap().contains("base64,"), "trajectories keep references too");
+}
+
+#[tokio::test]
+async fn soul_personality_and_profile_shape_the_prompt_and_the_profile_changes_in_diffs() {
+    let (url, script) = gateway(vec![
+        call("update_user_profile", json!({"action": "add", "text": "Prefers answers with the command first"})),
+        call("update_user_profile", json!({"action": "add", "text": "my key is sk-abcdefghijklmnopqrstuvwxyz"})),
+        say("Noted."),
+        say("Again."),
+    ])
+    .await;
+    let dir = temp("soul");
+    std::fs::write(dir.join("SOUL.md"), "Calm, direct, never gushing.").unwrap();
+    autobot::personality::set(&dir, "concise").unwrap();
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let diffs = Mutex::new(Vec::new());
+    let events = |e: Event| {
+        if let Event::Diff(d) = e {
+            diffs.lock().unwrap().push(d.to_owned());
+        }
+    };
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let owner = owner(Answer::Deny);
+    agent.turn(&mut session, "I like commands first", &owner, &mut HashSet::new(), &events).await.unwrap();
+    assert!(owner.asked.lock().unwrap().is_empty(), "the profile is the agent's own to keep");
+    let diffs = diffs.into_inner().unwrap();
+    assert_eq!(diffs.len(), 1, "the refused change shows no diff");
+    assert!(diffs[0].contains("+- Prefers answers with the command first"), "{}", diffs[0]);
+    assert_eq!(autobot::profile::entries(&dir), ["Prefers answers with the command first"]);
+    // A personality for this conversation only, then the next turn's prompt has everything.
+    agent.options.personality = Some("teacher".into());
+    agent.turn(&mut session, "again", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+
+    let script = script.lock().unwrap();
+    let system = |n: usize| script.seen[n].1["messages"][0]["content"].as_str().unwrap().to_owned();
+    let first = system(0);
+    assert!(first.contains("Calm, direct, never gushing."), "SOUL.md");
+    assert!(first.contains("Your personality now (concise"), "the one in use");
+    assert!(script.seen[2].1.to_string().contains("not kept: it contains an API key"));
+    let later = system(3);
+    assert!(later.contains("Your personality now (teacher"));
+    assert!(later.contains("About the owner") && later.contains("- Prefers answers with the command first"));
+    // The approval rules come first: a personality never replaces them.
+    assert!(later.find("need the owner's approval").unwrap() < later.find("Calm, direct").unwrap());
+}
+
+#[tokio::test]
+async fn skills_are_created_and_improved_as_proposals_and_turns_are_logged() {
+    let (url, _script) = gateway(vec![
+        call(
+            "create_skill",
+            json!({"name": "rotate-logs", "description": "Rotate the app's logs", "steps": "1. run scripts/rotate.sh", "files": {"scripts/rotate.sh": "logrotate -f app.conf\n"}}),
+        ),
+        call("improve_skill", json!({"name": "deploy", "old_text": "pull the code", "new_text": "pull the code, fast-forward only"})),
+        // The old name still works.
+        call("propose_skill", json!({"name": "old-name", "description": "d", "steps": "s"})),
+        say("Proposed."),
+    ])
+    .await;
+    let dir = temp("skill-create");
+    std::fs::create_dir_all(dir.join("skills")).unwrap();
+    std::fs::write(dir.join("skills/deploy.md"), "---\ndescription: Deploy\n---\n1. pull the code\n2. restart")
+        .unwrap();
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    let diffs = Mutex::new(Vec::new());
+    let events = |e: Event| {
+        if let Event::Diff(d) = e {
+            diffs.lock().unwrap().push(d.to_owned());
+        }
+    };
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "write it down", &owner(Answer::Deny), &mut HashSet::new(), &events).await.unwrap();
+    let names: Vec<String> = autobot::skills::proposals(&dir).into_iter().map(|s| s.name).collect();
+    assert_eq!(names, ["deploy", "old-name", "rotate-logs"]);
+    let diffs = diffs.into_inner().unwrap();
+    assert_eq!(diffs.len(), 1, "the improvement shows its diff");
+    assert!(diffs[0].contains("+1. pull the code, fast-forward only"), "{}", diffs[0]);
+    assert!(autobot::skills::read(&dir, "deploy").unwrap().contains("1. pull the code\n"), "not used until kept");
+    autobot::skills::accept(&dir, "deploy").unwrap();
+    autobot::skills::accept(&dir, "rotate-logs").unwrap();
+    assert!(autobot::skills::read(&dir, "deploy").unwrap().contains("fast-forward only"));
+    assert_eq!(
+        autobot::skills::read_with(&dir, "rotate-logs", Some("scripts/rotate.sh")).unwrap(),
+        "logrotate -f app.conf\n"
+    );
+    // The turn went into the log with its tools and calls.
+    let turns = autobot::insights::Log::new(&dir).read(0);
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].outcome, "answer");
+    assert_eq!(turns[0].calls.len(), 4);
+    assert_eq!(turns[0].calls[0].model, "qwen");
+    assert_eq!((turns[0].tools["create_skill"], turns[0].tools["improve_skill"]), (1, 1));
+    assert_eq!(turns[0].project, "work");
+}
+
+#[tokio::test]
+async fn every_few_turns_a_nudge_keeps_what_is_worth_keeping() {
+    let (url, script) = gateway(vec![
+        say("First."),
+        say("Second."),
+        say(
+            r#"Here: {"profile": ["Works on Nightfall in Rust"], "memory": ["Builds run on the VPS at night", "the token is ghp_abcdefghijklmnopqrstuvwxyz0123"]}"#,
+        ),
+    ])
+    .await;
+    let dir = temp("nudge");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone());
+    agent.options.nudge_every = 2;
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let owner = owner(Answer::Deny);
+    agent.turn(&mut session, "I work on Nightfall", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    assert!(agent.nudge(&session.messages, &quiet).await.is_empty(), "not yet: no call made");
+    agent.turn(&mut session, "builds run at night", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    let kept = agent.nudge(&session.messages, &quiet).await;
+    assert_eq!(kept, ["profile: Works on Nightfall in Rust", "memory: Builds run on the VPS at night"]);
+    assert_eq!(autobot::profile::entries(&dir), ["Works on Nightfall in Rust"]);
+    let facts: Vec<String> = autobot::memory::Memory::new(&dir).list().into_iter().map(|f| f.text).collect();
+    assert_eq!(facts, ["Builds run on the VPS at night"], "never a secret");
+    {
+        let script = script.lock().unwrap();
+        assert_eq!(script.seen.len(), 3);
+        let ask = script.seen[2].1["messages"][1]["content"].as_str().unwrap();
+        assert!(ask.contains("user: I work on Nightfall") && ask.contains("assistant: Second."));
+        assert_eq!(script.seen[2].0["invincible-private"], "1", "a nudge is as private as the turns");
+    }
+    agent.options.nudge_every = 0;
+    assert!(agent.nudge(&session.messages, &quiet).await.is_empty());
+}
+
+/// The last tool result the model was sent in call [n].
+fn tool_result(script: &Script, n: usize) -> String {
+    let messages = script.seen[n].1["messages"].as_array().unwrap();
+    messages.iter().rev().find(|m| m["role"] == "tool").unwrap()["content"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn the_browser_reads_types_clicks_and_shows_a_screenshot_asking_where_it_should() {
+    if autobot::browser::find().is_none() {
+        eprintln!("no Chrome, Chromium, Edge or Brave here: skipped");
+        return;
+    }
+    let page = r#"<!doctype html><html><head><title>Test page</title></head><body>
+        <h1>Hello</h1>
+        <input id="q" placeholder="Search">
+        <button id="b" onclick="document.getElementById('out').innerText = 'clicked ' + document.getElementById('q').value">Show</button>
+        <p id="out">nothing yet</p>
+        <form action="/sent"><input name="x"><button type="submit">Send</button></form>
+        <a href="https://example.org/">away</a>
+        </body></html>"#;
+    let site = axum::Router::new().route("/", axum::routing::get(move || async move { axum::response::Html(page) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, site).await.unwrap() });
+    let (url, script) = gateway(vec![
+        call("browser", json!({"action": "navigate", "url": format!("{origin}/")})),
+        call("browser", json!({"action": "snapshot"})),
+        call("browser", json!({"action": "type", "selector": "#q", "text": "rust"})),
+        call("browser", json!({"action": "click", "element": "Show"})),
+        call("browser", json!({"action": "click", "element": "Send"})),
+        call("browser", json!({"action": "click", "element": "away"})),
+        call("browser", json!({"action": "navigate", "url": format!("{origin}/#again")})),
+        call("browser", json!({"action": "screenshot"})),
+        call("browser", json!({"action": "close"})),
+        say("Done."),
+    ])
+    .await;
+    let dir = temp("browser");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.tools = agent.tools.clone().with_home(dir.clone()).with_browser(true);
+    agent.max_steps = 12;
+    let owner = owner(Answer::Once);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let outcome = agent.turn(&mut session, "check the page", &owner, &mut HashSet::new(), &quiet).await;
+    autobot::procs::stop_all().await;
+    assert_eq!(outcome.unwrap().text, "Done.");
+    // A new site and typing asked; the same site again, reading and clicking did not.
+    assert_eq!(
+        *owner.asked.lock().unwrap(),
+        vec![
+            Action::Fetch(origin.clone()),
+            Action::Type { page: format!("{origin}/"), field: "element #q".into(), text: "rust".into(), submit: false },
+        ]
+    );
+    let script = script.lock().unwrap();
+    let opened = tool_result(&script, 1);
+    assert!(opened.starts_with(&format!("opened {origin}/\ntitle: Test page")), "{opened}");
+    let snapshot = tool_result(&script, 2);
+    assert!(snapshot.contains("# Hello") && snapshot.contains(r#"input text "Search""#), "{snapshot}");
+    assert!(snapshot.contains("→ https://example.org"), "{snapshot}");
+    assert!(tool_result(&script, 3).starts_with("typed 4 characters into element #q"));
+    assert!(tool_result(&script, 4).starts_with("clicked \"Show\""));
+    assert!(tool_result(&script, 5).contains("it submits a form"), "never without asking");
+    assert!(tool_result(&script, 6).contains("leads to https://example.org"));
+    assert!(tool_result(&script, 7).starts_with("opened"));
+    let shot = tool_result(&script, 8);
+    assert!(shot.starts_with("saved a screenshot ("), "{shot}");
+    // The screenshot goes to the model as an image of its own.
+    let messages = script.seen[8].1["messages"].as_array().unwrap();
+    let last = messages.last().unwrap();
+    assert_eq!(last["role"], "user");
+    assert!(last["content"][0]["text"].as_str().unwrap().starts_with("(Screenshot from the browser"));
+    assert!(last["content"][1]["image_url"]["url"].as_str().unwrap().starts_with("data:image/"));
+    assert_eq!(tool_result(&script, 9), "closed the browser");
+    // It is not a request: /retry and /undo still find the owner's.
+    assert!(autobot::session::is_request(&session.messages[0]));
+    assert!(!session.messages.iter().skip(1).any(autobot::session::is_request));
+}
+
+/// A stand-in for `ssh`: it skips the options, notes the host, and runs the remote command here.
+fn fake_ssh(dir: &std::path::Path) -> String {
+    let path = dir.join("fake-ssh");
+    std::fs::write(
+        &path,
+        "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --) shift; break;; *) shift;; esac; done\n\
+         echo \"$1\" >> \"$(dirname \"$0\")/hosts\"; shift\nexec sh -c \"$*\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    path.display().to_string()
+}
+
+#[tokio::test]
+async fn with_ssh_commands_and_files_are_on_the_other_machine() {
+    let dir = temp("ssh");
+    let remote = dir.join("remote");
+    std::fs::create_dir_all(remote.join("src")).unwrap();
+    std::fs::write(remote.join("src/main.rs"), "fn main() {\n    println!(\"old\");\n}\n").unwrap();
+    let ssh = autobot::ssh::Ssh {
+        host: "me@build-box".into(),
+        workdir: Some(remote.clone()),
+        port: None,
+        identity: None,
+        args: vec![],
+        program: fake_ssh(&dir),
+    };
+    let tools = Tools::new(remote.clone(), Duration::from_secs(10)).with_ssh(ssh);
+    let run = |name: &str, args: Value| {
+        let call = tools.parse(name, &args.to_string()).unwrap();
+        let tools = tools.clone();
+        async move { tools.run(&call).await }
+    };
+    let out = run("terminal", json!({"command": "pwd; echo 'it''s'"})).await;
+    assert!(out.starts_with(&format!("{}\nits\n[exit code 0]", remote.display())), "{out}");
+    assert_eq!(
+        run("read_file", json!({"path": "src/main.rs", "offset": 2, "limit": 1})).await,
+        "    println!(\"old\");\n[lines 2-2 of 3]"
+    );
+    // A change shows its diff from what is there, and has no undo here.
+    let edit = tools
+        .parse("edit_file", &json!({"path": "src/main.rs", "old_text": "old", "new_text": "new"}).to_string())
+        .unwrap();
+    let diff = tools.preview(&edit).unwrap();
+    assert!(diff.contains("-    println!(\"old\");") && diff.contains("+    println!(\"new\");"), "{diff}");
+    assert!(tools.before(&edit).is_none());
+    assert!(tools.run(&edit).await.starts_with("replaced 1 occurrence"));
+    assert!(std::fs::read_to_string(remote.join("src/main.rs")).unwrap().contains("\"new\""));
+    assert!(run("write_file", json!({"path": "notes/a.txt", "content": "x'y\n"})).await.starts_with("wrote 4 bytes"));
+    assert_eq!(std::fs::read_to_string(remote.join("notes/a.txt")).unwrap(), "x'y\n");
+    std::os::unix::fs::symlink("/etc/hosts", remote.join("link")).unwrap();
+    assert!(run("write_file", json!({"path": "link", "content": "no"})).await.contains("symbolic link"));
+    assert_eq!(run("list_dir", json!({})).await, "link\nnotes/\nsrc/");
+    let found = run("search", json!({"pattern": "print"})).await;
+    assert!(found.contains("src/main.rs:2:"), "{found}");
+    assert_eq!(run("find_files", json!({"pattern": "**/*.rs"})).await, "src/main.rs");
+    assert!(run("read_file", json!({"path": "missing.txt"})).await.starts_with("error:"));
+    // Background processes run there and stop there.
+    let started = run("terminal", json!({"command": "echo up; sleep 30", "background": true})).await;
+    assert!(started.contains("on me@build-box"), "{started}");
+    // Stopped by its number (stop_all would also close the browser another test uses).
+    let id: u64 = started.split_whitespace().nth(3).unwrap().parse().unwrap();
+    let stopped = run("process", json!({"action": "stop", "id": id})).await;
+    assert!(!stopped.starts_with("error"), "{stopped}");
+    let hosts = std::fs::read_to_string(dir.join("hosts")).unwrap();
+    assert!(hosts.lines().all(|h| h == "me@build-box") && hosts.lines().count() >= 9);
+    assert!(!tools.definitions().to_string().contains("\"browser\""), "no local browser for a remote machine");
+}
+
+/// Says yes to commands, no to everything else, and remembers what was asked.
+struct CommandsOnly {
+    asked: Mutex<Vec<Action>>,
+}
+
+impl Approver for CommandsOnly {
+    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        self.asked.lock().unwrap().push(action.clone());
+        let yes = matches!(action, Action::Command(_));
+        Box::pin(async move { if yes { Answer::Once } else { Answer::Deny } })
+    }
+}
+
+#[tokio::test]
+async fn a_script_calls_the_read_only_tools_in_one_step() {
+    if autobot::find_on_path("python3").is_none() {
+        eprintln!("no python3 here: skipped");
+        return;
+    }
+    let code = r#"
+hits = search("TODO", glob="*.rs")
+files = find_files("**/*.rs")
+first = read_file("src/a.rs", limit=1)
+try:
+    read_file("/etc/hosts")
+except RuntimeError as e:
+    print("outside:", str(e)[:40])
+try:
+    web_fetch("https://example.org/")
+except RuntimeError as e:
+    print("fetch:", str(e)[:30])
+print(len(hits.splitlines()), "TODOs in", len(files.splitlines()), "files; first line:", first.splitlines()[0])
+"#;
+    let (url, script) = gateway(vec![call("execute_code", json!({"code": code})), say("3 TODOs.")]).await;
+    let dir = temp("script");
+    std::fs::create_dir_all(dir.join("work/src")).unwrap();
+    std::fs::write(dir.join("work/src/a.rs"), "// TODO one\n// TODO two\n").unwrap();
+    std::fs::write(dir.join("work/src/b.rs"), "fn b() {} // TODO three\n").unwrap();
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let owner = CommandsOnly { asked: Mutex::new(Vec::new()) };
+    let tools = Mutex::new(Vec::new());
+    let events = |e: Event| {
+        if let Event::Tool(t) = e {
+            tools.lock().unwrap().push(t.to_owned());
+        }
+    };
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    agent.turn(&mut session, "count the TODOs", &owner, &mut HashSet::new(), &events).await.unwrap();
+    let result = tool_result(&script.lock().unwrap(), 1);
+    let asked = owner.asked.into_inner().unwrap();
+    // The script was asked for like a command, showing its code; the fetch like a fetch.
+    assert!(
+        matches!(&asked[0], Action::Command(c) if c.starts_with("python3 - <<'EOF'\n") && c.contains("search(\"TODO\""))
+    );
+    assert_eq!(asked[1], Action::Fetch("https://example.org/".into()));
+    assert_eq!(asked.len(), 2, "reads in the working directory ask nothing");
+    assert!(result.contains("outside: read /etc/hosts (outside the working"), "{result}");
+    assert!(result.contains("fetch: refused: the owner did not"), "{result}");
+    assert!(result.contains("3 TODOs in 2 files; first line: // TODO one"), "{result}");
+    assert!(result.ends_with("[exit code 0, 5 tool calls]"), "{result}");
+    let tools = tools.into_inner().unwrap();
+    assert!(tools.iter().any(|t| t.starts_with("script → search")), "{tools:?}");
 }

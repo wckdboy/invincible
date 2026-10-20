@@ -163,7 +163,30 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
                 config.approvals.mode
             )));
             // Unattended commands need a working sandbox (or they are refused).
-            if let Some(docker) = &config.agent.docker {
+            if let Some(ssh) = &config.agent.ssh {
+                let out = agent
+                    .tools
+                    .run(&crate::tools::Call::Terminal {
+                        command: "uname -sm; command -v rg >/dev/null && echo rg || echo no-rg".into(),
+                    })
+                    .await;
+                if out.contains("[exit code 0]") {
+                    let mut lines = out.lines();
+                    let system = lines.next().unwrap_or_default().to_owned();
+                    let search = if lines.next() == Some("rg") { "ripgrep" } else { "grep (no ripgrep there)" };
+                    checks.push(ok(format!(
+                        "commands run on {} over SSH in {} ({system}; search with {search})",
+                        ssh.host,
+                        agent.tools.workdir().display()
+                    )));
+                } else {
+                    checks.push(bad(format!(
+                        "[agent.ssh] {}: {} (a key ssh can use without asking, and the working directory there)",
+                        ssh.host,
+                        out.lines().next().unwrap_or_default()
+                    )));
+                }
+            } else if let Some(docker) = &config.agent.docker {
                 let out = agent.tools.run(&crate::tools::Call::Terminal { command: "uname -sm".into() }).await;
                 if out.contains("[exit code 0]") {
                     checks.push(ok(format!(

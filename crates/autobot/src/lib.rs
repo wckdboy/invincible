@@ -6,6 +6,7 @@ pub mod agent;
 pub mod api;
 pub mod approval;
 pub mod board;
+pub mod browser;
 pub mod commands;
 pub mod config;
 pub mod cron;
@@ -18,15 +19,22 @@ pub mod gateway;
 pub mod heartbeat;
 pub mod hooks;
 pub mod images;
+pub mod insights;
+pub mod manage;
 pub mod mcp;
 pub mod memory;
+pub mod migrate;
+pub mod personality;
 pub mod procs;
+pub mod profile;
 pub mod sandbox;
+pub mod script;
 pub mod search;
 pub mod service;
 pub mod session;
 pub mod setup;
 pub mod skills;
+pub mod ssh;
 pub mod team;
 pub mod telegram;
 pub mod tools;
@@ -50,15 +58,32 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
     let gateway = gateway::Gateway::new(&config.gateway.url, &token, &config.gateway.model, config.gateway.private)?
         .with_stream(config.agent.stream);
     let workdir = workdir.unwrap_or_else(|| config.agent.workdir(home));
-    std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
+    // On another machine: its working directory is there (by default the same path).
+    let workdir = match &config.agent.ssh {
+        Some(ssh) => {
+            ssh.check()?;
+            ssh.workdir.clone().unwrap_or(workdir)
+        }
+        None => {
+            std::fs::create_dir_all(&workdir).map_err(|e| format!("{}: {e}", workdir.display()))?;
+            workdir
+        }
+    };
     let mut tools = tools::Tools::new(workdir, Duration::from_secs(config.agent.command_timeout))
         .with_home(home.to_owned())
-        .with_sandbox(config.agent.sandbox);
+        .with_sandbox(config.agent.sandbox)
+        .with_browser(config.agent.browser);
     if let Some(kib) = config.agent.context_kib {
         tools = tools.with_context(kib);
     }
     if let Some(docker) = &config.agent.docker {
+        if config.agent.ssh.is_some() {
+            return Err("[agent.docker] and [agent.ssh] are both set; commands run in one place".to_owned());
+        }
         tools = tools.with_docker(docker.clone());
+    }
+    if let Some(ssh) = &config.agent.ssh {
+        tools = tools.with_ssh(ssh.clone());
     }
     if let Some(groups) = &config.agent.tools {
         if let Some(unknown) = groups.iter().find(|g| !tools::GROUPS.iter().any(|(n, _)| n == g)) {
@@ -74,7 +99,11 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
         team: std::sync::Arc::new(team::Team::from_config(&config.agents, &config.team)?),
         mcp: std::sync::Arc::new(mcp::Hub::new(config.mcp.clone())?),
         trajectories: config.agent.trajectories.then(|| std::sync::Arc::new(trajectory::Recorder::dir(home))),
-        options: agent::Options { context_kib: config.agent.context_kib, vision: None },
+        options: agent::Options {
+            context_kib: config.agent.context_kib,
+            nudge_every: config.agent.nudge_every,
+            ..Default::default()
+        },
     })
 }
 

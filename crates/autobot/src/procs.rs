@@ -232,6 +232,7 @@ pub async fn stop_all() {
         procs.1.iter().filter(|(_, p)| p.shared.lock().expect("proc").ended.is_none()).map(|(id, _)| *id).collect()
     };
     futures_util::future::join_all(ids.into_iter().map(stop)).await;
+    crate::browser::close().await;
 }
 
 /// How many are running.

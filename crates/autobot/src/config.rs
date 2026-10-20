@@ -56,6 +56,9 @@ pub struct Config {
     /// The terminal chat (`autobot chat`, `autobot code`).
     #[serde(default)]
     pub terminal: TerminalConfig,
+    /// Dollars per million tokens, by model id, for `/usage` ([crate::insights::Price]).
+    #[serde(default)]
+    pub prices: crate::insights::Prices,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -178,6 +181,20 @@ pub struct AgentConfig {
     /// Commands run in a container ([crate::docker]): `[agent.docker] image = "…"`.
     #[serde(default)]
     pub docker: Option<crate::docker::Docker>,
+    /// Every this many turns of a conversation in the terminal, a short extra call looks back
+    /// over it for what is worth keeping in memory or the owner's profile (0: never).
+    #[serde(default = "nudge_every")]
+    pub nudge_every: usize,
+    /// Commands and files on another machine ([crate::ssh]): `[agent.ssh] host = "me@box"`.
+    #[serde(default)]
+    pub ssh: Option<crate::ssh::Ssh>,
+    /// The `browser` tool, when a Chrome, Chromium, Edge or Brave is installed ([crate::browser]).
+    #[serde(default = "yes")]
+    pub browser: bool,
+}
+
+fn nudge_every() -> usize {
+    8
 }
 
 fn heartbeat() -> String {
@@ -219,6 +236,9 @@ impl Default for AgentConfig {
             context_kib: None,
             stream: true,
             docker: None,
+            nudge_every: nudge_every(),
+            ssh: None,
+            browser: true,
         }
     }
 }
