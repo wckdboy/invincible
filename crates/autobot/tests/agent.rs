@@ -79,7 +79,8 @@ struct Owner {
 impl Approver for Owner {
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
         self.asked.lock().unwrap().push(action.clone());
-        Box::pin(async { self.answer })
+        let answer = self.answer.clone();
+        Box::pin(async move { answer })
     }
 }
 
@@ -154,6 +155,23 @@ async fn a_denied_command_does_not_run() {
     assert!(!dir.join("work/nope").exists());
     let result = &script.lock().unwrap().seen[1].1["messages"];
     assert!(result.to_string().contains("refused: the owner did not approve"));
+}
+
+#[tokio::test]
+async fn what_the_owner_says_instead_goes_to_the_model_with_the_refusal() {
+    let (url, script) = gateway(vec![call("terminal", json!({"command": "rm -rf build"})), say("ok, cleaning")]).await;
+    let dir = temp("instead");
+    let agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let owner = owner(Answer::Instead("use cargo clean".into()));
+    agent.turn(&mut session, "x", &owner, &mut HashSet::new(), &quiet).await.unwrap();
+    let result = script.lock().unwrap().seen[1].1["messages"].to_string();
+    assert!(
+        result.contains(
+            "refused: the owner did not approve this (run: rm -rf build). Instead, the owner says: use cargo clean"
+        ),
+        "{result}"
+    );
 }
 
 #[tokio::test]

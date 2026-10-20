@@ -3,13 +3,16 @@
 //! status line) redrawn in place. Everything else is printed above it into the normal
 //! scrollback: there is no alternate screen. Redraws change only the rows that changed, inside
 //! synchronized output where the terminal has it; the terminal is put back on exit, on a panic,
-//! and around ctrl+z.
+//! and around ctrl+z. Where the terminal speaks the kitty keyboard protocol, it is pushed
+//! (shift+enter and a lone Esc then arrive as themselves) and popped whenever the terminal is put
+//! back; the window's title says `autobot · <project>` while the chat runs, and is put back too.
 
 use std::io::Write;
 use std::os::fd::AsFd;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
+use super::osc::{self, Notify};
 use super::style;
 
 /// What is drawn in the live region now.
@@ -37,6 +40,19 @@ static SCREEN: Mutex<Screen> = Mutex::new(Screen {
 
 /// The input thread leaves the terminal alone while this is set (another reader has it).
 static PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// The terminal answered the kitty keyboard protocol's query: it is pushed while the terminal is
+/// ours.
+static KITTY: AtomicBool = AtomicBool::new(false);
+
+/// The title set while the terminal is ours (the one before is saved and put back).
+static TITLE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Whether the window has focus, as the terminal reported it: unknown, yes, no.
+static FOCUS: AtomicU8 = AtomicU8::new(0);
+
+/// How notifications reach the owner: [Notify] as a number (Osc9, Bell, Off).
+static NOTIFY: AtomicU8 = AtomicU8::new(1);
 
 const SYNC_START: &str = "\x1b[?2026h";
 const SYNC_END: &str = "\x1b[?2026l";
@@ -200,22 +216,92 @@ fn raw_on() -> std::io::Result<()> {
         modes.output_modes.insert(rustix::termios::OutputModes::OPOST | rustix::termios::OutputModes::ONLCR);
         let _ = rustix::termios::tcsetattr(fd.as_fd(), rustix::termios::OptionalActions::Now, &modes);
     }
-    write_out("\x1b[?2004h");
+    let mut out = String::from("\x1b[?2004h");
+    out.push_str(osc::FOCUS_ON);
+    if KITTY.load(Ordering::SeqCst) {
+        out.push_str(osc::KITTY_PUSH);
+    }
+    if let Some(title) = TITLE.lock().map(|t| t.clone()).unwrap_or_default() {
+        out.push_str(osc::TITLE_SAVE);
+        out.push_str(&osc::title(&title));
+    }
+    write_out(&out);
     Ok(())
 }
 
 fn raw_off() {
-    write_out("\x1b[?2004l\x1b[?25h");
+    let mut out = String::from("\x1b[?2004l\x1b[?25h");
+    out.push_str(osc::FOCUS_OFF);
+    if KITTY.load(Ordering::SeqCst) {
+        out.push_str(osc::KITTY_POP);
+    }
+    // A panic while the title was being read holds no lock worth waiting for.
+    if TITLE.try_lock().is_ok_and(|t| t.is_some()) {
+        out.push_str(osc::TITLE_RESTORE);
+    }
+    write_out(&out);
     let _ = crossterm::terminal::disable_raw_mode();
 }
 
+/// Whether the kitty keyboard protocol is on (shift+enter is its own key).
+pub fn kitty() -> bool {
+    KITTY.load(Ordering::SeqCst)
+}
+
+/// The window gained or lost focus (the terminal said so).
+pub fn focused(yes: bool) {
+    FOCUS.store(if yes { 1 } else { 2 }, Ordering::SeqCst);
+}
+
+/// How notifications reach the owner from now on.
+pub fn set_notify(kind: Notify) {
+    NOTIFY.store(
+        match kind {
+            Notify::Osc9 => 0,
+            Notify::Bell => 1,
+            Notify::Off => 2,
+        },
+        Ordering::SeqCst,
+    );
+}
+
+/// Tells the owner [text] wants them (a long turn ended, a question waits): a desktop
+/// notification or the bell; nothing without a terminal, or while the window has focus.
+pub fn notify(text: &str) {
+    let kind = match NOTIFY.load(Ordering::SeqCst) {
+        0 => Notify::Osc9,
+        1 => Notify::Bell,
+        _ => Notify::Off,
+    };
+    if FOCUS.load(Ordering::SeqCst) == 1 {
+        return;
+    }
+    emit(&osc::notification(kind, text, std::env::var_os("TMUX").is_some()));
+}
+
+/// Writes [seq] (nothing on the screen: a title, the clipboard) while the terminal is ours;
+/// whether it was written.
+pub fn emit(seq: &str) -> bool {
+    let s = SCREEN.lock().expect("screen");
+    if !s.active || seq.is_empty() {
+        return false;
+    }
+    write_out(seq);
+    true
+}
+
 impl Terminal {
-    /// Takes the terminal (None when stdin or stdout is not one).
-    pub fn take() -> Option<Self> {
+    /// Takes the terminal (None when stdin or stdout is not one), its window titled [title].
+    pub fn take(title: &str) -> Option<Self> {
         use std::io::IsTerminal;
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             return None;
         }
+        // Asked once (`CSI ? u`, then the device attributes every terminal answers): a terminal
+        // that does not know the protocol answers only the second.
+        let dumb = std::env::var("TERM").is_ok_and(|t| t == "dumb");
+        KITTY.store(!dumb && crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false), Ordering::SeqCst);
+        *TITLE.lock().expect("title") = Some(title.to_owned());
         raw_on().ok()?;
         {
             let mut s = SCREEN.lock().expect("screen");

@@ -27,6 +27,8 @@ const FRAMES: &[&str] = &["▖", "▘", "▝", "▗"];
 pub struct Card {
     pub title: String,
     pub what: String,
+    /// It can be answered with what to do instead (`e`).
+    pub instead: bool,
 }
 
 /// What was printed last, for the blank lines between kinds of output.
@@ -239,10 +241,14 @@ impl Ui {
         let mut s = self.state.lock().expect("ui");
         let Some((card, tx)) = s.asks.pop_front() else { return false };
         Self::gap(&mut s, Last::Step);
-        let said = match answer {
+        let said = match &answer {
             Answer::Once => style::bold("yes"),
             Answer::Always => style::bold("always, this session"),
             Answer::Deny => style::red("no"),
+            Answer::Instead(text) => {
+                let first = text.trim().lines().next().unwrap_or_default().to_owned();
+                format!("{}{} {first}", style::red("no"), style::gray(", instead:"))
+            }
         };
         term::say(&format!("{} {} {said}", style::faint("■"), style::gray(&card.title)));
         let _ = tx.send(answer);
@@ -250,8 +256,9 @@ impl Ui {
     }
 
     /// What is happening now, as lines for the live region at [width]: the answer's unfinished
-    /// line (at most [room] rows of it), then the running step or the spinner, or the question.
-    pub fn live(&self, width: usize, room: usize) -> Vec<String> {
+    /// line (at most [room] rows of it), then the running step or the spinner, or the question
+    /// ([typing]: its answer is being typed in the composer).
+    pub fn live(&self, width: usize, room: usize, typing: bool) -> Vec<String> {
         let s = self.state.lock().expect("ui");
         let mut out = Vec::new();
         if !s.live.is_empty() || s.md.in_code() {
@@ -265,7 +272,7 @@ impl Ui {
             if !out.is_empty() {
                 out.push(String::new());
             }
-            out.extend(card_lines(card, width));
+            out.extend(card_lines(card, width, typing));
             return out;
         }
         if !s.running {
@@ -514,8 +521,9 @@ fn footer(s: &State, note: Option<&str>) -> String {
     style::faint(&format!("  ─ {}", parts.join(" · ")))
 }
 
-/// A question as lines: `■ title`, what it is about hanging under it, the keys.
-pub fn card_lines(card: &Card, width: usize) -> Vec<String> {
+/// A question as lines: `■ title`, what it is about hanging under it, the keys ([typing]: what
+/// to do instead is being typed, so the keys for that).
+pub fn card_lines(card: &Card, width: usize, typing: bool) -> Vec<String> {
     let mut out = vec![truncate(&format!("{} {}", style::accent("■"), style::bold(&card.title)), width)];
     let gutter = style::faint("  │ ");
     let mut what: Vec<String> = card.what.lines().flat_map(|l| wrap(l, width, &gutter, &gutter, true)).collect();
@@ -526,13 +534,16 @@ pub fn card_lines(card: &Card, width: usize) -> Vec<String> {
     }
     out.extend(what);
     let key = |k: &str, what: &str| format!("{} {}", style::bold(k), style::gray(what));
-    out.push(format!(
-        "{}{}   {}   {}",
-        style::faint("  └ "),
-        key("y", "yes"),
-        key("a", "always, this session"),
-        key("n", "no")
-    ));
+    let keys = if typing {
+        vec![key("enter", "send what to do instead"), key("esc", "back")]
+    } else {
+        let mut keys = vec![key("y", "yes"), key("a", "always, this session"), key("n", "no")];
+        if card.instead {
+            keys.push(key("e", "no, and say what instead"));
+        }
+        keys
+    };
+    out.push(truncate(&format!("{}{}", style::faint("  └ "), keys.join("   ")), width));
     out
 }
 
@@ -617,16 +628,15 @@ pub fn summary(name: &str, text: &str, diff: Option<(usize, usize)>) -> String {
 }
 
 fn summary_lines(name: &str, text: &str, diff: Option<(usize, usize)>) -> Vec<String> {
+    let room = style::columns().saturating_sub(6).max(20);
     let failed = text.starts_with("error:") || text.starts_with("refused:");
     if failed {
-        let first: String = text.lines().next().unwrap_or_default().chars().take(200).collect();
-        return vec![style::red(&first)];
+        return vec![style::red(&truncate(text.lines().next().unwrap_or_default(), room))];
     }
     let lines: Vec<&str> = text.lines().collect();
     let n = lines.len();
     let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     let one = |text: String| vec![style::gray(&text)];
-    let room = style::columns().saturating_sub(6).max(20);
     match name {
         "terminal" => {
             let last = lines.last().copied().unwrap_or_default();
@@ -713,10 +723,16 @@ mod tests {
 
     #[test]
     fn a_question_is_a_card_with_its_keys() {
-        let card = Card { title: "Run this command?".into(), what: "cargo test".into() };
+        let card = Card { title: "Run this command?".into(), what: "cargo test".into(), instead: false };
         assert_eq!(
-            card_lines(&card, 60),
+            card_lines(&card, 60, false),
             ["■ Run this command?", "  │ cargo test", "  └ y yes   a always, this session   n no"]
         );
+        let card = Card { instead: true, ..card };
+        assert_eq!(
+            card_lines(&card, 80, false)[2],
+            "  └ y yes   a always, this session   n no   e no, and say what instead"
+        );
+        assert_eq!(card_lines(&card, 80, true)[2], "  └ enter send what to do instead   esc back");
     }
 }

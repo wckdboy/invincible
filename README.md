@@ -233,15 +233,23 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   as a colored diff with line numbers before it is made; the agent's task list (`todo`) shows as
   checkboxes; a `─` footer ends each turn with the models, tool calls, tokens (and how many were
   cached) and time. Approvals are a card above the composer that takes one key: `y`, `a`
-  (always, this session), `n`; any other key is no, and what was typed before the question is
-  dropped. Without a terminal (a pipe, a script) it reads plain lines and prints plain text;
-  `NO_COLOR` turns color off.
+  (always, this session), `n`, or `e`: no, and tell it what to do instead (typed in the
+  composer, Enter sends it with the refusal, esc goes back to the keys); any other key is no.
+  The window's title says `autobot · <project>` while it runs (and is put back after). When a
+  turn that took more than 10 seconds ends, or a question waits, and the window is not in front,
+  the terminal tells you: a desktop notification in iTerm2, Ghostty, WezTerm and kitty, the bell
+  elsewhere (`[terminal] notify = "auto"`, `"bell"` or `"off"` in the config). Without a
+  terminal (a pipe, a script) it reads plain lines and prints plain text (a question takes `y`,
+  `a`, `n` or `e what to do instead`); `NO_COLOR` turns color off.
 - **Steer while it works:** type while the agent works; Enter hands your words to the agent
   before its next step ("use the existing helper instead"), and what arrives as it finishes
   becomes the next request. A `/command` or `!command` sent then runs when the turn ends. Esc
   (or ctrl+c on an empty composer) stops a turn; the conversation stays usable.
-- **Keys:** Enter sends; alt+enter or ctrl+j starts a new line (so does a `\` at the end of a
-  line); ↑/↓ bring back what you sent (or move between lines); ctrl+a/e start and end of line,
+- **Keys:** Enter sends; shift+enter (in terminals with the kitty keyboard protocol: kitty,
+  Ghostty, WezTerm, iTerm2, foot), alt+enter or ctrl+j starts a new line (so does a `\` at the
+  end of a line); ↑/↓ bring back what you sent (or move between lines); ctrl+r searches what you
+  sent as you type (`search: …` in the status line; ctrl+r again for older matches, Enter keeps
+  the match to change or send, esc puts back what was there); ctrl+a/e start and end of line,
   ctrl+w/u/k delete a word, to the start, to the end (ctrl+y puts it back), alt+b/f move by
   words; ctrl+l clears the screen; ctrl+z suspends; ctrl+c clears the composer, and twice on an
   empty one quits, as does ctrl+d. A long paste folds into `[pasted 120 lines]` and goes out in
@@ -256,10 +264,13 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   `@path` attaches a file (typing `@` lists the project's files, matched as you type; tab
   completes), `!command` runs one yourself and hands its output to the next message.
 - **Commands:** typing `/` opens a list of them with a line about each, narrowed as you type
-  (↑/↓ or tab to choose, Enter runs, esc closes): `/model` (list, or switch: a cloud model lets turns leave the machine, and the
-  conversation sent per call grows with its context), `/approvals`, `/private`, `/tools`,
-  `/context`, `/diff`, `/undo`, `/status`, `/new`, `/fork`, `/sessions`, `/resume`, `/memory`,
-  `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
+  (↑/↓ or tab to choose, Enter runs, esc closes): `/model` (alone, a list of the gateway's models
+  to pick from as you type; or switch: `/model deepseek`; a cloud model lets turns leave the
+  machine, and the conversation sent per call grows with its context), `/approvals`,
+  `/private`, `/tools`, `/context`, `/diff`, `/undo`, `/status`, `/new`, `/fork`, `/sessions`,
+  `/resume` (alone, the recent conversations with what each is about and when, to pick from),
+  `/copy` (the last answer's Markdown onto the clipboard, through the terminal: OSC 52, passed
+  through tmux), `/memory`, `/skills`, `/team`, `/board`, `/help`. One conversation per project (`code-<name>-<hash>`).
   `/init` has the agent write (or improve) the project's `AGENTS.md`; `/compact` folds the
   conversation so far into a summary, keeping the last turn; `/ps` shows background processes
   (`/ps 2` its output, `/ps stop 2`).

@@ -332,6 +332,35 @@ pub fn list(dir: &Path) -> Vec<(String, std::time::SystemTime)> {
     found
 }
 
+/// What the session [id] in [dir] is about: the first line of its first request (cut to [max]
+/// characters), read from the start of its file only.
+pub fn title(dir: &Path, id: &str, max: usize) -> Option<String> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(dir.join(format!("{id}.jsonl"))).ok()?;
+    std::io::BufReader::new(file).lines().take(200).map_while(Result::ok).find_map(|line| {
+        let message: Value = serde_json::from_str(&line).ok()?;
+        if message["role"] != "user" {
+            return None;
+        }
+        let text = message["content"].as_str()?;
+        let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+        let mut title: String = first.chars().take(max).collect();
+        if first.chars().count() > max {
+            title.push('…');
+        }
+        Some(title)
+    })
+}
+
+/// The last answer in [messages]: the newest assistant message with text.
+pub fn last_answer(messages: &[Value]) -> Option<&str> {
+    messages
+        .iter()
+        .rev()
+        .filter(|m| m["role"] == "assistant")
+        .find_map(|m| m["content"].as_str().filter(|t| !t.trim().is_empty()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Session, WINDOW};
@@ -354,10 +383,20 @@ mod tests {
             .unwrap();
         let again = Session::open(&dir, "cli").unwrap();
         assert_eq!(again.messages.len(), 2);
+        assert_eq!(super::title(&dir, "cli", 40).as_deref(), Some("hi"));
         let mut again = again;
         again.reset().unwrap();
         assert!(Session::open(&dir, "cli").unwrap().messages.is_empty());
         assert_eq!(super::list(&dir).len(), 1);
+        assert_eq!(super::title(&dir, "missing", 40), None);
+        let messages = vec![
+            json!({"role": "user", "content": "q"}),
+            json!({"role": "assistant", "content": "**the answer**"}),
+            json!({"role": "user", "content": "again"}),
+            json!({"role": "assistant", "content": null, "tool_calls": []}),
+        ];
+        assert_eq!(super::last_answer(&messages), Some("**the answer**"));
+        assert_eq!(super::last_answer(&messages[..1]), None);
         assert!(Session::open(&dir, "../x").is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }

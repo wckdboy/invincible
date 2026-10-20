@@ -60,12 +60,14 @@ impl Action {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
     Once,
     /// Yes, and the same action again in this session without asking.
     Always,
     Deny,
+    /// No, and what to do instead (the owner's words, handed to the model with the refusal).
+    Instead(String),
 }
 
 /// The team member asking, when it is not the main agent: `[coder] ` to put before a question.

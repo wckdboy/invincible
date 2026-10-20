@@ -3,6 +3,7 @@
 pub mod chat;
 pub mod editor;
 pub mod markdown;
+pub mod osc;
 pub mod palette;
 pub mod style;
 pub mod term;

@@ -56,6 +56,16 @@ pub enum Event<'a> {
     Usage { input: u64, output: u64, cached: u64 },
 }
 
+/// What a refused tool call hands back to the model: that the owner said no, and what they said
+/// to do instead when they said it.
+pub fn refusal(action: &Action, instead: Option<String>) -> String {
+    let base = format!("refused: the owner did not approve this ({})", action.describe());
+    match instead {
+        Some(text) => format!("{base}. Instead, the owner says: {}", text.trim()),
+        None => base,
+    }
+}
+
 pub struct Outcome {
     pub text: String,
     pub receipts: Vec<String>,
@@ -219,7 +229,7 @@ impl Agent {
                 Ok(reply) => reply,
                 Err(GatewayError::Confirm(why)) if !confirmed => {
                     let action = Action::Cloud(why);
-                    if self.allowed(&session.id, &action, approver, grants, events).await {
+                    if self.allowed(&session.id, &action, approver, grants, events).await.is_ok() {
                         confirmed = true;
                         steps -= 1;
                         continue;
@@ -454,8 +464,8 @@ impl Agent {
             && self.tools.offers("mcp")
         {
             let action = Action::Mcp { tool: format!("{server}/{tool}"), arguments: arguments.to_owned() };
-            if !self.allowed(session, &action, approver, grants, events).await {
-                return format!("refused: the owner did not approve this ({})", action.describe());
+            if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {
+                return refusal(&action, instead);
             }
             events(Event::Tool(&action.describe()));
             let args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
@@ -472,8 +482,8 @@ impl Agent {
             events(Event::Diff(&diff));
         }
         if let Some(action) = self.tools.action(&call) {
-            if !self.allowed(session, &action, approver, grants, events).await {
-                return format!("refused: the owner did not approve this ({})", action.describe());
+            if let Err(instead) = self.allowed(session, &action, approver, grants, events).await {
+                return refusal(&action, instead);
             }
             match &call {
                 crate::tools::Call::Background { command } => {
@@ -579,6 +589,7 @@ impl Agent {
     }
 
     /// Whether [action] may run, asking [approver] when the policy says to; logged either way.
+    /// Refused, with what the owner said to do instead when they said it.
     async fn allowed(
         &self,
         session: &str,
@@ -586,9 +597,10 @@ impl Agent {
         approver: &dyn Approver,
         grants: &mut HashSet<Action>,
         events: &(dyn Fn(Event) + Send + Sync),
-    ) -> bool {
+    ) -> Result<(), Option<String>> {
         let granted = grants.contains(action);
         let verdict = if granted { Verdict::Run } else { approval::check(&self.approvals, action) };
+        let mut instead = None;
         let (ran, by) = match verdict {
             Verdict::Run => (true, if granted { "grant" } else { "policy" }),
             Verdict::Refuse(why) => {
@@ -603,6 +615,11 @@ impl Agent {
                 }
                 Answer::Deny => {
                     events(Event::Refused(&action.describe()));
+                    (false, approver.channel())
+                }
+                Answer::Instead(text) => {
+                    events(Event::Refused(&action.describe()));
+                    instead = Some(text).filter(|t| !t.trim().is_empty());
                     (false, approver.channel())
                 }
             },
@@ -620,7 +637,7 @@ impl Agent {
                 tracing::warn!("action log not written: {e}");
             }
         }
-        ran
+        if ran { Ok(()) } else { Err(instead) }
     }
 
     pub fn system_prompt(&self) -> String {
@@ -630,7 +647,8 @@ impl Agent {
              Working directory: {dir}\n\
              You can run shell commands and read, write and list files with your tools. Commands, file \
              writes and reads outside the working directory need the owner's approval; if one is refused, \
-             do not retry it, say what you would need instead.\n\
+             do not retry it, say what you would need instead (when the owner says what to do instead, \
+             do that).\n\
              To do something later or regularly (a reminder, a check), use schedule_task, never the \
              system crontab, at or launchd. When the owner refers to something from before, \
              search_sessions finds it. After a multi-step task that worked and will come up again, \

@@ -1,6 +1,6 @@
 //! The composer's text: several lines, a cursor, the usual editing keys (ctrl+a/e/w/u/k/y,
-//! words with alt), history on ↑/↓ at the first and last line, and large pastes kept aside as
-//! `[pasted N lines]` until the message is sent.
+//! words with alt), history on ↑/↓ at the first and last line, ctrl+r searching the history back
+//! as you type, and large pastes kept aside as `[pasted N lines]` until the message is sent.
 
 use std::path::Path;
 
@@ -23,6 +23,20 @@ pub struct Editor {
     pastes: Vec<(String, String)>,
     /// What ctrl+w/u/k took, for ctrl+y.
     killed: String,
+    /// ctrl+r: searching the history.
+    search: Option<Search>,
+}
+
+/// A reverse search through the history (ctrl+r): what is typed, the entry it found, and what
+/// the composer held before (esc puts it back).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Search {
+    pub query: String,
+    /// The history entry shown.
+    pub found: Option<usize>,
+    /// The last search found nothing (older): the entry shown stays.
+    pub failed: bool,
+    saved: (String, usize),
 }
 
 impl Editor {
@@ -253,6 +267,77 @@ impl Editor {
         true
     }
 
+    /// The search going on, if one is.
+    pub fn searching(&self) -> Option<&Search> {
+        self.search.as_ref()
+    }
+
+    /// ctrl+r: starts searching the history back; while searching, the next older match.
+    pub fn search_back(&mut self) {
+        let Some(search) = &self.search else {
+            self.search = Some(Search { saved: (self.text.clone(), self.cursor), ..Search::default() });
+            return;
+        };
+        let before = search.found.unwrap_or(self.history.len());
+        let query = search.query.clone();
+        self.find(&query, before, true);
+    }
+
+    /// A character typed into the search: the newest match from the one shown, it included.
+    pub fn search_type(&mut self, c: char) {
+        let Some(search) = &mut self.search else { return };
+        search.query.push(c);
+        let before = search.found.map_or(self.history.len(), |i| i + 1);
+        let query = search.query.clone();
+        self.find(&query, before, false);
+    }
+
+    /// Backspace in the search: the query a character shorter, searched again from the newest.
+    pub fn search_backspace(&mut self) {
+        let Some(search) = &mut self.search else { return };
+        search.query.pop();
+        let query = search.query.clone();
+        if query.is_empty() {
+            let (text, cursor) = search.saved.clone();
+            search.found = None;
+            search.failed = false;
+            self.text = text;
+            self.cursor = cursor;
+            return;
+        }
+        self.find(&query, self.history.len(), false);
+    }
+
+    /// Shows the newest entry before [before] that has [query] ([skip_same]: and is not the one
+    /// shown now); marks the search failed when there is none.
+    fn find(&mut self, query: &str, before: usize, skip_same: bool) {
+        let skip = skip_same.then(|| self.text.clone());
+        let found = find_back(&self.history, query, before, skip.as_deref());
+        let Some(search) = &mut self.search else { return };
+        match found {
+            Some((i, at)) => {
+                search.found = Some(i);
+                search.failed = false;
+                self.text = self.history[i].clone();
+                self.cursor = at;
+            }
+            None => search.failed = !query.is_empty(),
+        }
+    }
+
+    /// Enter (or a key that edits): the entry found stays in the composer, to send or change.
+    pub fn search_accept(&mut self) {
+        self.search = None;
+        self.browsing = None;
+    }
+
+    /// Esc: the composer as it was before the search.
+    pub fn search_cancel(&mut self) {
+        if let Some(search) = self.search.take() {
+            (self.text, self.cursor) = search.saved;
+        }
+    }
+
     /// Empties the composer (what was in it is not kept).
     pub fn clear(&mut self) {
         self.text.clear();
@@ -263,6 +348,12 @@ impl Editor {
     /// What was typed, as it is shown (labels for pastes), and as it is sent (pastes in full); the
     /// composer emptied and the shown text added to the history.
     pub fn take(&mut self) -> (String, String) {
+        self.take_as(true)
+    }
+
+    /// Like [Self::take], the history left as it is when not [keep] (an answer to a question).
+    pub fn take_as(&mut self, keep: bool) -> (String, String) {
+        self.search = None;
         let shown = std::mem::take(&mut self.text);
         let mut sent = shown.clone();
         // Pastes are kept for the session, so a message brought back with ↑ sends them again.
@@ -273,7 +364,7 @@ impl Editor {
         }
         self.cursor = 0;
         self.browsing = None;
-        if !shown.trim().is_empty() && self.history.last() != Some(&shown) {
+        if keep && !shown.trim().is_empty() && self.history.last() != Some(&shown) {
             self.history.push(shown.clone());
         }
         (shown, sent)
@@ -314,6 +405,34 @@ impl Editor {
         }
         (rows, cursor)
     }
+}
+
+/// The newest entry of [history] before index [before] that contains [query] (and is not
+/// [skip]): its index, and the byte where the match starts. Smart case: a query without capitals
+/// matches any case.
+pub fn find_back(history: &[String], query: &str, before: usize, skip: Option<&str>) -> Option<(usize, usize)> {
+    if query.is_empty() {
+        return None;
+    }
+    let exact = query.chars().any(char::is_uppercase);
+    history[..before.min(history.len())]
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, entry)| Some(entry.as_str()) != skip)
+        .find_map(|(i, entry)| find_in(entry, query, exact).map(|at| (i, at)))
+}
+
+/// Where [needle] starts in [hay] (a byte index), ignoring case unless [exact].
+fn find_in(hay: &str, needle: &str, exact: bool) -> Option<usize> {
+    if exact {
+        return hay.find(needle);
+    }
+    let same = |a: char, b: char| a == b || a.to_lowercase().eq(b.to_lowercase());
+    hay.char_indices().map(|(i, _)| i).find(|&i| {
+        let mut rest = hay[i..].chars();
+        needle.chars().all(|n| rest.next().is_some_and(|h| same(h, n)))
+    })
 }
 
 /// The byte index in `text[start..end]` at [column] characters (or its end).
@@ -358,7 +477,7 @@ pub fn save_history(path: &Path, history: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Editor, load_history, save_history};
+    use super::{Editor, find_back, load_history, save_history};
 
     fn typed(text: &str) -> Editor {
         let mut e = Editor::default();
@@ -441,6 +560,53 @@ mod tests {
         let mut e = typed("abc");
         e.home();
         assert_eq!(e.layout(5).1, (0, 0));
+    }
+
+    #[test]
+    fn searching_the_history_back() {
+        let history: Vec<String> =
+            ["cargo build", "git status", "cargo test -p parser", "Cargo fmt"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(find_back(&history, "cargo", 4, None), Some((3, 0)), "smart case: any case");
+        assert_eq!(find_back(&history, "Cargo", 3, None), None, "a capital matches exactly");
+        assert_eq!(find_back(&history, "test", 4, None), Some((2, 6)));
+        assert_eq!(find_back(&history, "cargo", 3, Some("cargo test -p parser")), Some((0, 0)));
+        assert_eq!(find_back(&history, "", 4, None), None);
+        assert_eq!(find_back(&history, "zz", 4, None), None);
+
+        let mut e = Editor::with_history(history);
+        e.insert("draft");
+        e.search_back();
+        assert_eq!(e.searching().unwrap().query, "");
+        assert_eq!(e.text(), "draft", "nothing typed yet");
+        for c in "car".chars() {
+            e.search_type(c);
+        }
+        assert_eq!((e.text(), e.cursor()), ("Cargo fmt", 0));
+        e.search_type('g');
+        e.search_type('o');
+        e.search_type(' ');
+        e.search_type('t');
+        assert_eq!((e.text(), e.cursor()), ("cargo test -p parser", 0), "typing narrows from the match");
+        e.search_backspace();
+        e.search_backspace();
+        assert_eq!(e.text(), "Cargo fmt", "a shorter query searches from the newest again");
+        e.search_back();
+        assert_eq!(e.text(), "cargo test -p parser", "ctrl+r again: older");
+        e.search_back();
+        assert_eq!(e.text(), "cargo build");
+        e.search_back();
+        assert!(e.searching().unwrap().failed, "nothing older");
+        assert_eq!(e.text(), "cargo build", "the last match stays");
+        e.search_cancel();
+        assert_eq!((e.text(), e.cursor()), ("draft", 5), "esc: as it was");
+        assert!(e.searching().is_none());
+        e.search_back();
+        e.search_type('s');
+        e.search_type('t');
+        assert_eq!((e.text(), e.cursor()), ("cargo test -p parser", 8));
+        e.search_accept();
+        assert!(e.searching().is_none());
+        assert_eq!(e.text(), "cargo test -p parser", "enter keeps it to change or send");
     }
 
     #[test]

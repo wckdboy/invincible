@@ -1,9 +1,11 @@
 //! The terminal chat (`autobot chat`, and `autobot code` in a project). On a terminal: the
 //! scrollback as usual, and at the bottom a composer (several lines, history, the editing keys,
 //! long pastes folded), a palette for `/` commands and `@` files, what the agent is doing with a
-//! spinner, approvals as a card that takes one key, and a status line. Esc stops a turn; typing
-//! while it works steers it. Without a terminal (a pipe, a script) it reads lines and prints
-//! plain text.
+//! spinner, approvals as a card that takes one key (or `e`, and what to do instead), and a
+//! status line. Esc stops a turn; typing while it works steers it; ctrl+r searches what was
+//! sent. `/model` and `/resume` alone open a picker. The window's title names the project, and a
+//! long turn's end or a waiting question notifies. Without a terminal (a pipe, a script) it reads
+//! lines and prints plain text.
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -15,7 +17,8 @@ use std::time::{Duration, Instant};
 use crossterm::event::{Event as Key, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::editor::Editor;
-use super::palette::{self, Kind, Palette};
+use super::osc;
+use super::palette::{self, Item, Kind, Palette, Picker};
 use super::style;
 use super::term::{self, say};
 use super::ui::{Card, Ui, render_diff};
@@ -65,7 +68,7 @@ impl Remembered {
 /// The slash commands, for `/help` and the palette.
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "commands and keys"),
-    ("/model", "show the models, or switch: /model deepseek"),
+    ("/model", "pick a model, or switch: /model deepseek"),
     ("/approvals", "show or set: ask, edits (changes in the project run), allowlist, trust"),
     ("/private", "on: local models only; off: cloud models allowed"),
     ("/tools", "show the tools, or keep only some groups: /tools files-read,terminal (or all)"),
@@ -80,7 +83,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/new", "start the conversation over"),
     ("/fork", "continue in a copy of this conversation: /fork [name]"),
     ("/sessions", "the saved conversations"),
-    ("/resume", "continue another conversation: /resume <name>"),
+    ("/resume", "pick a conversation to continue, or /resume <name>"),
+    ("/copy", "copy the last answer (its Markdown) to the clipboard"),
     ("/memory", "what the agent remembered"),
     ("/skills", "the owner's skills"),
     ("/team", "the team members it can delegate to"),
@@ -92,10 +96,12 @@ const COMMANDS: &[(&str, &str)] = &[
 /// The keys, for `/help`.
 const KEYS: &[(&str, &str)] = &[
     ("enter", "send (while it works: steer it, read before its next step)"),
-    ("alt+enter, ctrl+j", "a new line (or end a line with \\)"),
+    ("shift+enter, alt+enter", "a new line (also ctrl+j, or end a line with \\)"),
     ("↑ ↓", "history, or lines in a longer message"),
+    ("ctrl+r", "search what you sent (again: older; enter keeps it, esc puts back)"),
     ("tab", "complete a /command or @path from the list"),
     ("esc", "stop the turn; close the list"),
+    ("e (at a question)", "no, and type what to do instead"),
     ("ctrl+c", "clear the composer; stop the turn; twice to quit"),
     ("ctrl+d", "quit (on an empty composer)"),
     ("ctrl+a ctrl+e", "start and end of the line"),
@@ -158,29 +164,46 @@ impl Approver for KeyApprover {
     fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
         Box::pin(async move {
             let (title, what) = question(action, self.ui.workdir());
+            // What to do instead goes back to the model with a refused tool call; a cloud model
+            // refused ends the turn, so there it is a plain no.
+            let instead = !matches!(action, Action::Cloud(_));
             let Some(lines) = &self.lines else {
                 // On the terminal: a card above the composer, answered by the next key.
+                term::notify(&format!("autobot: {title}"));
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                self.ui.ask(Card { title, what }, tx);
+                self.ui.ask(Card { title, what, instead }, tx);
                 return rx.await.unwrap_or(Answer::Deny);
             };
             self.ui.flush();
-            for line in super::ui::card_lines(&Card { title, what }, style::columns()) {
+            for line in super::ui::card_lines(&Card { title, what, instead }, style::columns(), false) {
                 say(&line);
             }
-            // A line: y, a or n; anything else (or the end of the input) is no.
-            let answer = match lines.lock().await.recv().await.and_then(|l| l.trim().chars().next()) {
-                Some('y' | 'Y') => Answer::Once,
-                Some('a' | 'A') => Answer::Always,
-                _ => Answer::Deny,
-            };
-            say(&style::gray(match answer {
-                Answer::Once => "→ yes",
-                Answer::Always => "→ always, this session",
-                Answer::Deny => "→ no",
+            // A line: y, a, n, or `e what to do instead`; anything else (or the end of the input)
+            // is no.
+            let answer = answer_line(lines.lock().await.recv().await.as_deref().unwrap_or_default(), instead);
+            say(&style::gray(&match &answer {
+                Answer::Once => "→ yes".to_owned(),
+                Answer::Always => "→ always, this session".to_owned(),
+                Answer::Deny => "→ no".to_owned(),
+                Answer::Instead(text) => format!("→ no, instead: {text}"),
             }));
             answer
         })
+    }
+}
+
+/// An answer typed as a line (without a terminal): `y`, `a`, `n`, or `e` and what to do instead
+/// (when [instead] is offered); anything else is no.
+fn answer_line(line: &str, instead: bool) -> Answer {
+    let line = line.trim();
+    match line.chars().next() {
+        Some('y' | 'Y') => Answer::Once,
+        Some('a' | 'A') => Answer::Always,
+        // `e`, a space, the words (`everything` is not an `e`).
+        Some('e' | 'E') if instead && line[1..].starts_with(char::is_whitespace) => {
+            Answer::Instead(line[1..].trim().to_owned())
+        }
+        _ => Answer::Deny,
     }
 }
 
@@ -248,6 +271,10 @@ struct App {
     code: bool,
     /// Sent while a turn ran but not for it (commands): run after it.
     queued: Vec<(String, String)>,
+    /// `e` at a question: what to do instead is typed in the composer; what it held before.
+    instead: Option<String>,
+    /// A picker open (`/model`, `/resume`): the composer narrows it.
+    picker: Option<Picker>,
 }
 
 impl App {
@@ -265,7 +292,9 @@ impl App {
                 let _ = files.set(palette::files(&workdir, 20_000));
             });
         }
-        let terminal = term::Terminal::take();
+        let project = workdir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let title = if project.is_empty() { "autobot".to_owned() } else { format!("autobot · {project}") };
+        let terminal = term::Terminal::take(&title);
         let (keys, lines) = if terminal.is_some() {
             (Some(term::keys()), None)
         } else {
@@ -286,6 +315,30 @@ impl App {
             lines,
             code,
             queued: Vec::new(),
+            instead: None,
+            picker: None,
+        }
+    }
+
+    /// Opens [picker], the composer empty to narrow it.
+    fn open_picker(&mut self, picker: Picker) {
+        self.editor.clear();
+        self.dismissed = None;
+        self.palette = Some(picker.palette(""));
+        self.picker = Some(picker);
+    }
+
+    fn close_picker(&mut self) {
+        if self.picker.take().is_some() {
+            self.palette = None;
+            self.editor.clear();
+        }
+    }
+
+    /// Back from typing what to do instead: the composer as it was.
+    fn leave_instead(&mut self) {
+        if let Some(draft) = self.instead.take() {
+            self.editor.set(&draft);
         }
     }
 
@@ -322,6 +375,20 @@ impl App {
 
     /// The palette for what is typed now.
     fn suggest(&mut self) {
+        if let Some(picker) = &self.picker {
+            let next = picker.palette(self.editor.text());
+            // Narrowed further, the same first item stays chosen.
+            let selected = match &self.palette {
+                Some(old) if old.items == next.items => old.selected,
+                _ => next.selected,
+            };
+            self.palette = Some(Palette { selected, ..next });
+            return;
+        }
+        if self.instead.is_some() || self.editor.searching().is_some() {
+            self.palette = None;
+            return;
+        }
         let text = self.editor.text();
         if self.dismissed.as_deref() == Some(text) {
             self.palette = None;
@@ -349,6 +416,7 @@ impl App {
                 }
                 self.editor.replace(palette.range.clone(), &format!("{} ", item.text));
             }
+            Kind::Pick => return false,
             Kind::Path => {
                 // A directory stays open for the next part of the path.
                 let space = if item.text.ends_with('/') { "" } else { " " };
@@ -359,11 +427,17 @@ impl App {
         false
     }
 
-    /// What [key] does, while a turn runs ([running]) or a question waits ([asking]).
-    fn press(&mut self, key: Key, running: bool, asking: bool) -> Did {
+    /// What [key] does, while a turn runs ([running]) or a question waits ([card]).
+    fn press(&mut self, key: Key, running: bool, card: Option<&Card>) -> Did {
+        let asking = card.is_some();
+        if !asking {
+            // The question went (the turn was stopped) while its answer was being typed.
+            self.leave_instead();
+        }
+        let typing = self.instead.is_some();
         let key = match key {
             Key::Key(key) if key.kind != KeyEventKind::Release => key,
-            Key::Paste(text) if !asking => {
+            Key::Paste(text) if !asking || typing => {
                 self.editor.paste(&text);
                 self.suggest();
                 return Did::Nothing;
@@ -372,16 +446,57 @@ impl App {
                 term::resized(usize::from(width));
                 return Did::Nothing;
             }
+            Key::FocusGained => {
+                term::focused(true);
+                return Did::Nothing;
+            }
+            Key::FocusLost => {
+                term::focused(false);
+                return Did::Nothing;
+            }
             _ => return Did::Nothing,
         };
         let KeyEvent { code, modifiers, .. } = key;
         let ctrl = modifiers.contains(KeyModifiers::CONTROL);
         let alt = modifiers.contains(KeyModifiers::ALT);
-        if asking {
+        if asking && typing {
+            // What to do instead, typed in the composer: enter answers with it, esc goes back
+            // to the keys.
+            match code {
+                KeyCode::Esc => {
+                    self.leave_instead();
+                    return Did::Nothing;
+                }
+                KeyCode::Char('c') if ctrl => {
+                    if self.editor.is_empty() {
+                        self.leave_instead();
+                    } else {
+                        self.editor.clear();
+                    }
+                    return Did::Nothing;
+                }
+                KeyCode::Enter if !alt && !modifiers.contains(KeyModifiers::SHIFT) => {
+                    if self.editor.text().trim().is_empty() {
+                        return Did::Nothing;
+                    }
+                    let (_, sent) = self.editor.take_as(false);
+                    let draft = self.instead.take().unwrap_or_default();
+                    self.editor.set(&draft);
+                    return Did::Answer(Answer::Instead(sent.trim().to_owned()));
+                }
+                _ => {}
+            }
+        } else if let Some(card) = card {
             return match code {
                 KeyCode::Char('c') if ctrl => Did::Interrupt,
                 KeyCode::Char('y' | 'Y') if !ctrl => Did::Answer(Answer::Once),
                 KeyCode::Char('a' | 'A') if !ctrl => Did::Answer(Answer::Always),
+                KeyCode::Char('e' | 'E') if !ctrl && card.instead => {
+                    self.instead = Some(self.editor.text().to_owned());
+                    self.editor.clear();
+                    self.palette = None;
+                    Did::Nothing
+                }
                 // Any other key is someone typing, not answering: no (a sentence typed at the
                 // prompt must not approve anything with an `a` in it).
                 KeyCode::Char(_) | KeyCode::Esc | KeyCode::Enter => Did::Answer(Answer::Deny),
@@ -391,8 +506,57 @@ impl App {
         if !(ctrl && code == KeyCode::Char('c')) {
             self.exit_armed = None;
         }
+        // ctrl+r: searching what was sent. Typing narrows it; a key that moves or edits keeps
+        // what was found and does its own thing.
+        if self.editor.searching().is_some() {
+            let e = &mut self.editor;
+            match code {
+                KeyCode::Char('r') if ctrl => e.search_back(),
+                KeyCode::Char('c' | 'g') if ctrl => e.search_cancel(),
+                KeyCode::Esc => e.search_cancel(),
+                KeyCode::Enter if !alt && !modifiers.contains(KeyModifiers::SHIFT) => e.search_accept(),
+                KeyCode::Backspace if !ctrl && !alt => e.search_backspace(),
+                KeyCode::Char(c) if !ctrl && !alt => e.search_type(c),
+                _ => {
+                    e.search_accept();
+                    return self.press(Key::Key(key), running, card);
+                }
+            }
+            self.suggest();
+            return Did::Nothing;
+        }
+        if self.picker.is_some() {
+            match code {
+                KeyCode::Esc => {
+                    self.close_picker();
+                    return Did::Nothing;
+                }
+                KeyCode::Char('c') if ctrl => {
+                    self.close_picker();
+                    return Did::Nothing;
+                }
+                KeyCode::Enter | KeyCode::Tab if !alt && !modifiers.contains(KeyModifiers::SHIFT) => {
+                    // Nothing matches: the picker stays, to type something else.
+                    let Some(item) = self.palette.as_ref().and_then(|p| p.chosen().cloned()) else {
+                        return Did::Nothing;
+                    };
+                    let command = self.picker.as_ref().map(|p| p.command.clone()).unwrap_or_default();
+                    self.close_picker();
+                    let line = format!("{command} {}", item.text);
+                    return Did::Submit(line.clone(), line);
+                }
+                _ => {}
+            }
+        }
         let e = &mut self.editor;
         match code {
+            KeyCode::Char('r') if ctrl => {
+                if self.picker.is_none() {
+                    self.palette = None;
+                    e.search_back();
+                }
+                return Did::Nothing;
+            }
             KeyCode::Char('c') if ctrl => {
                 if self.palette.is_some() {
                     self.dismissed = Some(e.text().to_owned());
@@ -512,6 +676,7 @@ impl App {
         let height = style::rows();
         let running = ui.running();
         let asking = ui.card().is_some();
+        let typing = asking && self.instead.is_some();
         // The composer: `│ › text │`, at most 8 rows of it, scrolled to the cursor.
         let inner = width.saturating_sub(6).max(4);
         let (rows, (crow, ccol)) = self.editor.layout(inner);
@@ -523,7 +688,9 @@ impl App {
             let lead = if i == 0 { format!("{} ", style::bold(&style::accent("›"))) } else { "  ".to_owned() };
             let text = if empty {
                 let hint = match (running, self.code) {
-                    _ if asking => "y, a or n answers the question above",
+                    _ if typing => "what should it do instead? enter sends it with the no",
+                    _ if asking => "y, a or n answers the question above (e: no, and say what instead)",
+                    _ if self.picker.is_some() => "type to narrow the list; enter picks",
                     (true, _) => "type to steer it; enter sends before its next step",
                     (false, true) => "ask for a change, / for commands, @ to attach a file",
                     (false, false) => "ask anything, / for commands, @ to attach a file",
@@ -539,15 +706,17 @@ impl App {
             composer.push(format!("{} {lead}{} {}", style::faint("│"), pad(&text, inner), style::faint("│")));
         }
         composer.push(style::faint(&format!("╰{}╯", "─".repeat(width - 2))));
-        // Under it: the palette, or the status line.
-        let under: Vec<String> = match &self.palette {
-            Some(p) if !asking => palette_lines(p, width),
-            _ => vec![self.status_line(width, running, asking)],
+        // Under it: the palette, the search, or the status line.
+        let under: Vec<String> = match (&self.palette, &self.picker, self.editor.searching()) {
+            (Some(p), Some(picker), _) if !asking => picker_lines(p, picker, width),
+            (Some(p), None, None) if !asking => palette_lines(p, width),
+            (_, _, Some(search)) => vec![search_line(&search.query, search.failed, width)],
+            _ => vec![self.status_line(width, running, asking, typing)],
         };
         let fixed = 1 + composer.len() + under.len() + 1;
         let room = height.saturating_sub(fixed + 2).max(1);
         let mut head = if term::after_blank() || ui.streaming() { Vec::new() } else { vec![String::new()] };
-        let live = ui.live(width, room);
+        let live = ui.live(width, room, typing);
         if !live.is_empty() {
             head.extend(live);
             head.push(String::new());
@@ -556,14 +725,19 @@ impl App {
         let over = (head.len() + composer.len() + under.len() + 1).saturating_sub(height);
         head.drain(..over.min(head.len()));
         let box_top = head.len();
-        let cursor = (!asking).then_some((box_top + 1 + crow - first, 4 + if empty { 0 } else { ccol }));
+        let cursor = (!asking || typing).then_some((box_top + 1 + crow - first, 4 + if empty { 0 } else { ccol }));
         let lines = head.into_iter().chain(composer).chain(under).map(|l| truncate(&l, width)).collect();
         term::draw(lines, cursor);
     }
 
-    fn status_line(&self, width: usize, running: bool, asking: bool) -> String {
+    fn status_line(&self, width: usize, running: bool, asking: bool, typing: bool) -> String {
         let hint = match &self.notice {
             Some((notice, _)) => style::yellow(notice),
+            None if typing => style::faint("enter sends · esc back to the keys"),
+            // Where shift+enter is a key of its own, it is the one to name.
+            None if term::kitty() && !asking && !running && !self.editor.is_empty() => {
+                style::faint("enter send · shift+enter new line")
+            }
             None => style::faint(hint(asking, running, self.editor.is_empty())),
         };
         status_line(&self.status, &hint, width)
@@ -573,7 +747,7 @@ impl App {
 /// What the keys do now, for the right of the status line.
 fn hint(asking: bool, running: bool, empty: bool) -> &'static str {
     match (asking, running, empty) {
-        (true, ..) => "y yes · a always · n no",
+        (true, ..) => "y yes · a always · n no · e instead",
         (_, true, true) => "esc to interrupt",
         (_, true, false) => "enter steers · esc interrupts",
         (_, false, true) => "/ commands · @ files · ! shell",
@@ -609,6 +783,36 @@ fn status_line(s: &Status, hint: &str, width: usize) -> String {
         }
         parts.pop();
     }
+}
+
+/// The status line while searching what was sent: `search: query` on the left (and that nothing
+/// older matches), the keys on the right.
+fn search_line(query: &str, failed: bool, width: usize) -> String {
+    let mut left = format!("  {} {}", style::faint("search:"), style::bold(query));
+    if failed {
+        left.push_str(&format!("  {}", style::yellow("no older match")));
+    }
+    let hint = style::faint("ctrl+r older · enter keeps · esc puts back");
+    let gap = width.saturating_sub(style::width(&left) + style::width(&hint));
+    if gap < 2 {
+        return truncate(&left, width);
+    }
+    format!("{left}{}{hint}", " ".repeat(gap))
+}
+
+/// A picker's rows: the palette's, then what it is and its keys.
+fn picker_lines(p: &Palette, picker: &Picker, width: usize) -> Vec<String> {
+    let mut out: Vec<String> = palette_lines(p, width).into_iter().filter(|l| !l.contains("tab completes")).collect();
+    if p.items.is_empty() {
+        out.push(style::faint(&format!("    no {} match", picker.noun)));
+    }
+    let count = if p.items.len() == picker.all.len() {
+        format!("{} {}", picker.all.len(), picker.noun)
+    } else {
+        format!("{} of {} {}", p.items.len(), picker.all.len(), picker.noun)
+    };
+    out.push(truncate(&style::faint(&format!("    {count} · type to narrow · enter picks · esc closes")), width));
+    out
 }
 
 /// The palette's rows: the chosen one marked, each with its line about it.
@@ -698,6 +902,11 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
             std::process::exit(143);
         });
     }
+    term::set_notify(match config.terminal.notify {
+        crate::config::NotifyMode::Off => osc::Notify::Off,
+        crate::config::NotifyMode::Bell => osc::Notify::Bell,
+        crate::config::NotifyMode::Auto => osc::notify_kind(|k| std::env::var(k).ok()),
+    });
     chat.banner(options.code);
     app.status = chat.status();
     let mut tick = tokio::time::interval(Duration::from_millis(70));
@@ -707,7 +916,7 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
             tokio::select! {
                 key = app.key() => {
                     let Some(key) = key else { return Ok(()) };
-                    match app.press(key, false, false) {
+                    match app.press(key, false, None) {
                         Did::Submit(shown, sent) => (shown, sent),
                         Did::Exit => break,
                         _ => continue,
@@ -724,6 +933,7 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
         match chat.handle(&mut app, &shown, &sent).await {
             Some(Next::Exit) => break,
             Some(Next::Prefill(text)) => app.editor.set(&text),
+            Some(Next::Pick(picker)) => app.open_picker(picker),
             _ => {}
         }
         app.status = chat.status();
@@ -739,6 +949,8 @@ enum Next {
     Prefill(String),
     /// Send this as the owner's message (a command's prompt).
     Send(String),
+    /// Open this picker (a command with nothing after it).
+    Pick(Picker),
 }
 impl Chat {
     fn model_label(&self) -> String {
@@ -897,6 +1109,7 @@ impl Chat {
         }
         let ui = self.ui.clone();
         ui.begin();
+        let started = Instant::now();
         let inbox: crate::tools::Inbox = Arc::default();
         let approver = KeyApprover { ui: ui.clone(), lines: app.lines.clone() };
         let events = |event: crate::agent::Event| ui.event(event);
@@ -918,7 +1131,7 @@ impl Chat {
                             false => tokio::signal::ctrl_c().await,
                         }
                     } => break None,
-                    Some(key) = app.key() => match app.press(key, true, ui.card().is_some()) {
+                    Some(key) = app.key() => match app.press(key, true, ui.card().as_ref()) {
                         Did::Interrupt => break None,
                         Did::Answer(answer) => {
                             ui.respond(answer);
@@ -939,6 +1152,18 @@ impl Chat {
             }
         };
         drop(approver);
+        app.leave_instead();
+        // A long turn: the owner may be elsewhere.
+        if started.elapsed() >= Duration::from_secs(10) {
+            let how = match &outcome {
+                Some(Ok(_)) => "finished",
+                Some(Err(_)) => "failed",
+                None => "stopped",
+            };
+            let project = self.agent.tools.workdir().file_name().map(|n| n.to_string_lossy().into_owned());
+            let project = project.map(|p| format!(" · {p}")).unwrap_or_default();
+            term::notify(&format!("autobot{project}: the turn {how} ({}s)", started.elapsed().as_secs()));
+        }
         match outcome {
             Some(Ok(outcome)) => {
                 ui.answer(&outcome.text);
@@ -966,8 +1191,10 @@ impl Chat {
         app.status = self.status();
         // What was sent for after the turn.
         for (shown, sent) in std::mem::take(&mut app.queued) {
-            if let Some(Next::Prefill(text)) = Box::pin(self.handle(app, &shown, &sent)).await {
-                app.editor.set(&text);
+            match Box::pin(self.handle(app, &shown, &sent)).await {
+                Some(Next::Prefill(text)) => app.editor.set(&text),
+                Some(Next::Pick(picker)) => app.open_picker(picker),
+                _ => {}
             }
         }
     }
@@ -1100,8 +1327,9 @@ impl Chat {
                 }
                 if term::active() {
                     say(&format!("\n  {}", style::gray("keys")));
+                    let w = KEYS.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
                     for (keys, what) in KEYS {
-                        say(&format!("  {} {}", style::bold(&format!("{keys:<21}")), style::gray(what)));
+                        say(&format!("  {} {}", style::bold(&format!("{keys:<w$}")), style::gray(what)));
                     }
                 }
             }
@@ -1160,6 +1388,9 @@ impl Chat {
                     self.models = models;
                 }
                 let current = self.agent.gateway.model();
+                if term::active() {
+                    return Ok(Some(Next::Pick(model_picker(&self.models, current))));
+                }
                 for m in &self.models {
                     let mark = if m.id == current { style::accent("●") } else { " ".to_owned() };
                     let context = m.context.map(|c| format!(" · {}k context", c / 1000)).unwrap_or_default();
@@ -1328,7 +1559,15 @@ impl Chat {
             }
             "/resume" => {
                 if arg.is_empty() {
-                    return Err("/resume <name> (see /sessions)".to_owned());
+                    if !term::active() {
+                        return Err("/resume <name> (see /sessions)".to_owned());
+                    }
+                    let dir = self.home.join("sessions");
+                    let sessions = crate::session::list(&dir);
+                    if sessions.is_empty() {
+                        return Err("no saved conversations yet".to_owned());
+                    }
+                    return Ok(Some(Next::Pick(session_picker(&dir, &sessions, &self.session.id))));
                 }
                 self.session = Session::open(&self.home.join("sessions"), arg)?;
                 self.grants.clear();
@@ -1368,6 +1607,26 @@ impl Chat {
                 }
             }
             "/board" => term::print(&crate::board::Board::load(&self.home)?.listing()),
+            "/copy" => {
+                let text = crate::session::last_answer(&self.session.messages)
+                    .ok_or("no answer to copy yet")?
+                    .trim()
+                    .to_owned();
+                let tmux = std::env::var_os("TMUX").is_some();
+                if !term::emit(&osc::clipboard(&text, tmux)) {
+                    return Err("/copy needs a terminal (the text goes through it to the clipboard)".to_owned());
+                }
+                let lines = text.lines().count();
+                let mut note = format!(
+                    "copied the last answer to the clipboard ({lines} line{}, Markdown)",
+                    if lines == 1 { "" } else { "s" }
+                );
+                // Some terminals keep only so much of what is sent this way.
+                if text.len() > 74_000 {
+                    note.push_str("; it is long, and some terminals keep only part of it");
+                }
+                say(&style::gray(&note));
+            }
             other => {
                 let custom = crate::commands::list(self.agent.tools.workdir(), &self.home);
                 let Some(command) = custom.iter().find(|c| other.strip_prefix('/') == Some(c.name.as_str())) else {
@@ -1380,6 +1639,39 @@ impl Chat {
         }
         Ok(None)
     }
+}
+
+/// The models to pick from: the gateway's, then `auto`; the current one chosen.
+fn model_picker(models: &[ModelInfo], current: &str) -> Picker {
+    let mut all: Vec<Item> = models
+        .iter()
+        .map(|m| {
+            let context = m.context.map(|c| format!(" · {}k context", c / 1000)).unwrap_or_default();
+            let health = if m.healthy { "" } else { " · unhealthy" };
+            let now = if m.id == current { " · now" } else { "" };
+            Item { text: m.id.clone(), detail: format!("{}{context}{health}{now}", m.tier) }
+        })
+        .collect();
+    let now = if current == "auto" { " · now" } else { "" };
+    all.push(Item { text: "auto".into(), detail: format!("the gateway's router picks{now}") });
+    let current = all.iter().position(|i| i.text == current).unwrap_or(0);
+    Picker { command: "/model".into(), noun: "models".into(), all, current }
+}
+
+/// The conversations to pick from, newest first (at most 50): what each is about, and when.
+fn session_picker(dir: &Path, sessions: &[(String, std::time::SystemTime)], current: &str) -> Picker {
+    let all: Vec<Item> = sessions
+        .iter()
+        .take(50)
+        .map(|(name, modified)| {
+            let ago = ago_text(modified.elapsed().map(|d| d.as_secs()).unwrap_or(0));
+            let about = crate::session::title(dir, name, 60).unwrap_or_else(|| "(empty)".to_owned());
+            let now = if name == current { " · now" } else { "" };
+            Item { text: name.clone(), detail: format!("{about} · {ago}{now}") }
+        })
+        .collect();
+    let current = all.iter().position(|i| i.text == current).unwrap_or(0);
+    Picker { command: "/resume".into(), noun: "conversations".into(), all, current }
 }
 
 fn ago_text(secs: u64) -> String {
@@ -1449,7 +1741,172 @@ pub fn expand_mentions(text: &str, workdir: &Path, ui: &Ui) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Status, expand_mentions, hint, status_line};
+    use super::{App, Did, Status, answer_line, expand_mentions, hint, model_picker, search_line, status_line};
+    use crate::approval::Answer;
+    use crate::tui::editor::Editor;
+    use crate::tui::ui::Card;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    fn app(history: &[&str]) -> App {
+        App {
+            editor: Editor::with_history(history.iter().map(|h| h.to_string()).collect()),
+            history: std::env::temp_dir().join(format!("autobot-chat-history-{}", std::process::id())),
+            commands: vec![("/model".into(), "pick a model".into())],
+            files: Default::default(),
+            palette: None,
+            dismissed: None,
+            exit_armed: None,
+            notice: None,
+            status: Status::default(),
+            terminal: None,
+            keys: None,
+            lines: None,
+            code: false,
+            queued: Vec::new(),
+            instead: None,
+            picker: None,
+        }
+    }
+
+    /// A key as the terminal sends it; with the kitty keyboard protocol on, shift+enter and a
+    /// lone esc come as themselves (crossterm decodes `CSI 13;2u` and `CSI 27u` to these).
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
+        Event::Key(KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE })
+    }
+
+    fn typed(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.press(key(KeyCode::Char(c), KeyModifiers::NONE), false, None);
+        }
+    }
+
+    #[test]
+    fn kitty_keys_shift_enter_is_a_new_line_and_esc_stops() {
+        let mut a = app(&[]);
+        typed(&mut a, "one");
+        assert_eq!(a.press(key(KeyCode::Enter, KeyModifiers::SHIFT), false, None), Did::Nothing);
+        typed(&mut a, "two");
+        assert_eq!(a.editor.text(), "one\ntwo");
+        assert_eq!(a.press(key(KeyCode::Enter, KeyModifiers::ALT), false, None), Did::Nothing);
+        assert_eq!(a.editor.text(), "one\ntwo\n");
+        assert_eq!(a.press(key(KeyCode::Esc, KeyModifiers::NONE), true, None), Did::Interrupt);
+        // ctrl+c arrives as `CSI 99;5u`: the same key.
+        assert_eq!(a.press(key(KeyCode::Char('c'), KeyModifiers::CONTROL), true, None), Did::Nothing);
+        assert!(a.editor.is_empty(), "the composer cleared first");
+        let release = Event::Key(KeyEvent {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        });
+        a.press(release, false, None);
+        assert!(a.editor.is_empty(), "releases are not keys");
+        typed(&mut a, "go");
+        assert_eq!(
+            a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None),
+            Did::Submit("go".into(), "go".into())
+        );
+        let _ = std::fs::remove_file(&a.history);
+    }
+
+    #[test]
+    fn ctrl_r_searches_what_was_sent() {
+        let mut a = app(&["cargo build", "git status", "cargo test"]);
+        typed(&mut a, "dra");
+        a.press(key(KeyCode::Char('r'), KeyModifiers::CONTROL), false, None);
+        typed(&mut a, "cargo");
+        assert_eq!(a.editor.text(), "cargo test");
+        assert_eq!(a.editor.searching().unwrap().query, "cargo");
+        a.press(key(KeyCode::Char('r'), KeyModifiers::CONTROL), false, None);
+        assert_eq!(a.editor.text(), "cargo build");
+        assert!(a.palette.is_none());
+        // Enter keeps it; the next enter sends it.
+        assert_eq!(a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None), Did::Nothing);
+        assert!(a.editor.searching().is_none());
+        assert_eq!(
+            a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None),
+            Did::Submit("cargo build".into(), "cargo build".into())
+        );
+        // Esc puts back what was there; a key that moves keeps the match and moves.
+        typed(&mut a, "x");
+        a.press(key(KeyCode::Char('r'), KeyModifiers::CONTROL), false, None);
+        typed(&mut a, "git");
+        a.press(key(KeyCode::Esc, KeyModifiers::NONE), false, None);
+        assert_eq!(a.editor.text(), "x");
+        a.press(key(KeyCode::Char('r'), KeyModifiers::CONTROL), false, None);
+        typed(&mut a, "stat");
+        a.press(key(KeyCode::End, KeyModifiers::NONE), false, None);
+        assert!(a.editor.searching().is_none());
+        assert_eq!((a.editor.text(), a.editor.cursor()), ("git status", 10));
+        let line = search_line("stat", false, 80);
+        assert!(line.starts_with("  search: stat ") && line.ends_with("ctrl+r older · enter keeps · esc puts back"));
+        assert!(search_line("zz", true, 80).contains("no older match"));
+        let _ = std::fs::remove_file(&a.history);
+    }
+
+    #[test]
+    fn e_at_a_question_types_what_to_do_instead() {
+        let card = Card { title: "Run this command?".into(), what: "rm -rf build".into(), instead: true };
+        let mut a = app(&[]);
+        a.editor.set("a draft");
+        assert_eq!(a.press(key(KeyCode::Char('e'), KeyModifiers::NONE), true, Some(&card)), Did::Nothing);
+        assert!(a.editor.is_empty(), "the composer opens empty");
+        // Typed letters are the answer's words now, not y/a/n.
+        for c in "use cargo clean".chars() {
+            assert_eq!(a.press(key(KeyCode::Char(c), KeyModifiers::NONE), true, Some(&card)), Did::Nothing);
+        }
+        assert_eq!(
+            a.press(key(KeyCode::Enter, KeyModifiers::NONE), true, Some(&card)),
+            Did::Answer(Answer::Instead("use cargo clean".into()))
+        );
+        assert_eq!(a.editor.text(), "a draft", "the draft comes back");
+        assert!(a.editor.history().is_empty(), "an answer is not history");
+        // Esc goes back to the keys; without `e` offered, e is a no like any other letter.
+        a.press(key(KeyCode::Char('e'), KeyModifiers::NONE), true, Some(&card));
+        a.press(key(KeyCode::Esc, KeyModifiers::NONE), true, Some(&card));
+        assert_eq!(a.press(key(KeyCode::Char('y'), KeyModifiers::NONE), true, Some(&card)), Did::Answer(Answer::Once));
+        let cloud = Card { instead: false, ..card };
+        assert_eq!(a.press(key(KeyCode::Char('e'), KeyModifiers::NONE), true, Some(&cloud)), Did::Answer(Answer::Deny));
+        assert_eq!(answer_line("e try the staging box", true), Answer::Instead("try the staging box".into()));
+        assert_eq!(answer_line("e", true), Answer::Deny);
+        assert_eq!(answer_line("everything", true), Answer::Deny, "a word, not the key");
+        assert_eq!(answer_line("e do x", false), Answer::Deny);
+        assert_eq!(answer_line(" a", true), Answer::Always);
+    }
+
+    #[test]
+    fn a_picker_chooses_with_enter() {
+        let models = vec![
+            crate::gateway::ModelInfo { id: "qwen3".into(), tier: "node".into(), context: Some(32_000), healthy: true },
+            crate::gateway::ModelInfo { id: "deepseek".into(), tier: "cloud".into(), context: None, healthy: false },
+        ];
+        let picker = model_picker(&models, "deepseek");
+        assert_eq!(picker.all[1].detail, "cloud · unhealthy · now");
+        assert_eq!(picker.all[2].text, "auto");
+        assert_eq!(picker.current, 1);
+        let mut a = app(&[]);
+        a.open_picker(picker.clone());
+        assert_eq!(a.palette.as_ref().unwrap().selected, 1);
+        typed(&mut a, "qw");
+        assert_eq!(a.palette.as_ref().unwrap().items.len(), 1);
+        assert_eq!(
+            a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None),
+            Did::Submit("/model qwen3".into(), "/model qwen3".into())
+        );
+        assert!(a.picker.is_none() && a.palette.is_none() && a.editor.is_empty());
+        a.open_picker(picker.clone());
+        typed(&mut a, "zzz");
+        assert_eq!(a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None), Did::Nothing);
+        assert!(a.picker.is_some(), "nothing matches: it stays open");
+        a.press(key(KeyCode::Esc, KeyModifiers::NONE), false, None);
+        assert!(a.picker.is_none() && a.editor.is_empty());
+        a.open_picker(picker);
+        a.press(key(KeyCode::Down, KeyModifiers::NONE), false, None);
+        assert_eq!(
+            a.press(key(KeyCode::Enter, KeyModifiers::NONE), false, None),
+            Did::Submit("/model auto".into(), "/model auto".into())
+        );
+    }
 
     #[test]
     fn the_status_line_fits_and_its_hints_follow_the_state() {
@@ -1471,7 +1928,7 @@ mod tests {
         let narrow = status_line(&status, hint(false, true, true), 70);
         assert_eq!(narrow, "  auto → qwen (node) · approvals edits · app main     esc to interrupt");
         assert!(super::style::width(&status_line(&status, "x", 30)) <= 30);
-        assert_eq!(hint(true, true, false), "y yes · a always · n no");
+        assert_eq!(hint(true, true, false), "y yes · a always · n no · e instead");
         assert_eq!(hint(false, true, false), "enter steers · esc interrupts");
     }
 

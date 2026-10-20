@@ -1,6 +1,8 @@
 //! What the composer offers as you type: the slash commands for a `/` at the start, the
 //! project's files for an `@` word. Matches rank by where the typed text falls: the start of the
-//! name, the start of a word in it, anywhere, then its letters in order.
+//! name, the start of a word in it, anywhere, then its letters in order. A picker (`/model`,
+//! `/resume` with nothing after them) is a palette too: everything to choose from, narrowed by
+//! what is typed.
 
 use std::path::Path;
 
@@ -26,6 +28,50 @@ pub enum Kind {
     #[default]
     Command,
     Path,
+    /// A picker's choices.
+    Pick,
+}
+
+/// A list to choose from for a command: what is typed narrows it, enter runs [command] with the
+/// chosen item's text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Picker {
+    /// `/model`, `/resume`.
+    pub command: String,
+    /// What is chosen: `models`, `conversations`.
+    pub noun: String,
+    pub all: Vec<Item>,
+    /// The item chosen at first (the current one).
+    pub current: usize,
+}
+
+impl Picker {
+    /// The palette for [query]: the matches, best first (all, in their order, for nothing typed),
+    /// the current item chosen while nothing is typed.
+    pub fn palette(&self, query: &str) -> Palette {
+        let query = query.trim();
+        let items = filter(&self.all, query);
+        let selected = if query.is_empty() { self.current.min(items.len().saturating_sub(1)) } else { 0 };
+        Palette { items, selected, range: 0..0, kind: Kind::Pick }
+    }
+}
+
+/// [items] that match [query] by their text or, less well, by what is said about them; best
+/// first.
+pub fn filter(items: &[Item], query: &str) -> Vec<Item> {
+    let mut found: Vec<(usize, usize, &Item)> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, item)| {
+            let by_text = score(query, &item.text);
+            let by_detail = score(query, &item.detail).filter(|s| *s < 4).map(|s| s + 5);
+            by_text.or(by_detail).map(|s| (s, i, item))
+        })
+        .collect();
+    if !query.is_empty() {
+        found.sort_by_key(|(s, i, _)| (*s, *i));
+    }
+    found.into_iter().map(|(_, _, item)| item.clone()).collect()
 }
 
 impl Palette {
@@ -146,7 +192,7 @@ pub fn files(workdir: &Path, max: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Kind, score, suggest};
+    use super::{Item, Kind, Picker, filter, score, suggest};
 
     fn commands() -> Vec<(String, String)> {
         ["/help", "/model", "/approvals", "/compact", "/commands", "/context", "/memory"]
@@ -192,6 +238,28 @@ mod tests {
         assert!(suggest("look at @src/main.rs", 20, &[], Some(&files)).is_none(), "already whole");
         assert!(suggest("no at word", 10, &[], Some(&files)).is_none());
         assert!(suggest("@x", 2, &[], None).is_none(), "no files known yet");
+    }
+
+    #[test]
+    fn a_picker_narrows_as_you_type() {
+        let item = |text: &str, detail: &str| Item { text: text.into(), detail: detail.into() };
+        let all = vec![
+            item("qwen3-coder", "node · 32k context"),
+            item("claude-sonnet", "cloud · 200k context"),
+            item("deepseek-chat", "cloud · 64k context"),
+            item("auto", "the gateway's router picks"),
+        ];
+        let texts = |items: Vec<Item>| items.into_iter().map(|i| i.text).collect::<Vec<_>>();
+        assert_eq!(texts(filter(&all, "")), ["qwen3-coder", "claude-sonnet", "deepseek-chat", "auto"]);
+        assert_eq!(texts(filter(&all, "se")), ["deepseek-chat", "claude-sonnet"], "inside the name, then in order");
+        assert_eq!(texts(filter(&all, "cloud")), ["claude-sonnet", "deepseek-chat"], "then by what it is");
+        assert_eq!(texts(filter(&all, "dsc")), ["deepseek-chat"], "letters in order");
+        assert!(filter(&all, "zzz").is_empty());
+        let picker = Picker { command: "/model".into(), noun: "models".into(), all, current: 2 };
+        let p = picker.palette("");
+        assert_eq!((p.kind, p.selected), (Kind::Pick, 2), "the current one chosen");
+        assert_eq!(picker.palette("qw").selected, 0);
+        assert_eq!(picker.palette("qw").chosen().unwrap().text, "qwen3-coder");
     }
 
     #[test]

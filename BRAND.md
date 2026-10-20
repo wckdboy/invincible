@@ -99,7 +99,14 @@ Both CLIs and the installer speak one grammar:
   drawn in place: what is happening, then the composer in a rounded box of faint ash, then one
   status line (model, approvals, project and branch, context, tokens on the left; what the keys
   do now on the right). A question is a card above the composer: `■ title`, what it is about
-  hanging under it, and `└ y yes   a always, this session   n no`.
+  hanging under it, and `└ y yes   a always, this session   n no   e no, and say what instead`.
+  A picker (`/model`, `/resume` alone) and the `/` and `@` lists sit under the composer: the
+  chosen row marked `›` in the signal, the rest ash, a faint count and keys last. Searching what
+  was sent (ctrl+r) turns the status line into `search: query` (the query bold) with its keys on
+  the right.
+- The terminal is told, never shown: the window title `autobot · <project>` (the old one put
+  back after), a notification (OSC 9, else the bell) only when a long turn ends or a question
+  waits and the window is not in front, the clipboard by OSC 52.
 - Answers are Markdown, wrapped to the width: bold headings, `•` lists with hanging indents,
   `▎` quotes, aligned tables, code in sand, code blocks framed `╭── lang ──` … `╰────` with a
   light tint (keywords, strings, numbers; comments faint).

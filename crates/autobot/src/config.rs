@@ -23,6 +23,9 @@ use serde::Deserialize;
 ///
 /// [serve]
 /// listen = "127.0.0.1:7792"          # the agent API (spec/agent.md); loopback only
+///
+/// [terminal]
+/// notify = "auto"                    # a long turn ended, a question waits: auto, bell, off
 /// ```
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +53,29 @@ pub struct Config {
     /// Webhooks that start tasks ([crate::hooks]).
     #[serde(default)]
     pub hooks: crate::hooks::HooksConfig,
+    /// The terminal chat (`autobot chat`, `autobot code`).
+    #[serde(default)]
+    pub terminal: TerminalConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalConfig {
+    /// How the terminal tells you a turn longer than 10 seconds ended or a question waits, while
+    /// its window is not in front.
+    #[serde(default)]
+    pub notify: NotifyMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyMode {
+    /// A desktop notification where the terminal shows them (iTerm2, Ghostty, WezTerm, kitty),
+    /// the bell elsewhere.
+    #[default]
+    Auto,
+    Bell,
+    Off,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -315,6 +341,10 @@ mod tests {
         assert_eq!(config.approvals.mode, ApprovalMode::Ask);
         assert!(config.approvals.allow.is_empty());
         assert!(!config.telegram.enabled);
+        assert_eq!(config.terminal.notify, super::NotifyMode::Auto);
+        let quiet = Config::parse("[terminal]\nnotify = \"off\"").unwrap();
+        assert_eq!(quiet.terminal.notify, super::NotifyMode::Off);
+        assert!(Config::parse("[terminal]\nnotify = \"loud\"").is_err());
     }
 
     #[test]

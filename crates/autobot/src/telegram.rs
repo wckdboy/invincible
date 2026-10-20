@@ -325,12 +325,13 @@ async fn answer_button(bot: &Bot, query: &Value, waiting: &Waiting) {
     });
     let note = match (sender, answer) {
         (Some(tx), Some(answer)) => {
-            let _ = tx.send(answer);
-            match answer {
+            let note = match answer {
                 Answer::Once => "Allowed",
                 Answer::Always => "Allowed for this chat",
-                Answer::Deny => "Denied",
-            }
+                Answer::Deny | Answer::Instead(_) => "Denied",
+            };
+            let _ = tx.send(answer);
+            note
         }
         _ => "This question has expired",
     };
