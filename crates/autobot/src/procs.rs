@@ -165,7 +165,7 @@ pub fn start(
     Ok(id)
 }
 
-fn signal_group(pid: Option<u32>, signal: rustix::process::Signal) {
+pub(crate) fn signal_group(pid: Option<u32>, signal: rustix::process::Signal) {
     if let Some(pid) = pid.and_then(|p| rustix::process::Pid::from_raw(p as i32)) {
         let _ = rustix::process::kill_process_group(pid, signal);
     }

@@ -996,9 +996,13 @@ impl Tools {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            // Its own process group, so a timeout stops what it started too (`cmd &`, a
+            // server): left running, it would also hold the output open until the timeout.
+            .process_group(0)
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("sh: {e}"))?;
+        let group = child.id();
         let mut stdout = child.stdout.take().expect("piped");
         let mut stderr = child.stderr.take().expect("piped");
         let run = async {
@@ -1008,7 +1012,11 @@ impl Tools {
             Ok::<_, String>((out, err, out_cut || err_cut, status))
         };
         match tokio::time::timeout(self.timeout, run).await {
-            Err(_) => Err(format!("stopped after {} seconds", self.timeout.as_secs())),
+            Err(_) => {
+                // The whole group: what the command started goes with it.
+                crate::procs::signal_group(group, rustix::process::Signal::KILL);
+                Err(format!("stopped after {} seconds", self.timeout.as_secs()))
+            }
             Ok(result) => {
                 let (out, err, cut, status) = result?;
                 let mut text = String::from_utf8_lossy(&out).into_owned();
@@ -1493,7 +1501,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("autobot-tools-{}-{}", std::process::id(), rand()));
         std::fs::create_dir_all(&dir).unwrap();
         let dir = dir.canonicalize().unwrap();
-        (Tools::new(dir.clone(), Duration::from_secs(5)), dir)
+        // A command's timeout is not what these tests test (those that do set their own): a
+        // generous one, so a loaded machine does not cut a command short.
+        (Tools::new(dir.clone(), Duration::from_secs(60)), dir)
     }
 
     /// Unique per call: tests run in parallel and must not share a directory.
@@ -1616,8 +1626,8 @@ mod tests {
         assert!(out.contains("done"), "{out}");
         // Interactive turns are not confined unless the sandbox is \"always\".
         let plain = tools.with_sandbox(crate::sandbox::Mode::Unattended);
-        plain.run(&Call::Terminal { command }).await;
-        assert!(outside.exists());
+        let out = plain.run(&Call::Terminal { command }).await;
+        assert!(outside.exists(), "{out}");
         let _ = std::fs::remove_file(outside);
     }
 
@@ -1631,6 +1641,29 @@ mod tests {
         let tools = Tools::new(dir, Duration::from_millis(200));
         let out = tools.run(&Call::Terminal { command: "sleep 5".into() }).await;
         assert!(out.contains("stopped after"), "{out}");
+    }
+
+    /// A command that timed out is stopped with what it started: nothing is left running, and
+    /// the call ends at its timeout even when a child holds the output open.
+    #[tokio::test]
+    async fn a_timed_out_command_is_stopped_with_its_children() {
+        let (_, dir) = tools();
+        let pid = dir.join("pid");
+        let tools = Tools::new(dir.clone(), Duration::from_millis(500));
+        let command = format!("sleep 300 & echo $! > {}; wait", pid.display());
+        let started = std::time::Instant::now();
+        let out = tools.run(&Call::Terminal { command }).await;
+        assert!(out.contains("stopped after"), "{out}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let pid = std::fs::read_to_string(&pid).unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(!alive, "the command's child {} is still running", pid.trim());
     }
 
     /// A command that prints without end is kept to a few MiB, not to the agent's memory.
