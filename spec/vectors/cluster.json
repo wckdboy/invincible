@@ -1,0 +1,730 @@
+{
+  "spec": "cluster",
+  "version": 0,
+  "cases": [
+    {
+      "name": "link: loopback is always direct",
+      "input": {
+        "kind": "link",
+        "network": "offline",
+        "host": "127.0.0.1"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: loopback by name",
+      "input": {
+        "kind": "link",
+        "network": "offline",
+        "host": "localhost"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: the kill switch stops LAN links",
+      "input": {
+        "kind": "link",
+        "network": "offline",
+        "host": "192.168.1.20"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "link: a LAN peer under direct",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "192.168.1.20"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: 10/8 is LAN",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "10.1.2.3"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: 172.16/12 is LAN",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "172.31.255.1"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: 172.32 is not",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "172.32.0.1"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: link-local, the Thunderbolt bridge",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "169.254.10.20"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: Tailscale's CGNAT range",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "100.101.102.103"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: past the CGNAT range",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "100.128.0.1"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: unique-local IPv6",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "[fd12:3456::1]"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: link-local IPv6",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "fe80::1"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: a public IPv6 address",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "2001:db8::1"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: an mDNS name",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "studio.local"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: an mDNS name in capitals",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "Studio.LOCAL"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: an empty mDNS label",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "a..local"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: bare .local",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": ".local"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: a public address",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "8.8.8.8"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: a DNS name",
+      "input": {
+        "kind": "link",
+        "network": "direct",
+        "host": "mini.example.com"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: a LAN peer under Tor is direct, never proxied",
+      "input": {
+        "kind": "link",
+        "network": "tor:127.0.0.1:9050",
+        "host": "192.168.1.20"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: a public peer under Tor is refused, not proxied",
+      "input": {
+        "kind": "link",
+        "network": "tor:127.0.0.1:9050",
+        "host": "203.0.113.7"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "not_lan"
+      }
+    },
+    {
+      "name": "link: a LAN peer under SOCKS5",
+      "input": {
+        "kind": "link",
+        "network": "socks5:proxy.lan:1080",
+        "host": "10.0.0.9"
+      },
+      "expect": {
+        "action": "direct"
+      }
+    },
+    {
+      "name": "link: an unknown mode fails closed",
+      "input": {
+        "kind": "link",
+        "network": "direkt",
+        "host": "192.168.1.20"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "link: a typo after direct fails closed",
+      "input": {
+        "kind": "link",
+        "network": "direct:x",
+        "host": "192.168.1.20"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "link: an empty mode fails closed",
+      "input": {
+        "kind": "link",
+        "network": "",
+        "host": "10.0.0.2"
+      },
+      "expect": {
+        "action": "block",
+        "reason": "offline"
+      }
+    },
+    {
+      "name": "plan: fits on the head: local",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 4294967296,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          },
+          {
+            "node": "mini",
+            "device": "MTL0",
+            "free_mib": 12000
+          }
+        ]
+      },
+      "expect": {
+        "action": "local",
+        "need_mib": 5018
+      }
+    },
+    {
+      "name": "plan: always splits by free memory",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 4294967296,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          },
+          {
+            "node": "mini",
+            "device": "MTL0",
+            "free_mib": 12000
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 5018,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 700
+          },
+          {
+            "node": "mini",
+            "device": "MTL0",
+            "permille": 300
+          }
+        ]
+      }
+    },
+    {
+      "name": "plan: too big for the head: split",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 32212254720,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          },
+          {
+            "node": "mini",
+            "device": "MTL0",
+            "free_mib": 24000
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 34304,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 538
+          },
+          {
+            "node": "mini",
+            "device": "MTL0",
+            "permille": 462
+          }
+        ]
+      }
+    },
+    {
+      "name": "plan: too big for all of them",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 64424509440,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          },
+          {
+            "node": "mini",
+            "device": "MTL0",
+            "free_mib": 12000
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "need_mib": 68096,
+        "reason": "does_not_fit"
+      }
+    },
+    {
+      "name": "plan: no peers and it fits",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 1073741824,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          }
+        ]
+      },
+      "expect": {
+        "action": "local",
+        "need_mib": 1639
+      }
+    },
+    {
+      "name": "plan: no peers and it does not fit",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 42949672960,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "need_mib": 45568,
+        "reason": "does_not_fit"
+      }
+    },
+    {
+      "name": "plan: no devices at all",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 1073741824,
+        "split": "auto",
+        "devices": []
+      },
+      "expect": {
+        "action": "block",
+        "need_mib": 1639,
+        "reason": "does_not_fit"
+      }
+    },
+    {
+      "name": "plan: equal devices share equally",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 10737418240,
+        "split": "always",
+        "devices": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "free_mib": 16000
+          },
+          {
+            "node": "b",
+            "device": "MTL0",
+            "free_mib": 16000
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 11776,
+        "shares": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "permille": 500
+          },
+          {
+            "node": "b",
+            "device": "MTL0",
+            "permille": 500
+          }
+        ]
+      }
+    },
+    {
+      "name": "plan: three equal devices: the leftover thousandth goes first",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 10737418240,
+        "split": "always",
+        "devices": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "free_mib": 9000
+          },
+          {
+            "node": "b",
+            "device": "MTL0",
+            "free_mib": 9000
+          },
+          {
+            "node": "c",
+            "device": "MTL0",
+            "free_mib": 9000
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 11776,
+        "shares": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "permille": 334
+          },
+          {
+            "node": "b",
+            "device": "MTL0",
+            "permille": 333
+          },
+          {
+            "node": "c",
+            "device": "MTL0",
+            "permille": 333
+          }
+        ]
+      }
+    },
+    {
+      "name": "plan: a peer with two GPUs",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 53687091200,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          },
+          {
+            "node": "box",
+            "device": "CUDA0",
+            "free_mib": 24000
+          },
+          {
+            "node": "box",
+            "device": "CUDA1",
+            "free_mib": 24000
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 56832,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 368
+          },
+          {
+            "node": "box",
+            "device": "CUDA0",
+            "permille": 316
+          },
+          {
+            "node": "box",
+            "device": "CUDA1",
+            "permille": 316
+          }
+        ]
+      }
+    },
+    {
+      "name": "plan: a peer with no free memory takes nothing",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 2147483648,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 28000
+          },
+          {
+            "node": "mini",
+            "device": "MTL0",
+            "free_mib": 0
+          }
+        ]
+      },
+      "expect": {
+        "action": "local",
+        "need_mib": 2765
+      }
+    },
+    {
+      "name": "plan: the head may be the small one",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 21474836480,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "laptop",
+            "device": "MTL0",
+            "free_mib": 8000
+          },
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 60000
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 23040,
+        "shares": [
+          {
+            "node": "laptop",
+            "device": "MTL0",
+            "permille": 118
+          },
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 882
+          }
+        ]
+      }
+    },
+    {
+      "name": "plan: the estimate: weights, a tenth more, 512 MiB",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 1359279776,
+        "split": "always",
+        "devices": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "free_mib": 28753
+          },
+          {
+            "node": "b",
+            "device": "MTL0",
+            "free_mib": 28753
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 1938,
+        "shares": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "permille": 500
+          },
+          {
+            "node": "b",
+            "device": "MTL0",
+            "permille": 500
+          }
+        ]
+      }
+    },
+    {
+      "name": "plan: exactly full fits",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 0,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "free_mib": 569
+          }
+        ]
+      },
+      "expect": {
+        "action": "local",
+        "need_mib": 512
+      }
+    },
+    {
+      "name": "plan: one MiB short does not",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 0,
+        "split": "auto",
+        "devices": [
+          {
+            "node": "a",
+            "device": "MTL0",
+            "free_mib": 568
+          }
+        ]
+      },
+      "expect": {
+        "action": "block",
+        "need_mib": 512,
+        "reason": "does_not_fit"
+      }
+    }
+  ]
+}
