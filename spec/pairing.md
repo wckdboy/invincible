@@ -43,6 +43,11 @@ session. Every message after that is a **frame**: a big-endian `u16` length, the
 |---|---|---|
 | `0x01` pair | `Noise_IKpsk1_25519_ChaChaPoly_SHA256`, PSK = the code's secret | `invincible/0 pair` |
 | `0x02` session | `Noise_IK_25519_ChaChaPoly_SHA256` | `invincible/0 session` |
+| `0x03` shard link | `Noise_IK_25519_ChaChaPoly_SHA256` | `invincible/0 shard` |
+
+`0x03` is a session whose stream goes to the node's `ggml-rpc-server` instead of its API, for the
+devices the node names as cluster heads ([cluster.md](cluster.md)); any other device is refused
+before the node answers the first message.
 
 The prologue binds the mode byte into the handshake, so changing it in transit breaks the handshake.
 

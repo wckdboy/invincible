@@ -50,8 +50,12 @@ Both endpoints are on the loopback API (behind the token) and on the device API.
 | `tokens` | when the answer reported usage | `input` and `output` tokens |
 | `redactions` | when something was hidden | distinct values hidden per kind ([redaction.md](redaction.md)) |
 | `images` | when the request carried images | one `{"sha256", "bytes", "mime"}` per image, in order: the SHA-256 (hex) and size of its decoded bytes and its type; for an image given by link, the hash of the URL, `bytes` 0 and `mime` `url` |
+| `cluster` | when a model split across paired nodes ran ([cluster.md](cluster.md)) | every node that held layers, head first: `{"name", "share"}` (its share of the layers in thousandths), and for each peer also `"key"` (its static key, base64url, as pinned at pairing), `"bytes_sent"` and `"bytes_received"` (through its shard links while the request ran; links are shared, so concurrent requests count each other's traffic) |
 | `egress` | always | every attempt to reach a host off the node, in order; `[]` when nothing left |
 | `error` | when the answer was an error | `{"status"}`, the answer's HTTP status; or, for a stream that had begun (kept alive while a local engine read a long prompt), the error event that ended it: `{"status", "code"}` (`context_length_exceeded`, `rate_limit_exceeded`, `engine_stalled`, `upstream_stalled`, …) |
+
+Shard links to your own paired nodes are not egress: `cluster` lists them, `egress` lists hosts
+off hardware you own.
 
 An egress entry has the host, the route (`direct`, `tor`, `socks5`), the request bytes sent, the
 answer bytes received, and `ok` (false for an attempt that failed and was routed elsewhere). A failed

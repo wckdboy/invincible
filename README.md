@@ -28,6 +28,7 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
+| Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
@@ -82,8 +83,9 @@ middle tier**, and later the regional one.
 
 ### Not in v1
 
-Model training, a chat UI, identity systems, federation between strangers. Each may come later or
-become its own project.
+A chat UI, identity systems, federation between strangers. Each may come later or become its own
+project. Training (LoRA fine-tuning on your devices, then across them) is planned in
+[spec/cluster.md](spec/cluster.md).
 
 ## Deep integration with Autobot
 
@@ -1087,6 +1089,44 @@ admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer 
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.
+
+### A cluster of your own devices
+
+A model too big for one machine can be split across nodes you paired, layer by layer, as exo
+does ([spec/cluster.md](spec/cluster.md)). llama.cpp's RPC server does the work on each shard; it
+has no authentication, so it only ever listens on loopback, and the head reaches it through an
+encrypted shard link (Noise, with the keys pairing pinned), never over the network directly.
+
+On the machine that lends its GPU (the shard), with `[remote]` set up as above:
+
+```toml
+[cluster]
+serve = true
+heads = ["studio"]            # the paired devices that may use this node as a shard
+```
+
+On the machine that serves the model (the head), pair with the shard (`invincible join '<its
+code>' --name studio`), then:
+
+```toml
+[[models]]
+id = "big"
+path = "/models/Big-70B-Q4_K_M.gguf"
+cluster = ["mini"]            # paired nodes it may be split across
+split = "auto"                # only when it does not fit here; "always" to split anyway
+```
+
+```sh
+invincible cluster status     # devices, peers (probed now), heads served, where each model runs
+```
+
+- The split is sized by each device's free memory; receipts list the nodes that took part (`cluster`).
+- Shard links stay on the local network (private, link-local, Tailscale or `.local` addresses),
+  never go through Tor or SOCKS5, and stop under `network = "offline"`.
+- A shard that leaves mid-answer ends that answer with an error event; the model is planned again
+  over what is left (or waits, unhealthy, while the router uses another model).
+- Every node needs the same llama.cpp build with the RPC backend: llama.cpp's release archives have
+  `ggml-rpc-server`; Homebrew's llama.cpp has no RPC backend.
 
 ## Evals: local against frontier, on your own work
 
