@@ -16,7 +16,25 @@ pub struct Gateway {
     private: bool,
     /// Ask for the answer as a stream (server-sent events) and hand on its parts as they come.
     stream: bool,
+    /// Tries again after a failure that passes (the gateway restarting, a rate limit, a 5xx, a
+    /// stream cut before anything of it was shown): at most this many times more.
+    retries: u32,
+    /// The first wait before trying again (doubled each time; a `Retry-After` wins, to a point).
+    backoff: Duration,
+    /// How long a call may go without a byte from the gateway (its answer's start, or the next
+    /// piece of a stream) before it counts as hung.
+    idle: Duration,
 }
+
+/// Retries after a failure that passes ([Gateway::retries]).
+const RETRIES: u32 = 3;
+/// The first wait before a retry.
+const BACKOFF: Duration = Duration::from_secs(1);
+/// The longest wait a `Retry-After` gets.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+/// A call with no byte for this long is hung (a local model reading a long prompt, or writing a
+/// long answer whole, takes minutes; ten is past any of that).
+const IDLE: Duration = Duration::from_secs(600);
 
 /// A chat completion request, as the gateway takes it.
 #[derive(serde::Serialize)]
@@ -97,12 +115,18 @@ pub enum GatewayError {
     /// The router wants the owner to confirm (cloud use, a training provider, …).
     Confirm(String),
     Failed(String),
+    /// The request was longer than the model takes; [model]: the one the router chose, when it
+    /// said ([crate::agent] learns what fits it).
+    TooLong {
+        message: String,
+        model: Option<String>,
+    },
 }
 
 impl std::fmt::Display for GatewayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Confirm(m) | Self::Failed(m) => f.write_str(m),
+            Self::Confirm(m) | Self::Failed(m) | Self::TooLong { message: m, .. } => f.write_str(m),
         }
     }
 }
@@ -131,7 +155,21 @@ impl Gateway {
             model: model.to_owned(),
             private,
             stream: false,
+            retries: RETRIES,
+            backoff: BACKOFF,
+            idle: IDLE,
         })
+    }
+
+    /// The same gateway, trying a failed call that may pass [retries] times more, first after
+    /// [backoff].
+    pub fn with_retries(&self, retries: u32, backoff: Duration) -> Self {
+        Self { retries, backoff, ..self.clone() }
+    }
+
+    /// The same gateway, giving up on a call that sends nothing for [idle].
+    pub fn with_idle_timeout(&self, idle: Duration) -> Self {
+        Self { idle, ..self.clone() }
     }
 
     /// Whether the gateway answers its health check (`GET /health`, no token needed).
@@ -218,6 +256,9 @@ impl Gateway {
     }
 
     /// [Gateway::chat], handing [on] the answer's parts as they stream in (when streaming).
+    /// A failure that may pass is tried again, a few times, waiting longer each time: the
+    /// gateway restarting, a rate limit, an overloaded server, a stream cut before any of it was
+    /// handed on (once text is shown, it is not sent twice).
     pub async fn chat_with(
         &self,
         messages: &[Value],
@@ -225,6 +266,43 @@ impl Gateway {
         confirmed: bool,
         on: &(dyn Fn(Delta) + Send + Sync),
     ) -> Result<Reply, GatewayError> {
+        let shown = std::sync::atomic::AtomicBool::new(false);
+        let watched = |delta: Delta| {
+            shown.store(true, std::sync::atomic::Ordering::Relaxed);
+            on(delta)
+        };
+        let mut tried = 0;
+        loop {
+            match self.attempt(messages, tools, confirmed, &watched).await {
+                // Asked to wait longer than a turn should: said, not tried again early.
+                Err(Attempt::Again(e, Some(after))) if after > MAX_RETRY_AFTER => {
+                    return Err(GatewayError::Failed(format!(
+                        "{e} (the gateway asks to wait {} s before trying again)",
+                        after.as_secs()
+                    )));
+                }
+                Err(Attempt::Again(e, after))
+                    if tried < self.retries && !shown.load(std::sync::atomic::Ordering::Relaxed) =>
+                {
+                    let wait = after.unwrap_or_else(|| self.backoff.saturating_mul(2u32.saturating_pow(tried)));
+                    tried += 1;
+                    tracing::warn!("{e}; trying again in {} ms ({tried} of {})", wait.as_millis(), self.retries);
+                    tokio::time::sleep(wait).await;
+                }
+                Err(Attempt::Again(e, _) | Attempt::Final(e)) => return Err(e),
+                Ok(reply) => return Ok(reply),
+            }
+        }
+    }
+
+    /// One try of [Gateway::chat_with].
+    async fn attempt(
+        &self,
+        messages: &[Value],
+        tools: &Value,
+        confirmed: bool,
+        on: &(dyn Fn(Delta) + Send + Sync),
+    ) -> Result<Reply, Attempt> {
         // Serialized from what it borrows: no copy of the conversation and the tools per call.
         let body = Body {
             model: &self.model,
@@ -242,21 +320,45 @@ impl Gateway {
         if confirmed {
             request = request.header("invincible-confirmed", "1");
         }
-        let response = request.send().await.map_err(|e| GatewayError::Failed(self.unreachable(e)))?;
+        let failed = |e: String| Attempt::Final(GatewayError::Failed(e));
+        let hung = || failed(format!("the gateway sent nothing for {}; stopped waiting", seconds(self.idle)));
+        let response = match tokio::time::timeout(self.idle, request.send()).await {
+            Err(_) => return Err(hung()),
+            // Not there (restarting, say): worth another try; anything else is not.
+            Ok(Err(e)) if e.is_connect() => {
+                return Err(Attempt::Again(GatewayError::Failed(self.unreachable(e)), None));
+            }
+            Ok(Err(e)) => return Err(failed(self.unreachable(e))),
+            Ok(Ok(response)) => response,
+        };
         let status = response.status();
         let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
         let request_id = header(invincible::receipts::REQUEST_ID_HEADER);
         let decision = header(invincible::server::DECISION_HEADER).and_then(|d| serde_json::from_str(&d).ok());
+        let retry_after = header("retry-after").and_then(|v| v.trim().parse::<u64>().ok()).map(Duration::from_secs);
         let streamed = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .is_some_and(|t| t.starts_with("text/event-stream"));
         if status.is_success() && streamed {
-            let (message, usage) = read_stream(response, on).await.map_err(GatewayError::Failed)?;
-            return Ok(Reply { message, request_id, decision, usage });
+            return match read_stream(response, on, self.idle).await {
+                Ok((message, usage)) => Ok(Reply { message, request_id, decision, usage }),
+                // Cut off (not the model's own error, not a hang): again, unless some was shown.
+                Err(Stream::Broken(e)) => Err(Attempt::Again(GatewayError::Failed(e), None)),
+                Err(Stream::Failed(e)) => Err(failed(e)),
+            };
         }
-        let text = response.text().await.map_err(|e| GatewayError::Failed(format!("the gateway's answer: {e}")))?;
+        let text = match tokio::time::timeout(self.idle, response.text()).await {
+            Err(_) => return Err(hung()),
+            // An answer that was made (and maybe paid for) but did not arrive whole is not asked
+            // for again; an error's body that did not is.
+            Ok(Err(e)) => {
+                let error = GatewayError::Failed(format!("the gateway's answer: {e}"));
+                return Err(if status.is_success() { Attempt::Final(error) } else { Attempt::Again(error, None) });
+            }
+            Ok(Ok(text)) => text,
+        };
         let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         if !status.is_success() {
             let message = parsed["error"]["message"].as_str().map(str::to_owned).unwrap_or(text);
@@ -266,17 +368,24 @@ impl Gateway {
                 } else {
                     "no model is ready: wait for a local one to load, or add a cloud model (`invincible cloud add`)"
                 };
-                return Err(GatewayError::Failed(format!("the gateway refused ({status}): {message}: {hint}")));
+                return Err(failed(format!("the gateway refused ({status}): {message}: {hint}")));
             }
-            return Err(if status == reqwest::StatusCode::CONFLICT {
-                GatewayError::Confirm(message)
-            } else {
-                GatewayError::Failed(format!("the gateway refused ({status}): {message}"))
-            });
+            if status == reqwest::StatusCode::CONFLICT {
+                return Err(Attempt::Final(GatewayError::Confirm(message)));
+            }
+            if overflow(&message) {
+                let model = decision.as_ref().and_then(|d: &Value| d["model"].as_str()).map(str::to_owned);
+                let message = format!("the gateway refused ({status}): {message}");
+                return Err(Attempt::Final(GatewayError::TooLong { message, model }));
+            }
+            let error = GatewayError::Failed(format!("the gateway refused ({status}): {message}"));
+            // Too many requests, or a server that is overloaded or between restarts.
+            let passing = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504) && !overflow(&message);
+            return Err(if passing { Attempt::Again(error, retry_after) } else { Attempt::Final(error) });
         }
         let message = parsed["choices"][0]["message"].clone();
         if !message.is_object() {
-            return Err(GatewayError::Failed(format!("the gateway's answer has no message: {text}")));
+            return Err(failed(format!("the gateway's answer has no message: {text}")));
         }
         let usage = parsed.get("usage").filter(|u| u.is_object()).cloned();
         Ok(Reply { message, request_id, decision, usage })
@@ -414,26 +523,72 @@ impl Gateway {
     }
 }
 
+/// Whether a gateway's or a provider's error [message] says the request was longer than the
+/// model's context (llama.cpp, OpenAI, Anthropic, DeepSeek and others word it differently).
+pub fn overflow(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    [
+        "exceeds the available context",
+        "exceed_context_size",
+        "context_length_exceeded",
+        "maximum context length",
+        "context length exceeded",
+        "context window",
+        "prompt is too long",
+        "too many tokens",
+        "reduce the length",
+        "input is too long",
+    ]
+    .iter()
+    .any(|p| m.contains(p))
+}
+
+/// [d] for a message: `600 s`, `300 ms`.
+fn seconds(d: Duration) -> String {
+    if d >= Duration::from_secs(1) { format!("{} s", d.as_secs()) } else { format!("{} ms", d.as_millis()) }
+}
+
+/// One try at the gateway that did not answer: try again (after the wait it asked for, if it
+/// did), or not.
+enum Attempt {
+    Again(GatewayError, Option<Duration>),
+    Final(GatewayError),
+}
+
+/// Why a stream did not end well: cut off (worth another try), or failed (the model's own
+/// error, a hang).
+enum Stream {
+    Broken(String),
+    Failed(String),
+}
+
 /// An answer streamed as server-sent events (OpenAI's chunk shape), put back together as one
 /// message: its text, reasoning and tool calls (whose names and arguments come in pieces, by
-/// index).
+/// index). Nothing for [idle] is a hang.
 async fn read_stream(
     response: reqwest::Response,
     on: &(dyn Fn(Delta) + Send + Sync),
-) -> Result<(Value, Option<Value>), String> {
+    idle: Duration,
+) -> Result<(Value, Option<Value>), Stream> {
     use futures_util::StreamExt;
     let mut stream = response.bytes_stream();
     let mut pending: Vec<u8> = Vec::new();
     let mut assembled = Assembled::default();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("the gateway's answer stopped: {e}"))?;
-        if assembled.feed(&mut pending, &chunk, on)? {
+    loop {
+        let chunk = match tokio::time::timeout(idle, stream.next()).await {
+            Err(_) => {
+                return Err(Stream::Failed(format!("the model's answer stalled: nothing for {}", seconds(idle))));
+            }
+            Ok(None) => break,
+            Ok(Some(chunk)) => chunk.map_err(|e| Stream::Broken(format!("the gateway's answer stopped: {e}")))?,
+        };
+        if assembled.feed(&mut pending, &chunk, on).map_err(Stream::Failed)? {
             let usage = assembled.usage.take();
             return Ok((assembled.message(), usage));
         }
     }
     let rest = String::from_utf8_lossy(&pending).into_owned();
-    assembled.line(rest.trim(), on)?;
+    assembled.line(rest.trim(), on).map_err(Stream::Failed)?;
     let usage = assembled.usage.take();
     Ok((assembled.message(), usage))
 }

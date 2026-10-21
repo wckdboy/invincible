@@ -165,7 +165,7 @@ pub fn start(
     Ok(id)
 }
 
-pub(crate) fn signal_group(pid: Option<u32>, signal: rustix::process::Signal) {
+fn signal_group(pid: Option<u32>, signal: rustix::process::Signal) {
     if let Some(pid) = pid.and_then(|p| rustix::process::Pid::from_raw(p as i32)) {
         let _ = rustix::process::kill_process_group(pid, signal);
     }
@@ -225,8 +225,10 @@ pub async fn stop(id: u32) -> Result<String, String> {
     output(id, Duration::ZERO).await
 }
 
-/// Stops every background process (at the end of a chat or a run).
+/// Stops every background process (at the end of a chat or a run), and the commands tools are
+/// running in the foreground ([crate::tools::stop_running]).
 pub async fn stop_all() {
+    crate::tools::stop_running();
     let ids: Vec<u32> = {
         let procs = PROCS.lock().expect("procs");
         procs.1.iter().filter(|(_, p)| p.shared.lock().expect("proc").ended.is_none()).map(|(id, _)| *id).collect()

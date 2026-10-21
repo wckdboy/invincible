@@ -43,12 +43,12 @@ async fn model(command: String) -> std::net::SocketAddr {
     addr
 }
 
+/// Whether [pid] is a live process (a zombie, killed but not yet reaped, is not).
 fn alive(pid: &str) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", pid])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", pid]).output().unwrap();
+    let state = String::from_utf8_lossy(&out.stdout);
+    let state = state.trim();
+    !state.is_empty() && !state.starts_with('Z')
 }
 
 #[tokio::test]
@@ -99,8 +99,16 @@ async fn a_stopped_agent_leaves_no_background_process_behind() {
         assert!(std::time::Instant::now() < until, "the agent did not stop on SIGTERM");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    // Stopped with it, not after: no grace period for the process to linger in.
-    let left: Vec<&&str> = started.iter().filter(|pid| alive(pid)).collect();
-    let log = std::fs::read_to_string(dir.join("agent.log")).unwrap_or_default();
-    assert!(left.is_empty(), "left running after the agent stopped: {left:?}\n{log}");
+    // Stopped with it: gone within a few seconds (polled: a killed process not yet reaped still
+    // answers for a moment).
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let left: Vec<&&str> = started.iter().filter(|pid| alive(pid)).collect();
+        if left.is_empty() {
+            break;
+        }
+        let log = std::fs::read_to_string(dir.join("agent.log")).unwrap_or_default();
+        assert!(std::time::Instant::now() < until, "left running after the agent stopped: {left:?}\n{log}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }

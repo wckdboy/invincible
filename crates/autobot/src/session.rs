@@ -11,6 +11,11 @@ pub struct Session {
     pub messages: Vec<Value>,
     /// Characters of recent messages sent per call at most ([CHAR_BUDGET] unless set).
     pub budget: usize,
+    /// Less than [Session::budget] for now: what the model took when it said a request was too
+    /// long ([crate::agent]); set per turn.
+    pub cap: Option<usize>,
+    /// The file ends in a torn line (a crash mid-write): the next line starts on a new one.
+    torn: bool,
 }
 
 /// Messages sent per call at most (or a 1 KiB budget each, when the budget is larger); older ones
@@ -66,21 +71,41 @@ impl Session {
         }
         let path = dir.join(format!("{id}.jsonl"));
         let mut messages = Vec::new();
-        if let Some(text) = invincible::fsutil::read_optional(&path)? {
-            for line in text.lines().filter(|l| !l.trim().is_empty()) {
-                // A torn last line (crash mid-write) is dropped, not fatal.
-                if let Ok(message) = serde_json::from_str(line) {
-                    messages.push(message);
-                }
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        // A torn line (a crash mid-write) is dropped, not fatal; so is one cut inside a
+        // character (the rest of the file is still read as text).
+        let mut take = |message: serde_json::Result<Value>| {
+            if let Ok(message) = message
+                && !message.is_null()
+            {
+                messages.push(message);
             }
+        };
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => text.lines().filter(|l| !l.trim().is_empty()).for_each(|l| take(serde_json::from_str(l))),
+            Err(_) => bytes.split(|b| *b == b'\n').for_each(|l| take(serde_json::from_slice(l))),
         }
-        Ok(Self { id: id.to_owned(), path, messages, budget: CHAR_BUDGET })
+        // A torn last line: the next message starts a line of its own, or it would be appended
+        // to the torn one and be lost with it. (The file is not cut here: whoever only reads
+        // the conversation must not touch a line another writer is still writing.)
+        let torn = bytes.last().is_some_and(|b| *b != b'\n');
+        Ok(Self { id: id.to_owned(), path, messages, budget: CHAR_BUDGET, cap: None, torn })
     }
 
     pub fn push(&mut self, message: Value) -> Result<(), String> {
         // Serialized whole and written at once (formatting a value straight into the file is a
         // system call per piece).
-        invincible::fsutil::append_private(&self.path, &message.to_string())?;
+        let line = message.to_string();
+        if self.torn {
+            invincible::fsutil::append_private(&self.path, &format!("\n{line}"))?;
+            self.torn = false;
+        } else {
+            invincible::fsutil::append_private(&self.path, &line)?;
+        }
         self.messages.push(message);
         Ok(())
     }
@@ -205,7 +230,9 @@ impl Session {
             text.push_str(&m.to_string());
             text.push('\n');
         }
-        invincible::fsutil::replace_private(&self.path, &text)
+        invincible::fsutil::replace_private(&self.path, &text)?;
+        self.torn = false;
+        Ok(())
     }
 
     /// Starts over: the old conversation is kept under a dated name.
@@ -220,8 +247,14 @@ impl Session {
         }
         let _ = std::fs::remove_file(self.undo_path());
         self.messages.clear();
+        self.torn = false;
         crate::context::forget(self.path.parent(), &self.id);
         Ok(())
+    }
+
+    /// Characters of recent messages sent per call now: the budget, or the cap when lower.
+    pub fn limit(&self) -> usize {
+        self.cap.map_or(self.budget, |cap| cap.min(self.budget))
     }
 
     /// Where the recent part starts. What left the budget is summarized in batches
@@ -248,7 +281,7 @@ impl Session {
             count += 1;
             chars += cost(m);
         }
-        count > 0 && (chars >= self.budget / 8 || count >= WINDOW / 4)
+        count > 0 && (chars >= self.limit() / 8 || count >= WINDOW / 4)
     }
 
     /// Where the recent part starts by the budget alone: at most [WINDOW] messages and
@@ -262,7 +295,7 @@ impl Session {
                 continue;
             }
             used += cost(m);
-            if used > self.budget || self.messages.len() - i > WINDOW.max(self.budget / 1024) {
+            if used > self.limit() || self.messages.len() - i > WINDOW.max(self.limit() / 1024) {
                 break;
             }
             from = i;
@@ -276,9 +309,14 @@ impl Session {
             .unwrap_or(from)
     }
 
-    /// The recent part of the conversation, summaries left out (see [Session::summary]).
+    /// The recent part of the conversation, summaries left out (see [Session::summary]). A turn
+    /// longer than the budget on its own keeps its request and its newest results whole, and
+    /// the results of its earlier steps cleared ([fit]).
     pub fn window(&self) -> Vec<Value> {
-        self.messages[self.window_start()..].iter().filter(|m| !is_summary(m)).cloned().collect()
+        let mut window: Vec<Value> =
+            self.messages[self.window_start()..].iter().filter(|m| !is_summary(m)).cloned().collect();
+        fit(&mut window, self.limit());
+        window
     }
 
     /// The latest summary of what came before the window, if there is one.
@@ -324,6 +362,51 @@ impl Session {
         let covered = self.covered();
         let pending: Vec<Value> = self.messages.get(covered..cut)?.iter().filter(|m| !is_summary(m)).cloned().collect();
         (!pending.is_empty()).then(|| (self.summary().map(str::to_owned), pending, cut))
+    }
+}
+
+/// Tool results [fit] keeps whole, however long the turn: the newest ones.
+const KEEP_RESULTS: usize = 3;
+/// Results are cleared this many at a time, so most steps send what the step before sent and a
+/// model's prompt cache still holds it (one result more each step would change the prompt at
+/// every step).
+const CLEAR_BATCH: usize = 8;
+/// Results shorter than this stay: clearing them saves little.
+const CLEAR_MIN: usize = 1024;
+/// How a cleared result starts.
+pub const CLEARED: &str = "[cleared to fit the context:";
+
+/// Makes [window] fit [budget] when one long turn is over it by more than an eighth (a window
+/// of whole turns is never much over; a turn of many steps can be any length): the tool results
+/// of its earlier steps are cleared, oldest first and in batches, until it fits. Each still
+/// answers its call, so the conversation stays one a model takes, and says what it was.
+fn fit(window: &mut [Value], budget: usize) {
+    let costs: Vec<usize> = window.iter().map(cost).collect();
+    let total: usize = costs.iter().sum();
+    if total <= budget + budget / 8 {
+        return;
+    }
+    let results: Vec<usize> = (0..window.len())
+        .filter(|&i| window[i]["role"] == "tool" && costs[i] >= CLEAR_MIN && window[i]["content"].is_string())
+        .collect();
+    let candidates = &results[..results.len().saturating_sub(KEEP_RESULTS)];
+    let note = |bytes: usize| {
+        format!(
+            "{CLEARED} the result of an earlier step ({bytes} bytes) was taken out of the conversation; call the tool again if it is still needed]"
+        )
+    };
+    let (mut left, mut need) = (total, 0);
+    for (k, &i) in candidates.iter().enumerate() {
+        if left <= budget {
+            break;
+        }
+        left = left.saturating_sub(costs[i]) + note(costs[i]).len() + 40;
+        need = k + 1;
+    }
+    let clear = (need.div_ceil(CLEAR_BATCH) * CLEAR_BATCH).min(candidates.len());
+    for &i in &candidates[..clear] {
+        let bytes = window[i]["content"].as_str().map_or(0, str::len);
+        window[i]["content"] = note(bytes).into();
     }
 }
 

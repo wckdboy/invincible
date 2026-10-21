@@ -20,6 +20,7 @@ pub mod diff;
 pub mod discord;
 pub mod docker;
 pub mod doctor;
+pub mod edit;
 pub mod email;
 pub mod eval;
 pub mod gateway;
