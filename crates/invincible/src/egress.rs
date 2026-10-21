@@ -21,12 +21,18 @@ pub fn local() -> reqwest::ClientBuilder {
     reqwest::Client::builder().no_proxy().tls_built_in_root_certs(false)
 }
 
-/// How long a request to this machine's own engines may go without a byte before it is taken
-/// for hung: generous, since an answer that is not streamed arrives whole at the end.
+/// How long a model call on this machine may go without a byte before it is hung: the node's
+/// wait on its engine ([crate::relay]) and the agent's on the node. Streamed answers are kept
+/// alive meanwhile ([crate::relay::KEEP_ALIVE]), so only real silence counts; an answer not
+/// streamed comes whole at its end, so for it this is a total deadline. Generous: a large model
+/// reading a long prompt takes many minutes before its first token.
 pub const LOCAL_SILENCE: Duration = Duration::from_secs(30 * 60);
 
-/// How long an outbound request may go without a byte (a provider that took the request and
-/// went quiet): then it fails, and a cloud request fails over.
+/// How long a streamed cloud answer may go without a byte (a provider that took the request
+/// and went quiet): then it fails, and a request not yet answered fails over. An answer not
+/// streamed has [LOCAL_SILENCE] in all (a reasoning model thinks a long while before it says
+/// anything). The client itself has no such limit: each use sets its own (a channel's request,
+/// MCP's call, a download).
 pub const SILENCE: Duration = Duration::from_secs(10 * 60);
 
 /// The client for outbound requests under [mode].
@@ -34,7 +40,6 @@ pub fn client(mode: &NetworkMode) -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder()
         .user_agent("Invincible")
         .connect_timeout(Duration::from_secs(15))
-        .read_timeout(SILENCE)
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if attempt.previous().len() >= 10 {
                 attempt.error("too many redirects")

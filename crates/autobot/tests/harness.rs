@@ -864,3 +864,60 @@ async fn a_command_has_no_terminal_so_a_password_prompt_fails_at_once() {
     assert!(result.contains("no-terminal"), "{result}");
     assert!(started.elapsed() < Duration::from_secs(10));
 }
+
+/// A stand-in engine that thinks for [think] before its first byte (a large model reading a long
+/// prompt), then streams one word; and the node's relay in front of it, keeping the stream alive
+/// every [every]. The relay's URL.
+async fn slow_engine_behind_the_relay(think: Duration, every: Duration) -> String {
+    use axum::response::IntoResponse;
+    let engine = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move || async move {
+            tokio::time::sleep(think).await;
+            let chunk = json!({ "choices": [{ "index": 0, "delta": { "content": "thought" } }] });
+            let body = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+            ([("content-type", "text/event-stream")], body).into_response()
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let engine_url = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, engine).await.unwrap() });
+    let client = reqwest::Client::new();
+    let node =
+        axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move |body: axum::body::Bytes| {
+                let (client, engine_url) = (client.clone(), engine_url.clone());
+                async move {
+                    invincible::relay::engine(&client, &engine_url, body, true, every, Duration::from_secs(60)).await
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, node).await.unwrap() });
+    url
+}
+
+/// An engine slow to begin (longer than the agent's idle limit) is waited for: the node keeps
+/// the stream alive meanwhile. Without the keep-alives the same wait is taken for a hang.
+#[tokio::test]
+async fn a_model_slow_to_begin_is_kept_alive_not_taken_for_hung() {
+    let dir = dir("slow-first-byte");
+    let think = Duration::from_millis(1500);
+    let idle = Duration::from_millis(500);
+    let url = slow_engine_behind_the_relay(think, Duration::from_millis(100)).await;
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask);
+    agent.gateway = agent.gateway.with_stream(true).with_idle_timeout(idle);
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    let owner = Owner::new(Answer::Once);
+    let outcome = agent.turn(&mut session, "think hard", &owner, &mut grants(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "thought");
+
+    let url = slow_engine_behind_the_relay(think, Duration::from_secs(30)).await;
+    let mut agent = self::agent(&url, &dir, ApprovalMode::Ask);
+    agent.gateway = agent.gateway.with_stream(true).with_idle_timeout(idle);
+    let mut session = Session::open(&sessions(&dir), "t").unwrap();
+    let e = agent.turn(&mut session, "think hard", &owner, &mut grants(), &quiet).await.err().unwrap();
+    assert!(e.contains("sent nothing for 500 ms"), "{e}");
+}

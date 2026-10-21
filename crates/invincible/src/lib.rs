@@ -14,6 +14,7 @@ pub mod media;
 pub mod models;
 pub mod receipts;
 pub mod redact;
+pub mod relay;
 pub mod remote;
 pub mod server;
 pub mod service;

@@ -32,9 +32,10 @@ const RETRIES: u32 = 3;
 const BACKOFF: Duration = Duration::from_secs(1);
 /// The longest wait a `Retry-After` gets.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
-/// A call with no byte for this long is hung (a local model reading a long prompt, or writing a
-/// long answer whole, takes minutes; ten is past any of that).
-const IDLE: Duration = Duration::from_secs(600);
+/// A call with no byte for this long is hung: the node's own limit on its engine, so the two
+/// agree. A streamed answer is kept alive by the node meanwhile (its comments count as bytes);
+/// an answer not streamed comes whole, so for it this is the call's total time.
+const IDLE: Duration = invincible::egress::LOCAL_SILENCE;
 
 /// A chat completion request, as the gateway takes it.
 #[derive(serde::Serialize)]
@@ -139,12 +140,11 @@ impl Gateway {
         }
         // Plain HTTP (the gateway on this machine) needs no trust roots, and loading the
         // system's takes most of the agent's start (~100 ms on macOS).
-        // No overall timeout (a long generation is not a hung one), but a gateway that sends
-        // nothing for half an hour is: the turn fails instead of holding its conversation for good.
+        // No timeout of the client's own: how long a call may wait is [IDLE], which tells a hang
+        // (not sent again) from a cut connection (tried again).
         let client = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_secs(10))
-            .read_timeout(invincible::egress::LOCAL_SILENCE)
             .tls_built_in_root_certs(parsed.scheme() == "https")
             .build()
             .map_err(|e| e.to_string())?;
@@ -322,6 +322,8 @@ impl Gateway {
         }
         let failed = |e: String| Attempt::Final(GatewayError::Failed(e));
         let hung = || failed(format!("the gateway sent nothing for {}; stopped waiting", seconds(self.idle)));
+        // Not streamed: one deadline for the whole call (nothing comes before the answer is done).
+        let deadline = tokio::time::Instant::now() + self.idle;
         let response = match tokio::time::timeout(self.idle, request.send()).await {
             Err(_) => return Err(hung()),
             // Not there (restarting, say): worth another try; anything else is not.
@@ -349,7 +351,7 @@ impl Gateway {
                 Err(Stream::Failed(e)) => Err(failed(e)),
             };
         }
-        let text = match tokio::time::timeout(self.idle, response.text()).await {
+        let text = match tokio::time::timeout_at(deadline, response.text()).await {
             Err(_) => return Err(hung()),
             // An answer that was made (and maybe paid for) but did not arrive whole is not asked
             // for again; an error's body that did not is.
@@ -545,7 +547,11 @@ pub fn overflow(message: &str) -> bool {
 
 /// [d] for a message: `600 s`, `300 ms`.
 fn seconds(d: Duration) -> String {
-    if d >= Duration::from_secs(1) { format!("{} s", d.as_secs()) } else { format!("{} ms", d.as_millis()) }
+    match d.as_secs() {
+        s if s >= 60 && s.is_multiple_of(60) => format!("{} minutes", s / 60),
+        s if s >= 1 => format!("{s} seconds"),
+        _ => format!("{} ms", d.as_millis()),
+    }
 }
 
 /// One try at the gateway that did not answer: try again (after the wait it asked for, if it

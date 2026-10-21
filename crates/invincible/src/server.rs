@@ -62,14 +62,10 @@ pub struct AppState {
 impl AppState {
     pub fn new(engines: Vec<Engine>, node: NodeSettings, token: String) -> Self {
         // No overall timeout: a long generation is not a hung one. Connecting to a loopback
-        // engine is instant or it is down. But an engine that sends nothing at all for half an
-        // hour (an answer not streamed comes whole at the end, so the wait can be long) is hung,
-        // and the request is let go rather than held, with its client, for good.
-        let client = crate::egress::local()
-            .connect_timeout(std::time::Duration::from_secs(2))
-            .read_timeout(crate::egress::LOCAL_SILENCE)
-            .build()
-            .expect("HTTP client");
+        // engine is instant or it is down. How long an engine may stay silent is the relay's
+        // ([crate::relay]), which can say so to the client.
+        let client =
+            crate::egress::local().connect_timeout(std::time::Duration::from_secs(2)).build().expect("HTTP client");
         let egress = crate::egress::client(&node.network).ok();
         // An ephemeral receipt key until the node's own is set ([AppState::with_receipt_key]).
         let receipt_key = Arc::new(ReceiptKey::from_seed(&crate::token::random::<32>().expect("random bytes")));
@@ -534,7 +530,8 @@ async fn infer(
                 let engine =
                     state.engines.iter().find(|e| Some(&e.id) == decision.model.as_ref()).expect("decided model");
                 draft.data_policy = Some("owned".to_owned());
-                forward(&state.client, engine, api.path(), body.clone()).await
+                let streaming = parsed.get("stream").and_then(Value::as_bool) == Some(true);
+                forward(&state.client, engine, api.path(), body.clone(), streaming).await
             }
             (Action::Run, _) => {
                 let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
@@ -647,23 +644,11 @@ fn estimate_tokens(body: &Value) -> u64 {
 }
 
 /// Sends the request to the engine unchanged and streams its answer back unchanged (SSE included).
-async fn forward(client: &reqwest::Client, engine: &Engine, path: &str, body: Bytes) -> Response {
+/// [body] to [engine] and its answer back ([crate::relay]: kept alive while streamed, given up
+/// on after [crate::egress::LOCAL_SILENCE] of silence).
+async fn forward(client: &reqwest::Client, engine: &Engine, path: &str, body: Bytes, streaming: bool) -> Response {
     let url = format!("{}{path}", engine.base_url);
-    let upstream = match client.post(&url).header(header::CONTENT_TYPE, "application/json").body(body).send().await {
-        Ok(upstream) => upstream,
-        Err(e) => {
-            tracing::warn!(model = %engine.id, "engine unreachable: {e}");
-            return error(StatusCode::BAD_GATEWAY, "engine_unreachable", "the engine did not answer");
-        }
-    };
-    let status = StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
-    let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
-    *response.status_mut() = status;
-    if let Some(content_type) = content_type.and_then(|v| HeaderValue::from_bytes(v.as_bytes()).ok()) {
-        response.headers_mut().insert(header::CONTENT_TYPE, content_type);
-    }
-    response
+    crate::relay::engine(client, &url, body, streaming, crate::relay::KEEP_ALIVE, crate::egress::LOCAL_SILENCE).await
 }
 
 pub(crate) fn block_status(reason: Reason) -> StatusCode {

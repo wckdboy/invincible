@@ -942,6 +942,10 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
 - `invincible-private: 1` marks a request that must never leave hardware you own;
   `invincible-risk: health,personal` passes risk codes; `invincible-confirmed: 1` answers an `ask`.
 - Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
+- A streamed answer from a local engine is kept alive while the engine reads a long prompt
+  (`: keep-alive` comments every 20 s, which SSE clients skip); an engine silent for 30 minutes
+  is given up on with an `engine_stalled` error event (a 504 when not streamed, where 30 minutes
+  is the whole answer's limit).
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff, and stopping the node stops its engines.
 - Images (OpenAI `image_url` parts, Messages `image` blocks) pass through to the model as they

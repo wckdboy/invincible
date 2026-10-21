@@ -162,7 +162,15 @@ pub async fn forward(
     if let Some(key) = &model.key {
         request = request.bearer_auth(key);
     }
-    let upstream = request.send().await.map_err(|e| CloudError::Failover(format!("unreachable: {e}")))?;
+    // A streamed answer begins at once and then may pause [SILENCE] between pieces; one not
+    // streamed comes whole, so it gets [LOCAL_SILENCE] in all.
+    let total = crate::egress::LOCAL_SILENCE;
+    let deadline = tokio::time::Instant::now() + if streaming { crate::egress::SILENCE } else { total };
+    let quiet = |d: std::time::Duration| CloudError::Failover(format!("no answer in {} minutes", d.as_secs() / 60));
+    let upstream = match tokio::time::timeout_at(deadline, request.send()).await {
+        Err(_) => return Err(quiet(if streaming { crate::egress::SILENCE } else { total })),
+        Ok(sent) => sent.map_err(|e| CloudError::Failover(format!("unreachable: {e}")))?,
+    };
     let status = upstream.status();
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
         return Err(CloudError::Failover(format!("answered {status}")));
@@ -177,7 +185,15 @@ pub async fn forward(
             if done {
                 return None;
             }
-            match upstream.chunk().await {
+            let next = match tokio::time::timeout(crate::egress::SILENCE, upstream.chunk()).await {
+                Ok(next) => next,
+                Err(_) => {
+                    let stalled =
+                        format!("the cloud model sent nothing for {} minutes", crate::egress::SILENCE.as_secs() / 60);
+                    return Some((Err(std::io::Error::other(stalled)), (upstream, restorer, true, received)));
+                }
+            };
+            match next {
                 Ok(Some(bytes)) => {
                     received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                     let out = Bytes::from(restorer.push(&bytes));
@@ -189,7 +205,10 @@ pub async fn forward(
         });
         Response::new(Body::from_stream(stream))
     } else {
-        let bytes = upstream.bytes().await.map_err(|e| CloudError::Failover(format!("answer cut off: {e}")))?;
+        let bytes = match tokio::time::timeout_at(deadline, upstream.bytes()).await {
+            Err(_) => return Err(quiet(total)),
+            Ok(bytes) => bytes.map_err(|e| CloudError::Failover(format!("answer cut off: {e}")))?,
+        };
         received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         let body = match serde_json::from_slice::<Value>(&bytes) {
             Ok(mut answer) => {
