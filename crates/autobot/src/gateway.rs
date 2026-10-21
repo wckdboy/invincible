@@ -347,8 +347,12 @@ impl Gateway {
             return match read_stream(response, on, self.idle).await {
                 Ok((message, usage)) => Ok(Reply { message, request_id, decision, usage }),
                 // Cut off (not the model's own error, not a hang): again, unless some was shown.
-                Err(Stream::Broken(e)) => Err(Attempt::Again(GatewayError::Failed(e), None)),
+                Err(Stream::Broken(e) | Stream::Again(e)) => Err(Attempt::Again(GatewayError::Failed(e), None)),
                 Err(Stream::Failed(e)) => Err(failed(e)),
+                Err(Stream::TooLong(message)) => {
+                    let model = decision.as_ref().and_then(|d: &Value| d["model"].as_str()).map(str::to_owned);
+                    Err(Attempt::Final(GatewayError::TooLong { message, model }))
+                }
             };
         }
         let text = match tokio::time::timeout_at(deadline, response.text()).await {
@@ -381,8 +385,10 @@ impl Gateway {
                 return Err(Attempt::Final(GatewayError::TooLong { message, model }));
             }
             let error = GatewayError::Failed(format!("the gateway refused ({status}): {message}"));
-            // Too many requests, or a server that is overloaded or between restarts.
-            let passing = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504) && !overflow(&message);
+            // Too many requests, or a server that is overloaded or between restarts; not a model
+            // that hung (it would hang again, for as long).
+            let hung = parsed["error"]["code"].as_str().is_some_and(|c| c.ends_with("_stalled"));
+            let passing = matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504) && !overflow(&message) && !hung;
             return Err(if passing { Attempt::Again(error, retry_after) } else { Attempt::Final(error) });
         }
         let message = parsed["choices"][0]["message"].clone();
@@ -528,21 +534,7 @@ impl Gateway {
 /// Whether a gateway's or a provider's error [message] says the request was longer than the
 /// model's context (llama.cpp, OpenAI, Anthropic, DeepSeek and others word it differently).
 pub fn overflow(message: &str) -> bool {
-    let m = message.to_ascii_lowercase();
-    [
-        "exceeds the available context",
-        "exceed_context_size",
-        "context_length_exceeded",
-        "maximum context length",
-        "context length exceeded",
-        "context window",
-        "prompt is too long",
-        "too many tokens",
-        "reduce the length",
-        "input is too long",
-    ]
-    .iter()
-    .any(|p| m.contains(p))
+    invincible::relay::overflow(message)
 }
 
 /// [d] for a message: `600 s`, `300 ms`.
@@ -562,10 +554,44 @@ enum Attempt {
 }
 
 /// Why a stream did not end well: cut off (worth another try), or failed (the model's own
-/// error, a hang).
+/// error, a hang); or an error the node put in the stream after it began (a request queued for
+/// a while before the engine took it): too long for the model (made smaller), or one that may
+/// pass (a rate limit, an overload: again, unless some was shown).
+#[derive(Debug)]
 enum Stream {
     Broken(String),
     Failed(String),
+    TooLong(String),
+    Again(String),
+}
+
+impl std::fmt::Display for Stream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Broken(m) | Self::Failed(m) | Self::TooLong(m) | Self::Again(m) => f.write_str(m),
+        }
+    }
+}
+
+/// What an error event in a stream ([chunk], with `error`) means.
+fn stream_error(chunk: &Value) -> Stream {
+    let error = &chunk["error"];
+    let message = error["message"].as_str().unwrap_or("error");
+    let code = error["code"].as_str().unwrap_or_default();
+    let kind = error["type"].as_str().unwrap_or_default();
+    let status = chunk["status"].as_u64().unwrap_or(0);
+    let text = format!("the model failed: {message}");
+    if code == "context_length_exceeded" || overflow(message) {
+        return Stream::TooLong(format!("the gateway refused ({status}): {message}"));
+    }
+    // A hang, said as such: never sent again.
+    if code.ends_with("_stalled") {
+        return Stream::Failed(text);
+    }
+    if matches!(status, 429 | 500 | 502 | 503 | 529) || matches!(kind, "rate_limit_error" | "overloaded_error") {
+        return Stream::Again(text);
+    }
+    Stream::Failed(text)
 }
 
 /// An answer streamed as server-sent events (OpenAI's chunk shape), put back together as one
@@ -588,13 +614,13 @@ async fn read_stream(
             Ok(None) => break,
             Ok(Some(chunk)) => chunk.map_err(|e| Stream::Broken(format!("the gateway's answer stopped: {e}")))?,
         };
-        if assembled.feed(&mut pending, &chunk, on).map_err(Stream::Failed)? {
+        if assembled.feed(&mut pending, &chunk, on)? {
             let usage = assembled.usage.take();
             return Ok((assembled.message(), usage));
         }
     }
     let rest = String::from_utf8_lossy(&pending).into_owned();
-    assembled.line(rest.trim(), on).map_err(Stream::Failed)?;
+    assembled.line(rest.trim(), on)?;
     let usage = assembled.usage.take();
     Ok((assembled.message(), usage))
 }
@@ -617,7 +643,7 @@ impl Assembled {
         pending: &mut Vec<u8>,
         chunk: &[u8],
         on: &(dyn Fn(Delta) + Send + Sync),
-    ) -> Result<bool, String> {
+    ) -> Result<bool, Stream> {
         pending.extend_from_slice(chunk);
         // Every whole line in what came, then what is left moved to the front once.
         let mut start = 0;
@@ -634,14 +660,14 @@ impl Assembled {
     }
 
     /// Takes in one line of the stream; true at its end.
-    fn line(&mut self, line: &str, on: &(dyn Fn(Delta) + Send + Sync)) -> Result<bool, String> {
+    fn line(&mut self, line: &str, on: &(dyn Fn(Delta) + Send + Sync)) -> Result<bool, Stream> {
         let Some(data) = line.strip_prefix("data:").map(str::trim) else { return Ok(false) };
         if data == "[DONE]" {
             return Ok(true);
         }
         let Ok(chunk) = serde_json::from_str::<Value>(data) else { return Ok(false) };
-        if let Some(error) = chunk.get("error") {
-            return Err(format!("the model failed: {}", error["message"].as_str().unwrap_or("error")));
+        if chunk.get("error").is_some() {
+            return Err(stream_error(&chunk));
         }
         if let Some(usage) = chunk.get("usage").filter(|u| u.is_object()) {
             self.usage = Some(usage.clone());
@@ -722,7 +748,7 @@ impl Assembled {
 
 #[cfg(test)]
 mod tests {
-    use super::{Assembled, Delta};
+    use super::{Assembled, Delta, Stream};
 
     #[test]
     fn a_stream_is_put_back_together() {
@@ -752,7 +778,35 @@ mod tests {
         assert_eq!(m["tool_calls"][0]["function"]["name"], "read_file");
         assert_eq!(m["tool_calls"][0]["function"]["arguments"], r#"{"path":"a"}"#);
         assert_eq!(m["tool_calls"][1]["id"], "c2");
-        assert!(Assembled::default().line(r#"data: {"error":{"message":"boom"}}"#, &on).is_err());
+        assert!(matches!(
+            Assembled::default().line(r#"data: {"error":{"message":"boom"}}"#, &on),
+            Err(Stream::Failed(_))
+        ));
+        // An error the node put in a stream that had begun keeps its meaning.
+        let event = |data: &str| Assembled::default().line(&format!("data: {data}"), &on).unwrap_err();
+        assert!(matches!(
+            event(
+                r#"{"status":400,"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"too long"}}"#
+            ),
+            Stream::TooLong(_)
+        ));
+        assert!(matches!(
+            event(r#"{"status":429,"error":{"type":"rate_limit_error","message":"busy"}}"#),
+            Stream::Again(_)
+        ));
+        assert!(matches!(
+            event(r#"{"status":503,"error":{"type":"overloaded_error","message":"busy"}}"#),
+            Stream::Again(_)
+        ));
+        assert!(matches!(
+            event(r#"{"status":504,"error":{"code":"engine_stalled","message":"hung"}}"#),
+            Stream::Failed(_)
+        ));
+        assert!(matches!(
+            event(r#"{"status":504,"error":{"code":"upstream_stalled","message":"hung"}}"#),
+            Stream::Failed(_)
+        ));
+        assert!(matches!(event(r#"{"status":400,"error":{"message":"bad"}}"#), Stream::Failed(_)));
         // Whole calls without an index, and ids and names repeated in every piece.
         let mut b = Assembled::default();
         for line in [

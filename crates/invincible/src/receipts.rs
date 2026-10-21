@@ -183,6 +183,8 @@ pub struct Draft {
     pub caller: crate::audit::Caller,
     pub client: Option<String>,
     pub api: &'static str,
+    /// The answer's status ([attach]).
+    status: u16,
     tail: Vec<u8>,
 }
 
@@ -198,6 +200,7 @@ impl Draft {
             caller: crate::audit::Caller::Local,
             client: None,
             api: "chat",
+            status: 200,
             tail: Vec::new(),
         })
     }
@@ -239,7 +242,27 @@ impl Draft {
         if let Some((input, output)) = usage(&self.tail) {
             receipt["tokens"] = json!({ "input": input, "output": output });
         }
+        if let Some(error) = self.error() {
+            receipt["error"] = error;
+        }
         receipt
+    }
+
+    /// What went wrong, when the answer was an error: its status, or the error event that ended
+    /// a stream that had begun (with its status and code).
+    fn error(&self) -> Option<Value> {
+        if !(200..300).contains(&self.status) {
+            return Some(json!({ "status": self.status }));
+        }
+        let text = String::from_utf8_lossy(&self.tail);
+        let at = text.rfind("event: error\ndata: ")?;
+        let data = text[at + "event: error\ndata: ".len()..].lines().next()?;
+        let event: Value = serde_json::from_str(data).ok()?;
+        let mut error = json!({ "status": event["status"].as_u64().unwrap_or(502) });
+        if let Some(code) = event["error"]["code"].as_str() {
+            error["code"] = json!(code);
+        }
+        Some(error)
     }
 }
 
@@ -295,6 +318,7 @@ pub fn attach(
     let id = draft.lock().expect("draft lock").id.clone();
     store.begin(&id);
     let (mut parts, body) = response.into_parts();
+    draft.lock().expect("draft lock").status = parts.status.as_u16();
     if let Ok(value) = axum::http::HeaderValue::from_str(&id) {
         parts.headers.insert(REQUEST_ID_HEADER, value);
     }
@@ -316,8 +340,27 @@ pub fn attach(
 
 #[cfg(test)]
 mod tests {
-    use super::{ReceiptKey, canonical, usage, verify};
+    use super::{Draft, ReceiptKey, canonical, usage, verify};
     use serde_json::json;
+
+    /// An answer that was an error is receipted as one: its status, or the error event that
+    /// ended a stream that had begun, never as a normal answer.
+    #[test]
+    fn an_error_is_receipted_as_one() {
+        let mut draft = Draft::new().unwrap();
+        draft.observe(b"data: {\"choices\":[]}\n\n");
+        assert!(draft.receipt("k").get("error").is_none());
+        draft.observe(br#": keep-alive
+
+event: error
+data: {"type":"error","status":400,"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"too long"}}
+
+"#);
+        assert_eq!(draft.receipt("k")["error"], json!({ "status": 400, "code": "context_length_exceeded" }));
+        let mut draft = Draft::new().unwrap();
+        draft.status = 503;
+        assert_eq!(draft.receipt("k")["error"], json!({ "status": 503 }));
+    }
 
     #[test]
     fn signs_and_verifies() {

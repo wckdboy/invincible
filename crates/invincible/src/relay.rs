@@ -22,9 +22,10 @@ use crate::server::error;
 /// How often a streamed answer that has nothing new gets a comment.
 pub const KEEP_ALIVE: Duration = Duration::from_secs(20);
 
-const COMMENT: &[u8] = b": keep-alive\n\n";
+/// What fills a stream's silences: an SSE comment, which readers skip.
+pub const COMMENT: &[u8] = b": keep-alive\n\n";
 
-/// Minutes or seconds, for the messages.
+/// Minutes, seconds or milliseconds, for the messages.
 fn wait(d: Duration) -> String {
     match d.as_secs() {
         s if s >= 60 && s.is_multiple_of(60) => format!("{} minutes", s / 60),
@@ -38,11 +39,49 @@ pub fn stalled(silence: Duration) -> String {
     format!("the engine sent nothing for {}; stopped waiting", wait(silence))
 }
 
-/// An error as a server-sent event, readable as OpenAI's (`data` with `error`) and Anthropic's
-/// (`event: error`).
-fn error_event(kind: &str, message: &str) -> Bytes {
-    let data = json!({ "type": "error", "error": { "type": kind, "code": kind, "message": message } });
+/// Whether an engine's or a provider's error [message] says the request was longer than the
+/// model's context (llama.cpp, OpenAI, Anthropic, DeepSeek and others word it differently).
+pub fn overflow(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    [
+        "exceeds the available context",
+        "exceed_context_size",
+        "context_length_exceeded",
+        "maximum context length",
+        "context length exceeded",
+        "context window",
+        "prompt is too long",
+        "too many tokens",
+        "reduce the length",
+        "input is too long",
+    ]
+    .iter()
+    .any(|p| m.contains(p))
+}
+
+/// The standard error type and code for an engine's answer [status] saying [message]: what a
+/// client tells apart (a request too long to shrink, a limit or an overload to wait out).
+pub fn kind(status: u16, message: &str) -> (&'static str, &'static str) {
+    match status {
+        _ if overflow(message) => ("invalid_request_error", "context_length_exceeded"),
+        429 => ("rate_limit_error", "rate_limit_exceeded"),
+        503 | 529 => ("overloaded_error", "overloaded"),
+        500..=599 => ("api_error", "engine_error"),
+        _ => ("invalid_request_error", "engine_error"),
+    }
+}
+
+/// An error as a server-sent event that ends a stream, readable as OpenAI's (`data` with
+/// `error`) and Anthropic's (`event: error`); [status] is what the answer's status would have
+/// been, had it not begun already.
+pub fn error_event(status: u16, kind: &str, code: &str, message: &str) -> Bytes {
+    let data =
+        json!({ "type": "error", "status": status, "error": { "type": kind, "code": code, "message": message } });
     Bytes::from(format!("event: error\ndata: {data}\n\n"))
+}
+
+fn stalled_event(silence: Duration) -> Bytes {
+    error_event(504, "timeout_error", "engine_stalled", &stalled(silence))
 }
 
 /// POSTs [body] to [url] (an engine on this machine) and answers with what it answers.
@@ -106,26 +145,52 @@ where
             }
             let left = silence.saturating_sub(started.elapsed());
             if left.is_zero() {
-                let _ = tx.send(Ok(error_event("engine_stalled", &stalled(silence)))).await;
+                let _ = tx.send(Ok(stalled_event(silence))).await;
                 return;
             }
             match tokio::time::timeout(every.min(left), &mut send).await {
                 Err(_) => continue,
                 Ok(Err(e)) => {
                     tracing::warn!("engine unreachable: {e}");
-                    let _ = tx.send(Ok(error_event("engine_unreachable", "the engine did not answer"))).await;
+                    let event = error_event(502, "api_error", "engine_unreachable", "the engine did not answer");
+                    let _ = tx.send(Ok(event)).await;
                     return;
                 }
                 Ok(Ok(upstream)) => break upstream,
             }
         };
-        if !upstream.status().is_success() {
-            let status = upstream.status();
-            let text = upstream.text().await.unwrap_or_default();
-            let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-            let message = parsed["error"]["message"].as_str().map(str::to_owned).unwrap_or(text);
-            let message = if message.trim().is_empty() { format!("the engine answered {status}") } else { message };
-            let _ = tx.send(Ok(error_event("engine_error", &message))).await;
+        let status = upstream.status();
+        let streamed = upstream
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|t| t.starts_with("text/event-stream"));
+        if !status.is_success() || !streamed {
+            // Its error as an event, with the status and type it came with: a request too long
+            // for the model is still made smaller, a rate limit still waited out.
+            let left = silence.saturating_sub(started.elapsed());
+            let text = match tokio::time::timeout(left, upstream.text()).await {
+                Ok(text) => text.unwrap_or_default(),
+                Err(_) => {
+                    let _ = tx.send(Ok(stalled_event(silence))).await;
+                    return;
+                }
+            };
+            let event = if status.is_success() {
+                error_event(
+                    502,
+                    "api_error",
+                    "engine_error",
+                    "the engine answered a streamed request with a whole answer",
+                )
+            } else {
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                let message = parsed["error"]["message"].as_str().map(str::to_owned).unwrap_or(text);
+                let message = if message.trim().is_empty() { format!("the engine answered {status}") } else { message };
+                let (kind, code) = kind(status.as_u16(), &message);
+                error_event(status.as_u16(), kind, code, &message)
+            };
+            let _ = tx.send(Ok(event)).await;
             return;
         }
         pump(upstream, tx, Some(every), silence).await;
@@ -146,6 +211,9 @@ async fn pump(
 ) {
     let mut stream = upstream.bytes_stream();
     let mut heard = tokio::time::Instant::now();
+    // Whether what went last ended an event: a comment goes only between events, never inside
+    // one (a line split by it would be read wrong).
+    let mut between = true;
     loop {
         let left = silence.saturating_sub(heard.elapsed());
         let next = match every {
@@ -155,6 +223,9 @@ async fn pump(
         let sent = match next {
             Ok(Some(Ok(bytes))) => {
                 heard = tokio::time::Instant::now();
+                if !bytes.is_empty() {
+                    between = bytes.ends_with(b"\n\n") || bytes.ends_with(b"\r\n\r\n");
+                }
                 tx.send(Ok(bytes)).await
             }
             Ok(Some(Err(e))) => {
@@ -164,12 +235,19 @@ async fn pump(
             Ok(None) => return,
             Err(_) if heard.elapsed() >= silence => {
                 let _ = match every {
-                    Some(_) => tx.send(Ok(error_event("engine_stalled", &stalled(silence)))).await,
+                    // Ends what was half sent, so the error is read as an event of its own.
+                    Some(_) if !between => {
+                        let mut ended = b"\n\n".to_vec();
+                        ended.extend_from_slice(&stalled_event(silence));
+                        tx.send(Ok(Bytes::from(ended))).await
+                    }
+                    Some(_) => tx.send(Ok(stalled_event(silence))).await,
                     None => tx.send(Err(std::io::Error::other(stalled(silence)))).await,
                 };
                 return;
             }
-            Err(_) => tx.send(Ok(Bytes::from_static(COMMENT))).await,
+            Err(_) if between => tx.send(Ok(Bytes::from_static(COMMENT))).await,
+            Err(_) => Ok(()),
         };
         if sent.is_err() {
             return; // The client went away.
@@ -225,10 +303,51 @@ mod tests {
         let (status, body) = relayed(&url, true, Duration::from_millis(100), Duration::from_secs(10)).await;
         assert_eq!(status, StatusCode::OK, "begun already");
         assert!(body.contains("event: error\ndata: ") && body.contains("context too long"), "{body}");
+        assert!(body.contains(r#""status":400"#) && body.contains(r#""type":"invalid_request_error""#), "{body}");
+        // A request too long for the model says so in the standard way, and a limit as a limit.
+        let url = engine(
+            Duration::from_millis(400),
+            400,
+            r#"{"error":{"message":"the request exceeds the available context size"}}"#,
+            false,
+        )
+        .await;
+        let (_, body) = relayed(&url, true, Duration::from_millis(100), Duration::from_secs(10)).await;
+        assert!(body.contains(r#""code":"context_length_exceeded""#), "{body}");
+        let url = engine(Duration::from_millis(400), 429, r#"{"error":{"message":"busy"}}"#, false).await;
+        let (_, body) = relayed(&url, true, Duration::from_millis(100), Duration::from_secs(10)).await;
+        assert!(body.contains(r#""status":429"#) && body.contains("rate_limit_error"), "{body}");
         // An error that comes at once keeps its status.
         let url = engine(Duration::ZERO, 400, r#"{"error":{"message":"bad"}}"#, false).await;
         let (status, _) = relayed(&url, true, Duration::from_secs(5), Duration::from_secs(10)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// Comments go between events only: a pause inside one (half a line sent) is not filled.
+    #[tokio::test]
+    async fn keep_alives_never_split_an_event() {
+        let app = axum::Router::new().route(
+            "/x",
+            axum::routing::post(|| async {
+                let parts = futures_util::stream::unfold(0, |n| async move {
+                    let part: &'static [u8] = match n {
+                        0 => b"data: {\"half\":",
+                        1 => b" true}\n\n",
+                        _ => return None,
+                    };
+                    if n == 1 {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    Some((Ok::<_, std::io::Error>(Bytes::from_static(part)), n + 1))
+                });
+                ([("content-type", "text/event-stream")], Body::from_stream(parts)).into_response()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/x", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (_, body) = relayed(&url, true, Duration::from_millis(100), Duration::from_secs(10)).await;
+        assert_eq!(body, "data: {\"half\": true}\n\n");
     }
 
     #[tokio::test]

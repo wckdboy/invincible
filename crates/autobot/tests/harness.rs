@@ -921,3 +921,85 @@ async fn a_model_slow_to_begin_is_kept_alive_not_taken_for_hung() {
     let e = agent.turn(&mut session, "think hard", &owner, &mut grants(), &quiet).await.err().unwrap();
     assert!(e.contains("sent nothing for 500 ms"), "{e}");
 }
+
+/// A request queued long enough that the node began its stream (one engine slot shared by two
+/// bots), then refused as too long for the model: still made smaller and sent again, not the
+/// end of the turn.
+#[tokio::test]
+async fn too_long_after_the_stream_began_is_still_made_smaller() {
+    use axum::response::IntoResponse;
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = calls.clone();
+    let engine = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |body: axum::body::Bytes| {
+            let counted = counted.clone();
+            async move {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // Queued behind another request, past the node's early start.
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                let request: Value = serde_json::from_slice(&body).unwrap();
+                if request["tools"].is_array() && body.len() > 45_000 {
+                    let error = json!({ "error": { "message": "the request exceeds the available context size, try increasing it" } });
+                    return (axum::http::StatusCode::BAD_REQUEST, axum::Json(error)).into_response();
+                }
+                let text = if request["tools"].is_array() { "fits" } else { "Earlier: many things, all answered." };
+                let chunk = json!({ "choices": [{ "index": 0, "delta": { "content": text } }] });
+                ([("content-type", "text/event-stream")], format!("data: {chunk}\n\ndata: [DONE]\n\n")).into_response()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let engine_url = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, engine).await.unwrap() });
+    let client = reqwest::Client::new();
+    let node = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |body: axum::body::Bytes| {
+            let (client, engine_url) = (client.clone(), engine_url.clone());
+            async move {
+                let every = Duration::from_millis(100);
+                invincible::relay::engine(&client, &engine_url, body, true, every, Duration::from_secs(60)).await
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, node).await.unwrap() });
+
+    let dir = dir("overflow-late");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask);
+    agent.options.context_kib = Some(64);
+    agent.gateway = agent.gateway.with_stream(true).with_model("late-small-context");
+    let mut session = long_history(&dir, "s");
+    let outcome = agent.turn(&mut session, "one more", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "fits");
+    assert!(session.summary().is_some(), "what left the window was summarized");
+    assert!(calls.load(std::sync::atomic::Ordering::SeqCst) >= 3);
+}
+
+/// A model the node gave up on as hung (504 engine_stalled) is not asked again: it would hang
+/// again, for as long. A plain 504 still is.
+#[tokio::test]
+async fn a_hung_model_is_not_asked_again() {
+    let model = model(|n, _| match n {
+        0 => Reply::Json(
+            504,
+            json!({ "error": { "message": "the engine sent nothing for 30 minutes; stopped waiting", "code": "engine_stalled" } }),
+            Vec::new(),
+        ),
+        1 => error(504, "gateway timeout"),
+        _ => say("after a plain timeout"),
+    })
+    .await;
+    let dir = dir("hung-final");
+    let agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    let owner = Owner::new(Answer::Once);
+    let e = agent.turn(&mut session, "one", &owner, &mut grants(), &quiet).await.err().unwrap();
+    assert!(e.contains("sent nothing for 30 minutes"), "{e}");
+    assert_eq!(model.count(), 1, "not sent again");
+    let outcome = agent.turn(&mut session, "two", &owner, &mut grants(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "after a plain timeout");
+    assert_eq!(model.count(), 3);
+}

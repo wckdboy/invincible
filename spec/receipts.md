@@ -51,6 +51,7 @@ Both endpoints are on the loopback API (behind the token) and on the device API.
 | `redactions` | when something was hidden | distinct values hidden per kind ([redaction.md](redaction.md)) |
 | `images` | when the request carried images | one `{"sha256", "bytes", "mime"}` per image, in order: the SHA-256 (hex) and size of its decoded bytes and its type; for an image given by link, the hash of the URL, `bytes` 0 and `mime` `url` |
 | `egress` | always | every attempt to reach a host off the node, in order; `[]` when nothing left |
+| `error` | when the answer was an error | `{"status"}`, the answer's HTTP status; or, for a stream that had begun (kept alive while a local engine read a long prompt), the error event that ended it: `{"status", "code"}` (`context_length_exceeded`, `rate_limit_exceeded`, `engine_stalled`, `upstream_stalled`, …) |
 
 An egress entry has the host, the route (`direct`, `tor`, `socks5`), the request bytes sent, the
 answer bytes received, and `ok` (false for an attempt that failed and was routed elsewhere). A failed
