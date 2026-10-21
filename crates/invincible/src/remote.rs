@@ -345,7 +345,16 @@ impl Drop for SessionSlot {
 pub async fn serve(listener: TcpListener, pairing: Arc<Pairing>, app: Router) {
     let handshakes = Arc::new(tokio::sync::Semaphore::new(MAX_HANDSHAKES));
     loop {
-        let Ok((tcp, peer)) = listener.accept().await else { continue };
+        let (tcp, peer) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            // Out of file descriptors (or the like): a moment's pause, not a loop at full speed
+            // that keeps them from being freed.
+            Err(e) => {
+                tracing::warn!("remote: accept: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                continue;
+            }
+        };
         // Unauthenticated work is bounded: past MAX_HANDSHAKES in flight, new peers are dropped.
         let Ok(permit) = handshakes.clone().try_acquire_owned() else {
             tracing::debug!(%peer, "too many handshakes in progress; connection dropped");

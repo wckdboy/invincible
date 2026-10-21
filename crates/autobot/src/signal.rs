@@ -210,12 +210,17 @@ pub async fn serve(client: Client, runtime: Arc<Runtime>) -> Result<(), String> 
     runtime.channel_account("signal", &account);
     let mut backoff = Duration::from_secs(1);
     loop {
+        let started = std::time::Instant::now();
         match events(&client, &runtime, &channel).await {
             Ok(()) => {}
             Err(e) => {
                 tracing::warn!(bot = %runtime.name, "signal: {e}; again in {}s", backoff.as_secs());
                 runtime.channel_state("signal", &format!("retrying: {e}"));
             }
+        }
+        // A stream that ran a while was healthy: the next try is quick again.
+        if started.elapsed() > Duration::from_secs(60) {
+            backoff = Duration::from_secs(1);
         }
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(Duration::from_secs(60));

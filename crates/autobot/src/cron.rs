@@ -592,6 +592,25 @@ fn running_key(home: &Path, id: &str) -> String {
 static RUNNING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
     std::sync::LazyLock::new(Default::default);
 
+/// A schedule marked running in [RUNNING] until this is dropped: when its run ends, and also when
+/// it panics or is aborted (a bot stopped), so a schedule is never left "running" for good, never
+/// to fire again.
+struct Running(String);
+
+impl Running {
+    /// None when [key] runs already.
+    fn mark(key: String) -> Option<Self> {
+        let new = RUNNING.lock().expect("running").insert(key.clone());
+        new.then(|| Self(key))
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        RUNNING.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
+}
+
 /// Runs [schedule] once, unattended: its answer and the receipts of its model calls.
 pub async fn run(agent: &crate::agent::Agent, home: &Path, schedule: &Schedule) -> (Run, Vec<String>) {
     let mut unattended = agent.clone();
@@ -624,10 +643,9 @@ pub fn start(
     trigger: &'static str,
     runtime: Option<std::sync::Arc<crate::bots::Runtime>>,
 ) -> bool {
-    let key = running_key(&home, &schedule.id);
-    if !RUNNING.lock().expect("running").insert(key.clone()) {
+    let Some(running) = Running::mark(running_key(&home, &schedule.id)) else {
         return false;
-    }
+    };
     let now = Local::now().timestamp();
     // Mark it now, so a long run is not started again next round.
     let mut state = State::load(&home).unwrap_or_default();
@@ -636,6 +654,7 @@ pub fn start(
         tracing::warn!("cron: {e}");
     }
     tokio::spawn(async move {
+        let _running = running;
         tracing::info!(id = %schedule.id, trigger, "cron: running {:?}", schedule.task);
         let (result, receipts) = run(&agent, &home, &schedule).await;
         tracing::info!(id = %schedule.id, ok = result.ok, "cron: done");
@@ -697,7 +716,6 @@ pub fn start(
         if let Some(runtime) = runtime {
             deliver(&runtime, &home, &schedule, &text).await;
         }
-        RUNNING.lock().expect("running").remove(&key);
     });
     true
 }
@@ -768,6 +786,32 @@ fn cut(text: &str) -> String {
 mod tests {
     use super::{Schedules, State, When, due, local};
     use chrono::{Local, TimeZone};
+
+    /// A run that panics or is aborted lets go of its schedule: it can run again.
+    #[tokio::test]
+    async fn a_run_that_panics_or_is_stopped_is_not_left_running() {
+        use super::{RUNNING, Running};
+        let running = |key: &str| RUNNING.lock().unwrap().contains(key);
+        let mark = Running::mark("test\0panics".into()).unwrap();
+        assert!(Running::mark("test\0panics".into()).is_none(), "once at a time");
+        let task = tokio::spawn(async move {
+            let _mark = mark;
+            panic!("a bug in a run");
+        });
+        assert!(task.await.unwrap_err().is_panic());
+        assert!(!running("test\0panics"));
+
+        let mark = Running::mark("test\0aborted".into()).unwrap();
+        let task = tokio::spawn(async move {
+            let _mark = mark;
+            std::future::pending::<()>().await;
+        });
+        tokio::task::yield_now().await;
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(!running("test\0aborted"));
+        assert!(Running::mark("test\0aborted".into()).is_some());
+    }
     use std::time::Duration;
 
     fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> chrono::DateTime<Local> {
