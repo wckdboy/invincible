@@ -137,10 +137,18 @@ async fn a_turn_stopped_mid_tool_stops_the_tool_and_the_conversation_goes_on() {
     let agent = agent(&model.url, &dir, ApprovalMode::Ask);
     let mut session = Session::open(&sessions(&dir), "s").unwrap();
     let owner = Owner::new(Answer::Once);
-    let stopped =
-        tokio::time::timeout(Duration::from_millis(700), agent.turn(&mut session, "go", &owner, &mut grants(), &quiet))
-            .await;
-    assert!(stopped.is_err(), "stopped mid-tool");
+    // Stopped once the command runs (what it started is on disk).
+    let started = async {
+        while !dir.join("work/child.pid").exists() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let mut granted = grants();
+    tokio::select! {
+        _ = agent.turn(&mut session, "go", &owner, &mut granted, &quiet) => panic!("the turn ended by itself"),
+        () = started => {}
+    }
     let child: u32 = std::fs::read_to_string(dir.join("work/child.pid")).unwrap().trim().parse().unwrap();
     assert!(gone(child), "what the tool started is stopped with the turn");
     // From disk, as after a restart: the call gets its answer, and the next turn goes.

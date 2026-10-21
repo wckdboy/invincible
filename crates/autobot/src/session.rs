@@ -73,14 +73,18 @@ impl Session {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(format!("{}: {e}", path.display())),
         };
-        for line in bytes.split(|b| *b == b'\n') {
-            // A torn line (a crash mid-write) is dropped, not fatal; so is one cut inside a
-            // character.
-            if let Ok(message) = serde_json::from_slice::<Value>(line)
+        // A torn line (a crash mid-write) is dropped, not fatal; so is one cut inside a
+        // character (the rest of the file is still read as text).
+        let mut take = |message: serde_json::Result<Value>| {
+            if let Ok(message) = message
                 && !message.is_null()
             {
                 messages.push(message);
             }
+        };
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => text.lines().filter(|l| !l.trim().is_empty()).for_each(|l| take(serde_json::from_str(l))),
+            Err(_) => bytes.split(|b| *b == b'\n').for_each(|l| take(serde_json::from_slice(l))),
         }
         // A torn last line: the next message starts a line of its own, or it would be appended
         // to the torn one and be lost with it. (The file is not cut here: whoever only reads
