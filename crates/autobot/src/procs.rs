@@ -264,7 +264,13 @@ mod tests {
         let mut cmd = tokio::process::Command::new("sh");
         cmd.arg("-c").arg("echo started; sleep 30");
         let id = start("sleeper", cmd, &dir, None).unwrap();
-        let out = output(id, Duration::from_millis(300)).await.unwrap();
+        // What it printed comes when it comes (a loaded machine is slow to start a shell): read
+        // until it is there, not once after a fixed wait.
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        let mut out = String::new();
+        while !out.contains("started") && std::time::Instant::now() < until {
+            out = format!("{out}{}", output(id, Duration::from_millis(100)).await.unwrap());
+        }
         assert!(out.contains("started"), "{out}");
         assert!(out.contains("running"), "{out}");
         assert!(list().contains("sleeper"));

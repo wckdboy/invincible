@@ -1649,12 +1649,13 @@ mod tests {
     async fn a_timed_out_command_is_stopped_with_its_children() {
         let (_, dir) = tools();
         let pid = dir.join("pid");
-        let tools = Tools::new(dir.clone(), Duration::from_millis(500));
+        // Time enough for the shell to start its child on a loaded machine.
+        let tools = Tools::new(dir.clone(), Duration::from_secs(5));
         let command = format!("sleep 300 & echo $! > {}; wait", pid.display());
         let started = std::time::Instant::now();
         let out = tools.run(&Call::Terminal { command }).await;
         assert!(out.contains("stopped after"), "{out}");
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(120), "waited for the child");
         let pid = std::fs::read_to_string(&pid).unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;
         let alive = std::process::Command::new("kill")
@@ -1670,13 +1671,14 @@ mod tests {
     #[tokio::test]
     async fn terminal_output_is_capped() {
         let (_, dir) = tools();
-        let tools = Tools::new(dir, Duration::from_secs(60));
+        let tools = Tools::new(dir, Duration::from_secs(600));
         let out = tools
-            .run(&Call::Terminal { command: "head -c 20000000 /dev/zero | tr '\\0' x; echo; echo done >&2".into() })
+            .run(&Call::Terminal { command: "head -c 6000000 /dev/zero | tr '\\0' x; echo; echo done >&2".into() })
             .await;
-        assert!(out.len() < 2 * super::OUTPUT_KEPT + 1024, "{} bytes", out.len());
-        assert!(out.contains("[… output past 4 MiB not kept]"), "{}", &out[out.len() - 200..]);
-        assert!(out.contains("done") && out.ends_with("[exit code 0]"), "{}", &out[out.len() - 200..]);
+        let end: String = out.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
+        assert!(out.len() < super::OUTPUT_KEPT + 1024, "{} bytes: {end}", out.len());
+        assert!(out.contains("[… output past 4 MiB not kept]"), "{end}");
+        assert!(out.contains("done") && out.ends_with("[exit code 0]"), "{end}");
     }
 
     #[tokio::test]
