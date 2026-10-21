@@ -637,7 +637,7 @@ where
 }
 
 /// A task that is stopped when this is dropped.
-struct Aborting<T>(tokio::task::JoinHandle<T>);
+pub(crate) struct Aborting<T>(pub(crate) tokio::task::JoinHandle<T>);
 
 impl<T> Drop for Aborting<T> {
     fn drop(&mut self) {

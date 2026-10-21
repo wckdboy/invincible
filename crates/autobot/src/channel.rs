@@ -206,9 +206,11 @@ pub fn note(answer: &Answer) -> &'static str {
 /// An approval answered in words: `yes`, `always`, `no`, `no, <what to do instead>`.
 pub fn parse_answer(text: &str) -> Option<Answer> {
     let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
-    let lower = first.to_lowercase();
-    let word: String = lower.chars().take_while(|c| c.is_alphabetic()).collect();
-    let rest = first[word.len().min(first.len())..].trim_start_matches([',', ':', ';', '.', '-', ' ']).trim();
+    // The word is cut from the text as written: lowercasing can change its length in bytes
+    // ("İ" is two, "i̇" three), and the rest is what follows it there.
+    let end = first.find(|c: char| !c.is_alphabetic()).unwrap_or(first.len());
+    let word = first[..end].to_lowercase();
+    let rest = first[end..].trim_start_matches([',', ':', ';', '.', '-', ' ']).trim();
     match word.as_str() {
         "yes" | "y" | "ok" | "allow" | "approve" | "approved" | "sure" => Some(Answer::Once),
         "always" => Some(Answer::Always),
@@ -528,14 +530,16 @@ async fn handle_inner(
 
     let agent = runtime.agent();
     let progress = start_progress(transport.clone(), chat.clone(), agent.clone());
+    // Stopped with the turn, also when it panics or the bot is stopped mid-turn: never "typing…"
+    // every five seconds for good.
     let typing = {
         let (transport, chat) = (transport.clone(), chat.clone());
-        tokio::spawn(async move {
+        crate::bots::Aborting(tokio::spawn(async move {
             loop {
                 transport.typing(&chat).await;
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
-        })
+        }))
     };
     let last_route = Mutex::new(None::<String>);
     let lines = progress.as_ref().map(|(tx, _)| tx.clone());
@@ -596,7 +600,7 @@ async fn handle_inner(
     runtime.turn_ended();
     // What is worth keeping, in the background; nothing is said about it in the chat.
     let _ = runtime.nudge(agent.clone(), &guard.session.messages);
-    typing.abort();
+    drop(typing);
     drop(lines);
     if let Some((tx, task)) = progress {
         drop(tx);
@@ -874,6 +878,11 @@ mod tests {
         assert_eq!(parse_answer("no, use rsync instead"), Some(Answer::Instead("use rsync instead".into())));
         assert_eq!(parse_answer("nothing to add"), None);
         assert_eq!(parse_answer("what is this?"), None);
+        // Words whose lowercase is longer or shorter in bytes than they are: never a panic.
+        for odd in ["İ", "İs this ok", "Ⱥ€", "ȺȺȺ no", "ẞ", "K yes"] {
+            assert_eq!(parse_answer(odd), None, "{odd}");
+        }
+        assert_eq!(parse_answer("NO, İstanbul first"), Some(Answer::Instead("İstanbul first".into())));
     }
 
     #[test]
