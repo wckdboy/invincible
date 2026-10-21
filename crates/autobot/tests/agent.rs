@@ -236,7 +236,8 @@ async fn the_routers_question_goes_to_the_owner_and_a_yes_resends_confirmed() {
 
 #[tokio::test]
 async fn the_step_budget_ends_a_loop() {
-    let calls = (0..6).map(|_| call("list_dir", json!({}))).collect();
+    // Different calls each step (the same one over and over is stopped sooner, as a loop).
+    let calls = (0..6).map(|i| call("list_dir", json!({ "path": format!("d{i}") }))).collect();
     let (url, _) = gateway(calls).await;
     let dir = temp("budget");
     let agent = agent(&url, &dir, ApprovalMode::Ask, true);

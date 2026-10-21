@@ -333,10 +333,17 @@ impl Agent {
                 }}));
             }
         }
+        // The instructions are read once a turn (its files: memory, skills, the project's
+        // notes): the same for every step, so a model's prompt cache keeps the whole prefix, and
+        // no step waits on the disk for them again.
+        let instructions = self.system_prompt();
         let mut receipts = Vec::new();
         let mut confirmed = false;
+        // Times the window was made smaller after the model said the request was too long.
+        let mut shrunk = 0;
         let mut steps = 0;
         let mut sent: Vec<Value> = Vec::new();
+        let mut loops = Loops::default();
         loop {
             steps += 1;
             if steps > self.max_steps {
@@ -372,7 +379,7 @@ impl Agent {
             if steps == 1 {
                 self.compact(session, confirmed, events).await;
             }
-            let mut system = self.system_prompt();
+            let mut system = instructions.clone();
             if let Some(summary) = session.summary() {
                 system.push_str("\n\nEarlier in this conversation (a summary; the recent part follows):\n");
                 system.push_str(summary);
@@ -410,6 +417,16 @@ impl Agent {
                         continue;
                     }
                     return Err("Not sent: the cloud model was not approved.".to_owned());
+                }
+                // Longer than the model takes: a smaller window (what leaves it is summarized,
+                // long results cleared), and the same step again; a few times at most.
+                Err(GatewayError::Failed(e)) if crate::gateway::overflow(&e) && shrunk < 3 => {
+                    shrunk += 1;
+                    session.budget = (session.budget * 2 / 3).max(8 * 1024);
+                    tracing::warn!("{e}: sending less of the conversation ({} KiB)", session.budget / 1024);
+                    self.compact(session, confirmed, events).await;
+                    steps -= 1;
+                    continue;
                 }
                 Err(e) => return Err(e.to_string()),
             };
@@ -483,6 +500,7 @@ impl Agent {
                     for ((id, name, arguments), result) in batch.iter().zip(results) {
                         events(Event::Tool(&format!("{name} {arguments}")));
                         events(Event::Output { name, text: &result });
+                        let result = loops.note(name, arguments, result);
                         session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
                     }
                     continue;
@@ -491,6 +509,7 @@ impl Agent {
                 let at = session.messages.len();
                 let result = self.call(&session.id, at, &name, &arguments, approver, grants, events).await;
                 events(Event::Output { name: &name, text: &result });
+                let result = loops.note(&name, &arguments, result);
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
                 // A browser screenshot is shown to a model that can see (a tool result cannot
                 // carry an image; a message of its own can).
@@ -505,6 +524,17 @@ impl Agent {
             if !screenshots.is_empty() {
                 let note = format!("{}: what the page looks like now)", crate::session::SCREENSHOT_NOTE);
                 session.push(crate::images::message(&note, &std::mem::take(&mut screenshots)))?;
+            }
+            // Going round in circles: the same call, the same result, again and again.
+            if let Some(name) = loops.stuck() {
+                let note = format!(
+                    "Stopped: the same {name} call kept giving the same result ({STUCK} times), so it was going \
+                     round in circles; say what to try instead."
+                );
+                let last = json!({ "role": "assistant", "content": note });
+                session.push(last.clone())?;
+                record(&sent, &definitions, last, "stopped", steps, &receipts);
+                return Ok(Outcome { text: note, receipts });
             }
         }
     }
@@ -1153,6 +1183,57 @@ impl crate::script::Rpc for ScriptCalls<'_> {
                 None => Ok(result),
             }
         })
+    }
+}
+
+/// The same call with the same result this many times in a turn: the model is told.
+const REPEATED: usize = 3;
+/// And this many: the turn stops (it would only spend the step budget).
+const STUCK: usize = 6;
+
+/// The calls of one turn, to see a model going round in circles: by call (its tool and its
+/// arguments, as JSON reads them), how many times in a row it gave the same result.
+#[derive(Default)]
+struct Loops {
+    seen: std::collections::HashMap<u64, (u64, usize)>,
+    stuck: Option<String>,
+}
+
+impl Loops {
+    /// [result] for [name] called with [arguments], with a word to the model when it is the
+    /// same as the last [REPEATED] times or more.
+    fn note(&mut self, name: &str, arguments: &str, result: String) -> String {
+        use std::hash::{Hash, Hasher};
+        let hash = |parts: &[&str]| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            parts.hash(&mut h);
+            h.finish()
+        };
+        let canonical =
+            serde_json::from_str::<Value>(arguments).map_or_else(|_| arguments.to_owned(), |v| v.to_string());
+        let (call, outcome) = (hash(&[name, &canonical]), hash(&[&result]));
+        let entry = self.seen.entry(call).or_insert((outcome, 0));
+        if entry.0 == outcome {
+            entry.1 += 1;
+        } else {
+            *entry = (outcome, 1);
+        }
+        let times = entry.1;
+        if times >= STUCK {
+            self.stuck = Some(name.to_owned());
+        }
+        if times < REPEATED {
+            return result;
+        }
+        format!(
+            "{result}\n[You have now made this exact call {times} times this turn, with this same result each time. \
+             Do not repeat it: try something different, or answer with what you have.]"
+        )
+    }
+
+    /// The tool that was called [STUCK] times over with the same result, if one was.
+    fn stuck(&mut self) -> Option<String> {
+        self.stuck.take()
     }
 }
 

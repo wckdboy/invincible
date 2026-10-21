@@ -576,13 +576,89 @@ impl Tools {
         ])
     }
 
-    /// [name] with its JSON [arguments], as a [Call].
+    /// [name] with its JSON [arguments], as a [Call]. Arguments a model got slightly wrong
+    /// (in a code fence, a raw line break in a string, a trailing comma) are read as meant; what
+    /// cannot be read says what the tool takes, so the next try can be right.
     pub fn parse(&self, name: &str, arguments: &str) -> Result<Call, String> {
+        // `functions.read_file`: some models name tools as their template shows them.
+        let name = name.trim();
+        let name = name.strip_prefix("functions.").unwrap_or(name);
         let args: Value = if arguments.trim().is_empty() {
             json!({})
         } else {
-            serde_json::from_str(arguments).map_err(|e| format!("the arguments are not JSON: {e}"))?
+            match serde_json::from_str(arguments) {
+                Ok(args) => args,
+                Err(e) => match repair_json(arguments) {
+                    Some(args) => args,
+                    None => {
+                        return Err(format!(
+                            "the arguments are not JSON ({e}); send one JSON object{}",
+                            self.takes(name).map(|t| format!(" ({t})")).unwrap_or_default()
+                        ));
+                    }
+                },
+            }
         };
+        let args = if args.is_null() { json!({}) } else { args };
+        if !args.is_object() {
+            return Err(format!(
+                "the arguments must be a JSON object{}",
+                self.takes(name).map(|t| format!(" ({t})")).unwrap_or_default()
+            ));
+        }
+        self.parse_args(name, &args).map_err(|e| {
+            if e.starts_with("there is no tool") || e.contains("not allowed") {
+                return e;
+            }
+            match self.takes(name) {
+                Some(takes) => format!("{e}; {takes}"),
+                None => e,
+            }
+        })
+    }
+
+    /// What tool [name] takes, from its definition: `edit_file takes path, old_text, new_text
+    /// (required), replace_all`.
+    fn takes(&self, name: &str) -> Option<String> {
+        let definitions = self.definitions();
+        let tool = definitions.as_array()?.iter().find(|d| d["function"]["name"] == name)?;
+        let parameters = &tool["function"]["parameters"];
+        let required: Vec<&str> =
+            parameters["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        let optional: Vec<&str> = parameters["properties"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(k, _)| k.as_str())
+            .filter(|k| !required.contains(k))
+            .collect();
+        let mut out = format!("{name} takes ");
+        if !required.is_empty() {
+            out.push_str(&format!("{} (required)", required.join(", ")));
+        }
+        if !optional.is_empty() {
+            if !required.is_empty() {
+                out.push_str(", ");
+            }
+            out.push_str(&optional.join(", "));
+        }
+        if required.is_empty() && optional.is_empty() {
+            out.push_str("no arguments");
+        }
+        Some(out)
+    }
+
+    /// The tool names this agent offers, for a model that asked for one it does not have.
+    fn names(&self) -> Vec<String> {
+        self.definitions()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|d| d["function"]["name"].as_str().map(str::to_owned))
+            .collect()
+    }
+
+    fn parse_args(&self, name: &str, args: &Value) -> Result<Call, String> {
         // The old name of create_skill, for models (and trajectories) that know it.
         let name = if name == "propose_skill" { "create_skill" } else { name };
         if !self.offered(name) {
@@ -677,8 +753,8 @@ impl Tools {
             }
             "search_sessions" if self.home.is_some() => Call::SearchSessions { query: text("query")? },
             "cancel_schedule" if self.home.is_some() => Call::CancelSchedule { id: text("id")? },
-            "browser" if self.browser => Call::Browser(crate::browser::Act::parse(&args)?),
-            "home" if self.ha.is_some() => Call::Home(crate::homeassistant::HomeCall::parse(&args)?),
+            "browser" if self.browser => Call::Browser(crate::browser::Act::parse(args)?),
+            "home" if self.ha.is_some() => Call::Home(crate::homeassistant::HomeCall::parse(args)?),
             "speak" => Call::Speak {
                 text: text("text")?,
                 voice: args.get("voice").and_then(Value::as_str).map(str::to_owned).filter(|v| !v.trim().is_empty()),
@@ -693,7 +769,9 @@ impl Tools {
                 )?,
                 code: text("code")?,
             },
-            other => return Err(format!("there is no tool named {other:?}")),
+            other => {
+                return Err(format!("there is no tool named {other:?}; the tools are: {}", self.names().join(", ")));
+            }
         })
     }
 
@@ -795,7 +873,7 @@ impl Tools {
                     _ => Ok(crate::procs::list()),
                 }
             }
-            Call::ReadFile { path, offset, limit } => read(path).await.map(|text| lines(&text, *offset, *limit)),
+            Call::ReadFile { path, offset, limit } => read_lines(path, *offset, *limit, self.limit).await,
             Call::Todo { items } => todo(items),
             Call::WriteFile { path, content } => write(path, content).await,
             Call::EditFile { path, old, new, all } => edit(path, old, new, *all).await,
@@ -902,11 +980,7 @@ impl Tools {
             Call::WriteFile { path, content } => Some((path.clone(), now(path).unwrap_or_default(), content.clone())),
             Call::EditFile { path, old, new, all } => {
                 let text = now(path)?;
-                let found = text.matches(old.as_str()).count();
-                if old.is_empty() || found == 0 || (found > 1 && !all) {
-                    return None;
-                }
-                let after = text.replace(old.as_str(), new);
+                let (after, _, _) = crate::edit::apply(&text, old, new, *all).ok().filter(|_| !old.is_empty())?;
                 Some((path.clone(), text, after))
             }
             _ => None,
@@ -935,10 +1009,7 @@ impl Tools {
                     Err(e) => return Some(Err(e)),
                 };
                 match edited(&before, old, new, *all, path) {
-                    Ok((after, found)) => ssh.write(path, after.as_bytes()).await.map(|()| {
-                        let n = if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") };
-                        format!("replaced {n} in {}", path.display())
-                    }),
+                    Ok((after, said)) => ssh.write(path, after.as_bytes()).await.map(|()| said),
                     Err(e) => Err(e),
                 }
             }
@@ -999,25 +1070,56 @@ impl Tools {
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("sh: {e}"))?;
+        // Stopped (a timeout, or the turn dropped while it runs): what it started goes too.
+        let mut tree = Tree(child.id());
         let mut stdout = child.stdout.take().expect("piped");
         let mut stderr = child.stderr.take().expect("piped");
-        let run = async {
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let (a, b) = tokio::join!(stdout.read_to_end(&mut out), stderr.read_to_end(&mut err));
-            a.and(b).map_err(|e| e.to_string())?;
-            let status = child.wait().await.map_err(|e| e.to_string())?;
-            Ok::<_, String>((out, err, status))
-        };
-        match tokio::time::timeout(self.timeout, run).await {
-            Err(_) => Err(format!("stopped after {} seconds", self.timeout.as_secs())),
-            Ok(result) => {
-                let (out, err, status) = result?;
-                let mut text = String::from_utf8_lossy(&out).into_owned();
-                if !err.is_empty() {
-                    text.push_str(&String::from_utf8_lossy(&err));
+        // Only the start and the end of what it prints are kept (the model gets no more), so a
+        // command that prints gigabytes takes no more memory than one that prints a page.
+        let (mut out, mut err) = (Capture::new(self.limit), Capture::new(self.limit));
+        let deadline = tokio::time::Instant::now() + self.timeout;
+        let status = {
+            let mut reads = std::pin::pin!(async {
+                tokio::join!(out.pump(&mut stdout), err.pump(&mut stderr));
+            });
+            let mut read = false;
+            let status = loop {
+                tokio::select! {
+                    () = &mut reads, if !read => read = true,
+                    status = child.wait() => break Some(status.map_err(|e| e.to_string())?),
+                    () = tokio::time::sleep_until(deadline) => break None,
                 }
+            };
+            // Done, but something it started still holds its output open (`server &`): what is
+            // there already, without waiting for that to end.
+            if status.is_some() && !read {
+                let grace = deadline.min(tokio::time::Instant::now() + Duration::from_millis(500));
+                let _ = tokio::time::timeout_at(grace, &mut reads).await;
+            }
+            status
+        };
+        let mut text = out.text();
+        let err = err.text();
+        if !err.is_empty() {
+            text.push_str(&err);
+        }
+        let end = if text.is_empty() || text.ends_with('\n') { "" } else { "\n" };
+        match status {
+            None => {
+                tree.kill();
+                // What it printed before it was stopped: often where it hung.
+                if text.is_empty() {
+                    return Err(format!("stopped after {} seconds", self.timeout.as_secs()));
+                }
+                Ok(format!(
+                    "{text}{end}[stopped after {} seconds; for something that keeps running, use background: true]",
+                    self.timeout.as_secs()
+                ))
+            }
+            Some(status) => {
+                tree.0 = None;
                 let code = status.code().map_or("killed by a signal".to_owned(), |c| format!("exit code {c}"));
-                Ok(format!("{text}{}[{code}]", if text.is_empty() || text.ends_with('\n') { "" } else { "\n" }))
+                Ok(format!("{text}{end}[{code}]"))
             }
         }
     }
@@ -1091,11 +1193,7 @@ impl Tools {
         match call {
             Call::WriteFile { content, .. } => Some((path.clone(), text, content.clone())),
             Call::EditFile { old, new, all, .. } => {
-                let found = text.matches(old.as_str()).count();
-                if old.is_empty() || found == 0 || (found > 1 && !all) {
-                    return None;
-                }
-                let after = text.replace(old.as_str(), new);
+                let (after, _, _) = crate::edit::apply(&text, old, new, *all).ok().filter(|_| !old.is_empty())?;
                 Some((path.clone(), text, after))
             }
             _ => None,
@@ -1306,12 +1404,11 @@ async fn through(files: &dyn Files, call: &Call) -> Option<Result<String, String
                 Ok(before) => before,
                 Err(e) => return Some(Err(e)),
             };
-            let (after, found) = match edited(&before, old, new, *all, path) {
+            let (after, said) = match edited(&before, old, new, *all, path) {
                 Ok(done) => done,
                 Err(e) => return Some(Err(e)),
             };
-            let n = if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") };
-            Some(files.write(path, &after).await?.map(|()| format!("replaced {n} in {}", path.display())))
+            Some(files.write(path, &after).await?.map(|()| said))
         }
         _ => None,
     }
@@ -1323,6 +1420,116 @@ async fn read(path: &Path) -> Result<String, String> {
         return Err(format!("{} is not a text file ({} bytes)", path.display(), bytes.len()));
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Tool arguments a model got slightly wrong, read as it meant them: inside a code fence or
+/// with words around the object, raw line breaks and tabs inside strings, a trailing comma.
+/// None when that does not make them JSON either.
+fn repair_json(text: &str) -> Option<Value> {
+    let (start, end) = (text.find('{')?, text.rfind('}')?);
+    if start >= end {
+        return None;
+    }
+    let text = &text[start..=end];
+    let mut out = String::with_capacity(text.len() + 16);
+    let (mut in_string, mut escaped) = (false, false);
+    let chars: Vec<char> = text.chars().collect();
+    // The next character that is not a space, after each one.
+    let mut next = vec![None; chars.len()];
+    for i in (0..chars.len().saturating_sub(1)).rev() {
+        next[i] = if chars[i + 1].is_whitespace() { next[i + 1] } else { Some(chars[i + 1]) };
+    }
+    for (i, &c) in chars.iter().enumerate() {
+        if in_string {
+            match c {
+                _ if escaped => {
+                    escaped = false;
+                    out.push(c);
+                }
+                '\\' => {
+                    escaped = true;
+                    out.push(c);
+                }
+                '"' => {
+                    in_string = false;
+                    out.push(c);
+                }
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            // A comma with nothing after it but the end of the object or list.
+            ',' if matches!(next[i], Some('}' | ']')) => {}
+            c => out.push(c),
+        }
+    }
+    serde_json::from_str::<Value>(&out).ok().filter(Value::is_object)
+}
+
+/// Files larger than this are not read whole by `read_file` (a log of gigabytes).
+const LARGE_FILE: u64 = 16 * 1024 * 1024;
+
+/// `read_file`: the file's text, or lines [offset].. of it ([limit] of them). A large file is
+/// never held whole: without lines asked for, its start and its end ([keep] bytes in all);
+/// with them, read line by line.
+async fn read_lines(path: &Path, offset: Option<usize>, limit: Option<usize>, keep: usize) -> Result<String, String> {
+    let size = tokio::fs::metadata(path).await.map(|m| m.len()).unwrap_or(0);
+    if size <= LARGE_FILE {
+        return read(path).await.map(|text| lines(&text, offset, limit));
+    }
+    use tokio::io::{AsyncBufReadExt, AsyncSeekExt};
+    let shown = |e: std::io::Error| format!("{}: {e}", path.display());
+    let mut file = tokio::fs::File::open(path).await.map_err(shown)?;
+    let mut head = vec![0u8; 8192.min(size as usize)];
+    file.read_exact(&mut head).await.map_err(shown)?;
+    if head.contains(&0) {
+        return Err(format!("{} is not a text file ({size} bytes)", path.display()));
+    }
+    file.seek(std::io::SeekFrom::Start(0)).await.map_err(shown)?;
+    if offset.is_none() && limit.is_none() {
+        let half = (keep / 2) as u64;
+        let mut start = vec![0u8; half as usize];
+        file.read_exact(&mut start).await.map_err(shown)?;
+        file.seek(std::io::SeekFrom::Start(size - half)).await.map_err(shown)?;
+        let mut end = vec![0u8; half as usize];
+        file.read_exact(&mut end).await.map_err(shown)?;
+        return Ok(format!(
+            "{}\n[… {} bytes cut: the file is {size} bytes; read the part you need with offset and limit (lines), or search it …]\n{}",
+            String::from_utf8_lossy(&start),
+            size - 2 * half,
+            String::from_utf8_lossy(&end)
+        ));
+    }
+    let first = offset.unwrap_or(1).max(1);
+    let wanted = limit.unwrap_or(usize::MAX);
+    let mut reader = tokio::io::BufReader::new(file);
+    let (mut line, mut n, mut out, mut taken) = (Vec::new(), 0usize, String::new(), 0usize);
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).await.map_err(shown)? == 0 {
+            break;
+        }
+        n += 1;
+        if n >= first && taken < wanted && out.len() < 2 * keep {
+            if taken > 0 {
+                out.push('\n');
+            }
+            out.push_str(String::from_utf8_lossy(&line).trim_end_matches(['\n', '\r']));
+            taken += 1;
+        }
+    }
+    let start = first.min(n + 1);
+    out.push_str(&format!("\n[lines {start}-{} of {n}]", (start + taken).saturating_sub(1)));
+    Ok(out)
 }
 
 async fn write(path: &Path, content: &str) -> Result<String, String> {
@@ -1352,19 +1559,30 @@ async fn write(path: &Path, content: &str) -> Result<String, String> {
     Ok(format!("wrote {} bytes to {}", content.len(), path.display()))
 }
 
-/// [text] with [old] replaced by [new]: exactly once unless [all]; and how many there were.
-fn edited(text: &str, old: &str, new: &str, all: bool, path: &Path) -> Result<(String, usize), String> {
+/// [text] with [old] replaced by [new]: exactly once unless [all] (whitespace the model got
+/// wrong forgiven where that finds one place, [crate::edit]); and what to tell the model.
+fn edited(text: &str, old: &str, new: &str, all: bool, path: &Path) -> Result<(String, String), String> {
     if old.is_empty() {
         return Err("old_text is empty".to_owned());
     }
-    let found = text.matches(old).count();
-    match (found, all) {
-        (0, _) => Err(format!(
-            "old_text is not in {} (copy it exactly, spaces and line breaks included; read_file shows the file)",
-            path.display()
-        )),
-        (1, _) | (_, true) => Ok((text.replace(old, new), found)),
-        (n, false) => Err(format!(
+    match crate::edit::apply(text, old, new, all) {
+        Ok((after, found, loose)) => {
+            let n = if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") };
+            let how = loose.map(|l| format!(" ({})", l.describe())).unwrap_or_default();
+            Ok((after, format!("replaced {n} in {}{how}", path.display())))
+        }
+        Err(0) => {
+            let mut why =
+                format!("old_text is not in {} (copy it exactly, spaces and line breaks included)", path.display());
+            match crate::edit::closest(text, old) {
+                Some((line, shown)) => {
+                    why.push_str(&format!("; the closest is at line {line}, as it is in the file now:\n{shown}"))
+                }
+                None => why.push_str("; read_file shows the file"),
+            }
+            Err(why)
+        }
+        Err(n) => Err(format!(
             "old_text is in {} {n} times; include more lines around it so it is unique, or set replace_all",
             path.display()
         )),
@@ -1377,13 +1595,9 @@ async fn edit(path: &Path, old: &str, new: &str, all: bool) -> Result<String, St
         return Err("old_text is empty".to_owned());
     }
     let text = read(path).await?;
-    let (changed, found) = edited(&text, old, new, all, path)?;
+    let (changed, said) = edited(&text, old, new, all, path)?;
     write(path, &changed).await?;
-    Ok(format!(
-        "replaced {} in {}",
-        if found == 1 { "1 occurrence".to_owned() } else { format!("{found} occurrences") },
-        path.display()
-    ))
+    Ok(said)
 }
 
 /// Lines [offset].. of [text] ([limit] of them), with a note of where the rest is.
@@ -1428,6 +1642,91 @@ async fn list(path: &Path) -> Result<String, String> {
     }
     names.sort();
     Ok(if names.is_empty() { "(empty)".to_owned() } else { names.join("\n") })
+}
+
+/// What a command prints, as it comes: its first [Capture::keep] bytes and its last, and how
+/// many there were in all.
+struct Capture {
+    keep: usize,
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    total: usize,
+}
+
+impl Capture {
+    fn new(keep: usize) -> Self {
+        Self { keep, head: Vec::new(), tail: Vec::new(), total: 0 }
+    }
+
+    fn take(&mut self, mut bytes: &[u8]) {
+        self.total += bytes.len();
+        let room = self.keep.saturating_sub(self.head.len());
+        if room > 0 {
+            let n = room.min(bytes.len());
+            self.head.extend_from_slice(&bytes[..n]);
+            bytes = &bytes[n..];
+        }
+        self.tail.extend_from_slice(bytes);
+        // Trimmed now and then, not at every read.
+        if self.tail.len() > 2 * self.keep {
+            self.tail.drain(..self.tail.len() - self.keep);
+        }
+    }
+
+    /// Reads [from] to its end.
+    async fn pump(&mut self, from: &mut (impl tokio::io::AsyncRead + Unpin)) {
+        let mut buffer = vec![0u8; 64 * 1024];
+        while let Ok(n @ 1..) = from.read(&mut buffer).await {
+            self.take(&buffer[..n]);
+        }
+    }
+
+    /// What was kept, as text: whole when it all was, else its start and its end with how much
+    /// is not there.
+    fn text(mut self) -> String {
+        if self.tail.len() > self.keep {
+            self.tail.drain(..self.tail.len() - self.keep);
+        }
+        let dropped = self.total - self.head.len() - self.tail.len();
+        let mut text = String::from_utf8_lossy(&self.head).into_owned();
+        if dropped > 0 {
+            text.push_str(&format!("\n[… {dropped} bytes cut …]\n"));
+        }
+        text.push_str(&String::from_utf8_lossy(&self.tail));
+        text
+    }
+}
+
+/// A command's process and what it started, killed together by [Tree::kill] or when dropped
+/// (the turn stopped while it ran); `None` once it is done.
+struct Tree(Option<u32>);
+
+impl Tree {
+    fn kill(&mut self) {
+        let Some(root) = self.0.take() else { return };
+        // Its descendants first (the shell is still there to find them by), then all at once.
+        let mut found = vec![root];
+        let mut at = 0;
+        while at < found.len() && found.len() < 4096 {
+            let parent = found[at];
+            at += 1;
+            let Ok(out) = std::process::Command::new("pgrep").arg("-P").arg(parent.to_string()).output() else {
+                break;
+            };
+            found.extend(String::from_utf8_lossy(&out.stdout).split_whitespace().filter_map(|p| p.parse::<u32>().ok()));
+        }
+        for pid in found {
+            if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
+                let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+            }
+        }
+    }
+}
+
+impl Drop for Tree {
+    fn drop(&mut self) {
+        self.kill();
+    }
 }
 
 /// Keeps the start and the end of a long result: errors tend to be at the end.
