@@ -241,15 +241,17 @@ async fn events(client: &Client, runtime: &Arc<Runtime>, channel: &Arc<dyn Trans
     }
     runtime.channel_state("signal", "connected");
     let mut stream = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut data = String::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("signal-cli events: {e}"))?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(at) = buffer.find('\n') {
-            let line = buffer[..at].trim_end_matches('\r').to_owned();
-            buffer.drain(..=at);
+        for line in lines(&mut buffer, &chunk) {
             if let Some(rest) = line.strip_prefix("data:") {
+                // One event is not this big: a stream gone wrong is not kept in memory.
+                if data.len() + rest.len() > EVENT_MOST {
+                    data.clear();
+                    continue;
+                }
                 data.push_str(rest.trim_start());
             } else if line.is_empty() && !data.is_empty() {
                 let event: Value = serde_json::from_str(&std::mem::take(&mut data)).unwrap_or_default();
@@ -263,11 +265,26 @@ async fn events(client: &Client, runtime: &Arc<Runtime>, channel: &Arc<dyn Trans
                 }
             }
         }
-        if buffer.len() > 1 << 20 {
+        if buffer.len() > EVENT_MOST {
             buffer.clear();
         }
     }
     Ok(())
+}
+
+/// The most an event (or a line of one) may hold.
+const EVENT_MOST: usize = 1 << 20;
+
+/// The whole lines [chunk] completes, after what [buffer] held; the rest stays in [buffer]. Lines
+/// are decoded whole: a character split between chunks is not mangled.
+fn lines(buffer: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
+    buffer.extend_from_slice(chunk);
+    let mut out = Vec::new();
+    while let Some(at) = buffer.iter().position(|b| *b == b'\n') {
+        let line: Vec<u8> = buffer.drain(..=at).collect();
+        out.push(String::from_utf8_lossy(&line[..at]).trim_end_matches('\r').to_owned());
+    }
+    out
 }
 
 /// An event as a message for the bot: direct text or voice; groups, receipts and typing are not.
@@ -312,6 +329,19 @@ pub fn message(client: &Client, event: &Value) -> Option<Incoming> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A message's text split between two reads of the stream, inside a character: it arrives
+    /// whole, not with a replacement character where the split was.
+    #[test]
+    fn a_character_split_between_chunks_arrives_whole() {
+        let event = "data: {\"message\": \"grüße 👋\"}\r\n\n".as_bytes();
+        let split = event.iter().position(|b| *b >= 0x80).unwrap() + 1;
+        let mut buffer = Vec::new();
+        assert!(lines(&mut buffer, &event[..split]).is_empty());
+        let got = lines(&mut buffer, &event[split..]);
+        assert_eq!(got, ["data: {\"message\": \"grüße 👋\"}", ""]);
+        assert!(buffer.is_empty());
+    }
 
     #[test]
     fn events_become_messages() {
