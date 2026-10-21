@@ -62,9 +62,14 @@ pub struct AppState {
 impl AppState {
     pub fn new(engines: Vec<Engine>, node: NodeSettings, token: String) -> Self {
         // No overall timeout: a long generation is not a hung one. Connecting to a loopback
-        // engine is instant or it is down.
-        let client =
-            crate::egress::local().connect_timeout(std::time::Duration::from_secs(2)).build().expect("HTTP client");
+        // engine is instant or it is down. But an engine that sends nothing at all for half an
+        // hour (an answer not streamed comes whole at the end, so the wait can be long) is hung,
+        // and the request is let go rather than held, with its client, for good.
+        let client = crate::egress::local()
+            .connect_timeout(std::time::Duration::from_secs(2))
+            .read_timeout(crate::egress::LOCAL_SILENCE)
+            .build()
+            .expect("HTTP client");
         let egress = crate::egress::client(&node.network).ok();
         // An ephemeral receipt key until the node's own is set ([AppState::with_receipt_key]).
         let receipt_key = Arc::new(ReceiptKey::from_seed(&crate::token::random::<32>().expect("random bytes")));
@@ -634,7 +639,11 @@ fn estimate_tokens(body: &Value) -> u64 {
     };
     let answer = ["max_completion_tokens", "max_tokens"].iter().find_map(|k| body.get(*k).and_then(Value::as_u64));
     let images = crate::media::images(body).len() as u64;
-    ((chars + system) as u64).div_ceil(4) + images * IMAGE_TOKENS + answer.unwrap_or(0)
+    // Saturating: a client's max_tokens of u64::MAX needs more than any model has, not an overflow.
+    ((chars + system) as u64)
+        .div_ceil(4)
+        .saturating_add(images.saturating_mul(IMAGE_TOKENS))
+        .saturating_add(answer.unwrap_or(0))
 }
 
 /// Sends the request to the engine unchanged and streams its answer back unchanged (SSE included).
@@ -720,5 +729,9 @@ mod tests {
             json!({ "type": "image_url", "image_url": { "url": "data:image/png;base64,aGVsbG8=" } });
         assert_eq!(estimate_tokens(&body), 3 + super::IMAGE_TOKENS + 100);
         assert_eq!(estimate_tokens(&json!({})), 0);
+        // A wild limit needs more than any model has; it does not overflow (a panic in a debug
+        // build, a tiny wrapped number that fits any model in a release one).
+        body["max_tokens"] = json!(u64::MAX);
+        assert_eq!(estimate_tokens(&body), u64::MAX);
     }
 }

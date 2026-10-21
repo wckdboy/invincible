@@ -115,9 +115,12 @@ impl Gateway {
         }
         // Plain HTTP (the gateway on this machine) needs no trust roots, and loading the
         // system's takes most of the agent's start (~100 ms on macOS).
+        // No overall timeout (a long generation is not a hung one), but a gateway that sends
+        // nothing for half an hour is: the turn fails instead of holding its conversation for good.
         let client = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_secs(10))
+            .read_timeout(invincible::egress::LOCAL_SILENCE)
             .tls_built_in_root_certs(parsed.scheme() == "https")
             .build()
             .map_err(|e| e.to_string())?;
