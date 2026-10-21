@@ -1,7 +1,7 @@
 #!/bin/sh
 # The benchmarks: a release build, its binary sizes, then the timing and memory tests in
-# crates/autobot/tests/perf.rs (ignored in a plain `cargo test`). Prints one line per number,
-# `name value unit`, and a Markdown table to $GITHUB_STEP_SUMMARY when CI sets it.
+# crates/autobot/tests/perf.rs and perf_harness.rs (ignored in a plain `cargo test`). Prints one
+# line per number, `name value unit`, and a Markdown table to $GITHUB_STEP_SUMMARY when CI sets it.
 #
 #   sh bench/run.sh            # everything
 #   sh bench/run.sh gateway    # only the tests whose names contain "gateway"
@@ -23,7 +23,7 @@ done
 log=$(mktemp)
 trap 'rm -f "$out" "$log"' EXIT
 # A benchmark that fails fails the run (its output shown), numbers or not.
-if ! cargo test --release --locked --quiet -p autobot --test perf -- --ignored --nocapture --test-threads 1 $filter > "$log" 2>&1; then
+if ! cargo test --release --locked --quiet -p autobot --test perf --test perf_harness -- --ignored --nocapture --test-threads 1 $filter > "$log" 2>&1; then
   cat "$log"
   exit 1
 fi

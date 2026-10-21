@@ -458,6 +458,17 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (ripgrep's walker: `.gitignore` respected), `todo` (its task list for a longer job). Results
   are cut to a size small local models can take, larger for models with large contexts
   (`[agent] context_kib`, or set by `/model`). Answers stream (`[agent] stream`).
+- **Under a model that misbehaves:** `edit_file` forgives line-end spaces, `\r\n` and a block
+  indented differently when that finds one place, and a miss shows the closest lines; malformed
+  tool arguments are read as meant where that is safe, and errors say what the tool takes. The
+  same call with the same result is pointed out at the third time in a turn and ends the turn at
+  the sixth (a wait, such as `sleep` or `process wait`, at the twelfth).
+  A turn longer than the context clears its older tool results (in batches, so a prompt cache
+  keeps most of each request); a "context exceeded" error sends less and summarizes, and later turns with the model the router
+  chose start at the size that fit. Gateway
+  calls are tried again after a restart, a 429 or a 5xx (not once an answer has started to show);
+  a command runs without a terminal (a password prompt fails at once) and, when it hangs or the
+  agent stops, is stopped with what it printed, and what it started goes with it.
 - **Scripts that use the tools:** `execute_code` runs a short Python 3 (or `sh`) script, asked
   for like a command with its code shown and run where commands run (sandboxed when confined,
   in the container, over SSH). In it, `search`, `read_file`, `find_files`, `list_dir`,
