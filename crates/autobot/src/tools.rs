@@ -1002,19 +1002,21 @@ impl Tools {
         let mut stdout = child.stdout.take().expect("piped");
         let mut stderr = child.stderr.take().expect("piped");
         let run = async {
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let (a, b) = tokio::join!(stdout.read_to_end(&mut out), stderr.read_to_end(&mut err));
-            a.and(b).map_err(|e| e.to_string())?;
+            let (out, err) = tokio::join!(read_capped(&mut stdout), read_capped(&mut stderr));
+            let ((out, out_cut), (err, err_cut)) = (out?, err?);
             let status = child.wait().await.map_err(|e| e.to_string())?;
-            Ok::<_, String>((out, err, status))
+            Ok::<_, String>((out, err, out_cut || err_cut, status))
         };
         match tokio::time::timeout(self.timeout, run).await {
             Err(_) => Err(format!("stopped after {} seconds", self.timeout.as_secs())),
             Ok(result) => {
-                let (out, err, status) = result?;
+                let (out, err, cut, status) = result?;
                 let mut text = String::from_utf8_lossy(&out).into_owned();
                 if !err.is_empty() {
                     text.push_str(&String::from_utf8_lossy(&err));
+                }
+                if cut {
+                    text.push_str(&format!("\n[… output past {} MiB not kept]\n", OUTPUT_KEPT >> 20));
                 }
                 let code = status.code().map_or("killed by a signal".to_owned(), |c| format!("exit code {c}"));
                 Ok(format!("{text}{}[{code}]", if text.is_empty() || text.ends_with('\n') { "" } else { "\n" }))
@@ -1317,6 +1319,27 @@ async fn through(files: &dyn Files, call: &Call) -> Option<Result<String, String
     }
 }
 
+/// How much of a command's output (each of stdout and stderr) is kept: `yes` for the whole
+/// timeout must not take the agent's memory with it.
+const OUTPUT_KEPT: usize = 4 * 1024 * 1024;
+
+/// What [reader] gives until it ends, at most [OUTPUT_KEPT] of it; the rest is read and let go
+/// (a full pipe would stall the command), and whether there was more.
+async fn read_capped(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<(Vec<u8>, bool), String> {
+    let mut kept = Vec::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut cut = false;
+    loop {
+        let n = reader.read(&mut buf).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Ok((kept, cut));
+        }
+        let room = OUTPUT_KEPT - kept.len();
+        kept.extend_from_slice(&buf[..n.min(room)]);
+        cut |= n > room;
+    }
+}
+
 async fn read(path: &Path) -> Result<String, String> {
     let bytes = tokio::fs::read(path).await.map_err(|e| format!("{}: {e}", path.display()))?;
     if bytes.iter().take(8192).any(|b| *b == 0) {
@@ -1608,6 +1631,19 @@ mod tests {
         let tools = Tools::new(dir, Duration::from_millis(200));
         let out = tools.run(&Call::Terminal { command: "sleep 5".into() }).await;
         assert!(out.contains("stopped after"), "{out}");
+    }
+
+    /// A command that prints without end is kept to a few MiB, not to the agent's memory.
+    #[tokio::test]
+    async fn terminal_output_is_capped() {
+        let (_, dir) = tools();
+        let tools = Tools::new(dir, Duration::from_secs(60));
+        let out = tools
+            .run(&Call::Terminal { command: "head -c 20000000 /dev/zero | tr '\\0' x; echo; echo done >&2".into() })
+            .await;
+        assert!(out.len() < 2 * super::OUTPUT_KEPT + 1024, "{} bytes", out.len());
+        assert!(out.contains("[… output past 4 MiB not kept]"), "{}", &out[out.len() - 200..]);
+        assert!(out.contains("done") && out.ends_with("[exit code 0]"), "{}", &out[out.len() - 200..]);
     }
 
     #[tokio::test]
