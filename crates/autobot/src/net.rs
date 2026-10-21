@@ -13,8 +13,20 @@ pub fn loopback(host: &str) -> bool {
     host == "localhost" || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
+/// How long opening a connection may take, the proxy's handshake included (a Tor circuit can
+/// take tens of seconds); and then its TLS or websocket handshake. A server that accepts and never
+/// speaks, or a lost SYN, is an error the channel retries, not a channel stuck for good.
+const CONNECT_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+const HANDSHAKE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// A TCP connection to [host]:[port] under [network]. This machine is reached directly.
 pub async fn tcp(host: &str, port: u16, network: &NetworkMode) -> Result<tokio::net::TcpStream, String> {
+    tokio::time::timeout(CONNECT_WAIT, tcp_now(host, port, network))
+        .await
+        .map_err(|_| format!("{host}:{port}: no connection in {} seconds", CONNECT_WAIT.as_secs()))?
+}
+
+async fn tcp_now(host: &str, port: u16, network: &NetworkMode) -> Result<tokio::net::TcpStream, String> {
     if loopback(host) {
         return tokio::net::TcpStream::connect((host.trim_matches(['[', ']']), port))
             .await
@@ -46,7 +58,10 @@ pub async fn websocket(url: &str, network: &NetworkMode) -> Result<Socket, Strin
         _ => return Err(format!("{host}: only wss:// (or ws:// to this machine) is allowed")),
     }
     let stream = tcp(&host, port, network).await?;
-    let (socket, _) = tokio_tungstenite::client_async_tls(url, stream).await.map_err(|e| format!("{host}: {e}"))?;
+    let (socket, _) = tokio::time::timeout(HANDSHAKE_WAIT, tokio_tungstenite::client_async_tls(url, stream))
+        .await
+        .map_err(|_| format!("{host}: no websocket handshake in {} seconds", HANDSHAKE_WAIT.as_secs()))?
+        .map_err(|e| format!("{host}: {e}"))?;
     Ok(socket)
 }
 
@@ -95,7 +110,10 @@ pub async fn tls(stream: tokio::net::TcpStream, host: &str) -> Result<Tls, Strin
     let config = client_config()?;
     let name =
         tokio_rustls::rustls::pki_types::ServerName::try_from(host.to_owned()).map_err(|e| format!("{host}: {e}"))?;
-    tokio_rustls::TlsConnector::from(config).connect(name, stream).await.map_err(|e| format!("{host}: TLS: {e}"))
+    tokio::time::timeout(HANDSHAKE_WAIT, tokio_rustls::TlsConnector::from(config).connect(name, stream))
+        .await
+        .map_err(|_| format!("{host}: no TLS handshake in {} seconds", HANDSHAKE_WAIT.as_secs()))?
+        .map_err(|e| format!("{host}: TLS: {e}"))
 }
 
 fn client_config() -> Result<Arc<tokio_rustls::rustls::ClientConfig>, String> {
@@ -138,5 +156,26 @@ mod tests {
         let offline = invincible_policy::NetworkMode::Offline;
         assert!(super::tcp("example.com", 993, &offline).await.unwrap_err().contains("offline"));
         assert!(super::websocket("ws://example.com/x", &invincible_policy::NetworkMode::Direct).await.is_err());
+    }
+
+    /// A server that takes the connection and never answers: the handshake gives up, and the
+    /// channel's reconnect loop gets to run again.
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_never_speaks_is_given_up_on() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let held = tokio::spawn(async move {
+            let mut kept = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                kept.push(stream);
+            }
+        });
+        let direct = invincible_policy::NetworkMode::Direct;
+        let error = super::websocket(&format!("ws://127.0.0.1:{port}/x"), &direct).await.unwrap_err();
+        assert!(error.contains("no websocket handshake in 30 seconds"), "{error}");
+        let stream = super::tcp("127.0.0.1", port, &direct).await.unwrap();
+        let error = super::tls(stream, "localhost").await.unwrap_err();
+        assert!(error.contains("no TLS handshake"), "{error}");
+        held.abort();
     }
 }
