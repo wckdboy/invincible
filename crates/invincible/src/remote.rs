@@ -344,13 +344,19 @@ impl Drop for SessionSlot {
 /// Accepts remote connections on [listener] and serves [app] to paired devices.
 pub async fn serve(listener: TcpListener, pairing: Arc<Pairing>, app: Router) {
     let handshakes = Arc::new(tokio::sync::Semaphore::new(MAX_HANDSHAKES));
+    // Accept errors logged at most once a minute, with how many there were.
+    let (mut warned, mut failed) = (None::<tokio::time::Instant>, 0u64);
     loop {
         let (tcp, peer) = match listener.accept().await {
             Ok(accepted) => accepted,
             // Out of file descriptors (or the like): a moment's pause, not a loop at full speed
-            // that keeps them from being freed.
+            // that keeps them from being freed (or a log filled with the same line).
             Err(e) => {
-                tracing::warn!("remote: accept: {e}");
+                failed += 1;
+                if warned.is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(60)) {
+                    tracing::warn!("remote: accept: {e} ({failed} times since the last note)");
+                    (warned, failed) = (Some(tokio::time::Instant::now()), 0);
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 continue;
             }

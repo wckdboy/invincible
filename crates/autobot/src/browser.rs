@@ -334,7 +334,7 @@ impl Browser {
         match Self::attach(child, &url, profile.clone()).await {
             Ok(browser) => Ok(browser),
             Err(e) => {
-                // The child was killed when dropped; its throwaway profile goes too.
+                // The browser is stopped already; its throwaway profile goes too.
                 let _ = std::fs::remove_dir_all(&profile);
                 Err(e)
             }
@@ -342,20 +342,31 @@ impl Browser {
     }
 
     /// Connects to the DevTools endpoint at [url] and opens the page to drive.
-    async fn attach(child: tokio::process::Child, url: &str, profile: PathBuf) -> Result<Self, String> {
-        let address = url
-            .strip_prefix("ws://")
-            .and_then(|rest| rest.split('/').next())
-            .ok_or(format!("an odd DevTools address: {url}"))?
-            .to_owned();
+    /// The browser is stopped (and waited for) when this fails: its profile can go after.
+    async fn attach(mut child: tokio::process::Child, url: &str, profile: PathBuf) -> Result<Self, String> {
+        let address = match url.strip_prefix("ws://").and_then(|rest| rest.split('/').next()) {
+            Some(address) => address.to_owned(),
+            None => {
+                let _ = child.kill().await;
+                return Err(format!("an odd DevTools address: {url}"));
+            }
+        };
         let connect = async {
             let stream =
                 tokio::net::TcpStream::connect(&address).await.map_err(|e| format!("DevTools {address}: {e}"))?;
             tokio_tungstenite::client_async(url, stream).await.map_err(|e| format!("DevTools: {e}"))
         };
-        let (socket, _) = tokio::time::timeout(COMMAND_WAIT, connect)
+        let connected = tokio::time::timeout(COMMAND_WAIT, connect)
             .await
-            .map_err(|_| format!("DevTools {address}: no connection in {} seconds", COMMAND_WAIT.as_secs()))??;
+            .map_err(|_| format!("DevTools {address}: no connection in {} seconds", COMMAND_WAIT.as_secs()))
+            .and_then(|c| c);
+        let socket = match connected {
+            Ok((socket, _)) => socket,
+            Err(e) => {
+                let _ = child.kill().await;
+                return Err(e);
+            }
+        };
         let mut browser = Self {
             child,
             socket,
@@ -366,15 +377,25 @@ impl Browser {
             frame: String::new(),
             events: std::collections::VecDeque::new(),
         };
-        let target = browser.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
+        match browser.open_page().await {
+            Ok(()) => Ok(browser),
+            Err(e) => {
+                let _ = browser.child.kill().await;
+                Err(e)
+            }
+        }
+    }
+
+    /// A page of its own to drive, attached, its events on.
+    async fn open_page(&mut self) -> Result<(), String> {
+        let target = self.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
         let target = target["targetId"].as_str().ok_or("no page")?.to_owned();
-        let attached =
-            browser.call(None, "Target.attachToTarget", json!({ "targetId": target, "flatten": true })).await?;
-        browser.session = attached["sessionId"].as_str().ok_or("not attached to the page")?.to_owned();
-        browser.page("Page.enable", json!({})).await?;
-        let tree = browser.page("Page.getFrameTree", json!({})).await?;
-        browser.frame = tree["frameTree"]["frame"]["id"].as_str().ok_or("no main frame")?.to_owned();
-        Ok(browser)
+        let attached = self.call(None, "Target.attachToTarget", json!({ "targetId": target, "flatten": true })).await?;
+        self.session = attached["sessionId"].as_str().ok_or("not attached to the page")?.to_owned();
+        self.page("Page.enable", json!({})).await?;
+        let tree = self.page("Page.getFrameTree", json!({})).await?;
+        self.frame = tree["frameTree"]["frame"]["id"].as_str().ok_or("no main frame")?.to_owned();
+        Ok(())
     }
 
     /// Keeps [message] when it is an event of the page.
@@ -849,6 +870,19 @@ mod tests {
         let before = profiles();
         let error = Browser::launch_within(&silent, &direct, Duration::from_secs(1)).await.err().unwrap();
         assert!(error.ends_with("did not start its DevTools endpoint in 1 seconds"), "{error}");
+        assert_eq!(profiles(), before, "no profile left behind");
+        // A DevTools address that does not answer: the browser is stopped, then its profile
+        // removed.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let script = dir.join("unreachable");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\necho \"DevTools listening on ws://127.0.0.1:{closed}/devtools/browser/x\" >&2\nexec sleep 600\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let error = Browser::launch_within(&script, &direct, Duration::from_secs(10)).await.err().unwrap();
+        assert!(error.starts_with("DevTools 127.0.0.1:"), "{error}");
         assert_eq!(profiles(), before, "no profile left behind");
         // The deadline for real browsers leaves room for a cold start.
         assert!(LAUNCH_WAIT >= Duration::from_secs(60));
