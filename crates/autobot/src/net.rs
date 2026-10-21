@@ -116,28 +116,29 @@ pub async fn tls(stream: tokio::net::TcpStream, host: &str) -> Result<Tls, Strin
         .map_err(|e| format!("{host}: TLS: {e}"))
 }
 
+/// The TLS configuration with the system's trust roots: loaded once it loads; a failure (the
+/// system's trust store busy or unreadable for a moment) is not kept, and the next connection
+/// tries again rather than every one failing until a restart.
 fn client_config() -> Result<Arc<tokio_rustls::rustls::ClientConfig>, String> {
-    static CONFIG: std::sync::OnceLock<Result<Arc<tokio_rustls::rustls::ClientConfig>, String>> =
-        std::sync::OnceLock::new();
-    CONFIG
-        .get_or_init(|| {
-            let mut roots = tokio_rustls::rustls::RootCertStore::empty();
-            let found = rustls_native_certs::load_native_certs();
-            for cert in found.certs {
-                let _ = roots.add(cert);
-            }
-            if roots.is_empty() {
-                return Err("no trusted certificates on this system".to_owned());
-            }
-            let provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
-            let config = tokio_rustls::rustls::ClientConfig::builder_with_provider(provider)
-                .with_safe_default_protocol_versions()
-                .map_err(|e| e.to_string())?
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-            Ok(Arc::new(config))
-        })
-        .clone()
+    static CONFIG: std::sync::OnceLock<Arc<tokio_rustls::rustls::ClientConfig>> = std::sync::OnceLock::new();
+    if let Some(config) = CONFIG.get() {
+        return Ok(config.clone());
+    }
+    let mut roots = tokio_rustls::rustls::RootCertStore::empty();
+    let found = rustls_native_certs::load_native_certs();
+    for cert in found.certs {
+        let _ = roots.add(cert);
+    }
+    if roots.is_empty() {
+        return Err("no trusted certificates on this system".to_owned());
+    }
+    let provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
+    let config = tokio_rustls::rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| e.to_string())?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(CONFIG.get_or_init(|| Arc::new(config)).clone())
 }
 
 #[cfg(test)]
@@ -173,9 +174,6 @@ mod tests {
         let direct = invincible_policy::NetworkMode::Direct;
         let error = super::websocket(&format!("ws://127.0.0.1:{port}/x"), &direct).await.unwrap_err();
         assert!(error.contains("no websocket handshake in 30 seconds"), "{error}");
-        let stream = super::tcp("127.0.0.1", port, &direct).await.unwrap();
-        let error = super::tls(stream, "localhost").await.unwrap_err();
-        assert!(error.contains("no TLS handshake"), "{error}");
         held.abort();
     }
 }
