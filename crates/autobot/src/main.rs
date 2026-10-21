@@ -1607,6 +1607,9 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         part.abort();
     }
     fleet.stop();
+    // What the turns left running (a dev server, the browser) stops with the agent, not after:
+    // nothing else would stop it, and launchd stops only the agent's own process group.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), autobot::procs::stop_all()).await;
     autobot::alerts::stopped(&root).await;
     Ok(())
 }
