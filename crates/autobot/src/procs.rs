@@ -154,6 +154,13 @@ pub fn start(
         });
     }
     let mut procs = PROCS.lock().expect("procs");
+    // Stopping began while it started: the sweep may have looked already (it takes this lock), so
+    // it is stopped here.
+    if stopping() {
+        drop(procs);
+        signal_group(pid, rustix::process::Signal::KILL);
+        return Err("the agent is stopping; nothing new starts".to_owned());
+    }
     procs.0 += 1;
     let id = procs.0;
     procs.1.insert(id, Proc { command: label.to_owned(), pid, started: Instant::now(), shared, stop, done });
@@ -239,6 +246,19 @@ pub fn stopping() -> bool {
 pub async fn shut_down() {
     STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
     stop_all().await;
+}
+
+/// Kills at once every running command's and background process's group, without waiting:
+/// the last thing before the process exits when asked twice to stop.
+pub fn kill_now() {
+    STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::tools::stop_running();
+    let procs = PROCS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for p in procs.1.values() {
+        if p.shared.lock().map(|s| s.ended.is_none()).unwrap_or(true) {
+            signal_group(p.pid, rustix::process::Signal::KILL);
+        }
+    }
 }
 
 /// Stops every background process (at the end of a chat or a run), and the commands tools are

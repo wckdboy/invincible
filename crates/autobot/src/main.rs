@@ -1601,14 +1601,16 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         () = api => {}
         () = watch_gateway => {}
         () = watch_bots => {}
-        () = shutdown() => {}
+        _ = shutdown() => {}
     }
     // Stopping takes a few seconds (what turns left running is asked to stop first); asked
     // again meanwhile, it stops at once.
     tokio::spawn(async {
-        shutdown().await;
-        tracing::warn!("asked again to stop: stopping now, without cleaning up");
-        std::process::exit(130);
+        let code = shutdown().await;
+        tracing::warn!("asked again to stop: stopping now");
+        // What runs is killed, not asked: no grace period, and nothing left behind.
+        autobot::procs::kill_now();
+        std::process::exit(code);
     });
     for part in parts.into_iter().chain(background) {
         part.abort();
@@ -2014,17 +2016,21 @@ fn identities(action: IdentitiesAction, root: &std::path::Path) -> Result<(), St
     Ok(())
 }
 
-async fn shutdown() {
+/// Waits for SIGTERM or Ctrl-C; the exit code that goes with it (143, 130).
+async fn shutdown() -> i32 {
     #[cfg(unix)]
     {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM");
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
+            _ = tokio::signal::ctrl_c() => 130,
+            _ = term.recv() => 143,
         }
     }
     #[cfg(not(unix))]
-    let _ = tokio::signal::ctrl_c().await;
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        130
+    }
 }
 
 fn hooks(action: Option<HooksAction>, config: &Config, home: &std::path::Path) -> Result<(), String> {

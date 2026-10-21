@@ -37,6 +37,11 @@ pub const SILENCE: Duration = Duration::from_secs(10 * 60);
 
 /// The client for outbound requests under [mode].
 pub fn client(mode: &NetworkMode) -> Result<reqwest::Client, String> {
+    builder(mode)?.build().map_err(|e| e.to_string())
+}
+
+/// [client], to be finished by the caller (a read timeout of its own, say).
+pub fn builder(mode: &NetworkMode) -> Result<reqwest::ClientBuilder, String> {
     let builder = reqwest::Client::builder()
         .user_agent("Invincible")
         .connect_timeout(Duration::from_secs(15))
@@ -60,7 +65,16 @@ pub fn client(mode: &NetworkMode) -> Result<reqwest::Client, String> {
             builder.proxy(proxy.no_proxy(loopback))
         }
     };
-    builder.build().map_err(|e| e.to_string())
+    Ok(builder)
+}
+
+/// How long a download from the command line (a model, an update) may go without a byte: it is
+/// as long as it is, but a server that stopped sending is not waited on for good.
+pub const DOWNLOAD_SILENCE: Duration = Duration::from_secs(60);
+
+/// [client] for the command line's downloads: [DOWNLOAD_SILENCE] between bytes, no total limit.
+pub fn download_client(mode: &NetworkMode) -> Result<reqwest::Client, String> {
+    builder(mode)?.read_timeout(DOWNLOAD_SILENCE).build().map_err(|e| e.to_string())
 }
 
 /// HTTPS anywhere; plain HTTP to loopback only.
@@ -101,6 +115,27 @@ pub fn label(mode: &NetworkMode) -> &'static str {
 mod tests {
     use super::{check, client};
     use invincible_policy::NetworkMode;
+
+    /// A download whose server stops sending halfway is given up on, not waited on for good.
+    #[tokio::test(start_paused = true)]
+    async fn a_download_that_stops_is_given_up_on() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/model.gguf", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut tcp, &mut request).await;
+            tcp.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\nten bytes.").await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let client = super::download_client(&NetworkMode::Direct).unwrap();
+        let response = client.get(&url).send().await.unwrap();
+        let started = tokio::time::Instant::now();
+        let error = response.bytes().await.unwrap_err();
+        assert!(started.elapsed() >= super::DOWNLOAD_SILENCE, "{error}");
+        server.abort();
+    }
 
     #[test]
     fn https_anywhere_http_only_to_loopback() {

@@ -140,8 +140,12 @@ async fn asked_twice_the_agent_stops_at_once() {
     term(&proc);
     let took = ended(&mut proc, Duration::from_secs(20)).await;
     assert!(took < Duration::from_millis(1500), "took {took:?} after the second ask");
-    for pid in started {
-        let _ = std::process::Command::new("kill").args(["-KILL", &pid]).status();
+    assert_eq!(proc.0.try_wait().unwrap().and_then(|s| s.code()), Some(143), "the code for SIGTERM");
+    // Killed, not left behind, though it ignored TERM.
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while started.iter().any(|pid| alive(pid)) {
+        assert!(std::time::Instant::now() < until, "left running: {started:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -158,4 +162,6 @@ async fn nothing_starts_once_stopping_began() {
     let call = tools.parse("terminal", r#"{"command": "echo late"}"#).unwrap();
     let out = tools.run(&call).await;
     assert!(out.contains("stopping") && !out.contains("late\n"), "{out}");
+    let error = autobot::browser::run(&autobot::browser::Act::Text, &std::env::temp_dir(), 1000).await.unwrap_err();
+    assert!(error.contains("stopping"), "{error}");
 }

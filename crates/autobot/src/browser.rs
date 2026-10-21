@@ -601,6 +601,9 @@ pub async fn run(act: &Act, shots: &Path, limit: usize) -> Result<(String, Optio
         });
     }
     if slot.is_none() {
+        if crate::procs::stopping() {
+            return Err("the agent is stopping; the browser does not start".to_owned());
+        }
         let program = find().ok_or(
             "no browser here: install Chrome, Chromium, Edge or Brave (or set AUTOBOT_BROWSER to one), or use web_fetch",
         )?;

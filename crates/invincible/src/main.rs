@@ -613,8 +613,8 @@ fn run(cli: Cli) -> Result<(), String> {
                 return Err(format!("a model with id {id:?} is already configured"));
             }
             let mode = invincible_policy::NetworkMode::decode(network.as_deref().unwrap_or(&current.node.network));
-            let client =
-                invincible::egress::client(&mode).map_err(|e| format!("{e}; pass --network to download anyway"))?;
+            let client = invincible::egress::download_client(&mode)
+                .map_err(|e| format!("{e}; pass --network to download anyway"))?;
             let source = models::Source::parse(&source)?;
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
             runtime.block_on(async {
@@ -1033,7 +1033,7 @@ fn update_command(args: UpdateArgs) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    let client = invincible::egress::client(&network)?;
+    let client = invincible::egress::download_client(&network)?;
     let exe = std::env::current_exe().and_then(|e| e.canonicalize()).map_err(|e| format!("this program: {e}"))?;
     let bin = exe.parent().map(std::path::Path::to_path_buf).ok_or("this program has no directory")?;
     let platform = update::platform()?;
