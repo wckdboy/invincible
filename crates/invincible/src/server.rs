@@ -57,6 +57,8 @@ pub struct AppState {
     /// Speech and image backends ([crate::synth]).
     pub speech: Vec<crate::synth::Backend>,
     pub images: Vec<crate::synth::Backend>,
+    /// Cluster membership and the models split across paired nodes (spec/cluster.md).
+    pub cluster: Option<Arc<crate::cluster::ClusterState>>,
 }
 
 impl AppState {
@@ -84,7 +86,13 @@ impl AppState {
             agent_url: "http://127.0.0.1:7792".to_owned(),
             speech: Vec::new(),
             images: Vec::new(),
+            cluster: None,
         }
+    }
+
+    pub fn with_cluster(mut self, cluster: crate::cluster::ClusterState) -> Self {
+        self.cluster = Some(Arc::new(cluster));
+        self
     }
 
     /// With speech and image backends ([crate::synth]).
@@ -157,6 +165,7 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/receipts/{id}", get(receipt))
         .route("/v1/audit", get(audit))
         .route("/v1/node", get(node_info))
+        .route("/v1/cluster/node", get(cluster_node))
         .route("/v1/agent", any(agent))
         .route("/v1/agent/{*rest}", any(agent))
 }
@@ -273,6 +282,33 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
     }))
 }
 
+/// `GET /v1/cluster/node`: what this node can give a cluster (spec/cluster.md). A device that may
+/// not use it as a shard is told `shard: false`.
+async fn cluster_node(State(state): State<Arc<AppState>>, caller: Option<Extension<Caller>>) -> Response {
+    let Some(cluster) = state.cluster.clone() else {
+        return error(StatusCode::NOT_FOUND, "not_found", "this node takes no part in a cluster");
+    };
+    let mut caps = cluster.capabilities().await;
+    let may = match caller.map(|Extension(c)| c) {
+        Some(Caller::Device(name)) => {
+            state.pairing.as_ref().and_then(|p| p.shard.as_ref()).is_some_and(|s| s.heads.contains(&name))
+        }
+        _ => cluster.shard,
+    };
+    caps.shard = cluster.shard && may;
+    Json(caps).into_response()
+}
+
+/// `GET /v1/cluster` (loopback): this node, its peers probed now, the heads it serves and the
+/// models split across nodes.
+async fn cluster_status(State(state): State<Arc<AppState>>) -> Response {
+    let Some(cluster) = state.cluster.clone() else {
+        return error(StatusCode::NOT_FOUND, "not_found", "this node takes no part in a cluster");
+    };
+    let shard = state.pairing.as_ref().and_then(|p| p.shard.clone());
+    Json(cluster.status(&state.node.network.encode(), shard.as_ref()).await).into_response()
+}
+
 /// `GET /healthz`: unauthenticated, and says only that the node answers and its version (for the
 /// watchdog, the installer and monitoring).
 pub async fn healthz() -> Json<Value> {
@@ -286,7 +322,8 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/fetch", post(fetch))
         .route("/v1/admin/pairing", post(start_pairing))
         .route("/v1/admin/devices", get(list_devices))
-        .route("/v1/admin/devices/{name}", delete(remove_device));
+        .route("/v1/admin/devices/{name}", delete(remove_device))
+        .route("/v1/cluster", get(cluster_status));
     let guarded = api().merge(admin).route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
@@ -407,7 +444,7 @@ async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
         .route_models()
         .iter()
         .map(|m| {
-            json!({
+            let mut model = json!({
                 "id": m.id,
                 "object": "model",
                 "owned_by": "invincible",
@@ -418,7 +455,12 @@ async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
                     "data_policy": data_policy_code(m.data_policy),
                     "vision": state.vision(&m.id),
                 },
-            })
+            });
+            // A model split across paired nodes names them (spec/cluster.md).
+            if let Some(run) = state.engines.iter().find(|e| e.id == m.id).and_then(|e| e.cluster.as_ref()) {
+                model["invincible"]["cluster"] = json!(run.links.iter().map(|l| &l.peer.name).collect::<Vec<_>>());
+            }
+            model
         })
         .collect();
     Json(json!({ "object": "list", "data": data }))
@@ -530,6 +572,9 @@ async fn infer(
                 let engine =
                     state.engines.iter().find(|e| Some(&e.id) == decision.model.as_ref()).expect("decided model");
                 draft.data_policy = Some("owned".to_owned());
+                if let Some(run) = &engine.cluster {
+                    draft.cluster = run.uses();
+                }
                 let streaming = parsed.get("stream").and_then(Value::as_bool) == Some(true);
                 forward(&state.client, engine, api.path(), body.clone(), streaming).await
             }

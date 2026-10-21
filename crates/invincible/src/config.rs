@@ -51,6 +51,33 @@ pub struct Config {
     /// Image generation backends: `POST /v1/images/generations` ([crate::synth]).
     #[serde(default)]
     pub images: Vec<MediaConfig>,
+    /// This node as a shard for paired heads (spec/cluster.md).
+    #[serde(default)]
+    pub cluster: ClusterConfig,
+}
+
+/// ```toml
+/// [cluster]
+/// serve = true                        # run ggml-rpc-server on loopback for the heads below
+/// heads = ["laptop"]                  # paired devices (by name) that may use this node as a shard
+/// rpc_server = "ggml-rpc-server"      # default: next to llama_server, else on PATH
+/// cache = true                        # keep weights a head sent (fast reloads), in $INVINCIBLE_HOME/cache/rpc
+/// ```
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClusterConfig {
+    #[serde(default)]
+    pub serve: bool,
+    #[serde(default)]
+    pub heads: Vec<String>,
+    #[serde(default)]
+    pub rpc_server: Option<PathBuf>,
+    #[serde(default = "yes")]
+    pub cache: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// ```toml
@@ -309,6 +336,17 @@ pub struct ModelConfig {
     /// Whether it takes images; unset: when it has an `mmproj`.
     #[serde(default)]
     pub vision: Option<bool>,
+    /// Paired nodes (by name, as `invincible join` saved them) this model may be split across
+    /// (spec/cluster.md). Empty: this machine only.
+    #[serde(default)]
+    pub cluster: Vec<String>,
+    /// When to split: `auto` (only when it does not fit here) or `always`.
+    #[serde(default = "auto_split")]
+    pub split: invincible_policy::SplitMode,
+}
+
+fn auto_split() -> invincible_policy::SplitMode {
+    invincible_policy::SplitMode::Auto
 }
 
 impl ModelConfig {
@@ -367,6 +405,12 @@ impl Config {
             }
         }
         self.update.channel()?;
+        if self.cluster.serve && !self.remote.enabled() {
+            return Err("[cluster] serve needs [remote] listen: heads reach this node over its paired link".to_owned());
+        }
+        if self.cluster.serve && self.cluster.heads.is_empty() {
+            return Err("[cluster] serve: name the paired devices that may use this node in `heads`".to_owned());
+        }
         for cloud in &self.cloud {
             crate::egress::check(&cloud.base_url).map_err(|e| format!("[[cloud]] {}: {e}", cloud.id))?;
             if cloud.api_key_file.is_some() && cloud.api_key_env.is_some() {

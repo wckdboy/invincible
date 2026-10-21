@@ -8,13 +8,12 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use invincible::brand;
 use invincible::config::{self, Config};
-use invincible::devices::{Devices, StaticKey, fingerprint};
+use invincible::devices::{Devices, KnownNode, KnownNodes, StaticKey, fingerprint};
 use invincible::engine::{self, Engine, Launch};
 use invincible::remote::{self, Pairing, PairingCode};
 use invincible::server::{self, AppState};
 use invincible::{fsutil, models, token};
 use invincible_policy::{RouteInput, decide};
-use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 #[command(version = invincible::version::VERSION, about = "Intelligence that never relies solely on frontier labs, corporations or countries.")]
@@ -60,6 +59,11 @@ enum Command {
         node: Option<String>,
         #[arg(long, default_value = "127.0.0.1:7780")]
         listen: std::net::SocketAddr,
+    },
+    /// The cluster: this node, its paired peers, and the models split across them (spec/cluster.md).
+    Cluster {
+        #[command(subcommand)]
+        action: ClusterAction,
     },
     /// Add or list the models this node serves.
     Model {
@@ -156,6 +160,19 @@ enum Command {
         /// The daily job: updates only when [update] auto is on.
         #[arg(long, hide = true)]
         scheduled: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ClusterAction {
+    /// This node's devices, its peers (probed now, over their paired links), the heads it serves
+    /// as a shard, and where each split model runs.
+    Status {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -584,6 +601,15 @@ fn run(cli: Cli) -> Result<(), String> {
             })
         }
         Command::Cloud { action } => cloud_command(action),
+        Command::Cluster { action: ClusterAction::Status { config, json } } => {
+            let status = admin(config, reqwest::Method::GET, "/v1/cluster")?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status).expect("json"));
+            } else {
+                print!("{}", cluster_text(&status));
+            }
+            Ok(())
+        }
         Command::Model { action: ModelAction::List { config } } => {
             let home = config::home()?;
             let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
@@ -887,13 +913,71 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let mut engines = Vec::new();
     // Held until shutdown: dropping a supervisor kills its engine.
     let mut supervisors = Vec::new();
+    let heads_split = config.models.iter().any(|m| !m.cluster.is_empty());
+    let peers = KnownNodes::load(&home)?.0;
+    // The key this machine paired with other nodes under: a head's shard links use it.
+    let device_key = if heads_split || !peers.is_empty() {
+        Some(StaticKey::load_or_create(&home.join("device.key"))?)
+    } else {
+        None
+    };
+    let (head_devices, rpc_backend) = if heads_split || config.cluster.serve {
+        let llama = &config.engine.llama_server;
+        let (devices, rpc) =
+            tokio::join!(invincible::cluster::probe_devices(llama), invincible::cluster::probe_rpc_backend(llama));
+        (devices, rpc)
+    } else {
+        (Vec::new(), None)
+    };
+    let mut runs = Vec::new();
     for model in &config.models {
         let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
-        let engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
+        let mut engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
             .with_vision(model.vision(&config.engine));
-        supervisors.push(engine::supervise(engine.clone(), Launch::llama_server(&config.engine, model, port, &logs)));
+        let launch = Launch::llama_server(&config.engine, model, port, &logs);
+        if model.cluster.is_empty() {
+            supervisors.push(engine::supervise(engine.clone(), launch));
+        } else {
+            let network = config.node.settings().network.encode();
+            let device = device_key.clone().expect("a device key for a split model");
+            let mut links = Vec::new();
+            for name in &model.cluster {
+                let peer = peers.iter().find(|p| &p.name == name).cloned().ok_or(format!(
+                    "model {}: no paired node {name:?} (pair with it first: `invincible join` with its code)",
+                    model.id
+                ))?;
+                links.push(invincible::cluster::open_link(peer, device.clone(), network.clone()).await?);
+            }
+            let run =
+                Arc::new(invincible::cluster::ClusterRun::new(&model.id, model.split, &config.remote.name(), links));
+            engine = engine.with_cluster(run.clone());
+            let head = invincible::cluster::Head {
+                devices: head_devices.clone(),
+                rpc_backend,
+                device_key: device,
+                network,
+                model_bytes: std::fs::metadata(&model.path).map(|m| m.len()).unwrap_or(0),
+            };
+            supervisors.push(invincible::cluster::supervise(engine.clone(), launch, run.clone(), head));
+            runs.push(run);
+        }
         engines.push(engine);
     }
+    // This node as a shard: ggml-rpc-server on loopback, reached only through shard links.
+    let shard = if config.cluster.serve {
+        let program =
+            invincible::cluster::find_rpc_server(config.cluster.rpc_server.as_deref(), &config.engine.llama_server)
+                .ok_or("[cluster] serve: no ggml-rpc-server (set [cluster] rpc_server; see spec/cluster.md)")?;
+        let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
+        let cache = home.join("cache/rpc");
+        let launch =
+            invincible::cluster::rpc_launch(&program, port, config.cluster.cache.then_some(cache.as_path()), &logs);
+        supervisors.push(engine::keep_running("ggml-rpc-server", launch));
+        tracing::info!(heads = ?config.cluster.heads, "serving as a shard");
+        Some(remote::ShardService { port, heads: config.cluster.heads.clone(), traffic: Arc::default() })
+    } else {
+        None
+    };
     if engines.is_empty() && config.cloud.is_empty() {
         tracing::warn!(
             "no models configured: every request will be blocked (`invincible model add` or `invincible cloud add`)"
@@ -942,16 +1026,29 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         .with_audit(invincible::audit::AuditLog::new(&home))
         .with_agent(&config.agent.url);
     if config.remote.enabled() {
-        let pairing = Arc::new(
-            Pairing::new(
-                StaticKey::load_or_create(&home.join("node.key"))?,
-                config.remote.name(),
-                config.remote.advertised(),
-                Devices::load(&home.join("devices.json"))?,
-            )
-            .with_receipt_key(receipt_public),
-        );
+        let mut pairing = Pairing::new(
+            StaticKey::load_or_create(&home.join("node.key"))?,
+            config.remote.name(),
+            config.remote.advertised(),
+            Devices::load(&home.join("devices.json"))?,
+        )
+        .with_receipt_key(receipt_public);
+        if let Some(shard) = shard {
+            pairing = pairing.with_shard(shard);
+        }
+        let pairing = Arc::new(pairing);
         state = state.with_pairing(pairing);
+    }
+    if heads_split || config.cluster.serve || !peers.is_empty() {
+        state = state.with_cluster(invincible::cluster::ClusterState {
+            name: config.remote.name(),
+            llama_server: config.engine.llama_server.clone(),
+            rpc_backend,
+            peers,
+            device_key,
+            runs,
+            shard: config.cluster.serve,
+        });
     }
     let state = Arc::new(state);
     if let Some(pairing) = state.pairing.clone() {
@@ -1218,33 +1315,90 @@ fn admin(config: Option<PathBuf>, method: reqwest::Method, path: &str) -> Result
     })
 }
 
-/// Nodes this machine paired with as a device (`nodes.json`).
-#[derive(Default, Serialize, Deserialize)]
-struct KnownNodes(Vec<KnownNode>);
-
-#[derive(Serialize, Deserialize)]
-struct KnownNode {
-    name: String,
-    /// Static public key, base64url, pinned at pairing.
-    key: String,
-    addrs: Vec<String>,
-    /// The node's receipt key, pinned at pairing.
-    #[serde(default)]
-    receipt_key: Option<String>,
-}
-
-impl KnownNodes {
-    fn load(home: &std::path::Path) -> Result<Self, String> {
-        let path = home.join("nodes.json");
-        match fsutil::read_optional(&path)? {
-            Some(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
-            None => Ok(Self::default()),
+/// `invincible cluster status` as text.
+fn cluster_text(status: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let mib = |v: &serde_json::Value| v.as_u64().map(|m| format!("{:.1} GiB", m as f64 / 1024.0)).unwrap_or_default();
+    let devices = |caps: &serde_json::Value| {
+        caps["devices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|d| {
+                format!(
+                    "{} {} ({} free)",
+                    d["name"].as_str().unwrap_or("?"),
+                    d["description"].as_str().unwrap_or(""),
+                    mib(&d["free_mib"])
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let node = &status["node"];
+    let _ = writeln!(out, "{}", brand::ok(&format!("{} (this node)", node["name"].as_str().unwrap_or("?"))));
+    let _ = writeln!(out, "  devices: {}", devices(node));
+    let rpc = match node["rpc_backend"].as_bool() {
+        Some(true) => "llama-server can use shards",
+        Some(false) => "llama-server has no RPC backend: it cannot use shards",
+        None => "RPC backend not checked",
+    };
+    let _ = writeln!(out, "  {rpc}");
+    if let Some(shard) = status["shard"].as_object() {
+        let heads: Vec<&str> = shard["heads"].as_array().into_iter().flatten().filter_map(|h| h.as_str()).collect();
+        let _ = writeln!(out, "  serves as a shard for: {}", heads.join(", "));
+    }
+    let peers = status["peers"].as_array().cloned().unwrap_or_default();
+    if peers.is_empty() {
+        let _ = writeln!(out, "{}", brand::ash("no peers (pair with another node: `invincible join` with its code)"));
+    }
+    let rows: Vec<Vec<String>> = peers
+        .iter()
+        .map(|p| {
+            let state = if p["reachable"].as_bool() == Some(true) {
+                let caps = &p["capabilities"];
+                let role = if caps["shard"].as_bool() == Some(true) { "shard" } else { "not a shard for us" };
+                format!("up {} ms, {role}: {}", p["probe_ms"], devices(caps))
+            } else {
+                format!("down: {}", p["error"].as_str().unwrap_or("?"))
+            };
+            vec![
+                p["name"].as_str().unwrap_or("?").to_owned(),
+                brand::ash(p["fingerprint"].as_str().unwrap_or("")),
+                state,
+            ]
+        })
+        .collect();
+    out.push_str(&brand::table(&rows));
+    for model in status["models"].as_array().into_iter().flatten() {
+        let state = &model["state"];
+        let plan = &state["plan"];
+        let placement = match plan["action"].as_str() {
+            Some("split") => plan["shares"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|s| {
+                    format!(
+                        "{}/{} {}‰",
+                        s["node"].as_str().unwrap_or("?"),
+                        s["device"].as_str().unwrap_or("?"),
+                        s["permille"]
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" + "),
+            Some("local") => "this node alone".to_owned(),
+            Some("block") => format!("cannot run: needs {} MiB", plan["need_mib"]),
+            _ => "starting".to_owned(),
+        };
+        let _ = writeln!(out, "model {}: {placement}", model["id"].as_str().unwrap_or("?"));
+        for note in state["notes"].as_array().into_iter().flatten() {
+            let _ = writeln!(out, "  {}", brand::ash(note.as_str().unwrap_or("")));
         }
     }
-
-    fn save(&self, home: &std::path::Path) -> Result<(), String> {
-        fsutil::replace_private(&home.join("nodes.json"), &serde_json::to_string_pretty(self).expect("nodes serialise"))
-    }
+    out
 }
 
 /// Ctrl-C, or SIGTERM: what launchd, systemd and `kill` send to stop a service. Both shut down

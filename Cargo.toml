@@ -22,7 +22,9 @@ toml = "0.9"
 getrandom = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-snow = "0.10"
+# ring's ChaCha20-Poly1305 (already here, under rustls): 3-5x the default backend on Apple silicon,
+# which matters for shard links (spec/cluster.md); the same algorithm, so the Noise vectors hold.
+snow = { version = "0.10", features = ["ring-accelerated"] }
 hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 qrcode = { version = "0.14", default-features = false }

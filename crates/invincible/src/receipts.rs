@@ -179,6 +179,9 @@ pub struct Draft {
     /// The images the request carried, by hash, size and type ([crate::media::Image]); never
     /// their bytes.
     pub images: Vec<Value>,
+    /// The nodes that computed the answer, when a model split across paired nodes ran
+    /// (spec/cluster.md).
+    pub cluster: Vec<crate::cluster::ShardUse>,
     /// For the audit log, not the receipt: who asked, the client they named, which API.
     pub caller: crate::audit::Caller,
     pub client: Option<String>,
@@ -197,6 +200,7 @@ impl Draft {
             redactions: BTreeMap::new(),
             attempts: Vec::new(),
             images: Vec::new(),
+            cluster: Vec::new(),
             caller: crate::audit::Caller::Local,
             client: None,
             api: "chat",
@@ -238,6 +242,9 @@ impl Draft {
         }
         if !self.images.is_empty() {
             receipt["images"] = json!(self.images);
+        }
+        if !self.cluster.is_empty() {
+            receipt["cluster"] = self.cluster.iter().map(crate::cluster::ShardUse::to_json).collect();
         }
         if let Some((input, output)) = usage(&self.tail) {
             receipt["tokens"] = json!({ "input": input, "output": output });

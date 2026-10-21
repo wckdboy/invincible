@@ -1,0 +1,657 @@
+//! Cluster inference, phase 1 (spec/cluster.md): one model split layer-wise across this node (the
+//! head) and paired nodes (shards), through llama.cpp's RPC backend.
+//!
+//! llama.cpp's `ggml-rpc-server` has no authentication and no encryption, so it never listens
+//! anywhere but loopback. A shard runs it on a loopback port and reaches it only from inside a
+//! shard link: a Noise session from a paired device it names in `[cluster] heads`
+//! ([crate::remote::MODE_SHARD]). The head runs a loopback listener per peer; each connection
+//! `llama-server --rpc` opens to it becomes one shard link to that peer.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+
+use invincible_policy::{LinkAction, LinkInput, Plan, PlanAction, PlanDevice, PlanInput, SplitMode, decide_link};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
+
+use crate::devices::{KnownNode, StaticKey};
+use crate::engine::{Engine, Launch};
+use crate::remote::{self, Traffic};
+
+/// How long a peer may take to answer a capability probe.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long to wait before planning again when a model cannot run.
+const REPLAN: Duration = Duration::from_secs(15);
+
+// ---------------------------------------------------------------------------------------------
+// Capabilities
+
+/// One device llama.cpp can put layers on, as `llama-server --list-devices` reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Device {
+    pub name: String,
+    pub description: String,
+    pub total_mib: u64,
+    pub free_mib: u64,
+}
+
+/// The devices in `llama-server --list-devices` output (`  MTL0: Apple M3 Pro (28753 MiB, 28753
+/// MiB free)`), leaving out those with no memory of their own (BLAS, which holds no layers).
+pub fn parse_devices(text: &str) -> Vec<Device> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let (name, rest) = line.split_once(": ")?;
+            if name.is_empty() || name.contains(char::is_whitespace) {
+                return None;
+            }
+            let open = rest.rfind(" (")?;
+            let (description, sizes) = (&rest[..open], rest[open + 2..].strip_suffix(')')?);
+            let (total, free) = sizes.split_once(", ")?;
+            let total_mib = total.strip_suffix(" MiB")?.trim().parse().ok()?;
+            let free_mib = free.strip_suffix(" MiB free")?.trim().parse().ok()?;
+            (total_mib > 0).then(|| Device {
+                name: name.to_owned(),
+                description: description.to_owned(),
+                total_mib,
+                free_mib,
+            })
+        })
+        .collect()
+}
+
+async fn output(program: &Path, args: &[&str]) -> Option<String> {
+    let run =
+        tokio::process::Command::new(program).args(args).stdin(std::process::Stdio::null()).kill_on_drop(true).output();
+    let out = tokio::time::timeout(Duration::from_secs(30), run).await.ok()?.ok()?;
+    Some(format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
+}
+
+/// This machine's devices, from `llama-server --list-devices`.
+pub async fn probe_devices(llama_server: &Path) -> Vec<Device> {
+    output(llama_server, &["--list-devices"]).await.map(|o| parse_devices(&o)).unwrap_or_default()
+}
+
+/// Whether [llama_server] was built with the RPC backend (`GGML_RPC=ON`): asked to reach an RPC
+/// server on a closed port, a build without it says so before trying. None: it did not run.
+pub async fn probe_rpc_backend(llama_server: &Path) -> Option<bool> {
+    let text = output(llama_server, &["--rpc", "127.0.0.1:9", "--list-devices"]).await?;
+    Some(rpc_backend_in(&text))
+}
+
+/// [probe_rpc_backend]'s reading of the output.
+pub fn rpc_backend_in(text: &str) -> bool {
+    !(text.contains("RPC not supported") || text.contains("failed to find RPC backend"))
+}
+
+/// The machine's memory in bytes.
+pub fn memory_bytes() -> Option<u64> {
+    if cfg!(target_os = "macos") {
+        let out = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+        return String::from_utf8_lossy(&out.stdout).trim().parse().ok();
+    }
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = text.lines().find(|l| l.starts_with("MemTotal:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
+}
+
+/// The `ggml-rpc-server` to run: as configured, else next to [llama_server], else on PATH (by
+/// its current name, then the one it had until late 2026, `rpc-server`).
+pub fn find_rpc_server(configured: Option<&Path>, llama_server: &Path) -> Option<PathBuf> {
+    if let Some(path) = configured {
+        return Some(path.to_owned());
+    }
+    let names = ["ggml-rpc-server", "rpc-server"];
+    let beside = llama_server.parent().filter(|p| !p.as_os_str().is_empty()).map(Path::to_owned).or_else(|| {
+        std::env::var_os("PATH")
+            .and_then(|path| std::env::split_paths(&path).find(|dir| dir.join(llama_server).is_file()))
+    });
+    let dirs: Vec<PathBuf> = beside
+        .into_iter()
+        .chain(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default())
+        .collect();
+    dirs.iter().flat_map(|dir| names.iter().map(move |n| dir.join(n))).find(|p| p.is_file())
+}
+
+/// What a node can give a cluster: `GET /v1/cluster/node`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Capabilities {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub memory_bytes: Option<u64>,
+    #[serde(default)]
+    pub devices: Vec<Device>,
+    /// Whether its llama-server can use RPC shards (None: not known).
+    #[serde(default)]
+    pub rpc_backend: Option<bool>,
+    /// Whether it serves as a shard (`[cluster] serve`).
+    #[serde(default)]
+    pub shard: bool,
+}
+
+/// `ggml-rpc-server` on loopback [port] only, caching the weights heads send in [cache].
+pub fn rpc_launch(program: &Path, port: u16, cache: Option<&Path>, logs: &Path) -> Launch {
+    let mut args = vec!["--host".to_owned(), "127.0.0.1".to_owned(), "--port".to_owned(), port.to_string()];
+    let mut env = Vec::new();
+    if let Some(cache) = cache {
+        args.push("--cache".to_owned());
+        env.push(("LLAMA_CACHE".to_owned(), cache.display().to_string()));
+    }
+    // TCP inside the tunnel: RDMA would go around it.
+    env.push(("GGML_RPC_NO_RDMA".to_owned(), "1".to_owned()));
+    Launch { program: program.to_owned(), args, log: logs.join("ggml-rpc-server.log"), env }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Links (head side)
+
+/// The host part of `host:port` (`[fd00::1]:7778` keeps its brackets).
+fn host_of(addr: &str) -> &str {
+    addr.rsplit_once(':').map_or(addr, |(host, _)| host)
+}
+
+/// The addresses of [peer] a shard link may use under [network] (spec/cluster.md, Links), and why
+/// the others may not.
+pub fn link_addrs(peer: &KnownNode, network: &str) -> (Vec<String>, Vec<String>) {
+    let (mut ok, mut refused) = (Vec::new(), Vec::new());
+    for addr in &peer.addrs {
+        let decision = decide_link(&LinkInput { network: network.to_owned(), host: host_of(addr).to_owned() });
+        match decision.action {
+            LinkAction::Direct => ok.push(addr.clone()),
+            LinkAction::Block => refused.push(format!(
+                "{addr}: {}",
+                serde_json::to_value(decision.reason)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .unwrap_or_default()
+            )),
+        }
+    }
+    (ok, refused)
+}
+
+/// A loopback door to one peer's `ggml-rpc-server`: every connection to it is a shard link.
+pub struct Link {
+    pub peer: KnownNode,
+    /// The loopback port `llama-server --rpc` connects to.
+    pub port: u16,
+    pub traffic: Arc<Traffic>,
+    /// Links open now.
+    pub open: Arc<std::sync::atomic::AtomicUsize>,
+    /// Why the last link failed.
+    pub error: Arc<Mutex<Option<String>>>,
+}
+
+/// Opens [peer]'s door on a loopback port, with this machine's device key [device], under
+/// [network] (the link rule is checked for every connection).
+pub async fn open_link(peer: KnownNode, device: StaticKey, network: String) -> Result<Arc<Link>, String> {
+    let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let key = peer.key_bytes()?;
+    let link = Arc::new(Link { peer, port, traffic: Arc::default(), open: Arc::default(), error: Arc::default() });
+    let (traffic, open, error, peer) = (link.traffic.clone(), link.open.clone(), link.error.clone(), link.peer.clone());
+    tokio::spawn(async move {
+        loop {
+            let Ok((local, _)) = listener.accept().await else {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            let _ = local.set_nodelay(true);
+            let (addrs, refused) = link_addrs(&peer, &network);
+            let (key, device, traffic, open, error, name) =
+                (key.clone(), device.clone(), traffic.clone(), open.clone(), error.clone(), peer.name.clone());
+            tokio::spawn(async move {
+                if addrs.is_empty() {
+                    let why = format!("no address of {name} may carry a shard link ({})", refused.join("; "));
+                    tracing::warn!("{why}");
+                    *error.lock().expect("link error lock") = Some(why);
+                    return;
+                }
+                match remote::connect_shard(&addrs, &key, &device).await {
+                    Ok((tcp, transport)) => {
+                        *error.lock().expect("link error lock") = None;
+                        open.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        remote::pipe_counted(tcp, transport, local, || true, Some(traffic)).await;
+                        open.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        tracing::warn!(peer = %name, "shard link refused: {e}");
+                        *error.lock().expect("link error lock") = Some(e);
+                    }
+                }
+            });
+        }
+    });
+    Ok(link)
+}
+
+/// [peer]'s capabilities, over a session (and only by addresses the link rule allows).
+pub async fn probe_peer(peer: &KnownNode, device: &StaticKey, network: &str) -> Result<Capabilities, String> {
+    let (addrs, refused) = link_addrs(peer, network);
+    if addrs.is_empty() {
+        return Err(format!("no address may be used ({})", refused.join("; ")));
+    }
+    let key = peer.key_bytes()?;
+    let probe = remote::get_json(&addrs, &key, device, "/v1/cluster/node");
+    let value = tokio::time::timeout(PROBE_TIMEOUT, probe).await.map_err(|_| "timed out".to_owned())??;
+    serde_json::from_value(value).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------------------------
+// A model split across nodes
+
+/// Where a cluster model runs now: its plan, and why not when it cannot.
+pub struct ClusterRun {
+    pub model: String,
+    pub split: SplitMode,
+    /// The head's name (the node's `[remote] name`).
+    pub head: String,
+    pub links: Vec<Arc<Link>>,
+    state: RwLock<RunState>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct RunState {
+    pub plan: Option<Plan>,
+    /// Peers left out of the plan, and why.
+    pub notes: Vec<String>,
+}
+
+/// One node's part in an answer, for its receipt.
+pub struct ShardUse {
+    pub name: String,
+    /// The peer's static key (base64url); none for the head, which signs the receipt.
+    pub key: Option<String>,
+    pub permille: u64,
+    traffic: Option<(Arc<Traffic>, (u64, u64))>,
+}
+
+impl ShardUse {
+    /// `{"name", "share", "key"?, "bytes_sent"?, "bytes_received"?}` (spec/receipts.md): the
+    /// bytes through this peer's links since the request began.
+    pub fn to_json(&self) -> Value {
+        let mut entry = json!({ "name": self.name, "share": self.permille });
+        if let Some(key) = &self.key {
+            entry["key"] = json!(key);
+        }
+        if let Some((traffic, (sent, received))) = &self.traffic {
+            let (now_sent, now_received) = traffic.get();
+            entry["bytes_sent"] = json!(now_sent.saturating_sub(*sent));
+            entry["bytes_received"] = json!(now_received.saturating_sub(*received));
+        }
+        entry
+    }
+}
+
+impl std::fmt::Debug for ClusterRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ClusterRun({})", self.model)
+    }
+}
+
+impl ClusterRun {
+    pub fn new(model: &str, split: SplitMode, head: &str, links: Vec<Arc<Link>>) -> Self {
+        Self { model: model.to_owned(), split, head: head.to_owned(), links, state: RwLock::default() }
+    }
+
+    pub fn state(&self) -> RunState {
+        self.state.read().expect("run lock").clone()
+    }
+
+    /// Records where the model runs now (the supervisor does; tests may).
+    pub fn set(&self, state: RunState) {
+        *self.state.write().expect("run lock") = state;
+    }
+
+    /// The nodes the current plan puts layers on, head first, with their shares.
+    pub fn uses(&self) -> Vec<ShardUse> {
+        let state = self.state();
+        let Some(plan) = state.plan.filter(|p| p.action == PlanAction::Split) else { return Vec::new() };
+        let mut per_node: BTreeMap<usize, (String, u64)> = BTreeMap::new();
+        let order = |node: &str| {
+            if node == self.head {
+                0
+            } else {
+                1 + self.links.iter().position(|l| l.peer.name == node).unwrap_or(usize::MAX - 1)
+            }
+        };
+        for share in &plan.shares {
+            per_node.entry(order(&share.node)).or_insert_with(|| (share.node.clone(), 0)).1 += share.permille;
+        }
+        per_node
+            .into_values()
+            .map(|(name, permille)| {
+                let link = self.links.iter().find(|l| l.peer.name == name);
+                ShardUse {
+                    key: link.map(|l| l.peer.key.clone()),
+                    traffic: link.map(|l| (l.traffic.clone(), l.traffic.get())),
+                    name,
+                    permille,
+                }
+            })
+            .collect()
+    }
+}
+
+/// What the head knows about itself, for planning.
+pub struct Head {
+    pub devices: Vec<Device>,
+    pub rpc_backend: Option<bool>,
+    pub device_key: StaticKey,
+    pub network: String,
+    pub model_bytes: u64,
+}
+
+/// The `--rpc` and `--tensor-split` arguments for [plan]: llama.cpp puts RPC devices first, in
+/// `--rpc` order and each server's own order, then this machine's.
+pub fn split_args(plan: &Plan, head: &str, head_devices: &[Device], peers: &[(Arc<Link>, Vec<Device>)]) -> Vec<String> {
+    let share = |node: &str, device: &str| {
+        plan.shares.iter().find(|s| s.node == node && s.device == device).map_or(0, |s| s.permille)
+    };
+    let (mut rpc, mut split) = (Vec::new(), Vec::new());
+    for (link, devices) in peers {
+        if !plan.shares.iter().any(|s| s.node == link.peer.name) {
+            continue;
+        }
+        rpc.push(format!("127.0.0.1:{}", link.port));
+        split.extend(devices.iter().map(|d| share(&link.peer.name, &d.name)));
+    }
+    split.extend(head_devices.iter().map(|d| share(head, &d.name)));
+    if rpc.is_empty() {
+        return Vec::new();
+    }
+    let split: Vec<String> = split.iter().map(u64::to_string).collect();
+    vec!["--rpc".to_owned(), rpc.join(","), "--tensor-split".to_owned(), split.join(",")]
+}
+
+/// Plans [run] over the head and the peers that answer, runs llama-server with that plan, and
+/// plans again whenever it exits: a peer that left is planned around (or the model waits,
+/// unhealthy, when the rest cannot hold it), so the router sends requests elsewhere meanwhile.
+pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let client = crate::engine::health_client();
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            let mut notes = Vec::new();
+            let mut devices: Vec<PlanDevice> = head
+                .devices
+                .iter()
+                .map(|d| PlanDevice { node: run.head.clone(), device: d.name.clone(), free_mib: d.free_mib })
+                .collect();
+            let mut peers = Vec::new();
+            if head.rpc_backend == Some(false) {
+                notes.push(
+                    "this llama-server has no RPC backend (build it with GGML_RPC=ON; see spec/cluster.md)".into(),
+                );
+            } else if head.devices.is_empty() {
+                notes.push("this machine reports no GPU device to anchor a split".into());
+            } else {
+                for link in &run.links {
+                    match probe_peer(&link.peer, &head.device_key, &head.network).await {
+                        Ok(caps) if caps.shard && !caps.devices.is_empty() => {
+                            devices.extend(caps.devices.iter().map(|d| PlanDevice {
+                                node: link.peer.name.clone(),
+                                device: d.name.clone(),
+                                free_mib: d.free_mib,
+                            }));
+                            peers.push((link.clone(), caps.devices));
+                        }
+                        Ok(_) => notes.push(format!("{}: not serving as a shard ([cluster] serve)", link.peer.name)),
+                        Err(e) => notes.push(format!("{}: {e}", link.peer.name)),
+                    }
+                }
+            }
+            let plan = invincible_policy::plan(&PlanInput { model_bytes: head.model_bytes, split: run.split, devices });
+            for note in &notes {
+                tracing::warn!(model = %run.model, "cluster: {note}");
+            }
+            let mut launch = base.clone();
+            match plan.action {
+                PlanAction::Block => {
+                    tracing::warn!(model = %run.model, need_mib = plan.need_mib, "cluster: the devices that answered cannot hold it");
+                    run.set(RunState { plan: Some(plan), notes });
+                    engine.set_healthy(false);
+                    tokio::time::sleep(REPLAN).await;
+                    continue;
+                }
+                PlanAction::Split => {
+                    launch.args.extend(split_args(&plan, &run.head, &head.devices, &peers));
+                    tracing::info!(model = %run.model, shares = ?plan.shares, "cluster: split");
+                }
+                PlanAction::Local => tracing::info!(model = %run.model, "cluster: runs on this machine alone"),
+            }
+            run.set(RunState { plan: Some(plan), notes });
+            let started = tokio::time::Instant::now();
+            crate::engine::run_once(&engine, &launch, &client).await;
+            run.set(RunState { plan: None, notes: vec!["restarting".into()] });
+            if started.elapsed() >= Duration::from_secs(60) {
+                backoff = Duration::from_secs(1);
+            }
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(Duration::from_secs(30));
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Status
+
+/// What the node knows about its cluster, for `GET /v1/cluster` and `GET /v1/cluster/node`.
+pub struct ClusterState {
+    pub name: String,
+    pub llama_server: PathBuf,
+    pub rpc_backend: Option<bool>,
+    /// Nodes this machine paired with as a device: the peers it may use.
+    pub peers: Vec<KnownNode>,
+    pub device_key: Option<StaticKey>,
+    pub runs: Vec<Arc<ClusterRun>>,
+    /// Whether this node serves as a shard.
+    pub shard: bool,
+}
+
+impl ClusterState {
+    /// This node's capabilities now (devices probed afresh: their free memory changes).
+    pub async fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            name: self.name.clone(),
+            version: crate::version::VERSION.to_owned(),
+            memory_bytes: memory_bytes(),
+            devices: probe_devices(&self.llama_server).await,
+            rpc_backend: self.rpc_backend,
+            shard: self.shard,
+        }
+    }
+
+    /// The whole picture: this node, its peers (probed now), the heads it serves, its models.
+    pub async fn status(&self, network: &str, shard: Option<&remote::ShardService>) -> Value {
+        let me = self.capabilities().await;
+        let probes = self.peers.iter().map(|peer| async move {
+            let (addrs, refused) = link_addrs(peer, network);
+            let key = peer.key_bytes().ok();
+            let mut entry = json!({
+                "name": peer.name,
+                "fingerprint": key.as_deref().map(crate::devices::fingerprint),
+                "addrs": peer.addrs,
+                "link_addrs": addrs,
+                "refused_addrs": refused,
+            });
+            let Some(device) = &self.device_key else { return entry };
+            let started = std::time::Instant::now();
+            match probe_peer(peer, device, network).await {
+                Ok(caps) => {
+                    entry["reachable"] = json!(true);
+                    entry["probe_ms"] = json!(started.elapsed().as_millis() as u64);
+                    entry["capabilities"] = json!(caps);
+                }
+                Err(e) => {
+                    entry["reachable"] = json!(false);
+                    entry["error"] = json!(e);
+                }
+            }
+            entry
+        });
+        let peers: Vec<Value> = futures_util::future::join_all(probes).await;
+        let models: Vec<Value> = self
+            .runs
+            .iter()
+            .map(|run| {
+                let links: Vec<Value> = run
+                    .links
+                    .iter()
+                    .map(|l| {
+                        let (sent, received) = l.traffic.get();
+                        json!({
+                            "peer": l.peer.name,
+                            "port": l.port,
+                            "open": l.open.load(std::sync::atomic::Ordering::Relaxed),
+                            "bytes_sent": sent,
+                            "bytes_received": received,
+                            "error": *l.error.lock().expect("link error lock"),
+                        })
+                    })
+                    .collect();
+                json!({ "id": run.model, "split": run.split, "state": run.state(), "links": links })
+            })
+            .collect();
+        let serving = shard.map(|s| {
+            let (sent, received) = s.traffic.get();
+            json!({ "heads": s.heads, "bytes_sent": sent, "bytes_received": received })
+        });
+        json!({ "node": me, "network": network, "shard": serving, "peers": peers, "models": models })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_llama_server_device_lists() {
+        let text = "ggml_metal_device_init: GPU name:   MTL0 (Apple M3 Pro)\nAvailable devices:\n  MTL0: Apple M3 Pro (28753 MiB, 28753 MiB free)\n  BLAS: Accelerate (0 MiB, 0 MiB free)\n  CUDA1: NVIDIA GeForce RTX 4090 (24080 MiB, 23000 MiB free)\n";
+        assert_eq!(
+            parse_devices(text),
+            vec![
+                Device { name: "MTL0".into(), description: "Apple M3 Pro".into(), total_mib: 28753, free_mib: 28753 },
+                Device {
+                    name: "CUDA1".into(),
+                    description: "NVIDIA GeForce RTX 4090".into(),
+                    total_mib: 24080,
+                    free_mib: 23000
+                },
+            ]
+        );
+        assert!(parse_devices("").is_empty());
+        assert!(parse_devices("  X: y (lots, none)").is_empty());
+    }
+
+    #[test]
+    fn knows_a_build_without_rpc() {
+        assert!(!rpc_backend_in("error while handling argument \"--rpc\": RPC not supported in this build"));
+        assert!(rpc_backend_in("ggml-rpc.cpp:650: Failed to connect to 127.0.0.1:9"));
+    }
+
+    #[test]
+    fn hosts_of_addresses() {
+        assert_eq!(host_of("192.168.1.2:7778"), "192.168.1.2");
+        assert_eq!(host_of("[fd00::1]:7778"), "[fd00::1]");
+        assert_eq!(host_of("mini.local:7778"), "mini.local");
+    }
+
+    #[test]
+    fn link_addresses_follow_the_rule() {
+        let peer = KnownNode {
+            name: "mini".into(),
+            key: String::new(),
+            addrs: vec!["127.0.0.1:7778".into(), "192.168.1.5:7778".into(), "203.0.113.9:7778".into()],
+            receipt_key: None,
+        };
+        let (ok, refused) = link_addrs(&peer, "direct");
+        assert_eq!(ok, ["127.0.0.1:7778", "192.168.1.5:7778"]);
+        assert_eq!(refused, ["203.0.113.9:7778: not_lan"]);
+        let (ok, refused) = link_addrs(&peer, "offline");
+        assert_eq!(ok, ["127.0.0.1:7778"]);
+        assert_eq!(refused.len(), 2);
+    }
+
+    fn link(name: &str, port: u16) -> Arc<Link> {
+        Arc::new(Link {
+            peer: KnownNode { name: name.into(), key: format!("key-{name}"), addrs: vec![], receipt_key: None },
+            port,
+            traffic: Arc::default(),
+            open: Arc::default(),
+            error: Arc::default(),
+        })
+    }
+
+    fn device(name: &str, free_mib: u64) -> Device {
+        Device { name: name.into(), description: String::new(), total_mib: free_mib, free_mib }
+    }
+
+    #[test]
+    fn split_arguments_put_rpc_devices_first() {
+        let head = [device("MTL0", 28000)];
+        let peers = vec![
+            (link("box", 4001), vec![device("CUDA0", 24000), device("CUDA1", 24000)]),
+            (link("idle", 4002), vec![device("MTL0", 0)]),
+        ];
+        let mut devices: Vec<PlanDevice> = head
+            .iter()
+            .map(|d| PlanDevice { node: "studio".into(), device: d.name.clone(), free_mib: d.free_mib })
+            .collect();
+        for (l, ds) in &peers {
+            devices.extend(ds.iter().map(|d| PlanDevice {
+                node: l.peer.name.clone(),
+                device: d.name.clone(),
+                free_mib: d.free_mib,
+            }));
+        }
+        let plan = invincible_policy::plan(&PlanInput { model_bytes: 50 << 30, split: SplitMode::Auto, devices });
+        assert_eq!(plan.action, PlanAction::Split);
+        // The idle peer holds nothing, so llama-server is not given it.
+        assert_eq!(
+            split_args(&plan, "studio", &head, &peers),
+            ["--rpc", "127.0.0.1:4001", "--tensor-split", "316,316,368"]
+        );
+        let local =
+            invincible_policy::plan(&PlanInput { model_bytes: 1 << 30, split: SplitMode::Auto, devices: vec![] });
+        assert!(split_args(&local, "studio", &head, &peers).is_empty());
+    }
+
+    #[test]
+    fn a_split_names_its_nodes_head_first() {
+        let run = ClusterRun::new("big", SplitMode::Always, "studio", vec![link("mini", 1), link("box", 2)]);
+        assert!(run.uses().is_empty(), "nothing planned yet");
+        let plan = invincible_policy::plan(&PlanInput {
+            model_bytes: 1 << 30,
+            split: SplitMode::Always,
+            devices: vec![
+                PlanDevice { node: "studio".into(), device: "MTL0".into(), free_mib: 2000 },
+                PlanDevice { node: "box".into(), device: "CUDA0".into(), free_mib: 1000 },
+                PlanDevice { node: "box".into(), device: "CUDA1".into(), free_mib: 1000 },
+            ],
+        });
+        run.set(RunState { plan: Some(plan), notes: vec![] });
+        let uses: Vec<Value> = run.uses().iter().map(ShardUse::to_json).collect();
+        assert_eq!(
+            uses,
+            [
+                json!({ "name": "studio", "share": 500 }),
+                json!({ "name": "box", "share": 500, "key": "key-box", "bytes_sent": 0, "bytes_received": 0 }),
+            ]
+        );
+    }
+
+    #[test]
+    fn rpc_launch_stays_on_loopback() {
+        let launch = rpc_launch(Path::new("/x/ggml-rpc-server"), 5000, Some(Path::new("/c")), Path::new("/logs"));
+        assert_eq!(launch.args[..4], ["--host", "127.0.0.1", "--port", "5000"]);
+        assert!(launch.args.contains(&"--cache".to_owned()));
+        assert!(launch.env.contains(&("LLAMA_CACHE".to_owned(), "/c".to_owned())));
+    }
+}

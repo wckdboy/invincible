@@ -46,6 +46,7 @@ async fn restarts_a_crashed_engine_and_tracks_its_health() {
         program: "python3".into(),
         args: vec!["-I".into(), "-c".into(), STAND_IN.into(), port.to_string(), "1.5".into()],
         log: log.clone(),
+        env: vec![],
     };
     let engine = Engine::attached("stand-in", &format!("http://127.0.0.1:{port}"), None, false);
     let task = supervise(engine.clone(), launch);
@@ -62,7 +63,8 @@ async fn restarts_a_crashed_engine_and_tracks_its_health() {
 #[tokio::test]
 async fn an_engine_that_cannot_start_stays_unhealthy() {
     let dir = std::env::temp_dir().join(format!("invincible-missing-{}", std::process::id()));
-    let launch = Launch { program: "/nonexistent/llama-server".into(), args: vec![], log: dir.join("x.log") };
+    let launch =
+        Launch { program: "/nonexistent/llama-server".into(), args: vec![], log: dir.join("x.log"), env: vec![] };
     let engine = Engine::attached("missing", "http://127.0.0.1:9", None, false);
     let task = supervise(engine.clone(), launch);
     sleep(Duration::from_millis(1500)).await;

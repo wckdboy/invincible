@@ -3,6 +3,7 @@
 pub mod audit;
 pub mod brand;
 pub mod cloud;
+pub mod cluster;
 pub mod config;
 pub mod devices;
 pub mod egress;

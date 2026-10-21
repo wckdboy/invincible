@@ -23,9 +23,13 @@ pub const PAIR_PATTERN: &str = "Noise_IKpsk1_25519_ChaChaPoly_SHA256";
 pub const SESSION_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_SHA256";
 const PAIR_PROLOGUE: &[u8] = b"invincible/0 pair";
 const SESSION_PROLOGUE: &[u8] = b"invincible/0 session";
+const SHARD_PROLOGUE: &[u8] = b"invincible/0 shard";
 /// The first byte on a connection, in the clear (and bound into the handshake by the prologue).
 pub const MODE_PAIR: u8 = 1;
 pub const MODE_SESSION: u8 = 2;
+/// A shard link (spec/cluster.md): the same handshake as a session, but the stream inside is the
+/// node's own `ggml-rpc-server` on loopback, for a device the node lets use it as a shard.
+pub const MODE_SHARD: u8 = 3;
 
 const MAX_FRAME: usize = 65535;
 const TAG: usize = 16;
@@ -158,64 +162,117 @@ enum Inbound {
 
 /// Pipes [plain] through [transport] over [tcp] in both directions until both are done. When
 /// [allowed] turns false (the device was unpaired) the connection is dropped at the next frame.
-pub async fn pipe<P>(tcp: TcpStream, transport: TransportState, plain: P, allowed: impl Fn() -> bool)
-where
-    P: AsyncRead + AsyncWrite + Unpin,
+pub async fn pipe<P>(
+    tcp: TcpStream,
+    transport: TransportState,
+    plain: P,
+    allowed: impl Fn() -> bool + Send + Sync + 'static,
+) where
+    P: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let transport = Mutex::new(transport);
-    let (mut tcp_read, mut tcp_write) = tcp.into_split();
+    pipe_counted(tcp, transport, plain, allowed, None).await;
+}
+
+/// Plaintext bytes through a pipe, each way: `sent` to the peer, `received` from it.
+#[derive(Debug, Default)]
+pub struct Traffic {
+    pub sent: std::sync::atomic::AtomicU64,
+    pub received: std::sync::atomic::AtomicU64,
+}
+
+impl Traffic {
+    /// (sent, received) so far.
+    pub fn get(&self) -> (u64, u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        (self.sent.load(Relaxed), self.received.load(Relaxed))
+    }
+}
+
+/// [pipe], counting the plaintext each way in [traffic].
+pub async fn pipe_counted<P>(
+    tcp: TcpStream,
+    transport: TransportState,
+    plain: P,
+    allowed: impl Fn() -> bool + Send + Sync + 'static,
+    traffic: Option<Arc<Traffic>>,
+) where
+    P: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    use std::sync::atomic::Ordering::Relaxed;
+    // Each direction is its own task, so a bulk transfer (weights to a shard) encrypts on one
+    // core while the other decrypts; the transport is locked only for one message at a time.
+    let transport = Arc::new(Mutex::new(transport));
+    let allowed = Arc::new(allowed);
+    let (tcp_read, mut tcp_write) = tcp.into_split();
+    let mut tcp_read = tokio::io::BufReader::with_capacity(2 * MAX_FRAME, tcp_read);
     let (mut plain_read, mut plain_write) = tokio::io::split(plain);
 
+    let outbound = {
+        let (transport, allowed, traffic) = (transport.clone(), allowed.clone(), traffic.clone());
+        tokio::spawn(async move {
+            let mut plain = vec![0u8; MAX_PLAIN];
+            // The length, then the message: one write per frame.
+            let mut out = vec![0u8; 2 + MAX_FRAME];
+            loop {
+                let n = match plain_read.read(&mut plain).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                // An unpaired device gets nothing more, not even the rest of a stream.
+                if !allowed() {
+                    break;
+                }
+                let Ok(m) = transport.lock().expect("transport lock").write_message(&plain[..n], &mut out[2..]) else {
+                    break;
+                };
+                out[..2].copy_from_slice(&(m as u16).to_be_bytes());
+                if tcp_write.write_all(&out[..2 + m]).await.is_err() {
+                    break;
+                }
+                if let Some(t) = &traffic {
+                    t.sent.fetch_add(n as u64, Relaxed);
+                }
+            }
+            let _ = tcp_write.shutdown().await;
+        })
+    };
     let inbound = async {
+        let mut frame = vec![0u8; MAX_FRAME];
         let mut buf = vec![0u8; MAX_FRAME];
         loop {
-            let frame = match read_frame(&mut tcp_read).await {
-                Ok(frame) => frame,
+            let len = match tcp_read.read_u16().await {
+                Ok(len) => len as usize,
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break Inbound::Eof,
                 Err(_) => break Inbound::Abort,
             };
+            if tcp_read.read_exact(&mut frame[..len]).await.is_err() {
+                break Inbound::Abort;
+            }
             if !allowed() {
                 break Inbound::Abort;
             }
-            let Ok(n) = transport.lock().expect("transport lock").read_message(&frame, &mut buf) else {
+            let Ok(n) = transport.lock().expect("transport lock").read_message(&frame[..len], &mut buf) else {
                 break Inbound::Abort;
             };
+            if let Some(t) = &traffic {
+                t.received.fetch_add(n as u64, Relaxed);
+            }
             if plain_write.write_all(&buf[..n]).await.is_err() {
                 break Inbound::Abort;
             }
         }
     };
-    let outbound = async {
-        let mut plain = vec![0u8; MAX_PLAIN];
-        let mut out = vec![0u8; MAX_FRAME];
-        loop {
-            let n = match plain_read.read(&mut plain).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => n,
-            };
-            // An unpaired device gets nothing more, not even the rest of a stream.
-            if !allowed() {
-                break;
-            }
-            let Ok(m) = transport.lock().expect("transport lock").write_message(&plain[..n], &mut out) else {
-                break;
-            };
-            if write_frame(&mut tcp_write, &out[..m]).await.is_err() {
-                break;
-            }
-        }
-        let _ = tcp_write.shutdown().await;
-    };
 
-    tokio::pin!(outbound);
+    let mut outbound = outbound;
     tokio::select! {
-        how = inbound => {
-            if let Inbound::Eof = how {
+        how = inbound => match how {
+            Inbound::Eof => {
                 let _ = plain_write.shutdown().await;
-                outbound.await;
+                let _ = (&mut outbound).await;
             }
-        }
-        () = &mut outbound => {}
+            Inbound::Abort => outbound.abort(),
+        },
+        _ = &mut outbound => {}
     }
 }
 
@@ -234,6 +291,18 @@ pub struct Pairing {
     pending: Mutex<Option<Pending>>,
     /// Open sessions per device key.
     sessions: Mutex<std::collections::HashMap<Vec<u8>, usize>>,
+    /// This node as a shard for others: where its `ggml-rpc-server` listens, and who may use it.
+    pub shard: Option<ShardService>,
+}
+
+/// The node's `ggml-rpc-server` on loopback, and the paired devices (by name) that may reach it
+/// through a shard link. Nobody else can: not other paired devices, not the network.
+#[derive(Clone, Debug)]
+pub struct ShardService {
+    pub port: u16,
+    pub heads: Vec<String>,
+    /// Bytes through shard links, for `GET /v1/cluster`.
+    pub traffic: Arc<Traffic>,
 }
 
 struct Pending {
@@ -252,6 +321,21 @@ impl Pairing {
             receipt_key: String::new(),
             pending: Mutex::new(None),
             sessions: Mutex::default(),
+            shard: None,
+        }
+    }
+
+    /// Serves [shard] to the devices it names (spec/cluster.md).
+    pub fn with_shard(mut self, shard: ShardService) -> Self {
+        self.shard = Some(shard);
+        self
+    }
+
+    /// Whether the device with [key] may use this node as a shard: paired, and named in `heads`.
+    pub fn may_shard(&self, key: &[u8]) -> bool {
+        match (&self.shard, self.devices.name_of(key)) {
+            (Some(shard), Some(name)) => shard.heads.contains(&name),
+            _ => false,
         }
     }
 
@@ -382,11 +466,23 @@ async fn accept(
     permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<(), String> {
     let _ = tcp.set_nodelay(true);
-    let (transport, device_key) = timeout(HANDSHAKE_TIMEOUT, respond(&mut tcp, &pairing))
+    let (transport, device_key, mode) = timeout(HANDSHAKE_TIMEOUT, respond(&mut tcp, &pairing))
         .await
         .map_err(|_| "handshake timed out".to_owned())??;
     drop(permit);
     let _slot = pairing.session(&device_key).ok_or("too many open sessions for this device")?;
+    if mode == MODE_SHARD {
+        let shard = pairing.shard.clone().ok_or("this node is not a shard")?;
+        let rpc = TcpStream::connect(("127.0.0.1", shard.port)).await.map_err(|e| format!("ggml-rpc-server: {e}"))?;
+        let _ = rpc.set_nodelay(true);
+        let name = pairing.devices.name_of(&device_key).unwrap_or_default();
+        tracing::info!(head = %name, "shard link open");
+        let check = pairing.clone();
+        // Unpairing the head, or taking it out of `heads`, cuts the link at the next frame.
+        pipe_counted(tcp, transport, rpc, move || check.may_shard(&device_key), Some(shard.traffic)).await;
+        tracing::info!(head = %name, "shard link closed");
+        return Ok(());
+    }
 
     let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
     // Requests on this session are the device's (for the audit log).
@@ -406,7 +502,7 @@ async fn accept(
 }
 
 /// The responder's handshake: pairing (pins the device) or a session (requires a pinned device).
-async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportState, Vec<u8>), String> {
+async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportState, Vec<u8>, u8), String> {
     let mode = tcp.read_u8().await.map_err(|e| e.to_string())?;
     let mut payload = vec![0u8; MAX_FRAME];
     let mut out = vec![0u8; MAX_FRAME];
@@ -436,19 +532,27 @@ async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportSta
             let m = hs.write_message(reply.as_bytes(), &mut out).map_err(|e| e.to_string())?;
             write_frame(tcp, &out[..m]).await.map_err(|e| e.to_string())?;
             tracing::info!(device = %name, key = %crate::devices::fingerprint(&device_key), "device paired");
-            Ok((hs.into_transport_mode().map_err(|e| e.to_string())?, device_key))
+            Ok((hs.into_transport_mode().map_err(|e| e.to_string())?, device_key, MODE_SESSION))
         }
-        MODE_SESSION => {
-            let mut hs = responder(SESSION_PATTERN, &pairing.key, SESSION_PROLOGUE, None)?;
+        MODE_SESSION | MODE_SHARD => {
+            let prologue = if mode == MODE_SHARD { SHARD_PROLOGUE } else { SESSION_PROLOGUE };
+            let mut hs = responder(SESSION_PATTERN, &pairing.key, prologue, None)?;
             let first = read_frame(tcp).await.map_err(|e| e.to_string())?;
             hs.read_message(&first, &mut payload).map_err(|e| format!("session handshake failed: {e}"))?;
             let device_key = hs.get_remote_static().ok_or("no device key")?.to_vec();
             if !pairing.devices.is_pinned(&device_key) {
                 return Err(format!("device {} is not paired", crate::devices::fingerprint(&device_key)));
             }
+            // Refused before the node answers: a device that may not shard learns nothing more.
+            if mode == MODE_SHARD && !pairing.may_shard(&device_key) {
+                return Err(format!(
+                    "device {} may not use this node as a shard ([cluster] heads)",
+                    crate::devices::fingerprint(&device_key)
+                ));
+            }
             let m = hs.write_message(&[], &mut out).map_err(|e| e.to_string())?;
             write_frame(tcp, &out[..m]).await.map_err(|e| e.to_string())?;
-            Ok((hs.into_transport_mode().map_err(|e| e.to_string())?, device_key))
+            Ok((hs.into_transport_mode().map_err(|e| e.to_string())?, device_key, mode))
         }
         other => Err(format!("unknown mode {other}")),
     }
@@ -510,12 +614,31 @@ pub async fn connect(
     node_key: &[u8],
     device: &StaticKey,
 ) -> Result<(TcpStream, TransportState), String> {
+    open(addrs, node_key, device, MODE_SESSION).await
+}
+
+/// Opens a shard link to a node that lets this device use it as a shard (spec/cluster.md).
+pub async fn connect_shard(
+    addrs: &[String],
+    node_key: &[u8],
+    device: &StaticKey,
+) -> Result<(TcpStream, TransportState), String> {
+    open(addrs, node_key, device, MODE_SHARD).await
+}
+
+async fn open(
+    addrs: &[String],
+    node_key: &[u8],
+    device: &StaticKey,
+    mode: u8,
+) -> Result<(TcpStream, TransportState), String> {
     let mut tcp = dial(addrs).await?;
+    let prologue = if mode == MODE_SHARD { SHARD_PROLOGUE } else { SESSION_PROLOGUE };
     let work = async {
-        let mut hs = initiator(SESSION_PATTERN, device, node_key, SESSION_PROLOGUE, None)?;
+        let mut hs = initiator(SESSION_PATTERN, device, node_key, prologue, None)?;
         let mut out = vec![0u8; MAX_FRAME];
         let m = hs.write_message(&[], &mut out).map_err(|e| e.to_string())?;
-        tcp.write_u8(MODE_SESSION).await.map_err(|e| e.to_string())?;
+        tcp.write_u8(mode).await.map_err(|e| e.to_string())?;
         write_frame(&mut tcp, &out[..m]).await.map_err(|e| e.to_string())?;
         let reply = read_frame(&mut tcp).await.map_err(|_| "the node refused the session (device not paired?)")?;
         let mut payload = vec![0u8; MAX_FRAME];
@@ -524,6 +647,33 @@ pub async fn connect(
     };
     let transport = timeout(HANDSHAKE_TIMEOUT, work).await.map_err(|_| "session handshake timed out".to_owned())??;
     Ok((tcp, transport))
+}
+
+/// `GET [path]` on a paired node's API, through one encrypted session; the answer's JSON.
+pub async fn get_json(
+    addrs: &[String],
+    node_key: &[u8],
+    device: &StaticKey,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    let (tcp, transport) = connect(addrs, node_key, device).await?;
+    let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
+    tokio::spawn(async move { pipe(tcp, transport, theirs, || true).await });
+    let (mut sender, connection) =
+        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(ours)).await.map_err(|e| e.to_string())?;
+    tokio::spawn(connection);
+    let request = axum::http::Request::get(path)
+        .header(axum::http::header::HOST, "node")
+        .body(axum::body::Body::empty())
+        .map_err(|e| e.to_string())?;
+    let response = sender.send_request(request).await.map_err(|e| e.to_string())?;
+    let status = response.status();
+    let body =
+        axum::body::to_bytes(axum::body::Body::new(response.into_body()), 1 << 20).await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("{path}: {status}"));
+    }
+    serde_json::from_slice(&body).map_err(|e| format!("{path}: {e}"))
 }
 
 /// The tunnel's door: where the node is, and the local token a request must carry.

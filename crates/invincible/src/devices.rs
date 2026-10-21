@@ -132,6 +132,43 @@ impl Devices {
     }
 }
 
+/// Nodes this machine paired with as a device (`nodes.json`): for the tunnel, and as the peers
+/// a cluster model may be split across (spec/cluster.md).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct KnownNodes(pub Vec<KnownNode>);
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KnownNode {
+    pub name: String,
+    /// Static public key, base64url, pinned at pairing.
+    pub key: String,
+    pub addrs: Vec<String>,
+    /// The node's receipt key, pinned at pairing.
+    #[serde(default)]
+    pub receipt_key: Option<String>,
+}
+
+impl KnownNode {
+    /// The pinned static key, decoded.
+    pub fn key_bytes(&self) -> Result<Vec<u8>, String> {
+        URL_SAFE_NO_PAD.decode(&self.key).map_err(|e| format!("node {}: {e}", self.name))
+    }
+}
+
+impl KnownNodes {
+    pub fn load(home: &Path) -> Result<Self, String> {
+        let path = home.join("nodes.json");
+        match fsutil::read_optional(&path)? {
+            Some(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+            None => Ok(Self::default()),
+        }
+    }
+
+    pub fn save(&self, home: &Path) -> Result<(), String> {
+        fsutil::replace_private(&home.join("nodes.json"), &serde_json::to_string_pretty(self).expect("nodes serialise"))
+    }
+}
+
 /// Up to 40 ASCII letters, digits, `-` and `_` (no look-alike letters); anything else becomes `-`.
 fn clean_name(name: &str) -> String {
     let cleaned: String = name
