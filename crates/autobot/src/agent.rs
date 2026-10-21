@@ -293,8 +293,9 @@ impl Agent {
         if let Some(kib) = self.options.context_kib {
             session.budget = kib.max(8) * 1024;
         }
-        // Where the model said a request was too long before, this turn starts at what fit.
-        session.cap = learned_cap(self.gateway.model());
+        // Where this model (asked for by name; `auto` may pick any) said a request was too long
+        // before, at this budget, this turn starts at what fit.
+        session.cap = learned_cap(self.gateway.model(), session.budget);
         session.push(crate::images::message(text, images))?;
         let mut definitions = self.tools.definitions();
         if self.leads_team()
@@ -388,6 +389,14 @@ impl Agent {
             }
             messages[0] = json!({ "role": "system", "content": system });
             messages.extend(session.window());
+            // Results the model no longer has (cleared to fit): asking again for one is no loop.
+            loops.cleared = messages
+                .iter()
+                .filter(|m| {
+                    m["role"] == "tool" && m["content"].as_str().is_some_and(|c| c.starts_with(crate::session::CLEARED))
+                })
+                .filter_map(|m| m["tool_call_id"].as_str().map(str::to_owned))
+                .collect();
             // What was sent, kept only for a trajectory.
             if self.trajectories.is_some() {
                 sent.clone_from(&messages);
@@ -422,18 +431,35 @@ impl Agent {
                 }
                 // Longer than the model takes: a smaller window (what leaves it is summarized,
                 // long results cleared), and the same step again; a few times at most.
-                Err(GatewayError::Failed(e)) if crate::gateway::overflow(&e) => {
+                Err(GatewayError::TooLong { message: e, model }) => {
+                    // What fit this model before (the one the router chose), when less than now.
+                    if let Some(known) = model.as_deref().and_then(|m| peek_cap(m, session.budget))
+                        && known < session.limit()
+                    {
+                        session.cap = Some(known);
+                        tracing::warn!(
+                            "{e}: sending what fit {} before ({} KiB)",
+                            model.as_deref().unwrap_or("it"),
+                            known / 1024
+                        );
+                        self.compact(session, confirmed, events).await;
+                        steps -= 1;
+                        continue;
+                    }
                     if session.limit() <= MIN_WINDOW || shrunk >= 3 {
+                        let sent = session.limit() / 1024;
                         session.cap = None;
                         return Err(format!(
-                            "{e} (sent {} KiB of the conversation, as little as it goes; the instructions and tools alone may be too much for this model: fewer tools or MCP servers, or a model with a longer context)",
-                            session.limit() / 1024
+                            "{e} (sent {sent} KiB of the conversation, as little as it goes; the instructions and tools alone may be too much for this model: fewer tools or MCP servers, or a model with a longer context)"
                         ));
                     }
                     shrunk += 1;
                     let smaller = (session.limit() * 2 / 3).max(MIN_WINDOW);
                     session.cap = Some(smaller);
-                    learn_cap(self.gateway.model(), smaller);
+                    // Learned only for a model the router named.
+                    if let Some(model) = &model {
+                        learn_cap(model, session.budget, smaller);
+                    }
                     tracing::warn!("{e}: sending less of the conversation ({} KiB)", smaller / 1024);
                     self.compact(session, confirmed, events).await;
                     steps -= 1;
@@ -441,6 +467,14 @@ impl Agent {
                 }
                 Err(e) => return Err(e.to_string()),
             };
+            // The model took more than what was learned to fit it (a turn on `auto` sends
+            // without the cap): it was reloaded with more context, say; the cap is forgotten.
+            if let Some(model) = reply.decision.as_ref().and_then(|d| d["model"].as_str())
+                && let Some(cap) = peek_cap(model, session.budget)
+                && messages[1..].iter().map(crate::session::cost).sum::<usize>() > cap
+            {
+                forget_cap(model, session.budget);
+            }
             if let Some(id) = &reply.request_id {
                 receipts.push(id.clone());
                 let decision = reply.decision.as_ref();
@@ -511,7 +545,7 @@ impl Agent {
                     for ((id, name, arguments), result) in batch.iter().zip(results) {
                         events(Event::Tool(&format!("{name} {arguments}")));
                         events(Event::Output { name, text: &result });
-                        let result = loops.note(name, arguments, result);
+                        let result = loops.note(id, name, arguments, result);
                         session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
                     }
                     continue;
@@ -520,7 +554,7 @@ impl Agent {
                 let at = session.messages.len();
                 let result = self.call(&session.id, at, &name, &arguments, approver, grants, events).await;
                 events(Event::Output { name: &name, text: &result });
-                let result = loops.note(&name, &arguments, result);
+                let result = loops.note(&id, &name, &arguments, result);
                 session.push(json!({ "role": "tool", "tool_call_id": id, "content": result }))?;
                 // A browser screenshot is shown to a model that can see (a tool result cannot
                 // carry an image; a message of its own can).
@@ -539,8 +573,8 @@ impl Agent {
             // Going round in circles: the same call, the same result, again and again.
             if let Some(name) = loops.stuck() {
                 let note = format!(
-                    "Stopped: the same {name} call kept giving the same result ({STUCK} times), so it was going \
-                     round in circles; say what to try instead."
+                    "Stopped: the same {name} call kept giving the same result, so it was going round in \
+                     circles; say what to try instead."
                 );
                 let last = json!({ "role": "assistant", "content": note });
                 session.push(last.clone())?;
@@ -1208,17 +1242,46 @@ impl crate::script::Rpc for ScriptCalls<'_> {
 /// The least of the conversation a call sends, however often the model says it is too long.
 const MIN_WINDOW: usize = 8 * 1024;
 
-/// What fit, per model, after a model said a request was too long: the next turns start there,
-/// not with requests it refuses again. For as long as the process runs.
-static CAPS: std::sync::Mutex<Option<std::collections::HashMap<String, usize>>> = std::sync::Mutex::new(None);
+/// What fit, per model and budget, after a model said a request was too long: later turns
+/// start there, not with requests it refuses again. For as long as the process runs, at most
+/// [CAP_TURNS] turns (a model can be reloaded with more context); another budget (`/context`,
+/// `context_kib`) is another entry.
+type Caps = std::collections::HashMap<(String, usize), (usize, usize)>;
+static CAPS: std::sync::Mutex<Option<Caps>> = std::sync::Mutex::new(None);
+/// Turns a learned cap is used for before it is forgotten.
+const CAP_TURNS: usize = 50;
 
-fn learned_cap(model: &str) -> Option<usize> {
-    CAPS.lock().ok()?.as_ref()?.get(model).copied()
+/// The cap learned for [model] at [budget], counting a turn that starts with it.
+fn learned_cap(model: &str, budget: usize) -> Option<usize> {
+    let mut caps = CAPS.lock().ok()?;
+    let caps = caps.as_mut()?;
+    let key = (model.to_owned(), budget);
+    let (cap, uses) = caps.get_mut(&key)?;
+    *uses += 1;
+    let cap = *cap;
+    if *uses > CAP_TURNS {
+        caps.remove(&key);
+        return None;
+    }
+    Some(cap)
 }
 
-fn learn_cap(model: &str, cap: usize) {
+/// The cap learned for [model] at [budget], not counted as a turn.
+fn peek_cap(model: &str, budget: usize) -> Option<usize> {
+    CAPS.lock().ok()?.as_ref()?.get(&(model.to_owned(), budget)).map(|(cap, _)| *cap)
+}
+
+fn learn_cap(model: &str, budget: usize, cap: usize) {
     if let Ok(mut caps) = CAPS.lock() {
-        caps.get_or_insert_with(Default::default).insert(model.to_owned(), cap);
+        caps.get_or_insert_with(Default::default).insert((model.to_owned(), budget), (cap, 0));
+    }
+}
+
+fn forget_cap(model: &str, budget: usize) {
+    if let Ok(mut caps) = CAPS.lock()
+        && let Some(caps) = caps.as_mut()
+    {
+        caps.remove(&(model.to_owned(), budget));
     }
 }
 
@@ -1227,59 +1290,60 @@ const REPEATED: usize = 3;
 /// And this many: the turn stops (it would only spend the step budget).
 const STUCK: usize = 6;
 
-/// The calls of one turn, to see a model going round in circles: the same call (its tool and
-/// its arguments, as JSON reads them) with the same result, one after the other. Any other call
-/// in between starts the count again (alternating between two files is work, not a loop; and a
-/// result cleared from the window ([crate::session]) is never the one just before).
+/// The calls of one turn, to see a model going round in circles: by call (its tool and its
+/// arguments, as JSON reads them), how many times it gave the same result, whatever came in
+/// between (read a file, fail the same edit, read it again… is a loop too). A call's count
+/// starts again when its result changes, or when the model asks again for a result that was
+/// cleared from the window ([crate::session]) — it no longer has it.
 #[derive(Default)]
 struct Loops {
-    /// The last call, its result, and how many times in a row they came.
-    last: Option<(u64, u64, usize)>,
+    /// By call: its result, how many times, and the id of its last call.
+    seen: std::collections::HashMap<u64, (u64, usize, String)>,
+    /// The ids of the results cleared from what was sent last.
+    cleared: HashSet<String>,
     stuck: Option<String>,
 }
 
-/// Whether a call waits for something to change (a poll: `sleep`, a health check, `gh pr
-/// checks`, `process wait`): the same answer again is no loop, only a hint to stop polling.
+/// Whether a call waits for something to change: a command that starts with `sleep`, `wait`,
+/// `until` or `watch` (after variables set for it and a `cd … &&`), or `process` reading a
+/// background process. The same answer again is not yet a loop: it is stopped later
+/// ([STUCK_POLL]).
 fn polls(name: &str, arguments: &str) -> bool {
-    if name == "process" {
-        return true;
+    let args = serde_json::from_str::<Value>(arguments).unwrap_or_default();
+    match name {
+        "process" => matches!(args["action"].as_str(), Some("output" | "wait")),
+        "terminal" => {
+            let command = args["command"].as_str().unwrap_or_default();
+            let mut words = command.split_whitespace().peekable();
+            // `A=1 B=2 cmd`, `cd dir && cmd`.
+            loop {
+                match words.peek() {
+                    Some(w) if w.contains('=') && !w.starts_with('=') => {
+                        words.next();
+                    }
+                    Some(&"cd") => {
+                        words.next();
+                        words.next();
+                        if words.peek() == Some(&"&&") || words.peek() == Some(&";") {
+                            words.next();
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            matches!(words.next(), Some("sleep" | "wait" | "until" | "watch"))
+        }
+        _ => false,
     }
-    if name != "terminal" && name != "execute_code" {
-        return false;
-    }
-    let command = serde_json::from_str::<Value>(arguments)
-        .ok()
-        .and_then(|a| a["command"].as_str().or(a["code"].as_str()).map(str::to_owned))
-        .unwrap_or_else(|| arguments.to_owned());
-    command.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).any(|word| {
-        matches!(
-            word,
-            "sleep"
-                | "wait"
-                | "curl"
-                | "wget"
-                | "gh"
-                | "ping"
-                | "watch"
-                | "until"
-                | "while"
-                | "status"
-                | "health"
-                | "healthz"
-                | "systemctl"
-                | "kubectl"
-                | "docker"
-                | "journalctl"
-                | "tail"
-                | "ps"
-        )
-    })
 }
 
+/// A poll with the same result this many times: stopped (it would poll until the step budget).
+const STUCK_POLL: usize = 12;
+
 impl Loops {
-    /// [result] for [name] called with [arguments], with a word to the model when it is the
-    /// same as the last [REPEATED] times or more in a row.
-    fn note(&mut self, name: &str, arguments: &str, result: String) -> String {
+    /// [result] for call [id], [name] with [arguments]: with a word to the model when that call
+    /// gave this same result [REPEATED] times or more this turn.
+    fn note(&mut self, id: &str, name: &str, arguments: &str, result: String) -> String {
         use std::hash::{Hash, Hasher};
         let hash = |parts: &[&str]| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1289,18 +1353,15 @@ impl Loops {
         let canonical =
             serde_json::from_str::<Value>(arguments).map_or_else(|_| arguments.to_owned(), |v| v.to_string());
         let (call, outcome) = (hash(&[name, &canonical]), hash(&[&result]));
-        let times = match &mut self.last {
-            Some((c, o, n)) if *c == call && *o == outcome => {
-                *n += 1;
-                *n
-            }
-            last => {
-                *last = Some((call, outcome, 1));
-                1
-            }
-        };
+        let entry = self.seen.entry(call).or_insert_with(|| (outcome, 0, String::new()));
+        if entry.0 != outcome || self.cleared.contains(&entry.2) {
+            *entry = (outcome, 0, String::new());
+        }
+        entry.1 += 1;
+        id.clone_into(&mut entry.2);
+        let times = entry.1;
         let poll = polls(name, arguments);
-        if times >= STUCK && !poll {
+        if times >= if poll { STUCK_POLL } else { STUCK } {
             self.stuck = Some(name.to_owned());
         }
         if times < REPEATED {
@@ -1308,17 +1369,17 @@ impl Loops {
         }
         if poll {
             return format!(
-                "{result}\n[You have now waited the same way {times} times in a row, with this same result. Waiting \
+                "{result}\n[You have now waited the same way {times} times this turn, with this same result. Waiting \
                  longer may not change it: check why, or tell the owner what you are waiting for.]"
             );
         }
         format!(
-            "{result}\n[You have now made this exact call {times} times in a row, with this same result each time. \
+            "{result}\n[You have now made this exact call {times} times this turn, with this same result each time. \
              Do not repeat it: try something different, or answer with what you have.]"
         )
     }
 
-    /// The tool that was called [STUCK] times in a row with the same result, if one was.
+    /// The tool that was called [STUCK] times (a poll [STUCK_POLL]) with the same result, if one was.
     fn stuck(&mut self) -> Option<String> {
         self.stuck.take()
     }

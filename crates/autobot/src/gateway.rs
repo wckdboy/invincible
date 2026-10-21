@@ -115,12 +115,18 @@ pub enum GatewayError {
     /// The router wants the owner to confirm (cloud use, a training provider, …).
     Confirm(String),
     Failed(String),
+    /// The request was longer than the model takes; [model]: the one the router chose, when it
+    /// said ([crate::agent] learns what fits it).
+    TooLong {
+        message: String,
+        model: Option<String>,
+    },
 }
 
 impl std::fmt::Display for GatewayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Confirm(m) | Self::Failed(m) => f.write_str(m),
+            Self::Confirm(m) | Self::Failed(m) | Self::TooLong { message: m, .. } => f.write_str(m),
         }
     }
 }
@@ -363,6 +369,11 @@ impl Gateway {
             }
             if status == reqwest::StatusCode::CONFLICT {
                 return Err(Attempt::Final(GatewayError::Confirm(message)));
+            }
+            if overflow(&message) {
+                let model = decision.as_ref().and_then(|d: &Value| d["model"].as_str()).map(str::to_owned);
+                let message = format!("the gateway refused ({status}): {message}");
+                return Err(Attempt::Final(GatewayError::TooLong { message, model }));
             }
             let error = GatewayError::Failed(format!("the gateway refused ({status}): {message}"));
             // Too many requests, or a server that is overloaded or between restarts.

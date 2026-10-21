@@ -1062,10 +1062,9 @@ impl Tools {
     }
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
-        let mut child = self.shell_command(command).await?;
-        // A process group of its own, so what it starts can be stopped with it.
-        #[cfg(unix)]
-        child.process_group(0);
+        // A session of its own (no terminal: a password prompt fails at once instead of
+        // waiting on one it cannot read), and so a group that is stopped with it.
+        let mut child = detached(self.shell_command(command).await?);
         let mut child = child
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -1074,7 +1073,7 @@ impl Tools {
             .spawn()
             .map_err(|e| format!("sh: {e}"))?;
         // Stopped (a timeout, or the turn dropped while it runs): what it started goes too.
-        let mut tree = Group(child.id());
+        let mut tree = Group::new(child.id());
         let mut stdout = child.stdout.take().expect("piped");
         let mut stderr = child.stderr.take().expect("piped");
         // Only the start and the end of what it prints are kept (the model gets no more), so a
@@ -1091,7 +1090,7 @@ impl Tools {
                     () = &mut reads, if !read => read = true,
                     status = child.wait() => {
                         // Reaped: its number may be given to another process from now on.
-                        tree.0 = None;
+                        tree.reaped();
                         break Some(status.map_err(|e| e.to_string())?);
                     }
                     () = tokio::time::sleep_until(deadline) => break None,
@@ -1634,6 +1633,10 @@ fn edited(text: &str, old: &str, new: &str, all: bool, path: &Path) -> Result<(S
             }
             Err(why)
         }
+        Err(crate::edit::NO_CHANGE) => Err(format!(
+            "the edit changes nothing in {} (new_text is what is there already); nothing was written",
+            path.display()
+        )),
         Err(n) => Err(format!(
             "old_text is in {} {n} times; include more lines around it so it is unique, or set replace_all",
             path.display()
@@ -1756,13 +1759,87 @@ impl Capture {
     }
 }
 
+/// [command], to start in a session of its own: no controlling terminal (opening `/dev/tty`
+/// fails, so `sudo` or `ssh` asking for a password stop with an error rather than wait until
+/// the timeout), and its own process group, numbered as it is. Through `perl` (POSIX `setsid`,
+/// then the command in its place: the same process), which macOS and Linux have; without it,
+/// only a group of its own.
+fn detached(command: tokio::process::Command) -> tokio::process::Command {
+    static PERL: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let Some(perl) = PERL.get_or_init(|| crate::find_on_path("perl")) else {
+        let mut command = command;
+        #[cfg(unix)]
+        command.process_group(0);
+        return command;
+    };
+    let std = command.as_std();
+    let mut wrapped = tokio::process::Command::new(perl);
+    wrapped
+        .arg("-e")
+        .arg("use POSIX (); POSIX::setsid(); exec { $ARGV[0] } @ARGV or die \"$ARGV[0]: $!\\n\";")
+        .arg(std.get_program())
+        .args(std.get_args());
+    for (key, value) in std.get_envs() {
+        match value {
+            Some(value) => wrapped.env(key, value),
+            None => wrapped.env_remove(key),
+        };
+    }
+    if let Some(dir) = std.get_current_dir() {
+        wrapped.current_dir(dir);
+    }
+    wrapped
+}
+
+/// The process groups of the commands running now, to stop them when the agent is killed
+/// ([stop_running]).
+static RUNNING: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+/// Stops every command a tool is running (the agent is going: a signal, the end of a run),
+/// with what they started.
+pub fn stop_running() {
+    let groups = std::mem::take(&mut *RUNNING.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    for pid in groups {
+        if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+        }
+    }
+}
+
+/// How many commands a tool is running now.
+pub fn running_commands() -> usize {
+    RUNNING.lock().map_or(0, |r| r.len())
+}
+
 /// A command's process group (it and what it started), killed together by [Group::kill] or
 /// when dropped (the turn stopped while it ran); `None` once the command was reaped.
 struct Group(Option<u32>);
 
 impl Group {
+    fn new(pid: Option<u32>) -> Self {
+        if let (Some(pid), Ok(mut running)) = (pid, RUNNING.lock()) {
+            running.push(pid);
+        }
+        Self(pid)
+    }
+
+    fn forget(pid: u32) {
+        if let Ok(mut running) = RUNNING.lock() {
+            running.retain(|p| *p != pid);
+        }
+    }
+
+    /// The command was reaped: its number may go to another process from now on.
+    fn reaped(&mut self) {
+        if let Some(pid) = self.0.take() {
+            Self::forget(pid);
+        }
+    }
+
     fn kill(&mut self) {
-        if let Some(pid) = self.0.take().and_then(|p| rustix::process::Pid::from_raw(p as i32)) {
+        let Some(pid) = self.0.take() else { return };
+        Self::forget(pid);
+        if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
             let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
         }
     }
@@ -1962,6 +2039,16 @@ mod tests {
         assert_eq!(tools.run(&tools.parse("read_file", r#"{"path":"d/n.txt"}"#).unwrap()).await, "héllo");
         assert_eq!(tools.run(&tools.parse("list_dir", "{}").unwrap()).await, "d/");
         assert!(tools.run(&tools.parse("read_file", r#"{"path":"nope"}"#).unwrap()).await.starts_with("error:"));
+    }
+
+    #[test]
+    fn an_edit_that_changes_nothing_says_so() {
+        let path = std::path::Path::new("a.txt");
+        let e = super::edited("foo \nbar\n", "foo\nbar", "foo \nbar", false, path).unwrap_err();
+        assert!(e.starts_with("the edit changes nothing in a.txt"), "{e}");
+        let e = super::edited("x = 1\n", "x = 1", "x = 1", false, path).unwrap_err();
+        assert!(e.starts_with("the edit changes nothing"), "{e}");
+        assert!(super::edited("x = 1\n", "y", "z", false, path).unwrap_err().starts_with("old_text is not in"));
     }
 
     #[tokio::test]

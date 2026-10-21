@@ -112,6 +112,8 @@ async fn a_hung_command_is_stopped_with_what_it_printed_and_what_it_started() {
     let mut session = Session::open(&sessions(&dir), "s").unwrap();
     let started = Instant::now();
     agent.turn(&mut session, "go", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    // A second for the timeout, and no wait for what the second command left running.
+    let took = started.elapsed();
     let requests = model.requests();
     let hung = last_result(&requests[1].body);
     assert!(hung.starts_with("started\n[stopped after 1 seconds"), "{hung}");
@@ -126,7 +128,7 @@ async fn a_hung_command_is_stopped_with_what_it_printed_and_what_it_started() {
     std::thread::sleep(Duration::from_millis(200));
     assert!(!gone(left), "a command that finished does not take what it left running with it");
     let _ = std::process::Command::new("kill").arg(left.to_string()).status();
-    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    assert!(took < Duration::from_secs(5), "{took:?}");
 }
 
 #[tokio::test]
@@ -283,9 +285,12 @@ async fn a_request_too_long_for_the_model_is_made_smaller_and_sent_again() {
             return say("Earlier: the owner asked about many things, all answered.");
         }
         if body.to_string().len() > 45_000 {
-            return error(400, "the request exceeds the available context size, try increasing it");
+            return routed(
+                error(400, "the request exceeds the available context size, try increasing it"),
+                "small-context",
+            );
         }
-        say("fits")
+        routed(say("fits"), "small-context")
     })
     .await;
     let dir = dir("overflow");
@@ -293,11 +298,7 @@ async fn a_request_too_long_for_the_model_is_made_smaller_and_sent_again() {
     agent.options.context_kib = Some(64);
     // A model of its own: what is learned about it is kept for the process.
     agent.gateway = agent.gateway.with_model("small-context");
-    let mut session = Session::open(&sessions(&dir), "s").unwrap();
-    for i in 0..40 {
-        session.push(json!({ "role": "user", "content": format!("question {i}") })).unwrap();
-        session.push(json!({ "role": "assistant", "content": format!("answer {i}: {}", "x".repeat(3000)) })).unwrap();
-    }
+    let mut session = long_history(&dir, "s");
     let outcome = agent.turn(&mut session, "one more", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
     assert_eq!(outcome.text, "fits");
     let requests = model.requests();
@@ -318,7 +319,87 @@ async fn a_request_too_long_for_the_model_is_made_smaller_and_sent_again() {
     let mut other = Session::open(&sessions(&dir), "other").unwrap();
     agent.turn(&mut other, "hi", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
     assert!(other.limit() < 64 * 1024);
+    // Another budget (`/context`, `context_kib`) learns for itself.
+    agent.options.context_kib = Some(96);
+    let mut third = Session::open(&sessions(&dir), "third").unwrap();
+    agent.turn(&mut third, "hi", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    assert_eq!(third.limit(), 96 * 1024);
     assert_consistent(&session.messages);
+}
+
+/// A conversation of 40 turns with long answers (about 120 KiB).
+fn long_history(dir: &std::path::Path, id: &str) -> Session {
+    let mut session = Session::open(&sessions(dir), id).unwrap();
+    for i in 0..40 {
+        session.push(json!({ "role": "user", "content": format!("question {i}") })).unwrap();
+        session.push(json!({ "role": "assistant", "content": format!("answer {i}: {}", "x".repeat(3000)) })).unwrap();
+    }
+    session
+}
+
+#[tokio::test]
+async fn what_fits_is_learned_for_the_model_the_router_chose_not_for_auto() {
+    // `auto` routes to a small local model, or (when told) to a large cloud one.
+    let cloud = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let to_cloud = cloud.clone();
+    let model = model(move |_, body| {
+        if !body["tools"].is_array() {
+            return say("a summary");
+        }
+        if to_cloud.load(std::sync::atomic::Ordering::SeqCst) {
+            return routed(say("cloud"), "cloud-200k");
+        }
+        if body.to_string().len() > 45_000 {
+            return routed(error(400, "the request exceeds the available context size"), "local-8k");
+        }
+        routed(say("local"), "local-8k")
+    })
+    .await;
+    let dir = dir("overflow-auto");
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    agent.options.context_kib = Some(64);
+    let owner = Owner::new(Answer::Once);
+    let mut first = long_history(&dir, "a");
+    assert_eq!(agent.turn(&mut first, "go", &owner, &mut grants(), &quiet).await.unwrap().text, "local");
+    let big = |from: usize| model.requests()[from..].iter().filter(|r| r.body.to_string().len() > 45_000).count();
+    assert!(big(0) >= 2, "it shrank step by step the first time");
+    // On `auto`, a turn starts whole; refused once, it goes straight to what fit the model the
+    // router named.
+    let before = model.count();
+    let mut second = long_history(&dir, "b");
+    assert_eq!(agent.turn(&mut second, "go", &owner, &mut grants(), &quiet).await.unwrap().text, "local");
+    assert_eq!(big(before), 1);
+    // A turn the router sends to a large model is not held to the small one's size.
+    cloud.store(true, std::sync::atomic::Ordering::SeqCst);
+    let before = model.count();
+    let mut third = long_history(&dir, "c");
+    assert_eq!(agent.turn(&mut third, "go", &owner, &mut grants(), &quiet).await.unwrap().text, "cloud");
+    assert_eq!(third.limit(), 64 * 1024);
+    assert!(big(before) >= 1, "the whole window went to the cloud model");
+}
+
+#[tokio::test]
+async fn without_the_routers_word_nothing_is_learned() {
+    let model = model(|_, body| {
+        if !body["tools"].is_array() {
+            return say("a summary");
+        }
+        if body.to_string().len() > 45_000 {
+            return error(400, "the request exceeds the available context size");
+        }
+        say("fits")
+    })
+    .await;
+    let dir = dir("overflow-unnamed");
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    agent.options.context_kib = Some(64);
+    agent.gateway = agent.gateway.with_model("unnamed-model");
+    let owner = Owner::new(Answer::Once);
+    let mut first = long_history(&dir, "a");
+    assert_eq!(agent.turn(&mut first, "go", &owner, &mut grants(), &quiet).await.unwrap().text, "fits");
+    let mut second = Session::open(&sessions(&dir), "b").unwrap();
+    agent.turn(&mut second, "hi", &owner, &mut grants(), &quiet).await.unwrap();
+    assert_eq!(second.limit(), 64 * 1024);
 }
 
 #[tokio::test]
@@ -584,33 +665,88 @@ async fn a_crash_between_a_call_and_its_results_is_answered_on_the_next_turn() {
 }
 
 #[tokio::test]
-async fn going_back_and_forth_is_work_and_polling_is_not_stopped() {
+async fn going_round_two_calls_is_a_loop_too() {
+    // Read the file, try the same edit that cannot apply, read it again, …
     let model = model(|_, body| {
         let done = results_this_turn(body);
-        match done {
-            // a, b, a, b, …: the same calls, never twice in a row.
-            0..8 => call(
-                &format!("r{done}"),
-                "read_file",
-                json!({ "path": if done.is_multiple_of(2) { "a.txt" } else { "b.txt" } }),
-            ),
-            // Waiting on something, the same answer each time.
-            8..16 => call(&format!("p{done}"), "terminal", json!({ "command": "sleep 0; echo pending" })),
-            _ => say("done waiting"),
+        if done.is_multiple_of(2) {
+            call(&format!("r{done}"), "read_file", json!({ "path": "x.txt" }))
+        } else {
+            call(
+                &format!("e{done}"),
+                "edit_file",
+                json!({ "path": "x.txt", "old_text": "nothing like it", "new_text": "y" }),
+            )
         }
     })
     .await;
-    let dir = dir("back-and-forth");
-    std::fs::write(dir.join("work/a.txt"), "a").unwrap();
-    std::fs::write(dir.join("work/b.txt"), "b").unwrap();
+    let dir = dir("two-step-loop");
+    std::fs::write(dir.join("work/x.txt"), "the file\n").unwrap();
     let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
     agent.max_steps = 40;
     let mut session = Session::open(&sessions(&dir), "s").unwrap();
     let outcome = agent.turn(&mut session, "go", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
-    assert_eq!(outcome.text, "done waiting");
-    let results = tool_results(&model.requests().last().unwrap().body);
-    assert!(results[..8].iter().all(|r| !r.contains("in a row")), "{results:?}");
-    assert!(results[10].contains("waited the same way 3 times in a row"), "{}", results[10]);
+    assert!(outcome.text.starts_with("Stopped: the same read_file call"), "{}", outcome.text);
+    assert!(model.count() <= 12, "{}", model.count());
+    assert!(tool_results(&model.requests()[5].body)[4].contains("made this exact call 3 times"));
+}
+
+#[tokio::test]
+async fn waiting_is_stopped_later_and_output_through_tail_is_no_wait() {
+    let model = model(|_, body| {
+        let done = results_this_turn(body);
+        let first_user = body["messages"].as_array().unwrap().iter().rev().find(|m| m["role"] == "user").unwrap();
+        let command = if first_user["content"] == "wait" { "sleep 0; echo pending" } else { "echo 3 failed | tail -1" };
+        call(&format!("p{done}"), "terminal", json!({ "command": command }))
+    })
+    .await;
+    let dir = dir("polls");
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    agent.max_steps = 40;
+    let owner = Owner::new(Answer::Once);
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    let outcome = agent.turn(&mut session, "wait", &owner, &mut grants(), &quiet).await.unwrap();
+    assert!(outcome.text.starts_with("Stopped: the same terminal call"), "{}", outcome.text);
+    assert_eq!(model.count(), 12, "a wait gets twelve tries");
+    assert!(tool_results(&model.requests()[3].body)[2].contains("waited the same way 3 times"));
+    let before = model.count();
+    let outcome = agent.turn(&mut session, "test", &owner, &mut grants(), &quiet).await.unwrap();
+    assert!(outcome.text.starts_with("Stopped: the same terminal call"));
+    assert_eq!(model.count() - before, 6, "a command piped to tail is no wait");
+}
+
+#[tokio::test]
+async fn asking_again_for_a_result_that_was_cleared_is_no_loop() {
+    // f0 twice, then twelve large files (f0's results are cleared to fit), then f0 again.
+    let model = model(|_, body| {
+        let done = results_this_turn(body);
+        let path = match done {
+            0 | 1 | 14 => "f0.txt".to_owned(),
+            2..14 => format!("big{done}.txt"),
+            _ => return say("done"),
+        };
+        call(&format!("r{done}"), "read_file", json!({ "path": path }))
+    })
+    .await;
+    let dir = dir("cleared-reread");
+    std::fs::write(dir.join("work/f0.txt"), "first file ".repeat(300)).unwrap();
+    for i in 2..14 {
+        std::fs::write(dir.join(format!("work/big{i}.txt")), format!("{i} {}", "data ".repeat(1000))).unwrap();
+    }
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    agent.max_steps = 40;
+    agent.options.context_kib = Some(16);
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    agent.turn(&mut session, "go", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    let requests = model.requests();
+    let sent_before = tool_results(&requests[14].body);
+    assert!(sent_before[0].starts_with(autobot::session::CLEARED), "f0's first results were cleared");
+    let last = last_result(&requests[15].body);
+    assert!(
+        last.starts_with("first file") && !last.contains("exact call"),
+        "{}",
+        &last[last.len().saturating_sub(200)..]
+    );
 }
 
 /// A server that answers 200 with a body shorter than it said, then hangs up.
@@ -690,4 +826,41 @@ async fn an_mcp_tools_arguments_are_repaired_like_the_agents_own() {
     let results = tool_results(&model.requests()[1].body);
     assert_eq!(results[0], "42");
     assert!(results[1].contains("not a JSON object"), "{}", results[1]);
+}
+
+#[tokio::test]
+async fn a_command_has_no_terminal_so_a_password_prompt_fails_at_once() {
+    let model = model(|n, _| match n {
+        0 => call(
+            "t",
+            "terminal",
+            json!({ "command": "echo $$ > me.pid; read x < /dev/tty && echo got || echo no-terminal; sleep 1" }),
+        ),
+        _ => say("ok"),
+    })
+    .await;
+    let dir = dir("no-tty");
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    agent.tools = autobot::tools::Tools::new(dir.join("work"), Duration::from_secs(30)).with_home(dir.join("home"));
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    let owner = Owner::new(Answer::Once);
+    let mut granted = grants();
+    let turn = agent.turn(&mut session, "go", &owner, &mut granted, &quiet);
+    let look = async {
+        while !dir.join("work/me.pid").exists() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let pid: i32 = std::fs::read_to_string(dir.join("work/me.pid")).unwrap().trim().parse().unwrap();
+        let pid = rustix::process::Pid::from_raw(pid).unwrap();
+        // A session of its own, which it leads (and a group: killed as one).
+        assert_eq!(rustix::process::getsid(Some(pid)).unwrap(), pid);
+        assert_ne!(rustix::process::getsid(None).unwrap(), pid);
+    };
+    let started = Instant::now();
+    let (outcome, ()) = tokio::join!(turn, look);
+    outcome.unwrap();
+    let result = last_result(&model.requests()[1].body);
+    assert!(result.contains("no-terminal"), "{result}");
+    assert!(started.elapsed() < Duration::from_secs(10));
 }

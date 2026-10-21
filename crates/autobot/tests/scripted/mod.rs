@@ -187,6 +187,18 @@ pub fn calls(list: &[(&str, &str, Value)]) -> Reply {
     )
 }
 
+/// [reply] with the router's decision naming [model] (as the gateway sends on answers and errors).
+pub fn routed(reply: Reply, model: &str) -> Reply {
+    match reply {
+        Reply::Json(status, body, mut headers) => {
+            headers
+                .push(("invincible-decision", json!({ "action": "run", "model": model, "tier": "node" }).to_string()));
+            Reply::Json(status, body, headers)
+        }
+        other => other,
+    }
+}
+
 /// An error answer, the way an OpenAI-compatible server words one.
 pub fn error(status: u16, message: &str) -> Reply {
     Reply::Json(status, json!({ "error": { "message": message } }), Vec::new())

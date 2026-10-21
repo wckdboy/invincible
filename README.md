@@ -461,13 +461,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Under a model that misbehaves:** `edit_file` forgives line-end spaces, `\r\n` and a block
   indented differently when that finds one place, and a miss shows the closest lines; malformed
   tool arguments are read as meant where that is safe, and errors say what the tool takes. The
-  same call with the same result, in a row, is pointed out at the third time and ends the turn at
-  the sixth (a poll, such as `sleep` or a health check, is only pointed out).
+  same call with the same result is pointed out at the third time in a turn and ends the turn at
+  the sixth (a wait, such as `sleep` or `process wait`, at the twelfth).
   A turn longer than the context clears its older tool results (in batches, so a prompt cache
-  keeps most of each request); a "context exceeded" error sends less and summarizes, and later turns with that model start at
-  the size that fit. Gateway
+  keeps most of each request); a "context exceeded" error sends less and summarizes, and later turns with the model the router
+  chose start at the size that fit. Gateway
   calls are tried again after a restart, a 429 or a 5xx (not once an answer has started to show);
-  a command that hangs is stopped with what it printed, and what it started goes with it.
+  a command runs without a terminal (a password prompt fails at once) and, when it hangs or the
+  agent stops, is stopped with what it printed, and what it started goes with it.
 - **Scripts that use the tools:** `execute_code` runs a short Python 3 (or `sh`) script, asked
   for like a command with its code shown and run where commands run (sandboxed when confined,
   in the container, over SSH). In it, `search`, `read_file`, `find_files`, `list_dir`,

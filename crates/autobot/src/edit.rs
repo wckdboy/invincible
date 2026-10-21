@@ -28,7 +28,19 @@ impl Loose {
 /// [text] with [old] replaced by [new] (every match with [all], else exactly one), how many
 /// there were, and how they were found when not exactly. `Err(n)`: no single match (n = 0:
 /// none; more: that many, and not [all]).
+/// [NO_CHANGE]: it matched, but the file would be the same after.
 pub fn apply(text: &str, old: &str, new: &str, all: bool) -> Result<(String, usize, Option<Loose>), usize> {
+    let done = find(text, old, new, all)?;
+    if done.0 == text {
+        return Err(NO_CHANGE);
+    }
+    Ok(done)
+}
+
+/// What [apply] says when the edit would leave the file as it is.
+pub const NO_CHANGE: usize = usize::MAX;
+
+fn find(text: &str, old: &str, new: &str, all: bool) -> Result<(String, usize, Option<Loose>), usize> {
     let found = text.matches(old).count();
     if found == 1 || (found > 1 && all) {
         return Ok((text.replace(old, new), found, None));
@@ -61,10 +73,32 @@ fn strip_break(text: &str) -> (&str, bool) {
     }
 }
 
-/// Text in [new] whose lines must stay as they are (a multi-line string, a heredoc): it cannot
-/// be indented again without changing what it says.
+/// Text in [new] whose lines must stay as they are, so it cannot be indented again without
+/// changing what it says: a heredoc (`<<EOF`, `<<-'END'` at a line's end), or a string that a
+/// line opens and a later one closes (`"""`, `\'\'\'`, a backtick: an odd count on a line). A
+/// `<<` shift or stream and backticks closed on their own line are not.
 fn literal(new: &str) -> bool {
-    new.contains('\n') && ["\"\"\"", "\'\'\'", "`", "<<"].iter().any(|m| new.contains(m))
+    if !new.contains('\n') {
+        return false;
+    }
+    let heredoc = |line: &str| {
+        let Some(at) = line.rfind("<<") else { return false };
+        let rest = line[at + 2..].trim_end();
+        let rest = rest.strip_prefix('-').unwrap_or(rest);
+        // `<< EOF` with a space: only a word in capitals (`y << z` is a shift).
+        let spaced = rest.starts_with(char::is_whitespace);
+        let word = rest.trim_start().trim_matches(['\'', '"']);
+        !word.is_empty()
+            && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && word.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && (!spaced || word.chars().all(|c| !c.is_ascii_lowercase()))
+    };
+    new.lines().any(|line| {
+        heredoc(line)
+            || line.matches("\"\"\"").count() % 2 == 1
+            || line.matches("\'\'\'").count() % 2 == 1
+            || line.matches('`').count() % 2 == 1
+    })
 }
 
 /// The lines of [text] that [old]'s lines match once without their line-end spaces, or with
@@ -147,9 +181,6 @@ fn by_lines(text: &str, old: &str, new: &str) -> Option<(String, usize, Option<L
         out.push_str(&text[..from]);
         out.push_str(&replacement);
         out.push_str(&text[to..]);
-        if out == text {
-            return None;
-        }
         return Some((out, 1, Some(loose)));
     }
     None
@@ -318,7 +349,8 @@ mod tests {
         // A break the file does not have at its end: not guessed.
         assert_eq!(apply("a\nfoo  ", "foo\n", "", false), Err(0));
         // A change that changes nothing is not a success.
-        assert_eq!(apply("foo \nbar\n", "foo\nbar", "foo \nbar", false), Err(0));
+        assert_eq!(apply("foo \nbar\n", "foo\nbar", "foo \nbar", false), Err(super::NO_CHANGE));
+        assert_eq!(apply("same", "same", "same", false), Err(super::NO_CHANGE));
     }
 
     #[test]
@@ -340,7 +372,16 @@ mod tests {
         let new = "x = \"\"\"\nkeep\n  as is\n\"\"\"\nreturn x";
         assert_eq!(apply(text, "x = 1\nreturn x", new, false), Err(0));
         assert_eq!(apply(text, "x = 1\nreturn x", "cat <<EOF\nhi\nEOF", false), Err(0));
-        // Without one, it is.
+        assert_eq!(apply(text, "x = 1\nreturn x", "cat <<- 'END'\nhi\nEND", false), Err(0));
+        assert_eq!(apply(text, "x = 1\nreturn x", "cat << EOF\nhi\nEOF", false), Err(0));
+        assert_eq!(apply(text, "x = 1\nreturn x", "s = `a\nb`\nreturn x", false), Err(0));
+        // Without one, it is: shifts and streams, backticks closed on their line.
         assert!(apply(text, "x = 1\nreturn x", "x = 2\nreturn x", false).is_ok());
+        assert!(apply(text, "x = 1\nreturn x", "x = 1 << 4\nreturn x", false).is_ok());
+        assert!(apply(text, "x = 1\nreturn x", "x = y << z\nreturn x", false).is_ok());
+        assert!(apply(text, "x = 1\nreturn x", "# `x` is one\nreturn x", false).is_ok());
+        assert!(apply(text, "x = 1\nreturn x", "x = \"\"\"one\"\"\"\nreturn x", false).is_ok());
+        let cpp = "int f() {\n    out << 1;\n    return 0;\n}\n";
+        assert!(apply(cpp, "out << 1;\nreturn 0;", "std::cout << x << y;\nreturn 0;", false).is_ok());
     }
 }
