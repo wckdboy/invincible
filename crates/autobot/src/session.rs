@@ -11,6 +11,9 @@ pub struct Session {
     pub messages: Vec<Value>,
     /// Characters of recent messages sent per call at most ([CHAR_BUDGET] unless set).
     pub budget: usize,
+    /// Less than [Session::budget] for now: what the model took when it said a request was too
+    /// long ([crate::agent]); set per turn.
+    pub cap: Option<usize>,
     /// The file ends in a torn line (a crash mid-write): the next line starts on a new one.
     torn: bool,
 }
@@ -90,7 +93,7 @@ impl Session {
         // to the torn one and be lost with it. (The file is not cut here: whoever only reads
         // the conversation must not touch a line another writer is still writing.)
         let torn = bytes.last().is_some_and(|b| *b != b'\n');
-        Ok(Self { id: id.to_owned(), path, messages, budget: CHAR_BUDGET, torn })
+        Ok(Self { id: id.to_owned(), path, messages, budget: CHAR_BUDGET, cap: None, torn })
     }
 
     pub fn push(&mut self, message: Value) -> Result<(), String> {
@@ -249,6 +252,11 @@ impl Session {
         Ok(())
     }
 
+    /// Characters of recent messages sent per call now: the budget, or the cap when lower.
+    pub fn limit(&self) -> usize {
+        self.cap.map_or(self.budget, |cap| cap.min(self.budget))
+    }
+
     /// Where the recent part starts. What left the budget is summarized in batches
     /// ([Session::compaction]): until enough has left to be worth a model call, the window keeps
     /// it (going over the budget by at most an eighth), so nothing is out of both.
@@ -273,7 +281,7 @@ impl Session {
             count += 1;
             chars += cost(m);
         }
-        count > 0 && (chars >= self.budget / 8 || count >= WINDOW / 4)
+        count > 0 && (chars >= self.limit() / 8 || count >= WINDOW / 4)
     }
 
     /// Where the recent part starts by the budget alone: at most [WINDOW] messages and
@@ -287,7 +295,7 @@ impl Session {
                 continue;
             }
             used += cost(m);
-            if used > self.budget || self.messages.len() - i > WINDOW.max(self.budget / 1024) {
+            if used > self.limit() || self.messages.len() - i > WINDOW.max(self.limit() / 1024) {
                 break;
             }
             from = i;
@@ -307,7 +315,7 @@ impl Session {
     pub fn window(&self) -> Vec<Value> {
         let mut window: Vec<Value> =
             self.messages[self.window_start()..].iter().filter(|m| !is_summary(m)).cloned().collect();
-        fit(&mut window, self.budget);
+        fit(&mut window, self.limit());
         window
     }
 

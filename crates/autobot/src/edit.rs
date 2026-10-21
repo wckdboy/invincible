@@ -38,7 +38,9 @@ pub fn apply(text: &str, old: &str, new: &str, all: bool) -> Result<(String, usi
     }
     // The file's line breaks.
     if text.contains("\r\n") && old.contains('\n') && !old.contains("\r\n") {
-        let (old, new) = (old.replace('\n', "\r\n"), new.replace('\n', "\r\n"));
+        let old = old.replace('\n', "\r\n");
+        // The new text's breaks made the file's too (whether it had them already or not).
+        let new = new.replace("\r\n", "\n").replace('\n', "\r\n");
         let found = text.matches(old.as_str()).count();
         if found == 1 || (found > 1 && all) {
             return Ok((text.replace(old.as_str(), &new), found, Some(Loose::LineBreaks)));
@@ -51,20 +53,36 @@ pub fn apply(text: &str, old: &str, new: &str, all: bool) -> Result<(String, usi
     }
 }
 
+/// [text] without one line break at its end; and whether it had one.
+fn strip_break(text: &str) -> (&str, bool) {
+    match text.strip_suffix('\n') {
+        Some(rest) => (rest.strip_suffix('\r').unwrap_or(rest), true),
+        None => (text, false),
+    }
+}
+
+/// Text in [new] whose lines must stay as they are (a multi-line string, a heredoc): it cannot
+/// be indented again without changing what it says.
+fn literal(new: &str) -> bool {
+    new.contains('\n') && ["\"\"\"", "\'\'\'", "`", "<<"].iter().any(|m| new.contains(m))
+}
+
 /// The lines of [text] that [old]'s lines match once without their line-end spaces, or with
-/// only their indentation changed by the same amount everywhere; replaced by [new]'s.
+/// only their indentation changed by the same amount everywhere; replaced by [new]'s. When
+/// [old] ends with a line break, so does what it matched (the break is replaced too, as an
+/// exact match would); when that cannot be done exactly, nothing is.
 fn by_lines(text: &str, old: &str, new: &str) -> Option<(String, usize, Option<Loose>)> {
-    let old_lines: Vec<&str> =
-        old.trim_end_matches(['\n', '\r']).split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    let (body, old_breaks) = strip_break(old);
+    let old_lines: Vec<&str> = body.split('\n').map(|l| l.trim_end_matches('\r')).collect();
     if old_lines.iter().all(|l| l.trim().is_empty()) {
         return None;
     }
-    // Each line of the file: where it starts and ends (without its line break).
+    // Each line of the file: where it starts, where its text ends, and where its line break does.
     let mut spans = Vec::new();
     let mut start = 0;
     for line in text.split_inclusive('\n') {
         let body = line.trim_end_matches('\n').trim_end_matches('\r');
-        spans.push((start, start + body.len()));
+        spans.push((start, start + body.len(), start + line.len()));
         start += line.len();
     }
     let line = |i: usize| &text[spans[i].0..spans[i].1];
@@ -92,10 +110,23 @@ fn by_lines(text: &str, old: &str, new: &str) -> Option<(String, usize, Option<L
             }
             continue;
         };
-        let file_lines: Vec<&str> = (0..n).map(|k| line(at + k)).collect();
-        let new = new.trim_end_matches(['\n', '\r']);
+        let last = spans[at + n - 1];
+        // The old text ends with a line break; the file's last matched line must have one.
+        if old_breaks && last.2 == last.1 {
+            return None;
+        }
+        // The line break of the matched lines (a file can mix them).
+        let brk = (at..at + n)
+            .chain(at.checked_sub(1))
+            .find(|&i| spans[i].2 > spans[i].1)
+            .map_or("\n", |i| &text[spans[i].1..spans[i].2]);
+        let new = new.replace("\r\n", "\n");
         let new = match loose {
             Loose::Indentation => {
+                if literal(&new) {
+                    return None;
+                }
+                let file_lines: Vec<&str> = (0..n).map(|k| line(at + k)).collect();
                 let (add, remove) = shift(&file_lines, &old_lines)?;
                 new.split('\n')
                     .map(|l| {
@@ -108,14 +139,17 @@ fn by_lines(text: &str, old: &str, new: &str) -> Option<(String, usize, Option<L
                     .collect::<Vec<_>>()
                     .join("\n")
             }
-            _ => new.to_owned(),
+            _ => new,
         };
-        let breaks = if text.contains("\r\n") { new.replace("\r\n", "\n").replace('\n', "\r\n") } else { new };
-        let (from, to) = (spans[at].0, spans[at + n - 1].1);
-        let mut out = String::with_capacity(text.len() + breaks.len());
+        let replacement = if brk == "\n" { new } else { new.replace('\n', brk) };
+        let (from, to) = (spans[at].0, if old_breaks { last.2 } else { last.1 });
+        let mut out = String::with_capacity(text.len() + replacement.len());
         out.push_str(&text[..from]);
-        out.push_str(&breaks);
+        out.push_str(&replacement);
         out.push_str(&text[to..]);
+        if out == text {
+            return None;
+        }
         return Some((out, 1, Some(loose)));
     }
     None
@@ -154,8 +188,15 @@ fn shift(file: &[&str], old: &[&str]) -> Option<(String, String)> {
     Some((add, remove))
 }
 
+/// Longest line [closest] compares by similarity (longer ones only when equal).
+const CLOSEST_MAX: usize = 2000;
+/// How long [closest] may look, in all.
+const CLOSEST_TIME: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// Where [text] comes closest to [old]: its line number and those lines (as many as [old] has,
-/// at most 12), when something is close at all.
+/// at most 12), when something is close at all. Bounded: only lines of about the needle's
+/// length are compared (no other can come close), each comparison and the whole search with a
+/// time limit, so one long line (minified code, a log) cannot stall it.
 pub fn closest(text: &str, old: &str) -> Option<(usize, String)> {
     let old_lines: Vec<&str> = old.lines().filter(|l| !l.trim().is_empty()).collect();
     let first = old_lines.first()?.trim();
@@ -163,15 +204,30 @@ pub fn closest(text: &str, old: &str) -> Option<(usize, String)> {
     if lines.len() > 20_000 {
         return None;
     }
+    // A ratio of 0.6 needs the shorter at least 0.43 of the longer: 2m / (a + b) <= 2a / (a + b).
+    let (low, high) = (first.len() * 2 / 5, (first.len() * 5 / 2).max(1));
+    let deadline = std::time::Instant::now() + CLOSEST_TIME;
     let mut best = (0.0f32, 0usize);
     for (i, line) in lines.iter().enumerate() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let score = if line == first { 1.0 } else { similar::TextDiff::from_chars(line, first).ratio() };
+        let score = if line == first {
+            1.0
+        } else if line.len() < low || line.len() > high || line.len() > CLOSEST_MAX || first.len() > CLOSEST_MAX {
+            continue;
+        } else {
+            similar::TextDiff::configure().timeout(std::time::Duration::from_millis(5)).diff_chars(line, first).ratio()
+        };
         if score > best.0 {
             best = (score, i);
+            if score == 1.0 {
+                break;
+            }
+        }
+        if std::time::Instant::now() > deadline {
+            break;
         }
     }
     if best.0 < 0.6 {
@@ -179,7 +235,8 @@ pub fn closest(text: &str, old: &str) -> Option<(usize, String)> {
     }
     let count = old.lines().count().clamp(1, 12);
     let end = (best.1 + count).min(lines.len());
-    let shown: Vec<String> = (best.1..end).map(|i| format!("{:>5}  {}", i + 1, lines[i])).collect();
+    let shown: Vec<String> =
+        (best.1..end).map(|i| format!("{:>5}  {}", i + 1, lines[i].chars().take(300).collect::<String>())).collect();
     Some((best.1 + 1, shown.join("\n")))
 }
 
@@ -232,5 +289,58 @@ mod tests {
         assert!(shown.starts_with("    3  fn compute_total(items) {"), "{shown}");
         assert_eq!(shown.lines().count(), 3);
         assert!(closest(text, "nothing like it at all here").is_none());
+    }
+
+    #[test]
+    fn one_very_long_line_does_not_stall_the_closest_lines() {
+        let text = format!("short\n{}\nfn main() {{}}\n", "x".repeat(200_000));
+        let started = std::time::Instant::now();
+        let found = closest(&text, "fn mian() {}");
+        assert!(started.elapsed() < std::time::Duration::from_millis(500), "{:?}", started.elapsed());
+        assert_eq!(found.map(|f| f.0), Some(3));
+        let needle = "y".repeat(10_000);
+        let started = std::time::Instant::now();
+        let _ = closest(&format!("{}\n", "y".repeat(10_001)).repeat(50), &needle);
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    }
+
+    #[test]
+    fn line_breaks_at_the_end_go_as_an_exact_match_would() {
+        // A line taken out with its break.
+        assert_eq!(apply("a\nfoo  \nb\n", "foo\n", "", false).unwrap().0, "a\nb\n");
+        assert_eq!(apply("a\nfoo  \nbar \nb\n", "foo\nbar\n", "", false).unwrap().0, "a\nb\n");
+        assert_eq!(apply("a\nfoo  \nb\n", "foo\n", "baz\n", false).unwrap().0, "a\nbaz\nb\n");
+        // The blank line after it is part of what is matched.
+        assert_eq!(apply("foo \n\nbar\n", "foo\n\n", "foo\n", false).unwrap().0, "foo\nbar\n");
+        // Indented differently, with its break.
+        let (out, _, loose) = apply("if x:\n    y()\nz\n", "      y()\n", "", false).unwrap();
+        assert_eq!((out.as_str(), loose), ("if x:\nz\n", Some(Loose::Indentation)));
+        // A break the file does not have at its end: not guessed.
+        assert_eq!(apply("a\nfoo  ", "foo\n", "", false), Err(0));
+        // A change that changes nothing is not a success.
+        assert_eq!(apply("foo \nbar\n", "foo\nbar", "foo \nbar", false), Err(0));
+    }
+
+    #[test]
+    fn line_breaks_come_from_the_lines_matched() {
+        // The new text already has \r\n: not doubled.
+        let (out, _, _) = apply("x = 1\r\ny = 2\r\n", "x = 1\ny = 2", "x = 3\r\ny = 4", false).unwrap();
+        assert_eq!(out, "x = 3\r\ny = 4\r\n");
+        // A file with both: the matched lines' kind.
+        let mixed = "a\r\nb\r\nc  \nd\ne\n";
+        let (out, _, _) = apply(mixed, "c\nd", "C\nD", false).unwrap();
+        assert_eq!(out, "a\r\nb\r\nC\nD\ne\n");
+        let (out, _, _) = apply("a  \r\nb\r\nc\n", "a\nb", "A\nB", false).unwrap();
+        assert_eq!(out, "A\r\nB\r\nc\n");
+    }
+
+    #[test]
+    fn multi_line_literals_are_not_indented_again() {
+        let text = "def f():\n    x = 1\n    return x\n";
+        let new = "x = \"\"\"\nkeep\n  as is\n\"\"\"\nreturn x";
+        assert_eq!(apply(text, "x = 1\nreturn x", new, false), Err(0));
+        assert_eq!(apply(text, "x = 1\nreturn x", "cat <<EOF\nhi\nEOF", false), Err(0));
+        // Without one, it is.
+        assert!(apply(text, "x = 1\nreturn x", "x = 2\nreturn x", false).is_ok());
     }
 }

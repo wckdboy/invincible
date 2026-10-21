@@ -102,7 +102,7 @@ async fn a_command_that_prints_gigabytes_is_cut_without_holding_it_all() {
 async fn a_hung_command_is_stopped_with_what_it_printed_and_what_it_started() {
     let model = model(|n, _| match n {
         0 => call("c", "terminal", json!({ "command": "sleep 300 & echo $! > child.pid; echo started; sleep 300" })),
-        1 => call("d", "terminal", json!({ "command": "sleep 300 > /dev/null 2>&1 & echo done" })),
+        1 => call("d", "terminal", json!({ "command": "sleep 300 > /dev/null 2>&1 & echo $! > left.pid; echo done" })),
         _ => say("ok"),
     })
     .await;
@@ -120,6 +120,12 @@ async fn a_hung_command_is_stopped_with_what_it_printed_and_what_it_started() {
     // Done, though what it started keeps running (and is left to run): no wait for it.
     let done = last_result(&requests[2].body);
     assert_eq!(done, "done\n[exit code 0]");
+    // Once a command is done (and reaped), nothing is killed in its name any more: what it left
+    // running stays (and a process given its number later is safe).
+    let left: u32 = std::fs::read_to_string(dir.join("work/left.pid")).unwrap().trim().parse().unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!gone(left), "a command that finished does not take what it left running with it");
+    let _ = std::process::Command::new("kill").arg(left.to_string()).status();
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 }
 
@@ -285,6 +291,8 @@ async fn a_request_too_long_for_the_model_is_made_smaller_and_sent_again() {
     let dir = dir("overflow");
     let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
     agent.options.context_kib = Some(64);
+    // A model of its own: what is learned about it is kept for the process.
+    agent.gateway = agent.gateway.with_model("small-context");
     let mut session = Session::open(&sessions(&dir), "s").unwrap();
     for i in 0..40 {
         session.push(json!({ "role": "user", "content": format!("question {i}") })).unwrap();
@@ -297,8 +305,54 @@ async fn a_request_too_long_for_the_model_is_made_smaller_and_sent_again() {
     assert!((1..=3).contains(&refused), "{refused}");
     assert!(requests.iter().any(|r| !r.body["tools"].is_array()), "what left the window was summarized");
     assert!(session.summary().is_some());
-    assert!(session.budget < 64 * 1024);
+    assert_eq!(session.budget, 64 * 1024, "the budget itself is the configured one");
+    assert!(session.limit() < 64 * 1024);
+    // The next turn starts at what fit: no request refused again.
+    let before = model.count();
+    let outcome =
+        agent.turn(&mut session, "and another", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "fits");
+    let again = model.requests()[before..].iter().filter(|r| r.body.to_string().len() > 45_000).count();
+    assert_eq!(again, 0);
+    // So does a new conversation with the same model.
+    let mut other = Session::open(&sessions(&dir), "other").unwrap();
+    agent.turn(&mut other, "hi", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    assert!(other.limit() < 64 * 1024);
     assert_consistent(&session.messages);
+}
+
+#[tokio::test]
+async fn a_model_that_takes_nothing_fails_clearly_without_endless_summaries() {
+    let model = model(|_, body| {
+        if !body["tools"].is_array() {
+            return say("a summary");
+        }
+        error(400, "This model's maximum context length is 512 tokens")
+    })
+    .await;
+    let dir = dir("overflow-min");
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    agent.gateway = agent.gateway.with_model("tiny-context");
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    for i in 0..20 {
+        session.push(json!({ "role": "user", "content": format!("q{i}") })).unwrap();
+        session.push(json!({ "role": "assistant", "content": "y".repeat(4000) })).unwrap();
+    }
+    let e = agent.turn(&mut session, "go", &Owner::new(Answer::Once), &mut grants(), &quiet).await.err().unwrap();
+    assert!(e.contains("as little as it goes"), "{e}");
+    let requests = model.requests();
+    assert!(requests.iter().filter(|r| r.body["tools"].is_array()).count() <= 4, "{}", requests.len());
+    assert!(
+        requests.iter().filter(|r| !r.body["tools"].is_array()).count() <= 4,
+        "one summary at the start, one per smaller window"
+    );
+    // Already at the least it sends: no smaller window to try, the error at once.
+    agent.options.context_kib = Some(8);
+    agent.gateway = agent.gateway.with_model("tiny-context-2");
+    let before = model.requests().iter().filter(|r| r.body["tools"].is_array()).count();
+    let e = agent.turn(&mut session, "again", &Owner::new(Answer::Once), &mut grants(), &quiet).await.err().unwrap();
+    assert!(e.contains("as little as it goes"), "{e}");
+    assert_eq!(model.requests().iter().filter(|r| r.body["tools"].is_array()).count(), before + 1);
 }
 
 #[tokio::test]
@@ -398,7 +452,8 @@ async fn a_member_that_fails_is_reported_to_the_lead_which_carries_on() {
             return error(400, "the member's model fell over");
         }
         if results_this_turn(body) == 0 {
-            call("d", "delegate", json!({ "agent": "coder", "goal": "Print the date" }))
+            // As some templates name it: still the hand-off to the team.
+            call("d", "functions.delegate", json!({ "agent": "coder", "goal": "Print the date" }))
         } else {
             say("The coder could not do it; here is what I know.")
         }
@@ -526,4 +581,113 @@ async fn a_crash_between_a_call_and_its_results_is_answered_on_the_next_turn() {
     assert_consistent(&kept.messages);
     assert_eq!(kept.messages.iter().filter(|m| m["tool_call_id"] == "c2").count(), 1);
     assert_eq!(kept.messages.iter().filter(|m| m["tool_call_id"] == "c1").count(), 1);
+}
+
+#[tokio::test]
+async fn going_back_and_forth_is_work_and_polling_is_not_stopped() {
+    let model = model(|_, body| {
+        let done = results_this_turn(body);
+        match done {
+            // a, b, a, b, …: the same calls, never twice in a row.
+            0..8 => call(
+                &format!("r{done}"),
+                "read_file",
+                json!({ "path": if done.is_multiple_of(2) { "a.txt" } else { "b.txt" } }),
+            ),
+            // Waiting on something, the same answer each time.
+            8..16 => call(&format!("p{done}"), "terminal", json!({ "command": "sleep 0; echo pending" })),
+            _ => say("done waiting"),
+        }
+    })
+    .await;
+    let dir = dir("back-and-forth");
+    std::fs::write(dir.join("work/a.txt"), "a").unwrap();
+    std::fs::write(dir.join("work/b.txt"), "b").unwrap();
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    agent.max_steps = 40;
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    let outcome = agent.turn(&mut session, "go", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "done waiting");
+    let results = tool_results(&model.requests().last().unwrap().body);
+    assert!(results[..8].iter().all(|r| !r.contains("in a row")), "{results:?}");
+    assert!(results[10].contains("waited the same way 3 times in a row"), "{}", results[10]);
+}
+
+/// A server that answers 200 with a body shorter than it said, then hangs up.
+async fn cut_body_server() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = count.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let mut buffer = vec![0u8; 1 << 20];
+                let n = socket.read(&mut buffer).await.unwrap_or(0);
+                // Chat calls only (the agent also asks what media the node has).
+                if buffer[..n].starts_with(b"POST /v1/chat/completions") {
+                    seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 5000\r\n\r\n{\"choices\":[")
+                    .await;
+            });
+        }
+    });
+    (url, count)
+}
+
+#[tokio::test]
+async fn an_answer_cut_short_is_not_asked_for_again_and_a_long_retry_after_is_said() {
+    let (url, count) = cut_body_server().await;
+    let dir = dir("cut-body");
+    let agent = agent(&url, &dir, ApprovalMode::Ask);
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    let owner = Owner::new(Answer::Once);
+    let e = agent.turn(&mut session, "one", &owner, &mut grants(), &quiet).await.err().unwrap();
+    assert!(e.contains("the gateway's answer"), "{e}");
+    assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1, "a made answer is not made again: {e}");
+    let model =
+        model(|_, _| Reply::Json(429, json!({ "error": { "message": "quota" } }), vec![("retry-after", "120".into())]))
+            .await;
+    let agent = scripted::agent(&model.url, &dir, ApprovalMode::Ask);
+    let started = Instant::now();
+    let e = agent.turn(&mut session, "two", &owner, &mut grants(), &quiet).await.err().unwrap();
+    assert!(e.contains("asks to wait 120 s"), "{e}");
+    assert_eq!(model.count(), 1);
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn an_mcp_tools_arguments_are_repaired_like_the_agents_own() {
+    let model = model(|n, _| match n {
+        0 => calls(&[
+            ("a", "calc__add", json!("```json\n{\"a\": 2, \"b\": 40,}\n```")),
+            ("b", "calc__add", json!("no object here")),
+        ]),
+        _ => say("ok"),
+    })
+    .await;
+    let dir = dir("mcp-repair");
+    let mut agent = agent(&model.url, &dir, ApprovalMode::Ask);
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_server.py");
+    agent.mcp = std::sync::Arc::new(
+        autobot::mcp::Hub::new(std::collections::BTreeMap::from([(
+            "calc".to_owned(),
+            autobot::mcp::ServerConfig {
+                command: "python3".into(),
+                args: vec![script.display().to_string()],
+                ..Default::default()
+            },
+        )]))
+        .unwrap(),
+    );
+    let mut session = Session::open(&sessions(&dir), "s").unwrap();
+    agent.turn(&mut session, "2 + 40?", &Owner::new(Answer::Once), &mut grants(), &quiet).await.unwrap();
+    let results = tool_results(&model.requests()[1].body);
+    assert_eq!(results[0], "42");
+    assert!(results[1].contains("not a JSON object"), "{}", results[1]);
 }

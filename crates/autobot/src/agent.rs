@@ -293,6 +293,8 @@ impl Agent {
         if let Some(kib) = self.options.context_kib {
             session.budget = kib.max(8) * 1024;
         }
+        // Where the model said a request was too long before, this turn starts at what fit.
+        session.cap = learned_cap(self.gateway.model());
         session.push(crate::images::message(text, images))?;
         let mut definitions = self.tools.definitions();
         if self.leads_team()
@@ -420,10 +422,19 @@ impl Agent {
                 }
                 // Longer than the model takes: a smaller window (what leaves it is summarized,
                 // long results cleared), and the same step again; a few times at most.
-                Err(GatewayError::Failed(e)) if crate::gateway::overflow(&e) && shrunk < 3 => {
+                Err(GatewayError::Failed(e)) if crate::gateway::overflow(&e) => {
+                    if session.limit() <= MIN_WINDOW || shrunk >= 3 {
+                        session.cap = None;
+                        return Err(format!(
+                            "{e} (sent {} KiB of the conversation, as little as it goes; the instructions and tools alone may be too much for this model: fewer tools or MCP servers, or a model with a longer context)",
+                            session.limit() / 1024
+                        ));
+                    }
                     shrunk += 1;
-                    session.budget = (session.budget * 2 / 3).max(8 * 1024);
-                    tracing::warn!("{e}: sending less of the conversation ({} KiB)", session.budget / 1024);
+                    let smaller = (session.limit() * 2 / 3).max(MIN_WINDOW);
+                    session.cap = Some(smaller);
+                    learn_cap(self.gateway.model(), smaller);
+                    tracing::warn!("{e}: sending less of the conversation ({} KiB)", smaller / 1024);
                     self.compact(session, confirmed, events).await;
                     steps -= 1;
                     continue;
@@ -687,7 +698,15 @@ impl Agent {
                 return refusal(&action, instead);
             }
             events(Event::Tool(&action.describe()));
-            let args: Value = serde_json::from_str(arguments).unwrap_or_else(|_| json!({}));
+            let args: Value = match serde_json::from_str::<Value>(arguments) {
+                Ok(Value::Null) => json!({}),
+                Ok(args) if args.is_object() => args,
+                _ if arguments.trim().is_empty() => json!({}),
+                _ => match crate::tools::repair_json(arguments) {
+                    Some(args) => args,
+                    None => return format!("error: the arguments for {server}/{tool} are not a JSON object; send one"),
+                },
+            };
             return match self.mcp.call(server, tool, args).await {
                 Ok(text) => crate::tools::cut(text),
                 Err(e) => format!("error: {e}"),
@@ -1186,22 +1205,80 @@ impl crate::script::Rpc for ScriptCalls<'_> {
     }
 }
 
+/// The least of the conversation a call sends, however often the model says it is too long.
+const MIN_WINDOW: usize = 8 * 1024;
+
+/// What fit, per model, after a model said a request was too long: the next turns start there,
+/// not with requests it refuses again. For as long as the process runs.
+static CAPS: std::sync::Mutex<Option<std::collections::HashMap<String, usize>>> = std::sync::Mutex::new(None);
+
+fn learned_cap(model: &str) -> Option<usize> {
+    CAPS.lock().ok()?.as_ref()?.get(model).copied()
+}
+
+fn learn_cap(model: &str, cap: usize) {
+    if let Ok(mut caps) = CAPS.lock() {
+        caps.get_or_insert_with(Default::default).insert(model.to_owned(), cap);
+    }
+}
+
 /// The same call with the same result this many times in a turn: the model is told.
 const REPEATED: usize = 3;
 /// And this many: the turn stops (it would only spend the step budget).
 const STUCK: usize = 6;
 
-/// The calls of one turn, to see a model going round in circles: by call (its tool and its
-/// arguments, as JSON reads them), how many times in a row it gave the same result.
+/// The calls of one turn, to see a model going round in circles: the same call (its tool and
+/// its arguments, as JSON reads them) with the same result, one after the other. Any other call
+/// in between starts the count again (alternating between two files is work, not a loop; and a
+/// result cleared from the window ([crate::session]) is never the one just before).
 #[derive(Default)]
 struct Loops {
-    seen: std::collections::HashMap<u64, (u64, usize)>,
+    /// The last call, its result, and how many times in a row they came.
+    last: Option<(u64, u64, usize)>,
     stuck: Option<String>,
+}
+
+/// Whether a call waits for something to change (a poll: `sleep`, a health check, `gh pr
+/// checks`, `process wait`): the same answer again is no loop, only a hint to stop polling.
+fn polls(name: &str, arguments: &str) -> bool {
+    if name == "process" {
+        return true;
+    }
+    if name != "terminal" && name != "execute_code" {
+        return false;
+    }
+    let command = serde_json::from_str::<Value>(arguments)
+        .ok()
+        .and_then(|a| a["command"].as_str().or(a["code"].as_str()).map(str::to_owned))
+        .unwrap_or_else(|| arguments.to_owned());
+    command.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).any(|word| {
+        matches!(
+            word,
+            "sleep"
+                | "wait"
+                | "curl"
+                | "wget"
+                | "gh"
+                | "ping"
+                | "watch"
+                | "until"
+                | "while"
+                | "status"
+                | "health"
+                | "healthz"
+                | "systemctl"
+                | "kubectl"
+                | "docker"
+                | "journalctl"
+                | "tail"
+                | "ps"
+        )
+    })
 }
 
 impl Loops {
     /// [result] for [name] called with [arguments], with a word to the model when it is the
-    /// same as the last [REPEATED] times or more.
+    /// same as the last [REPEATED] times or more in a row.
     fn note(&mut self, name: &str, arguments: &str, result: String) -> String {
         use std::hash::{Hash, Hasher};
         let hash = |parts: &[&str]| {
@@ -1212,26 +1289,36 @@ impl Loops {
         let canonical =
             serde_json::from_str::<Value>(arguments).map_or_else(|_| arguments.to_owned(), |v| v.to_string());
         let (call, outcome) = (hash(&[name, &canonical]), hash(&[&result]));
-        let entry = self.seen.entry(call).or_insert((outcome, 0));
-        if entry.0 == outcome {
-            entry.1 += 1;
-        } else {
-            *entry = (outcome, 1);
-        }
-        let times = entry.1;
-        if times >= STUCK {
+        let times = match &mut self.last {
+            Some((c, o, n)) if *c == call && *o == outcome => {
+                *n += 1;
+                *n
+            }
+            last => {
+                *last = Some((call, outcome, 1));
+                1
+            }
+        };
+        let poll = polls(name, arguments);
+        if times >= STUCK && !poll {
             self.stuck = Some(name.to_owned());
         }
         if times < REPEATED {
             return result;
         }
+        if poll {
+            return format!(
+                "{result}\n[You have now waited the same way {times} times in a row, with this same result. Waiting \
+                 longer may not change it: check why, or tell the owner what you are waiting for.]"
+            );
+        }
         format!(
-            "{result}\n[You have now made this exact call {times} times this turn, with this same result each time. \
+            "{result}\n[You have now made this exact call {times} times in a row, with this same result each time. \
              Do not repeat it: try something different, or answer with what you have.]"
         )
     }
 
-    /// The tool that was called [STUCK] times over with the same result, if one was.
+    /// The tool that was called [STUCK] times in a row with the same result, if one was.
     fn stuck(&mut self) -> Option<String> {
         self.stuck.take()
     }
@@ -1279,9 +1366,16 @@ fn tool_calls(message: &mut Value) -> Vec<(String, String, String)> {
             let arguments = call["function"]["arguments"].to_string();
             call["function"]["arguments"] = json!(if arguments == "null" { "{}".to_owned() } else { arguments });
         }
+        // `functions.read_file`: some models name tools as their template shows them; the real
+        // name from here on (delegate, the board, reads run together all go by it).
+        let name = call["function"]["name"].as_str().unwrap_or_default().trim();
+        let name = name.strip_prefix("functions.").unwrap_or(name).to_owned();
+        if call["function"]["name"].as_str() != Some(name.as_str()) {
+            call["function"]["name"] = json!(name);
+        }
         found.push((
             call["id"].as_str().unwrap_or_default().to_owned(),
-            call["function"]["name"].as_str().unwrap_or_default().to_owned(),
+            name,
             call["function"]["arguments"].as_str().unwrap_or_default().to_owned(),
         ));
     }
@@ -1312,6 +1406,11 @@ mod tests {
         assert_eq!(calls[0], ("call_0".into(), "terminal".into(), r#"{"command":"ls"}"#.into()));
         assert_eq!(calls[1].0, "x");
         assert_eq!(message["tool_calls"][0]["id"], "call_0");
+        let mut prefixed = json!({"role": "assistant", "tool_calls": [
+            {"id": "d", "type": "function", "function": {"name": "functions.delegate", "arguments": "{}"}},
+        ]});
+        assert_eq!(tool_calls(&mut prefixed)[0].1, "delegate");
+        assert_eq!(prefixed["tool_calls"][0]["function"]["name"], "delegate", "kept as the real name");
         let mut empty = json!({"role": "assistant", "content": "hi", "tool_calls": []});
         assert!(tool_calls(&mut empty).is_empty());
         assert!(empty.get("tool_calls").is_none());

@@ -265,10 +265,17 @@ impl Gateway {
         let mut tried = 0;
         loop {
             match self.attempt(messages, tools, confirmed, &watched).await {
+                // Asked to wait longer than a turn should: said, not tried again early.
+                Err(Attempt::Again(e, Some(after))) if after > MAX_RETRY_AFTER => {
+                    return Err(GatewayError::Failed(format!(
+                        "{e} (the gateway asks to wait {} s before trying again)",
+                        after.as_secs()
+                    )));
+                }
                 Err(Attempt::Again(e, after))
                     if tried < self.retries && !shown.load(std::sync::atomic::Ordering::Relaxed) =>
                 {
-                    let wait = after.map_or(self.backoff * 2u32.pow(tried), |a| a.min(MAX_RETRY_AFTER));
+                    let wait = after.unwrap_or_else(|| self.backoff.saturating_mul(2u32.saturating_pow(tried)));
                     tried += 1;
                     tracing::warn!("{e}; trying again in {} ms ({tried} of {})", wait.as_millis(), self.retries);
                     tokio::time::sleep(wait).await;
@@ -335,7 +342,12 @@ impl Gateway {
         }
         let text = match tokio::time::timeout(self.idle, response.text()).await {
             Err(_) => return Err(hung()),
-            Ok(Err(e)) => return Err(Attempt::Again(GatewayError::Failed(format!("the gateway's answer: {e}")), None)),
+            // An answer that was made (and maybe paid for) but did not arrive whole is not asked
+            // for again; an error's body that did not is.
+            Ok(Err(e)) => {
+                let error = GatewayError::Failed(format!("the gateway's answer: {e}"));
+                return Err(if status.is_success() { Attempt::Final(error) } else { Attempt::Again(error, None) });
+            }
             Ok(Ok(text)) => text,
         };
         let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);

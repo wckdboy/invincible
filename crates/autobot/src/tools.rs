@@ -1008,7 +1008,7 @@ impl Tools {
                     Ok(before) => before,
                     Err(e) => return Some(Err(e)),
                 };
-                match edited(&before, old, new, *all, path) {
+                match edited_off(before, old, new, *all, path).await {
                     Ok((after, said)) => ssh.write(path, after.as_bytes()).await.map(|()| said),
                     Err(e) => Err(e),
                 }
@@ -1063,6 +1063,9 @@ impl Tools {
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
         let mut child = self.shell_command(command).await?;
+        // A process group of its own, so what it starts can be stopped with it.
+        #[cfg(unix)]
+        child.process_group(0);
         let mut child = child
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -1071,7 +1074,7 @@ impl Tools {
             .spawn()
             .map_err(|e| format!("sh: {e}"))?;
         // Stopped (a timeout, or the turn dropped while it runs): what it started goes too.
-        let mut tree = Tree(child.id());
+        let mut tree = Group(child.id());
         let mut stdout = child.stdout.take().expect("piped");
         let mut stderr = child.stderr.take().expect("piped");
         // Only the start and the end of what it prints are kept (the model gets no more), so a
@@ -1086,7 +1089,11 @@ impl Tools {
             let status = loop {
                 tokio::select! {
                     () = &mut reads, if !read => read = true,
-                    status = child.wait() => break Some(status.map_err(|e| e.to_string())?),
+                    status = child.wait() => {
+                        // Reaped: its number may be given to another process from now on.
+                        tree.0 = None;
+                        break Some(status.map_err(|e| e.to_string())?);
+                    }
                     () = tokio::time::sleep_until(deadline) => break None,
                 }
             };
@@ -1117,7 +1124,6 @@ impl Tools {
                 ))
             }
             Some(status) => {
-                tree.0 = None;
                 let code = status.code().map_or("killed by a signal".to_owned(), |c| format!("exit code {c}"));
                 Ok(format!("{text}{end}[{code}]"))
             }
@@ -1404,7 +1410,7 @@ async fn through(files: &dyn Files, call: &Call) -> Option<Result<String, String
                 Ok(before) => before,
                 Err(e) => return Some(Err(e)),
             };
-            let (after, said) = match edited(&before, old, new, *all, path) {
+            let (after, said) = match edited_off(before, old, new, *all, path).await {
                 Ok(done) => done,
                 Err(e) => return Some(Err(e)),
             };
@@ -1425,7 +1431,7 @@ async fn read(path: &Path) -> Result<String, String> {
 /// Tool arguments a model got slightly wrong, read as it meant them: inside a code fence or
 /// with words around the object, raw line breaks and tabs inside strings, a trailing comma.
 /// None when that does not make them JSON either.
-fn repair_json(text: &str) -> Option<Value> {
+pub fn repair_json(text: &str) -> Option<Value> {
     let (start, end) = (text.find('{')?, text.rfind('}')?);
     if start >= end {
         return None;
@@ -1486,7 +1492,7 @@ async fn read_lines(path: &Path, offset: Option<usize>, limit: Option<usize>, ke
     if size <= LARGE_FILE {
         return read(path).await.map(|text| lines(&text, offset, limit));
     }
-    use tokio::io::{AsyncBufReadExt, AsyncSeekExt};
+    use tokio::io::AsyncSeekExt;
     let shown = |e: std::io::Error| format!("{}: {e}", path.display());
     let mut file = tokio::fs::File::open(path).await.map_err(shown)?;
     let mut head = vec![0u8; 8192.min(size as usize)];
@@ -1513,23 +1519,69 @@ async fn read_lines(path: &Path, offset: Option<usize>, limit: Option<usize>, ke
     let wanted = limit.unwrap_or(usize::MAX);
     let mut reader = tokio::io::BufReader::new(file);
     let (mut line, mut n, mut out, mut taken) = (Vec::new(), 0usize, String::new(), 0usize);
+    let mut ended = false;
     loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line).await.map_err(shown)? == 0 {
+        // Enough: the lines asked for, or as much text as a result takes.
+        if taken >= wanted || out.len() >= keep {
             break;
         }
+        let Some(cut) = next_line(&mut reader, &mut line, LONG_LINE).await.map_err(shown)? else {
+            ended = true;
+            break;
+        };
         n += 1;
-        if n >= first && taken < wanted && out.len() < 2 * keep {
+        if n >= first {
             if taken > 0 {
                 out.push('\n');
             }
             out.push_str(String::from_utf8_lossy(&line).trim_end_matches(['\n', '\r']));
+            if cut {
+                out.push_str(" [… line cut]");
+            }
             taken += 1;
         }
     }
     let start = first.min(n + 1);
-    out.push_str(&format!("\n[lines {start}-{} of {n}]", (start + taken).saturating_sub(1)));
+    // Counting the rest would mean reading the whole file: only said when it was read anyway.
+    let of = if ended { format!("{n}") } else { format!("more than {n}") };
+    out.push_str(&format!("\n[lines {start}-{} of {of}]", (start + taken).saturating_sub(1)));
     Ok(out)
+}
+
+/// Most of one line `read_file` keeps from a large file (minified code, a log line of
+/// megabytes): the rest of it is skipped, not held.
+const LONG_LINE: usize = 8 * 1024;
+
+/// The next line of [reader] into [line] (at most [cap] bytes of it, the rest skipped to its
+/// end): whether it was cut; None at the end.
+async fn next_line(
+    reader: &mut (impl tokio::io::AsyncBufRead + Unpin),
+    line: &mut Vec<u8>,
+    cap: usize,
+) -> std::io::Result<Option<bool>> {
+    use tokio::io::AsyncBufReadExt;
+    line.clear();
+    let (mut any, mut cut) = (false, false);
+    loop {
+        let buffer = reader.fill_buf().await?;
+        if buffer.is_empty() {
+            return Ok(any.then_some(cut));
+        }
+        any = true;
+        let (used, done) = match buffer.iter().position(|b| *b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (buffer.len(), false),
+        };
+        let room = cap.saturating_sub(line.len());
+        if room < used {
+            cut = true;
+        }
+        line.extend_from_slice(&buffer[..used.min(room)]);
+        reader.consume(used);
+        if done {
+            return Ok(Some(cut));
+        }
+    }
 }
 
 async fn write(path: &Path, content: &str) -> Result<String, String> {
@@ -1589,13 +1641,20 @@ fn edited(text: &str, old: &str, new: &str, all: bool, path: &Path) -> Result<(S
     }
 }
 
+/// [edited], off the async workers (a large file, and the search for the closest lines on a
+/// miss, take a while).
+async fn edited_off(text: String, old: &str, new: &str, all: bool, path: &Path) -> Result<(String, String), String> {
+    let (old, new, path) = (old.to_owned(), new.to_owned(), path.to_owned());
+    tokio::task::spawn_blocking(move || edited(&text, &old, &new, all, &path)).await.map_err(|e| e.to_string())?
+}
+
 /// Replaces [old] with [new] in the file at [path]: exactly once unless [all].
 async fn edit(path: &Path, old: &str, new: &str, all: bool) -> Result<String, String> {
     if old.is_empty() {
         return Err("old_text is empty".to_owned());
     }
     let text = read(path).await?;
-    let (changed, said) = edited(&text, old, new, all, path)?;
+    let (changed, said) = edited_off(text, old, new, all, path).await?;
     write(path, &changed).await?;
     Ok(said)
 }
@@ -1697,33 +1756,19 @@ impl Capture {
     }
 }
 
-/// A command's process and what it started, killed together by [Tree::kill] or when dropped
-/// (the turn stopped while it ran); `None` once it is done.
-struct Tree(Option<u32>);
+/// A command's process group (it and what it started), killed together by [Group::kill] or
+/// when dropped (the turn stopped while it ran); `None` once the command was reaped.
+struct Group(Option<u32>);
 
-impl Tree {
+impl Group {
     fn kill(&mut self) {
-        let Some(root) = self.0.take() else { return };
-        // Its descendants first (the shell is still there to find them by), then all at once.
-        let mut found = vec![root];
-        let mut at = 0;
-        while at < found.len() && found.len() < 4096 {
-            let parent = found[at];
-            at += 1;
-            let Ok(out) = std::process::Command::new("pgrep").arg("-P").arg(parent.to_string()).output() else {
-                break;
-            };
-            found.extend(String::from_utf8_lossy(&out.stdout).split_whitespace().filter_map(|p| p.parse::<u32>().ok()));
-        }
-        for pid in found {
-            if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
-                let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
-            }
+        if let Some(pid) = self.0.take().and_then(|p| rustix::process::Pid::from_raw(p as i32)) {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
         }
     }
 }
 
-impl Drop for Tree {
+impl Drop for Group {
     fn drop(&mut self) {
         self.kill();
     }
@@ -1917,6 +1962,25 @@ mod tests {
         assert_eq!(tools.run(&tools.parse("read_file", r#"{"path":"d/n.txt"}"#).unwrap()).await, "héllo");
         assert_eq!(tools.run(&tools.parse("list_dir", "{}").unwrap()).await, "d/");
         assert!(tools.run(&tools.parse("read_file", r#"{"path":"nope"}"#).unwrap()).await.starts_with("error:"));
+    }
+
+    #[tokio::test]
+    async fn a_huge_file_is_read_in_parts_without_holding_a_huge_line() {
+        let (_, dir) = tools();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.log");
+        let mut text = "x".repeat(20 * 1024 * 1024);
+        text.push_str("\nsecond\nthird\n");
+        std::fs::write(&path, &text).unwrap();
+        let part = super::read_lines(&path, Some(2), Some(1), RESULT_LIMIT).await.unwrap();
+        assert_eq!(part, "second\n[lines 2-2 of more than 2]");
+        let first = super::read_lines(&path, Some(1), Some(1), RESULT_LIMIT).await.unwrap();
+        assert!(first.len() < 9 * 1024 && first.contains("[… line cut]"), "{}", first.len());
+        let all = super::read_lines(&path, Some(2), None, RESULT_LIMIT).await.unwrap();
+        assert_eq!(all, "second\nthird\n[lines 2-3 of 3]");
+        let whole = super::read_lines(&path, None, None, RESULT_LIMIT).await.unwrap();
+        assert!(whole.len() < RESULT_LIMIT + 300 && whole.contains("bytes cut"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
