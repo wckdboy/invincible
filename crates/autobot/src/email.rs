@@ -681,6 +681,7 @@ pub async fn serve(
     let mut backoff = Duration::from_secs(5);
     let mut first = true;
     loop {
+        let started = std::time::Instant::now();
         let result = session(&runtime, &channel, &transport, &config, &password, &host, port, &network).await;
         match result {
             Err(e) if first && e.contains("login was refused") => return Err(e),
@@ -691,6 +692,10 @@ pub async fn serve(
             Ok(()) => {}
         }
         first = false;
+        // A session that ran a while was healthy: the next try is quick again.
+        if started.elapsed() > Duration::from_secs(300) {
+            backoff = Duration::from_secs(5);
+        }
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(Duration::from_secs(300));
     }

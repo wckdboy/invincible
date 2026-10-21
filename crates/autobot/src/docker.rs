@@ -44,17 +44,19 @@ impl Docker {
     pub async fn ensure(&self, workdir: &Path) -> Result<String, String> {
         let name = self.name(workdir);
         let docker = crate::find_on_path("docker").ok_or("[agent.docker] is set but docker is not installed")?;
-        let state = tokio::process::Command::new(&docker)
-            .args(["inspect", "-f", "{{.State.Running}}", &name])
-            .output()
-            .await
-            .map_err(|e| format!("docker: {e}"))?;
+        let mut inspect = tokio::process::Command::new(&docker);
+        inspect.args(["inspect", "-f", "{{.State.Running}}", &name]);
+        let state = output(inspect, std::time::Duration::from_secs(30)).await?;
         let running = String::from_utf8_lossy(&state.stdout).trim().to_owned();
         if state.status.success() && running == "true" {
             return Ok(name);
         }
+        // A first run may pull the image: minutes, not forever (a wedged daemon).
+        let wait = std::time::Duration::from_secs(15 * 60);
         let output = if state.status.success() {
-            tokio::process::Command::new(&docker).args(["start", &name]).output().await
+            let mut start = tokio::process::Command::new(&docker);
+            start.args(["start", &name]);
+            output(start, wait).await
         } else {
             let dir = workdir.to_str().ok_or("the working directory's path is not UTF-8")?;
             let mut run = tokio::process::Command::new(&docker);
@@ -65,9 +67,8 @@ impl Docker {
                 .args(["-w", dir])
                 .args(&self.args)
                 .args([&self.image, "sleep", "infinity"]);
-            run.output().await
-        }
-        .map_err(|e| format!("docker: {e}"))?;
+            output(run, wait).await
+        }?;
         if !output.status.success() {
             return Err(format!(
                 "the container {name} ({}) did not start: {}",
@@ -117,6 +118,18 @@ impl Docker {
              kill -TERM $p $kids 2>/dev/null; sleep 2; kill -KILL $p $kids 2>/dev/null; rm -f '{pidfile}'"
         );
         ["docker", "exec", name, "sh", "-c", &script].iter().map(|s| (*s).to_owned()).collect()
+    }
+}
+
+/// What [command] printed, once it ended; stopped (and an error) after [wait].
+async fn output(
+    mut command: tokio::process::Command,
+    wait: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    command.kill_on_drop(true);
+    match tokio::time::timeout(wait, command.output()).await {
+        Ok(output) => output.map_err(|e| format!("docker: {e}")),
+        Err(_) => Err(format!("docker did not answer in {} seconds (is its daemon stuck?)", wait.as_secs())),
     }
 }
 

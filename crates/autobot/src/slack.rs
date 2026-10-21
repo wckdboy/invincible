@@ -386,58 +386,91 @@ pub async fn serve(
     }
 }
 
+/// How often the socket is pinged, and how long it may stay silent (no message, no pong) before
+/// it is taken for dead: a connection half-open after a network change or a sleep would otherwise
+/// wait for the system to give up on it, many minutes of messages lost.
+const PING_EVERY: Duration = Duration::from_secs(30);
+const SILENT_FOR: Duration = Duration::from_secs(90);
+
+/// Reads a Socket Mode connection, pinging it and noticing when it has gone quiet.
+struct Alive {
+    ping: tokio::time::Interval,
+    heard: tokio::time::Instant,
+}
+
+impl Alive {
+    fn new() -> Self {
+        Self { ping: tokio::time::interval(PING_EVERY), heard: tokio::time::Instant::now() }
+    }
+
+    /// The next text message; None when Slack closed the connection.
+    async fn next<S>(&mut self, socket: &mut S) -> Result<Option<String>, String>
+    where
+        S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+            + futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+            + Unpin,
+    {
+        loop {
+            tokio::select! {
+                _ = self.ping.tick() => {
+                    if self.heard.elapsed() > SILENT_FOR {
+                        return Err(format!("Slack sent nothing in {} seconds, not even a pong", SILENT_FOR.as_secs()));
+                    }
+                    socket.send(Message::Ping(Vec::new().into())).await.map_err(|e| e.to_string())?;
+                }
+                message = socket.next() => {
+                    self.heard = tokio::time::Instant::now();
+                    match message {
+                        None | Some(Ok(Message::Close(_))) => return Ok(None),
+                        Some(Err(e)) => return Err(e.to_string()),
+                        Some(Ok(Message::Text(text))) => return Ok(Some(text.to_string())),
+                        Some(Ok(_)) => {}
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// One Socket Mode connection: every envelope acknowledged at once, then handled.
 async fn connection(shared: &Arc<Shared>) -> Result<(), String> {
     let url = shared.client.socket_url().await?;
     let mut socket = crate::net::websocket(&url, &shared.network).await?;
-    let mut ping = tokio::time::interval(Duration::from_secs(30));
+    let mut alive = Alive::new();
     loop {
-        tokio::select! {
-            _ = ping.tick() => {
-                socket.send(Message::Ping(Vec::new().into())).await.map_err(|e| e.to_string())?;
-            }
-            message = socket.next() => {
-                let text = match message {
-                    None => return Ok(()),
-                    Some(Err(e)) => return Err(e.to_string()),
-                    Some(Ok(Message::Text(text))) => text.to_string(),
-                    Some(Ok(Message::Close(_))) => return Ok(()),
-                    Some(Ok(_)) => continue,
-                };
-                let envelope: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-                if let Some(id) = envelope["envelope_id"].as_str() {
-                    socket.send(Message::text(json!({ "envelope_id": id }).to_string())).await.map_err(|e| e.to_string())?;
-                }
-                match envelope["type"].as_str().unwrap_or_default() {
-                    "hello" => shared.runtime.channel_state("slack", "connected"),
-                    // Slack refreshes connections now and then: open a new one.
-                    "disconnect" => return Ok(()),
-                    "events_api" => {
-                        let (shared, event) = (shared.clone(), envelope["payload"]["event"].clone());
-                        let id = envelope["payload"]["event_id"].as_str().unwrap_or_default().to_owned();
-                        if shared.first_time(&id) {
-                            tokio::spawn(async move {
-                                if let Err(e) = event_message(&shared, &event).await {
-                                    tracing::warn!(bot = %shared.runtime.name, "slack: {e}");
-                                }
-                            });
+        let Some(text) = alive.next(&mut socket).await? else { return Ok(()) };
+        let envelope: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        if let Some(id) = envelope["envelope_id"].as_str() {
+            socket.send(Message::text(json!({ "envelope_id": id }).to_string())).await.map_err(|e| e.to_string())?;
+        }
+        match envelope["type"].as_str().unwrap_or_default() {
+            "hello" => shared.runtime.channel_state("slack", "connected"),
+            // Slack refreshes connections now and then: open a new one.
+            "disconnect" => return Ok(()),
+            "events_api" => {
+                let (shared, event) = (shared.clone(), envelope["payload"]["event"].clone());
+                let id = envelope["payload"]["event_id"].as_str().unwrap_or_default().to_owned();
+                if shared.first_time(&id) {
+                    tokio::spawn(async move {
+                        if let Err(e) = event_message(&shared, &event).await {
+                            tracing::warn!(bot = %shared.runtime.name, "slack: {e}");
                         }
-                    }
-                    "interactive" => {
-                        let (shared, payload) = (shared.clone(), envelope["payload"].clone());
-                        tokio::spawn(async move { press(&shared, &payload).await });
-                    }
-                    "slash_commands" => {
-                        let (shared, payload) = (shared.clone(), envelope["payload"].clone());
-                        tokio::spawn(async move {
-                            if let Err(e) = slash(&shared, &payload).await {
-                                tracing::warn!(bot = %shared.runtime.name, "slack: {e}");
-                            }
-                        });
-                    }
-                    _ => {}
+                    });
                 }
             }
+            "interactive" => {
+                let (shared, payload) = (shared.clone(), envelope["payload"].clone());
+                tokio::spawn(async move { press(&shared, &payload).await });
+            }
+            "slash_commands" => {
+                let (shared, payload) = (shared.clone(), envelope["payload"].clone());
+                tokio::spawn(async move {
+                    if let Err(e) = slash(&shared, &payload).await {
+                        tracing::warn!(bot = %shared.runtime.name, "slack: {e}");
+                    }
+                });
+            }
+            _ => {}
         }
     }
 }
@@ -596,6 +629,28 @@ async fn press(shared: &Shared, payload: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A connection that went half-open (it takes what is sent and never answers, not even a
+    /// pong) is given up on, and the reconnect loop opens a new one.
+    #[tokio::test(start_paused = true)]
+    async fn a_socket_that_goes_silent_is_taken_for_dead() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            // Held, never read: no pong goes back.
+            std::future::pending::<()>().await;
+            drop(socket);
+        });
+        let tcp = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (mut socket, _) = tokio_tungstenite::client_async(format!("ws://{address}/"), tcp).await.unwrap();
+        let started = tokio::time::Instant::now();
+        let error = Alive::new().next(&mut socket).await.unwrap_err();
+        assert!(error.contains("sent nothing in 90 seconds"), "{error}");
+        assert!(started.elapsed() >= SILENT_FOR && started.elapsed() <= SILENT_FOR + PING_EVERY * 2);
+        server.abort();
+    }
 
     #[test]
     fn events_for_the_bot() {

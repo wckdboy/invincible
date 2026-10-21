@@ -449,8 +449,9 @@ The same agent as on the phone, for a machine that is always on. It is written i
 ([`crates/autobot`](crates/autobot)) and uses the gateway on the same machine as its only model
 provider, so the gateway's rules hold for every agent turn: routing, redaction, receipts.
 
-- **Tools:** `terminal` (a shell command in the working directory, with a timeout, or left
-  running in the background; `process` reads, waits for or stops it), `read_file`,
+- **Tools:** `terminal` (a shell command in the working directory, with a timeout that stops
+  what it started too, the start and end of its output kept, or left running in the background;
+  `process` reads, waits for or stops it; `autobot serve` stops them when it stops), `read_file`,
   `write_file`, `edit_file` (replace an exact piece of a file), `list_dir`, `web_fetch` (a page as
   text, through the gateway: under the node's network mode, so offline means no fetch and Tor
   carries it; HTTPS only; receipted and in the audit log; it asks first, and unattended runs may
@@ -485,7 +486,8 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   follows a link to another site. Its traffic follows the gateway's network mode (Tor or SOCKS5
   as its proxy; nothing but loopback while offline); it is not receipted. A screenshot goes to
   a model that can see as an image, and stays in `~/.autobot/attachments`. One browser per
-  process, with a throwaway profile, closed with the session or after ten idle minutes;
+  process, with a throwaway profile (a minute allowed for a cold start), closed with the session
+  or after ten idle minutes;
   `[agent] browser = false` turns it off.
 - **MCP servers:** any [Model Context Protocol](https://modelcontextprotocol.io) server over stdio
   adds its tools (`<server>__<tool>`), each call asked for like a command, logged, and allowed
@@ -940,6 +942,10 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
 - `invincible-private: 1` marks a request that must never leave hardware you own;
   `invincible-risk: health,personal` passes risk codes; `invincible-confirmed: 1` answers an `ask`.
 - Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
+- A streamed answer from a local engine is kept alive while the engine reads a long prompt
+  (`: keep-alive` comments every 20 s, which SSE clients skip); an engine silent for 30 minutes
+  is given up on with an `engine_stalled` error event (a 504 when not streamed, where 30 minutes
+  is the whole answer's limit).
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff, and stopping the node stops its engines.
 - Images (OpenAI `image_url` parts, Messages `image` blocks) pass through to the model as they
@@ -1209,7 +1215,7 @@ Markdown for the chat platforms, pastes) have property tests over generated inpu
 (`INVINCIBLE_FUZZ_CASES=5000 cargo test` runs more cases; a failure names its
 `INVINCIBLE_FUZZ_SEED`). Every night CI runs the benchmarks and a ten-minute soak test: two bots
 under steady traffic with the gateway restarting, every message answered, and no growth in
-memory, file descriptors, tasks or threads.
+memory, file descriptors, tasks or threads (compared at rest: traffic paused, nothing in flight).
 
 **Numbers** (an Apple M-series Mac, release builds, against stand-ins on loopback that answer at
 once; `bench/run.sh`, medians):

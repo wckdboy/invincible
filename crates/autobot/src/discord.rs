@@ -370,11 +370,16 @@ async fn connection(shared: &Arc<Shared>) -> Result<(), String> {
     let url = shared.bot.gateway_url().await?;
     let url = format!("{}/?v=10&encoding=json", url.trim_end_matches('/'));
     let mut socket = crate::net::websocket(&url, &shared.bot.network).await?;
-    let hello = next_json(&mut socket).await?.ok_or("Discord closed the connection")?;
+    let hello = tokio::time::timeout(Duration::from_secs(30), next_json(&mut socket))
+        .await
+        .map_err(|_| "Discord sent no hello in 30 seconds".to_owned())??
+        .ok_or("Discord closed the connection")?;
     if hello["op"] != 10 {
         return Err(format!("Discord began with op {} instead of hello", hello["op"]));
     }
-    let interval = Duration::from_millis(hello["d"]["heartbeat_interval"].as_u64().unwrap_or(41_250).max(1000));
+    // Between a second and ten minutes: a wild value must neither flood nor overflow the clock.
+    let interval =
+        Duration::from_millis(hello["d"]["heartbeat_interval"].as_u64().unwrap_or(41_250).clamp(1000, 600_000));
     let identify = json!({ "op": 2, "d": {
         "token": shared.bot.token,
         "intents": INTENTS,

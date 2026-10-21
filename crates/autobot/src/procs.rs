@@ -74,6 +74,9 @@ pub fn start(
     workdir: &Path,
     stopper: Option<Vec<String>>,
 ) -> Result<u32, String> {
+    if stopping() {
+        return Err("the agent is stopping; nothing new starts".to_owned());
+    }
     {
         let procs = PROCS.lock().expect("procs");
         let running = procs.1.values().filter(|p| p.shared.lock().expect("proc").ended.is_none()).count();
@@ -132,13 +135,11 @@ pub fn start(
                         let _ = tokio::time::timeout(Duration::from_secs(8), stopping.status()).await;
                     }
                     signal_group(pid, rustix::process::Signal::TERM);
-                    match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
-                        Ok(_) => {}
-                        Err(_) => {
-                            signal_group(pid, rustix::process::Signal::KILL);
-                            let _ = child.wait().await;
-                        }
-                    }
+                    let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
+                    // Then the whole group, whether or not the leader went quietly: a child that
+                    // ignores TERM outlives a prompt leader.
+                    signal_group(pid, rustix::process::Signal::KILL);
+                    let _ = child.wait().await;
                     "stopped".to_owned()
                 }
             };
@@ -153,6 +154,13 @@ pub fn start(
         });
     }
     let mut procs = PROCS.lock().expect("procs");
+    // Stopping began while it started: the sweep may have looked already (it takes this lock), so
+    // it is stopped here.
+    if stopping() {
+        drop(procs);
+        signal_group(pid, rustix::process::Signal::KILL);
+        return Err("the agent is stopping; nothing new starts".to_owned());
+    }
     procs.0 += 1;
     let id = procs.0;
     procs.1.insert(id, Proc { command: label.to_owned(), pid, started: Instant::now(), shared, stop, done });
@@ -225,6 +233,34 @@ pub async fn stop(id: u32) -> Result<String, String> {
     output(id, Duration::ZERO).await
 }
 
+/// Set once the agent began to stop: no command starts from then on (one started after the
+/// stopping swept would outlive it).
+static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the agent is stopping ([shut_down]).
+pub fn stopping() -> bool {
+    STOPPING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The agent is going: nothing new starts, and what runs is stopped ([stop_all]).
+pub async fn shut_down() {
+    STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+    stop_all().await;
+}
+
+/// Kills at once every running command's and background process's group, without waiting:
+/// the last thing before the process exits when asked twice to stop.
+pub fn kill_now() {
+    STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::tools::stop_running();
+    let procs = PROCS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for p in procs.1.values() {
+        if p.shared.lock().map(|s| s.ended.is_none()).unwrap_or(true) {
+            signal_group(p.pid, rustix::process::Signal::KILL);
+        }
+    }
+}
+
 /// Stops every background process (at the end of a chat or a run), and the commands tools are
 /// running in the foreground ([crate::tools::stop_running]).
 pub async fn stop_all() {
@@ -260,13 +296,56 @@ mod tests {
         assert_eq!(s.output.len(), KEEP);
     }
 
+    /// Whether [pid] is a live process (not a zombie).
+    fn running(pid: &str) -> bool {
+        let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", pid]).output().unwrap();
+        let state = String::from_utf8_lossy(&out.stdout);
+        let state = state.trim();
+        !state.is_empty() && !state.starts_with('Z')
+    }
+
+    /// A child that ignores TERM is stopped too, though the leader went at once.
+    #[tokio::test]
+    async fn stopping_takes_a_child_that_ignores_term() {
+        let dir = std::env::temp_dir().join(format!("autobot-procs-term-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pidfile = dir.join("pid");
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c").arg(format!("sh -c 'trap \"\" TERM; exec sleep 300' & echo $! > {}; wait", pidfile.display()));
+        let id = start("stubborn", cmd, &dir, None).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        let pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&pidfile)
+                && !pid.trim().is_empty()
+            {
+                break pid.trim().to_owned();
+            }
+            assert!(std::time::Instant::now() < until, "it did not start");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert!(running(&pid));
+        stop(id).await.unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        while running(&pid) {
+            assert!(std::time::Instant::now() < until, "{pid} ignored TERM and is still running");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn runs_reads_and_stops() {
         let dir = std::env::temp_dir();
         let mut cmd = tokio::process::Command::new("sh");
         cmd.arg("-c").arg("echo started; sleep 30");
         let id = start("sleeper", cmd, &dir, None).unwrap();
-        let out = output(id, Duration::from_millis(300)).await.unwrap();
+        // What it printed comes when it comes (a loaded machine is slow to start a shell): read
+        // until it is there, not once after a fixed wait.
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        let mut out = String::new();
+        while !out.contains("started") && std::time::Instant::now() < until {
+            out = format!("{out}{}", output(id, Duration::from_millis(100)).await.unwrap());
+        }
         assert!(out.contains("started"), "{out}");
         assert!(out.contains("running"), "{out}");
         assert!(list().contains("sleeper"));

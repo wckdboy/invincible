@@ -50,6 +50,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 [dev-dependencies]
 # The benchmarks drive the terminal UI through a pseudo-terminal (the same crate, one more feature).
 rustix = { version = "1", features = ["pty", "termios"] }
+# A paused clock for tests of timeouts (a silent socket given up on after minutes, at once).
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

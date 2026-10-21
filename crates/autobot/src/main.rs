@@ -649,7 +649,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
             let agent = autobot::agent(&config, &home)?;
             let options = autobot::tui::chat::Options { session, new, model, code: false };
             let done = autobot::tui::chat::run(&config, home, agent, options).await;
-            autobot::procs::stop_all().await;
+            autobot::procs::shut_down().await;
             done
         }),
         Command::Code { dir, model, approvals, session, new } => {
@@ -674,7 +674,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
                 autobot::for_coding(&mut agent);
                 let options = autobot::tui::chat::Options { session, new, model, code: true };
                 let done = autobot::tui::chat::run(&config, home, agent, options).await;
-                autobot::procs::stop_all().await;
+                autobot::procs::shut_down().await;
                 done
             })
         }
@@ -721,7 +721,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
             };
             let approver = Unattended { cloud };
             let outcome = agent.turn(&mut session, &task, &approver, &mut HashSet::new(), &events).await;
-            autobot::procs::stop_all().await;
+            autobot::procs::shut_down().await;
             match outcome {
                 Ok(outcome) if json => {
                     println!(
@@ -750,7 +750,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
             tracing_subscriber::fmt().with_writer(std::io::stderr).with_target(false).init();
             runtime()?.block_on(async {
                 let done = autobot::acp::serve(config, home, tokio::io::stdin(), tokio::io::stdout()).await;
-                autobot::procs::stop_all().await;
+                autobot::procs::shut_down().await;
                 done
             })
         }
@@ -1601,12 +1601,24 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         () = api => {}
         () = watch_gateway => {}
         () = watch_bots => {}
-        () = shutdown() => {}
+        _ = shutdown() => {}
     }
+    // Stopping takes a few seconds (what turns left running is asked to stop first); asked
+    // again meanwhile, it stops at once.
+    tokio::spawn(async {
+        let code = shutdown().await;
+        tracing::warn!("asked again to stop: stopping now");
+        // What runs is killed, not asked: no grace period, and nothing left behind.
+        autobot::procs::kill_now();
+        std::process::exit(code);
+    });
     for part in parts.into_iter().chain(background) {
         part.abort();
     }
     fleet.stop();
+    // What the turns left running (a dev server, the browser) stops with the agent, not after:
+    // nothing else would stop it, and launchd stops only the agent's own process group.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), autobot::procs::shut_down()).await;
     autobot::alerts::stopped(&root).await;
     Ok(())
 }
@@ -2004,17 +2016,21 @@ fn identities(action: IdentitiesAction, root: &std::path::Path) -> Result<(), St
     Ok(())
 }
 
-async fn shutdown() {
+/// Waits for SIGTERM or Ctrl-C; the exit code that goes with it (143, 130).
+async fn shutdown() -> i32 {
     #[cfg(unix)]
     {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM");
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
+            _ = tokio::signal::ctrl_c() => 130,
+            _ = term.recv() => 143,
         }
     }
     #[cfg(not(unix))]
-    let _ = tokio::signal::ctrl_c().await;
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        130
+    }
 }
 
 fn hooks(action: Option<HooksAction>, config: &Config, home: &std::path::Path) -> Result<(), String> {

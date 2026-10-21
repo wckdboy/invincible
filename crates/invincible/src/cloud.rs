@@ -162,7 +162,15 @@ pub async fn forward(
     if let Some(key) = &model.key {
         request = request.bearer_auth(key);
     }
-    let upstream = request.send().await.map_err(|e| CloudError::Failover(format!("unreachable: {e}")))?;
+    // A streamed answer begins at once and then may pause [SILENCE] between pieces; one not
+    // streamed comes whole, so it gets [LOCAL_SILENCE] in all.
+    let total = crate::egress::LOCAL_SILENCE;
+    let deadline = tokio::time::Instant::now() + if streaming { crate::egress::SILENCE } else { total };
+    let quiet = |d: std::time::Duration| CloudError::Failover(format!("no answer in {} minutes", d.as_secs() / 60));
+    let upstream = match tokio::time::timeout_at(deadline, request.send()).await {
+        Err(_) => return Err(quiet(if streaming { crate::egress::SILENCE } else { total })),
+        Ok(sent) => sent.map_err(|e| CloudError::Failover(format!("unreachable: {e}")))?,
+    };
     let status = upstream.status();
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
         return Err(CloudError::Failover(format!("answered {status}")));
@@ -172,24 +180,14 @@ pub async fn forward(
 
     let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
     let mut response = if streaming && status.is_success() {
-        let state = (upstream, StreamRestorer::new(vault), false, received);
-        let stream = futures_util::stream::unfold(state, |(mut upstream, mut restorer, done, received)| async move {
-            if done {
-                return None;
-            }
-            match upstream.chunk().await {
-                Ok(Some(bytes)) => {
-                    received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-                    let out = Bytes::from(restorer.push(&bytes));
-                    Some((Ok::<_, std::io::Error>(out), (upstream, restorer, false, received)))
-                }
-                Ok(None) => Some((Ok(Bytes::from(restorer.finish())), (upstream, restorer, true, received))),
-                Err(e) => Some((Err(std::io::Error::other(e)), (upstream, restorer, true, received))),
-            }
-        });
+        let restorer = StreamRestorer::new(vault);
+        let stream = kept_alive(upstream, restorer, received, crate::relay::KEEP_ALIVE, crate::egress::SILENCE);
         Response::new(Body::from_stream(stream))
     } else {
-        let bytes = upstream.bytes().await.map_err(|e| CloudError::Failover(format!("answer cut off: {e}")))?;
+        let bytes = match tokio::time::timeout_at(deadline, upstream.bytes()).await {
+            Err(_) => return Err(quiet(total)),
+            Ok(bytes) => bytes.map_err(|e| CloudError::Failover(format!("answer cut off: {e}")))?,
+        };
         received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         let body = match serde_json::from_slice::<Value>(&bytes) {
             Ok(mut answer) => {
@@ -340,6 +338,116 @@ pub fn set_update_auto(config: &std::path::Path, auto: &str) -> Result<(), Strin
         update.as_table_mut().ok_or("`update` is not a table")?.insert("auto", toml_edit::value(auto));
         Ok(())
     })
+}
+
+/// A provider's stream, its placeholders restored ([restorer]), kept alive with comments after
+/// [every] of silence, and ended with an `upstream_stalled` error event past [silence].
+fn kept_alive(
+    upstream: reqwest::Response,
+    restorer: StreamRestorer,
+    received: Arc<AtomicU64>,
+    every: std::time::Duration,
+    silence: std::time::Duration,
+) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> {
+    // Kept alive while the provider is silent (a reasoning model thinking), and ended with an
+    // error event past [SILENCE]: a stream cut instead would be taken for a broken connection
+    // and sent again (and paid for again).
+    struct Live {
+        upstream: reqwest::Response,
+        restorer: StreamRestorer,
+        done: bool,
+        received: Arc<AtomicU64>,
+        heard: tokio::time::Instant,
+        between: bool,
+    }
+    let state = Live { upstream, restorer, done: false, received, heard: tokio::time::Instant::now(), between: true };
+    futures_util::stream::unfold(state, move |mut live| async move {
+        if live.done {
+            return None;
+        }
+        loop {
+            let left = silence.saturating_sub(live.heard.elapsed());
+            let next = match tokio::time::timeout(every.min(left), live.upstream.chunk()).await {
+                Ok(next) => next,
+                Err(_) if live.heard.elapsed() >= silence => {
+                    live.done = true;
+                    let message =
+                        format!("the cloud model sent nothing for {} minutes; stopped waiting", silence.as_secs() / 60);
+                    let mut out = if live.between { Vec::new() } else { b"\n\n".to_vec() };
+                    out.extend_from_slice(&crate::relay::error_event(
+                        504,
+                        "timeout_error",
+                        "upstream_stalled",
+                        &message,
+                    ));
+                    return Some((Ok::<_, std::io::Error>(Bytes::from(out)), live));
+                }
+                Err(_) if live.between => {
+                    return Some((Ok(Bytes::from_static(crate::relay::COMMENT)), live));
+                }
+                Err(_) => continue,
+            };
+            return match next {
+                Ok(Some(bytes)) => {
+                    live.heard = tokio::time::Instant::now();
+                    live.received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                    let out = live.restorer.push(&bytes);
+                    if !out.is_empty() {
+                        live.between = out.ends_with(b"\n\n") || out.ends_with(b"\r\n\r\n");
+                    }
+                    Some((Ok(Bytes::from(out)), live))
+                }
+                Ok(None) => {
+                    live.done = true;
+                    Some((Ok(Bytes::from(live.restorer.finish())), live))
+                }
+                Err(e) => {
+                    live.done = true;
+                    Some((Err(std::io::Error::other(e)), live))
+                }
+            };
+        }
+    })
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    use futures_util::StreamExt;
+
+    /// A provider that sends a piece of its answer, then nothing (a reasoning model thinking):
+    /// the stream is kept alive between events, then ended with an error event, not cut.
+    #[tokio::test]
+    async fn a_silent_provider_is_kept_alive_then_ended_with_an_error() {
+        let app = axum::Router::new().route(
+            "/s",
+            axum::routing::get(|| async {
+                let first = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(
+                    b"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+                ))]);
+                Body::from_stream(first.chain(futures_util::stream::pending()))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/s", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let upstream = reqwest::get(&url).await.unwrap();
+        let stream = kept_alive(
+            upstream,
+            StreamRestorer::new(Vault::default()),
+            Arc::default(),
+            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(600),
+        );
+        let parts: Vec<Bytes> = stream.map(|p| p.unwrap()).collect().await;
+        let text: String = parts.iter().map(|p| String::from_utf8_lossy(p).into_owned()).collect();
+        assert!(text.starts_with("data: {"), "{text}");
+        assert!(text.contains(": keep-alive\n\n"), "{text}");
+        assert!(
+            text.ends_with("\n\n") && text.contains("event: error\ndata: ") && text.contains("upstream_stalled"),
+            "{text}"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -1062,6 +1062,9 @@ impl Tools {
     }
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
+        if crate::procs::stopping() {
+            return Err("the agent is stopping; nothing new starts".to_owned());
+        }
         // A session of its own (no terminal: a password prompt fails at once instead of
         // waiting on one it cannot read), and so a group that is stopped with it.
         let mut child = detached(self.shell_command(command).await?);
@@ -1820,7 +1823,12 @@ impl Group {
         if let (Some(pid), Ok(mut running)) = (pid, RUNNING.lock()) {
             running.push(pid);
         }
-        Self(pid)
+        let mut group = Self(pid);
+        // Started as the agent began to stop (after its sweep, maybe): stopped now.
+        if crate::procs::stopping() {
+            group.kill();
+        }
+        group
     }
 
     fn forget(pid: u32) {
@@ -1891,7 +1899,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("autobot-tools-{}-{}", std::process::id(), rand()));
         std::fs::create_dir_all(&dir).unwrap();
         let dir = dir.canonicalize().unwrap();
-        (Tools::new(dir.clone(), Duration::from_secs(5)), dir)
+        // A command's timeout is not what these tests test (those that do set their own): a
+        // generous one, so a loaded machine does not cut a command short.
+        (Tools::new(dir.clone(), Duration::from_secs(60)), dir)
     }
 
     /// Unique per call: tests run in parallel and must not share a directory.
@@ -2014,8 +2024,8 @@ mod tests {
         assert!(out.contains("done"), "{out}");
         // Interactive turns are not confined unless the sandbox is \"always\".
         let plain = tools.with_sandbox(crate::sandbox::Mode::Unattended);
-        plain.run(&Call::Terminal { command }).await;
-        assert!(outside.exists());
+        let out = plain.run(&Call::Terminal { command }).await;
+        assert!(outside.exists(), "{out}");
         let _ = std::fs::remove_file(outside);
     }
 
@@ -2029,6 +2039,51 @@ mod tests {
         let tools = Tools::new(dir, Duration::from_millis(200));
         let out = tools.run(&Call::Terminal { command: "sleep 5".into() }).await;
         assert!(out.contains("stopped after"), "{out}");
+    }
+
+    /// A command that timed out is stopped with what it started: nothing is left running, and
+    /// the call ends at its timeout even when a child holds the output open.
+    #[tokio::test]
+    async fn a_timed_out_command_is_stopped_with_its_children() {
+        let (_, dir) = tools();
+        let pid = dir.join("pid");
+        // Time enough for the shell to start its child on a loaded machine.
+        let tools = Tools::new(dir.clone(), Duration::from_secs(5));
+        let command = format!("sleep 300 & echo $! > {}; wait", pid.display());
+        let started = std::time::Instant::now();
+        let out = tools.run(&Call::Terminal { command }).await;
+        assert!(out.contains("stopped after"), "{out}");
+        assert!(started.elapsed() < Duration::from_secs(120), "waited for the child");
+        let pid = std::fs::read_to_string(&pid).unwrap();
+        // Gone within a while: polled, since a killed process not yet reaped (a zombie) still
+        // answers kill -0 for a moment.
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        while running(pid.trim()) {
+            assert!(std::time::Instant::now() < until, "the command's child {} is still running", pid.trim());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Whether [pid] is a live process (not a zombie).
+    fn running(pid: &str) -> bool {
+        let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", pid]).output().unwrap();
+        let state = String::from_utf8_lossy(&out.stdout);
+        let state = state.trim();
+        !state.is_empty() && !state.starts_with('Z')
+    }
+
+    /// A command that prints without end is kept to what the model gets (its start and its
+    /// end), not to the agent's memory: the end of a long build log is still there.
+    #[tokio::test]
+    async fn terminal_output_is_capped() {
+        let (_, dir) = tools();
+        let tools = Tools::new(dir, Duration::from_secs(600));
+        let out = tools
+            .run(&Call::Terminal { command: "head -c 6000000 /dev/zero | tr '\\0' x; echo; echo done >&2".into() })
+            .await;
+        let end: String = out.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
+        assert!(out.len() <= 4 * tools.limit + 1024, "{} bytes for a limit of {}: {end}", out.len(), tools.limit);
+        assert!(end.contains("done") && out.ends_with("[exit code 0]"), "{end}");
     }
 
     #[tokio::test]
