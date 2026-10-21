@@ -403,7 +403,26 @@ export) is a natural first dataset.
 On one Apple M3 Pro (36 GB), Qwen3 1.7B Q4_K_M (1.26 GiB), two `invincible serve` processes with
 separate homes on loopback, the shard's `ggml-rpc-server` on the same GPU; medians:
 
-MEASUREMENTS
+**Preliminary: measured while the machine was shared with other heavy work (load average
+190–470), so the spread is wide; a quiet run replaces these before this phase is called done.**
+
+| What | One node | Split, raw RPC (no tunnel) | Split, through shard links |
+|---|---:|---:|---:|
+| Generation through the gateway, 256 tokens, tok/s (median of 5, two series) | 56.4, 56.0 | — | 42.2, 33.2 |
+| `llama-bench` tg128, tok/s (median of 10, interleaved) | 60.3 | 51.6 | 32.4 (before the pipe fix) |
+| `llama-bench` pp512, tok/s | 1457 | 1389 | 980 |
+| 8 KiB round trip, p50 (micro-benchmark, echo) | — | 21–98 µs | 93–387 µs |
+| Bulk, each way | — | 0.4–1.8 GB/s | 0.16–0.28 GB/s (was 0.02–0.08 before ring and a task per direction) |
+
+- The split model's answers are token-for-token the same as the single-node model's (temperature 0).
+- Per generated token the head sent the shard about 31 KB (llama.cpp's graph and inputs) and
+  received 8.4 KB (the activations: 2048 × 4 bytes); loading put 573 MB of weights (half the
+  model) through the link once.
+- Killing the shard (the node and its RPC server, `kill -9`) mid-answer: the head's llama-server
+  aborted, and 3 s later the model was serving again on the head alone.
+- In the one quiet stretch, raw RPC and shard links were within 2% of each other on generation
+  (44.6 against 43.9 tok/s); under load the links lose more, because each token's few round trips
+  cross four more processes that wait for the scheduler.
 
 Both "devices" share one GPU here, so the split numbers measure the overhead of the pipeline and
 the link, not a gain: on two machines the shard's layers run on its own GPU, and each token also
