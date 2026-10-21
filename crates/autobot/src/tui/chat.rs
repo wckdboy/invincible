@@ -992,7 +992,7 @@ pub async fn run(config: &Config, home: PathBuf, agent: Agent, options: Options)
                 _ = hangup.recv() => {}
             }
             term::restore();
-            crate::procs::stop_all().await;
+            crate::procs::shut_down().await;
             std::process::exit(143);
         });
     }

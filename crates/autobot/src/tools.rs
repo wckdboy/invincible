@@ -1062,6 +1062,9 @@ impl Tools {
     }
 
     async fn terminal(&self, command: &str) -> Result<String, String> {
+        if crate::procs::stopping() {
+            return Err("the agent is stopping; nothing new starts".to_owned());
+        }
         // A session of its own (no terminal: a password prompt fails at once instead of
         // waiting on one it cannot read), and so a group that is stopped with it.
         let mut child = detached(self.shell_command(command).await?);
@@ -1820,7 +1823,12 @@ impl Group {
         if let (Some(pid), Ok(mut running)) = (pid, RUNNING.lock()) {
             running.push(pid);
         }
-        Self(pid)
+        let mut group = Self(pid);
+        // Started as the agent began to stop (after its sweep, maybe): stopped now.
+        if crate::procs::stopping() {
+            group.kill();
+        }
+        group
     }
 
     fn forget(pid: u32) {

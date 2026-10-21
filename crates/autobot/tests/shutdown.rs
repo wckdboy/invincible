@@ -51,14 +51,13 @@ fn alive(pid: &str) -> bool {
     !state.is_empty() && !state.starts_with('Z')
 }
 
-#[tokio::test]
-async fn a_stopped_agent_leaves_no_background_process_behind() {
-    let dir = temp("shutdown");
+/// `autobot serve` in a home under [name], whose first turn starts [command] in the background
+/// ($PIDS in it: a file to write pids to); the agent, its directory, and the pids written.
+async fn agent_running(name: &str, command: &str) -> (Proc, std::path::PathBuf, Vec<String>) {
+    let dir = temp(name);
     let homes = Homes::new(&dir);
     let pids = dir.join("pids");
-    // A shell that starts a child of its own: both must go.
-    let command = format!("sleep 300 & echo $$ $! > {}; wait", pids.display());
-    let gateway = model(command).await;
+    let gateway = model(command.replace("$PIDS", &pids.display().to_string())).await;
     let port = free_port();
     homes.agent_config(&format!("http://{gateway}"), port, false);
     let config = homes.autobot.join("config.toml");
@@ -66,7 +65,7 @@ async fn a_stopped_agent_leaves_no_background_process_behind() {
     text.push_str("\n[approvals]\nmode = \"trust\"\n");
     std::fs::write(&config, text).unwrap();
     std::fs::create_dir_all(homes.home.join("work")).unwrap();
-    let mut proc = spawn(
+    let proc = spawn(
         {
             let mut c = homes.command(&binary("autobot"));
             c.arg("serve").current_dir(&homes.home);
@@ -89,21 +88,37 @@ async fn a_stopped_agent_leaves_no_background_process_behind() {
         assert!(std::time::Instant::now() < until, "the background command did not start");
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
-    let started: Vec<&str> = line.split_whitespace().collect();
+    let started: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
     assert!(started.iter().all(|pid| alive(pid)), "running: {started:?}");
+    (proc, dir, started)
+}
 
+fn term(proc: &Proc) {
     let status = std::process::Command::new("kill").args(["-TERM", &proc.pid().to_string()]).status().unwrap();
     assert!(status.success());
-    let until = std::time::Instant::now() + Duration::from_secs(20);
+}
+
+/// Waits (at most [within]) for [proc] to end; how long it took.
+async fn ended(proc: &mut Proc, within: Duration) -> Duration {
+    let started = std::time::Instant::now();
     while proc.0.try_wait().unwrap().is_none() {
-        assert!(std::time::Instant::now() < until, "the agent did not stop on SIGTERM");
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(started.elapsed() < within, "the agent did not stop within {within:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    started.elapsed()
+}
+
+#[tokio::test]
+async fn a_stopped_agent_leaves_no_background_process_behind() {
+    // A shell that starts a child of its own: both must go.
+    let (mut proc, dir, started) = agent_running("shutdown", "sleep 300 & echo $$ $! > $PIDS; wait").await;
+    term(&proc);
+    ended(&mut proc, Duration::from_secs(20)).await;
     // Stopped with it: gone within a few seconds (polled: a killed process not yet reaped still
     // answers for a moment).
     let until = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let left: Vec<&&str> = started.iter().filter(|pid| alive(pid)).collect();
+        let left: Vec<&String> = started.iter().filter(|pid| alive(pid)).collect();
         if left.is_empty() {
             break;
         }
@@ -111,4 +126,36 @@ async fn a_stopped_agent_leaves_no_background_process_behind() {
         assert!(std::time::Instant::now() < until, "left running after the agent stopped: {left:?}\n{log}");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// Asked to stop again while it cleans up (a command that ignores TERM holds it a few
+/// seconds), the agent stops at once.
+#[tokio::test]
+async fn asked_twice_the_agent_stops_at_once() {
+    let (mut proc, _dir, started) =
+        agent_running("shutdown-twice", "trap '' TERM; sleep 300 & echo $$ $! > $PIDS; wait").await;
+    term(&proc);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(proc.0.try_wait().unwrap().is_none(), "still cleaning up (TERM is ignored for 3 s)");
+    term(&proc);
+    let took = ended(&mut proc, Duration::from_secs(20)).await;
+    assert!(took < Duration::from_millis(1500), "took {took:?} after the second ask");
+    for pid in started {
+        let _ = std::process::Command::new("kill").args(["-KILL", &pid]).status();
+    }
+}
+
+/// Once the agent began to stop, nothing new starts: a background process or a command started
+/// then would outlive the sweep.
+#[tokio::test]
+async fn nothing_starts_once_stopping_began() {
+    autobot::procs::shut_down().await;
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c").arg("sleep 300");
+    let error = autobot::procs::start("late", cmd, &std::env::temp_dir(), None).unwrap_err();
+    assert!(error.contains("stopping"), "{error}");
+    let tools = autobot::tools::Tools::new(std::env::temp_dir(), Duration::from_secs(5));
+    let call = tools.parse("terminal", r#"{"command": "echo late"}"#).unwrap();
+    let out = tools.run(&call).await;
+    assert!(out.contains("stopping") && !out.contains("late\n"), "{out}");
 }
