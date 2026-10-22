@@ -1,6 +1,6 @@
 {
   "spec": "cluster",
-  "version": 0,
+  "version": 1,
   "cases": [
     {
       "name": "link: loopback is always direct",
@@ -755,6 +755,13 @@
             "device": "MTL0",
             "tg_tps": 60.0
           }
+        ],
+        "links": [
+          {
+            "node": "box",
+            "rtt_ms": 0.3,
+            "mib_s": 120.0
+          }
         ]
       },
       "expect": {
@@ -772,7 +779,7 @@
             "permille": 999
           }
         ],
-        "predicted_tps": 59.7
+        "predicted_tps": 57.57
       }
     },
     {
@@ -804,6 +811,13 @@
             "device": "MTL0",
             "tg_tps": 100.0
           }
+        ],
+        "links": [
+          {
+            "node": "box",
+            "rtt_ms": 0.3,
+            "mib_s": 120.0
+          }
         ]
       },
       "expect": {
@@ -821,7 +835,7 @@
             "permille": 194
           }
         ],
-        "predicted_tps": 55.37
+        "predicted_tps": 53.53
       }
     },
     {
@@ -865,6 +879,13 @@
             "device": "MTL0",
             "permille": 100
           }
+        ],
+        "links": [
+          {
+            "node": "box",
+            "rtt_ms": 0.3,
+            "mib_s": 120.0
+          }
         ]
       },
       "expect": {
@@ -882,7 +903,7 @@
             "permille": 100
           }
         ],
-        "predicted_tps": 52.63
+        "predicted_tps": 50.97
       }
     },
     {
@@ -926,6 +947,13 @@
             "device": "MTL0",
             "permille": 500
           }
+        ],
+        "links": [
+          {
+            "node": "box",
+            "rtt_ms": 0.3,
+            "mib_s": 120.0
+          }
         ]
       },
       "expect": {
@@ -943,7 +971,7 @@
             "permille": 194
           }
         ],
-        "predicted_tps": 55.37
+        "predicted_tps": 53.53
       }
     },
     {

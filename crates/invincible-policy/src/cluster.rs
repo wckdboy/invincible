@@ -104,6 +104,20 @@ pub struct Measurement {
     pub tg_tps: f64,
 }
 
+/// What a shard link costs per token, measured over the link itself. Phase 1's numbers: a head
+/// sends a shard about 31 KiB and gets 8.4 KiB back per generated token, so a remote stage adds a
+/// round trip plus ~40 KiB of transfer to every token. Joined by node; a remote node with no entry
+/// means no prediction, never a guess of zero.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LinkSpeed {
+    pub node: String,
+    pub rtt_ms: f64,
+    pub mib_s: f64,
+}
+
+/// Activation traffic per generated token through one remote stage, in MiB: (31 + 8.4) KiB.
+pub const TOKEN_MIB: f64 = 0.0385;
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct PlanInput {
     /// The model's file size.
@@ -114,6 +128,10 @@ pub struct PlanInput {
     /// What the nodes measured about themselves. Empty or partial: plan by memory (v0).
     #[serde(default)]
     pub measured: Vec<Measurement>,
+    /// What the shard links cost per token (`invincible tune link`). Without an entry for a remote
+    /// node the plan still picks shares by device speed, but reports no prediction.
+    #[serde(default)]
+    pub links: Vec<LinkSpeed>,
     /// The split running now, if any: kept unless another predicts at least [`HYSTERESIS`] better,
     /// because a reshard reloads the model on every node.
     #[serde(default)]
@@ -123,7 +141,7 @@ pub struct PlanInput {
 impl PlanInput {
     /// What a node knows before anything is calibrated: memory only, no running split.
     pub fn new(model_bytes: u64, split: SplitMode, devices: Vec<PlanDevice>) -> Self {
-        Self { model_bytes, split, devices, measured: Vec::new(), current: Vec::new() }
+        Self { model_bytes, split, devices, measured: Vec::new(), links: Vec::new(), current: Vec::new() }
     }
 }
 
@@ -194,16 +212,29 @@ fn capacities(input: &PlanInput, need_mib: u64) -> Vec<u64> {
     input.devices.iter().map(|d| (usable(d).saturating_mul(1000) / need_mib.max(1)).min(1000)).collect()
 }
 
-/// Tokens/s predicted for these shares: `1 / Σ share_i / tps_i`. Every token crosses every stage,
-/// so throughputs do not add — times do.
+/// Tokens/s predicted for these shares: `1 / (Σ share_i / tps_i + Σ links)`. Every token crosses
+/// every stage, so throughputs do not add — times do — and every remote stage adds a round trip and
+/// its activation traffic to every token.
 fn pipeline_tps(shares: &[Share], input: &PlanInput) -> Option<f64> {
     if shares.is_empty() || shares.iter().map(|s| s.permille).sum::<u64>() != 1000 {
         return None;
     }
+    let head = &input.devices.first()?.node;
     let mut seconds = 0.0;
+    let mut remotes: Vec<&str> = Vec::new();
     for share in shares {
         let device = input.devices.iter().find(|d| d.node == share.node && d.device == share.device)?;
         seconds += (share.permille as f64 / 1000.0) / measured_tps(input, device)?;
+        if &share.node != head && !remotes.contains(&share.node.as_str()) {
+            remotes.push(&share.node);
+        }
+    }
+    for node in remotes {
+        let link = input.links.iter().find(|l| l.node == node)?;
+        if !(link.rtt_ms.is_finite() && link.mib_s.is_finite() && link.mib_s > 0.0) {
+            return None;
+        }
+        seconds += link.rtt_ms / 1000.0 + TOKEN_MIB / link.mib_s;
     }
     (seconds > 0.0).then(|| 1.0 / seconds)
 }
@@ -363,12 +394,23 @@ mod tests {
         PlanDevice { node: node.into(), device: "MTL0".into(), free_mib }
     }
 
+    fn link(node: &str) -> LinkSpeed {
+        LinkSpeed { node: node.into(), rtt_ms: 0.3, mib_s: 120.0 }
+    }
+
     fn measured(node: &str, tps: f64) -> Measurement {
         Measurement { node: node.into(), device: "MTL0".into(), tg_tps: tps }
     }
 
     fn input(model_bytes: u64, devices: Vec<PlanDevice>) -> PlanInput {
-        PlanInput { model_bytes, split: SplitMode::Always, devices, measured: Vec::new(), current: Vec::new() }
+        PlanInput {
+            model_bytes,
+            split: SplitMode::Always,
+            devices,
+            measured: Vec::new(),
+            links: Vec::new(),
+            current: Vec::new(),
+        }
     }
 
     #[test]
@@ -406,12 +448,13 @@ mod tests {
         // can hold; the head keeps its output block.
         let mut i = input(8 << 30, vec![device("studio", 8_000), device("box", 48_000)]);
         i.measured = vec![measured("studio", 10.0), measured("box", 60.0)];
+        i.links = vec![link("box")];
         let plan = plan(&i);
         assert_eq!(plan.action, PlanAction::Split);
         let shares: Vec<(&str, u64)> = plan.shares.iter().map(|s| (s.node.as_str(), s.permille)).collect();
         assert_eq!(shares, vec![("studio", 1), ("box", 999)]);
-        // 1 / (0.001/10 + 0.999/60) = 59.70
-        assert_eq!(plan.predicted_tps, Some(59.7));
+        // 1 / (0.001/10 + 0.999/60 + 0.0003 + 0.0385/120) = 57.57
+        assert_eq!(plan.predicted_tps, Some(57.57));
     }
 
     #[test]
@@ -419,25 +462,27 @@ mod tests {
         // 16 GiB model: 18535 MiB needed. The peer is twice as fast but can hold only 0.194 of it.
         let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
         i.measured = vec![measured("studio", 50.0), measured("box", 100.0)];
+        i.links = vec![link("box")];
         let plan = plan(&i);
         let shares: Vec<(&str, u64)> = plan.shares.iter().map(|s| (s.node.as_str(), s.permille)).collect();
         assert_eq!(shares, vec![("studio", 806), ("box", 194)]);
-        // 1 / (0.194/100 + 0.806/50) = 55.37
-        assert_eq!(plan.predicted_tps, Some(55.37));
+        // 1 / (0.194/100 + 0.806/50 + 0.0003 + 0.0385/120) = 53.53
+        assert_eq!(plan.predicted_tps, Some(53.53));
     }
 
     #[test]
     fn the_running_split_is_kept_when_it_is_close() {
         let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
         i.measured = vec![measured("studio", 50.0), measured("box", 100.0)];
+        i.links = vec![link("box")];
         i.current = vec![
             Share { node: "studio".into(), device: "MTL0".into(), permille: 900 },
             Share { node: "box".into(), device: "MTL0".into(), permille: 100 },
         ];
         let plan = plan(&i);
-        // 1 / (0.9/50 + 0.1/100) = 52.63, within 10% of 55.37: not worth a reload.
+        // 1 / (0.9/50 + 0.1/100 + 0.0003 + 0.0385/120) = 50.97, within 10% of 53.53.
         assert_eq!(plan.shares, i.current);
-        assert_eq!(plan.predicted_tps, Some(52.63));
+        assert_eq!(plan.predicted_tps, Some(50.97));
     }
 
     #[test]
@@ -450,6 +495,16 @@ mod tests {
         ];
         let plan = plan(&i);
         assert_eq!(plan.shares.iter().map(|s| s.permille).collect::<Vec<_>>(), vec![806, 194]);
+    }
+
+    #[test]
+    fn without_a_link_number_there_is_no_prediction() {
+        let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
+        i.measured = vec![measured("studio", 50.0), measured("box", 100.0)];
+        let plan = plan(&i);
+        // The shares still follow the measurements; the rate would be a guess, so it is not given.
+        assert_eq!(plan.shares.iter().map(|s| s.permille).collect::<Vec<_>>(), vec![806, 194]);
+        assert_eq!(plan.predicted_tps, None);
     }
 
     #[test]

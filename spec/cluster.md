@@ -201,9 +201,12 @@ are chosen by measured speed instead of memory:
 6. Fill the fastest device (`tg_tps` descending, the order given breaking a tie) to its capacity,
    then the next, until 1000 thousandths are placed. The head keeps at least 1: its own device runs
    the output block.
-7. `predicted_tps` = `1 / Σ (permille_i / 1000) / tg_tps_i`. A token crosses every stage, so stage
-   times add; throughputs do not. It is a prediction from the measurements, and a plan states it
-   rather than claiming it.
+7. `predicted_tps` = `1 / (Σ (permille_i / 1000) / tg_tps_i + Σ_remote (rtt_ms / 1000 + TOKEN_MIB / mib_s))`.
+   A token crosses every stage, so stage times add; throughputs do not, and every remote stage adds
+   a round trip plus its activation traffic to every token (phase 1 measured ~31 KiB sent and 8.4
+   KiB returned per token, so `TOKEN_MIB` = 0.0385). A remote node whose link has not been measured
+   leaves `predicted_tps` absent: the shares still follow the device measurements, but the rate is
+   never guessed. Vectors: `spec/vectors/cluster.json` version 1.
 8. **Stability.** A `current` split that still fits the capacities is kept whenever its predicted
    rate is at least `HYSTERESIS` (0.9) of the new plan's. A reshard reloads the model on every node
    and ends the requests in flight, so a 10% gain is the floor for paying that. A `current` that no
