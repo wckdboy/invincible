@@ -129,6 +129,17 @@ def verified(status: int, obj: dict, headers: dict) -> dict | None:
     }
 
 
+def check_offline(binary: str, envelope: dict, key: str) -> list[str]:
+    """Verify a receipt on THIS machine: the envelope as JSON on stdin, the node's public key.
+
+    `receipt verify` is the product's own examiner, so the demonstration runs it rather than
+    re-implementing a signature check in Python and calling that a verification.
+    """
+    argv = [binary, "receipt", "verify", "-"] + (["--key", key] if key else [])
+    p = subprocess.run(argv, input=json.dumps(envelope), capture_output=True, text=True, timeout=120)
+    return [line.rstrip() for line in (p.stdout + p.stderr).splitlines() if line.strip()]
+
+
 def run_batch(url: str, token: str, n: int, concurrency: int = 1) -> tuple[float, list[dict], list[str]]:
     """Send n requests, `concurrency` of them in flight at once.
 
@@ -300,64 +311,96 @@ def main() -> int:
     act = Act(5, "a receipt you can check without trusting the node")
     acts.append(act)
     act.head()
-    hosts = {"invincible-lab-head": args.head_host, "invincible-lab-peer": args.peer_host}
-    subject = next((a for a in spread if a.get("id") and (a.get("by") in hosts)), None) if spread else None
+    head_name, peer_name = "invincible-lab-head", "invincible-lab-peer"
+
+    def api_get(who: str, path: str) -> dict:
+        """GET a path on a node: the head through the forward, the peer over ssh."""
+        if who == head_name:
+            status, obj = get(f"{args.head}{path}", args.token)
+            return obj if status == 200 else {}
+        code, out = ssh(
+            args.peer_host,
+            args.ssh_key,
+            "t=$(/root/.local/bin/invincible token) && "
+            f"curl -s -H \"Authorization: Bearer $t\" http://127.0.0.1:7777{path}",
+        )
+        try:
+            return json.loads(out)
+        except json.JSONDecodeError:
+            return {}
+
+    candidates = [a for a in spread if a.get("id") and a.get("by")]
+    # Prefer an answer a *different* machine produced: that case has two receipts, which is the
+    # interesting one. The id in the answer's header names the head's receipt either way.
+    subject = next((a for a in candidates if a["by"] != head_name), candidates[0] if candidates else None)
     if subject is None:
         act.say("no dispatched answer carried a request id: nothing to check")
         broke = True
     else:
-        node = subject["by"]
-        act.say(f"request {subject['id']} answered by {node} with {subject['tokens']} tokens")
-
-        def node_get(path: str) -> dict:
-            """GET a path on the answering node: the head through the forward, the peer over ssh."""
-            if node == "invincible-lab-head":
-                status, obj = get(f"{args.head}{path}", args.token)
-                return obj if status == 200 else {}
-            code, out = ssh(
-                args.peer_host,
-                args.ssh_key,
-                "t=$(/root/.local/bin/invincible token) && "
-                f"curl -s -H \"Authorization: Bearer $t\" http://127.0.0.1:7777{path}",
-            )
-            try:
-                return json.loads(out)
-            except json.JSONDecodeError:
-                return {}
-
-        if args.verify_bin:
-            # Fetch the envelope and the node's public key, then check the receipt here: the check
-            # does not run on the machine that signed it, which is the whole point of a receipt.
-            envelope = node_get(f"/v1/receipts/{subject['id']}")
-            key = (node_get("/v1/node") or {}).get("receipt_key") or ""
-            if key:
-                act.say(f"the signing node publishes its key: {key[:20]}... (fetched, not assumed)")
-            if not envelope:
-                act.say("the node did not return the envelope for that id")
-                broke = True
-            elif not key:
-                act.say("the node did not publish a receipt key: nothing to verify against")
-                broke = True
-            else:
-                p = subprocess.run(
-                    [args.verify_bin, "receipt", "verify", "-", "--key", key],
-                    input=json.dumps(envelope),
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                for line in (p.stdout + p.stderr).splitlines():
-                    act.say(line.rstrip()[:190])
-                if p.returncode != 0 or "checked" not in p.stdout.lower():
-                    act.say(f"OFFLINE VERIFY FAILED (exit {p.returncode})")
-                    broke = True
+        envelope = api_get(head_name, f"/v1/receipts/{subject['id']}")
+        if "signature" not in envelope:
+            act.say(f"the head returned no signed receipt for {subject['id']}")
+            broke = True
         else:
-            code, out = ssh(hosts[node], args.ssh_key, f"/root/.local/bin/invincible receipt verify {subject['id']} 2>&1")
-            for line in out.splitlines():
-                act.say(line.rstrip()[:190])
-            if code != 0 or "checked" not in out.lower():
-                act.say(f"the node could not verify its own receipt (exit {code})")
-                broke = True
+            inner = envelope.get("receipt") or {}
+            tokens = inner.get("tokens") or {}
+            caller = (inner.get("caller") or {}).get("kind")
+            act.say(f"request {subject['id']}: answered by {subject['by']}, receipted on the head")
+            act.say(
+                f"  api {inner.get('api')}, {tokens.get('output', '?')} tokens, caller {caller}, "
+                f"egress {inner.get('egress')}"
+            )
+            head_key = (api_get(head_name, "/v1/node") or {}).get("receipt_key") or ""
+            if not args.verify_bin:
+                code, out = ssh(args.head_host, args.ssh_key, f"/root/.local/bin/invincible receipt verify {subject['id']} 2>&1")
+                for line in out.splitlines():
+                    act.say(line.rstrip()[:190])
+                if code != 0 or "checked" not in out.lower():
+                    act.say(f"the node could not verify its own receipt (exit {code})")
+                    broke = True
+            else:
+                report = check_offline(args.verify_bin, envelope, head_key)
+                for line in report:
+                    act.say(line[:190])
+                if not any(line.startswith("signature: valid") for line in report):
+                    act.say("THE HEAD'S RECEIPT DID NOT VERIFY")
+                    broke = True
+                # The other half: the node that ran it signed its own receipt for the same answer.
+                if subject["by"] != head_name:
+                    code, audit_json = ssh(
+                        args.peer_host, args.ssh_key, "/root/.local/bin/invincible audit --limit 400 --json"
+                    )
+                    try:
+                        entries = json.loads(audit_json)
+                    except json.JSONDecodeError:
+                        entries = []
+                    want = inner.get("answer_sha256")
+                    found = next(
+                        (
+                            e
+                            for e in entries
+                            if ((e.get("receipt") or {}).get("receipt") or {}).get("answer_sha256") == want
+                        ),
+                        None,
+                    )
+                    if found is None:
+                        act.say(f"the node that ran it kept no receipt for that answer (sha256 {str(want)[:16]}…)")
+                        broke = True
+                    else:
+                        half = found["receipt"]
+                        peer_env = {"receipt": half.get("receipt"), "signature": half.get("signature")}
+                        peer_key = (api_get(peer_name, "/v1/node") or {}).get("receipt_key") or ""
+                        peer_report = check_offline(args.verify_bin, peer_env, peer_key)
+                        act.say(f"the same answer carries a second receipt, signed by {peer_name}:")
+                        act.say(f"  request_id {half.get('receipt', {}).get('request_id')}, key {peer_key[:16]}…")
+                        for line in peer_report:
+                            if line.startswith(("signature", "  caller", "  api", "  request ", "  answer ")):
+                                act.say(f"  {line.strip()[:170]}")
+                        if any(line.startswith("signature: valid") for line in peer_report):
+                            act.say("both signatures verify here, against keys fetched from the nodes")
+                        else:
+                            act.say("THE SECOND RECEIPT DID NOT VERIFY")
+                            broke = True
 
     # ---- 6. break it ------------------------------------------------------------------------------
     act = Act(6, "now break it: kill the peer mid-flight")
