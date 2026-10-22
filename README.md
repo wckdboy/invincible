@@ -1084,8 +1084,11 @@ On macOS with the application firewall on, the first remote connection can wait 
 incoming connections?" prompt for `invincible` (or `System Settings › Network › Firewall`): allow it,
 or pairing hangs until it times out.
 
-Paired devices reach the inference API with no token (their key authenticates them) and never the
-admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer is in
+Paired devices reach `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
+cluster's `/v1/cluster/node` and `/v1/cluster/meter` with no token (their key authenticates them),
+and nothing else: the agent, the audit log, dispatch and the admin endpoints answer them exactly as
+a path that does not exist. The list is in [spec/pairing.md](spec/pairing.md) (Transport). Autobot
+pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.

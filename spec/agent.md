@@ -2,14 +2,15 @@
 
 The Autobot Agent (`autobot serve`) answers on loopback (default `127.0.0.1:7792`). Invincible
 Gateway passes every request under `/v1/agent` through to it, for local clients with the gateway's
-token and for paired devices over their Noise session. A paired phone can therefore start agent
-turns on the owner's machine, watch them and answer approvals, with nothing exposed beyond what
-pairing already exposes.
+token. **A paired device does not reach it** (spec/pairing.md, Transport): the proxy carries the
+node's own bearer token, so a device that could call it would take agent turns with the node's
+tools, write schedules on the node and spend its cloud models — operator-equivalent, not what
+pairing grants. Letting a phone do that needs a per-device capability recorded at pairing, which
+does not exist yet; until it does, `/v1/agent` is loopback only.
 
-The agent accepts only requests that carry the gateway's token (`Authorization: Bearer <token>`,
-the file `$INVINCIBLE_HOME/token`). The gateway adds it when it passes a device's request through,
-with `invincible-caller: device:<name>` (or `local`) saying who is asking; only the gateway can set
-it, since only it has the token.
+The agent accepts only requests that carry the gateway's token (`Authorization: Bearer ***
+the file `$INVINCIBLE_HOME/token`). The gateway adds it when it passes a request through,
+with `invincible-caller: local` saying who is asking (a device never gets this far).
 If the agent is not running, the gateway answers `503` with error type `agent_unavailable`.
 
 One path needs no token: `GET /healthz` on the agent's own address (not under `/v1/agent`, so not
@@ -190,8 +191,9 @@ No `tools` means every tool, as for schedules made here; a schedule from a devic
 at most `every 366d`. The phone sends its schedule in UTC
 (`CRON_TZ=UTC 0 5 * * *` for 07:00 at UTC+2), so it runs at the phone's time wherever the
 machine is, and sends it again when its UTC offset changes. The schedule records its `origin`
-(`device:<name>`, from `invincible-caller`). Posting it again with the same `id` replaces it and
-keeps its creation time; `enabled: false` keeps it without running it. The phone collects results
+(`device:<name>`, from `invincible-caller`; no device reaches `/v1/agent` yet, so in practice a
+local client posts one). Posting it again with the same `id` replaces it and keeps its creation
+time; `enabled: false` keeps it without running it. The phone collects results
 with `GET …/runs?after=<last run it has>`, so nothing is lost while it is away.
 
 On this machine, `[agent] tools` keeps a bot to some groups and `[agent] disabled_tools` turns

@@ -39,6 +39,11 @@ pub const MAX_REQUEST: usize = 32 * 1024 * 1024;
 /// The largest agent turn passed through: its text and a few images in base64 (the agent takes
 /// four of 10 MiB at most).
 const AGENT_TURN_BODY: usize = 64 * 1024 * 1024;
+/// The largest body a paired device may post to the meter: one bulk payload
+/// ([`crate::remote::meter_link`] posts `4 << 20`) plus room for a larger one, not the 16 MiB the
+/// loopback route takes. One device may hold 32 sessions (`spec/pairing.md`, Limits), so this
+/// per-request limit is also the per-device worst case.
+const METER_BODY: usize = 5 * 1024 * 1024;
 
 pub struct AppState {
     pub engines: Vec<Engine>,
@@ -502,10 +507,43 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// What paired devices reach through their encrypted session: the API only. They are
-/// authenticated by their pinned key, so no token, and they cannot administer the node.
+/// What paired devices reach through their encrypted session: an allowlist, not the API.
+///
+/// A paired device is authenticated by its pinned key, not by the node's token, and it is not the
+/// operator: a phone, or a peer that uses this node as a shard. It gets the inference its app
+/// runs, the node's own description, and what a cluster head needs to size and time this node —
+/// exactly what `spec/pairing.md` (Transport) documents. Nothing else is mounted, so every other
+/// path is a 404 from the fallback below, which is also what a path that does not exist gets: a
+/// device cannot tell an operator route from no route at all.
+///
+/// Deliberately absent (each would be operator-equivalent or worse):
+/// - `/v1/agent*` — the proxy runs Autobot here with the node's own bearer token, so a device
+///   could take agent turns with shell tools and write cron jobs on this machine.
+/// - `/v1/audit` — every caller's records: model, decision, tokens, egress hosts, topology.
+/// - `/v1/dispatch` (status) and `/v1/dispatch/chat/completions` — control of, and a hop through,
+///   the operator's other nodes.
+/// - `/v1/messages`, `/v1/audio/speech`, `/v1/images/generations` — inference the device protocol
+///   does not document and no peer needs over a session.
+/// - `/v1/fetch`, `/v1/cluster*` except the two above, `/v1/admin/*` — outbound fetch, membership
+///   and administration.
+fn device_api() -> Router<Arc<AppState>> {
+    Router::new()
+        // The app: which models it may ask for, one turn, and the receipt for it.
+        .route("/v1/models", get(models))
+        .route("/v1/chat/completions", post(chat_completions).layer(DefaultBodyLimit::max(MAX_REQUEST)))
+        .route("/v1/receipts/{id}", get(receipt))
+        // What this node is — the membership probe's `GET /v1/node` — and what it can give a
+        // cluster (`GET /v1/cluster/node`, which a head probes before splitting a model here).
+        .route("/v1/node", get(node_info))
+        .route("/v1/cluster/node", get(cluster_node))
+        // The meter: a head times the link with one post of the size `meter_link` sends. Its
+        // limit is the payload, not the loopback route's 16 MiB.
+        .route("/v1/cluster/meter", post(cluster_meter).layer(DefaultBodyLimit::max(METER_BODY)))
+        .fallback(|| async { error(StatusCode::NOT_FOUND, "not_found", "no such endpoint") })
+}
+
 pub fn device_app(state: Arc<AppState>) -> Router {
-    api().with_state(state)
+    device_api().with_state(state)
 }
 
 /// `POST /v1/fetch {"url"}`: a web page through the node's network policy, receipted
