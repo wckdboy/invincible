@@ -280,7 +280,10 @@ async fn the_fastest_idle_node_is_chosen_and_named_in_the_answer() {
     assert_eq!(slow.asked.load(Ordering::SeqCst), 0);
     assert_eq!(head.engine_asked.load(Ordering::SeqCst), 0, "this machine was not chosen");
 
-    // The head's signed receipt describes its own part only: `dispatch` is not in it.
+    // The head's signed receipt describes its own part — it forwarded this and `fast` answered —
+    // so `dispatch` names the worker inside the signature (spec/dispatch.md). What it must not do
+    // is claim the model ran here: the decision, the tokens and the answer hash are all the
+    // answering node's, relayed.
     let envelope: Value = client
         .get(format!("{}/v1/receipts/{id}", head.url))
         .bearer_auth("token")
@@ -296,7 +299,11 @@ async fn the_fastest_idle_node_is_chosen_and_named_in_the_answer() {
         receipt,
         envelope["signature"].as_str().unwrap()
     ));
-    assert!(receipt.get("dispatch").is_none(), "the signed receipt must not claim another machine's work");
+    assert_eq!(
+        receipt["dispatch"],
+        json!({ "via": "studio", "node": "fast" }),
+        "the signed receipt names the machine that answered"
+    );
     assert_eq!(receipt["decision"]["model"], "qwen3-4b");
     assert_eq!(receipt["tokens"], json!({ "input": 5, "output": 2 }));
 

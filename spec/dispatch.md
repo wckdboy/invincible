@@ -4,8 +4,10 @@
 > completion and answers it whole from one of the nodes this machine owns
 > (`crates/invincible/src/dispatch.rs`): the answering node comes back in
 > `invincible-dispatched-to`, a retry in `invincible-dispatch-retried`, and
-> `dispatch: {"via", "node"}` is written to the head's audit line only — never into the signed
-> receipt. `stream: true` is refused with a 400 (`streaming_not_dispatched`) that points at
+> `dispatch: {"via", "node"}` is **inside the signed receipt** as well as on the head's audit
+> line: a client that cannot learn which machine answered cannot check the claim, and a dispatch
+> receipt naming only the head reads as if the head did the work. `stream: true` is refused with a
+> 400 (`streaming_not_dispatched`) that points at
 > `/v1/chat/completions`. A node advertises what it will take in its capabilities as
 > `dispatch: { max_inflight, queue }` (`queue` fixed at 0, `max_inflight` from
 > `[node] dispatch_max_inflight`, default 1; a shard advertises none,
@@ -61,9 +63,11 @@ refused. If no node is eligible, it answers `503 no_capacity` with the reason pe
   request appears in the receipt with `error.code = "dispatched_node_failed"`. Half an answer from
   a second node would be a lie. (v0 answers whole, so every failure it sees is before the first
   token; the after-token case is what streaming adds.)
-- The answering node's receipt stays the receipt of record. The head adds
-  `dispatch: { "via": "<head name>", "node": "<node name>" }` to its audit line only — never to
-  the signed receipt, which must describe one machine's work.
+- The head's receipt describes **the head's** work — it forwarded this request to `<node>` and
+  returned those bytes — so it carries `dispatch: { "via": "<head name>", "node": "<node name>" }`
+  inside the signature, and on its audit line. The answering node's own receipt stays the receipt
+  of record for the model's work; the head's receipt names it so a client knows which machine to
+  ask for it. Both halves bind the same `answer_sha256`.
 - `invincible-private` requests go only to nodes on the owner's hardware (all paired nodes are),
   and never to a node whose model is cloud-backed.
 
@@ -109,5 +113,8 @@ The rules above stand; these are the parts a v0 will notice.
   (handshake included), which only ever makes a node look slower than it is.
 - **A node too old to advertise `dispatch` is read as taking nothing** (`max_inflight: 0`), and a
   node that names no models serves none. Unknown is never unlimited.
-- **The head's receipt has no `dispatch` field.** `dispatch: {"via", "node"}` is written to the
-  head's audit line only; the answering node's receipt stays the receipt of record.
+- **A dispatch receipt names the worker but does not carry its receipt.** `dispatch: {"via",
+  "node"}` says which node answered, signed by the head; the node's own receipt id and key are not
+  relayed, so fetching and verifying that second half still means asking the node (a paired device
+  can read `/v1/receipts/<id>` on it). Relaying the id and the key so one fetch checks both halves
+  is the next change, not a claim this one makes.

@@ -473,9 +473,10 @@ pub struct Draft {
     pub caller: crate::audit::Caller,
     pub client: Option<String>,
     pub api: &'static str,
-    /// For the audit log, not the receipt: the head this request was dispatched through and the
-    /// node that answered it (spec/dispatch.md, `dispatch.via`). The signed receipt describes one
-    /// machine's work, so it never holds this.
+    /// The head this request was dispatched through and the node that answered it
+    /// (spec/dispatch.md, `dispatch`). It is in the signed receipt as well as the audit line: a
+    /// client that cannot learn which machine answered cannot check the claim, and a dispatch
+    /// receipt naming only the head reads as if the head did the work.
     pub dispatch: Option<Value>,
     /// The request as bound: `{"api", "body"}` canonicalised and hashed, then dropped — a receipt
     /// holds the hash of the request, never the prompt.
@@ -570,6 +571,11 @@ impl Draft {
         }
         if !self.cluster.is_empty() {
             receipt["cluster"] = self.cluster.iter().map(crate::cluster::ShardUse::to_json).collect();
+        }
+        // The worker, when this node forwarded the request to another one. Only then: a receipt
+        // from a node that answered itself keeps the shape it always had.
+        if let Some(dispatch) = &self.dispatch {
+            receipt["dispatch"] = dispatch.clone();
         }
         if let Some((input, output)) = usage(&self.tail) {
             receipt["tokens"] = json!({ "input": input, "output": output });
@@ -706,6 +712,31 @@ mod tests {
     };
     use crate::audit::Caller;
     use serde_json::json;
+
+    /// A dispatch receipt names the machine that answered, and the name is inside the signature:
+    /// otherwise a client verifying it learns nothing about who did the work, and a receipt that
+    /// says nothing can be relabelled without touching the signature.
+    #[test]
+    fn the_worker_is_inside_the_signed_bytes() {
+        let key = ReceiptKey::from_seed(&[7; 32]);
+        let mut draft = Draft::new().expect("draft");
+        draft.bind_request("dispatch", &json!({ "model": "qwen3-0.6b", "messages": [] }));
+        draft.dispatch = Some(json!({ "via": "head", "node": "peer" }));
+        let receipt = draft.receipt(&key.public(), 1_700_000_000).expect("a bound draft receipts");
+        assert_eq!(receipt["dispatch"]["node"], "peer");
+        let envelope = key.sign(receipt.clone()).expect("sign");
+        let signature = envelope["signature"].as_str().expect("signature");
+        assert!(verify(&key.public(), &receipt, signature));
+        // A different worker is a different receipt, and the old signature does not cover it.
+        let mut changed = receipt.clone();
+        changed["dispatch"]["node"] = json!("someone-else");
+        assert!(!verify(&key.public(), &changed, signature));
+        // A node that answered itself names no worker: the old shape, unchanged.
+        let mut local = Draft::new().expect("draft");
+        local.bind_request("chat", &json!({ "model": "qwen3-0.6b" }));
+        let plain = local.receipt(&key.public(), 1_700_000_000).expect("receipt");
+        assert!(plain.get("dispatch").is_none(), "a receipt that was not forwarded names no worker");
+    }
 
     /// An answer that was an error is receipted as one: its status, or the error event that
     /// ended a stream that had begun, never as a normal answer.
