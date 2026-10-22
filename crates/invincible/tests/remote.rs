@@ -275,12 +275,15 @@ async fn a_device_pins_the_receipt_key_and_checks_receipts_through_the_tunnel() 
     assert!(invincible::receipts::verify(&pinned, &envelope["receipt"], envelope["signature"].as_str().unwrap()));
     assert_eq!(envelope["receipt"]["egress"], json!([]));
 
-    // The node's audit log has it, as the device's request, and the device can read it.
-    let audit: Value = client.get(format!("{door}/v1/audit")).send().await.unwrap().json().await.unwrap();
-    let entry = audit["entries"].as_array().unwrap().last().unwrap().clone();
+    // The node's audit log has it, as the device's request — and the device cannot read the log
+    // (spec/pairing.md, Transport: it is not a device route, and it holds every caller's records).
+    let refused = client.get(format!("{door}/v1/audit")).send().await.unwrap();
+    assert_eq!(refused.status(), 404, "a paired device must not read the audit log");
+    let log = invincible::audit::AuditLog::new(&node.dir);
+    let entries = log.read(0, 10);
+    let entry = entries.last().expect("the request is in the node's log");
     assert_eq!(entry["caller"], "device:phone");
     assert_eq!(entry["receipt"], envelope);
-    assert_eq!(audit["summary"]["egress"], json!([]));
-    assert_eq!(invincible::audit::AuditLog::new(&node.dir).verify(&pinned), Ok(1));
+    assert_eq!(log.verify(&pinned), Ok(1));
     let _ = std::fs::remove_dir_all(dir);
 }

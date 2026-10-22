@@ -20,14 +20,30 @@ const ROTATE_AT: u64 = 16 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Caller {
     Local,
-    Device(String),
+    /// A paired device: the name it is listed under, its pinned static key (base64url), and the
+    /// fingerprint people compare ([crate::devices::fingerprint]). The key is the identity; the
+    /// name is a label the owner can change.
+    Device {
+        name: String,
+        key: String,
+        fingerprint: String,
+    },
 }
 
 impl Caller {
+    /// A paired device, from its static public key as the session handshake gave it.
+    pub fn device(name: &str, key: &[u8]) -> Self {
+        Self::Device {
+            name: name.to_owned(),
+            key: base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, key),
+            fingerprint: crate::devices::fingerprint(key),
+        }
+    }
+
     pub fn code(&self) -> String {
         match self {
             Self::Local => "local".to_owned(),
-            Self::Device(name) => format!("device:{name}"),
+            Self::Device { name, .. } => format!("device:{name}"),
         }
     }
 }
@@ -69,6 +85,20 @@ impl AuditLog {
 
     /// Appends one entry for [envelope] (a signed receipt).
     pub fn append(&self, caller: &Caller, client: Option<&str>, api: &str, envelope: &Value) -> Result<(), String> {
+        self.append_tagged(caller, client, api, envelope, None)
+    }
+
+    /// [append], with [extra] fields for this entry only — what the head did that the signed
+    /// receipt must not claim (`dispatch: {"via", "node"}`, spec/dispatch.md). A signed receipt
+    /// describes one machine's work, so this never goes inside [envelope].
+    pub fn append_tagged(
+        &self,
+        caller: &Caller,
+        client: Option<&str>,
+        api: &str,
+        envelope: &Value,
+        extra: Option<&Value>,
+    ) -> Result<(), String> {
         let mut last = self.last.lock().expect("audit lock");
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() >= ROTATE_AT) {
             let prev = Self::tail_hash(&self.path);
@@ -84,6 +114,12 @@ impl AuditLog {
         let mut entry = json!({ "at": now(), "caller": caller.code(), "api": api, "prev": prev, "receipt": envelope });
         if let Some(client) = client {
             entry["client"] = json!(client);
+        }
+        for (key, value) in extra.and_then(Value::as_object).into_iter().flatten() {
+            // Never over the entry's own fields: the chain and the receipt come first.
+            if entry.get(key).is_none() {
+                entry[key] = value.clone();
+            }
         }
         let line = entry.to_string();
         crate::fsutil::append_private(&self.path, &line)?;
@@ -113,16 +149,45 @@ impl AuditLog {
         entries.into_iter().skip(skip).collect()
     }
 
-    /// The signed receipt of request [id], newest entries first.
-    pub fn find(&self, id: &str) -> Option<Value> {
-        let needle = format!("\"request_id\":\"{id}\"");
-        self.lines()
+    /// The signed receipt of request [id], from this log: the envelope of the one entry that names
+    /// it.
+    ///
+    /// An entry names a request by its own `request_id` field, or — for an entry written before the
+    /// log recorded it — by the id inside the receipt it holds. Entries that name no request (a
+    /// receipt from before the exchange was bound) are passed over: not an error, simply not
+    /// reachable by id.
+    ///
+    /// `Ok(None)` when no entry names [id]. `Err` when the log cannot answer with one receipt: more
+    /// than one entry names it (an id is one receipt, so none is chosen), or an entry whose id the
+    /// caller asked for holds a receipt that names another request (that line was edited, so it is
+    /// no answer for either).
+    pub fn find(&self, id: &str) -> Result<Option<Value>, String> {
+        let naming: Vec<Value> = self
+            .lines()
             .iter()
-            .rev()
-            .filter(|l| l.contains(&needle))
-            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-            .find(|e| e["receipt"]["receipt"]["request_id"] == id)
-            .map(|e| e["receipt"].clone())
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|entry| entry["receipt"].get("signature").is_some())
+            .filter(|entry| Self::names(entry, id))
+            .collect();
+        match naming.len() {
+            0 => Ok(None),
+            1 => Ok(naming.into_iter().next().map(|entry| entry["receipt"].clone())),
+            n => Err(format!(
+                "request id {id} names {n} entries in this node's audit log (at {}): an id names one receipt, so none is chosen",
+                naming.iter().map(|entry| entry["at"].to_string()).collect::<Vec<_>>().join(", ")
+            )),
+        }
+    }
+
+    /// Whether [entry] names request [id]: its `request_id`, or the id in the receipt it holds. A
+    /// line whose two ids disagree names neither: the receipt's id is the signed one, and a line
+    /// that claims another is edited, not evidence.
+    fn names(entry: &Value, id: &str) -> bool {
+        let signed = entry["receipt"]["receipt"]["request_id"].as_str();
+        match entry["request_id"].as_str() {
+            Some(recorded) => recorded == id && signed.is_none_or(|signed| signed == id),
+            None => signed == Some(id),
+        }
     }
 
     /// Checks the chain and every receipt's signature against [receipt_key]: the number of entries,
@@ -209,6 +274,73 @@ mod tests {
     }
 
     #[test]
+    fn extra_entry_fields_ride_on_the_entry_and_never_over_its_own() {
+        // What a dispatcher records: `dispatch: {"via", "node"}` on the audit line, outside the
+        // signed receipt (spec/dispatch.md).
+        let home = std::env::temp_dir().join(format!("invincible-audit-tag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let key = ReceiptKey::from_seed(&[11; 32]);
+        let log = AuditLog::new(&home);
+        let envelope = receipt(&key, "d1", "qwen", json!([]));
+        let extra = json!({ "dispatch": { "via": "studio", "node": "mini" }, "api": "overwritten" });
+        log.append_tagged(&Caller::Local, None, "dispatch", &envelope, Some(&extra)).unwrap();
+        let entry = log.read(0, 1).pop().unwrap();
+        assert_eq!(entry["dispatch"], json!({ "via": "studio", "node": "mini" }));
+        assert_eq!(entry["api"], "dispatch", "an extra field never replaces the entry's own");
+        assert!(entry["receipt"]["receipt"].get("dispatch").is_none());
+        // The chain still verifies with the extra field in it.
+        assert_eq!(log.verify(&key.public()), Ok(1));
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn finds_a_request_by_its_id_and_refuses_a_tie() {
+        let home = std::env::temp_dir().join(format!("invincible-audit-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let key = ReceiptKey::from_seed(&[13; 32]);
+        let log = AuditLog::new(&home);
+        // As this build writes it: the id is on the entry and inside the receipt.
+        log.append_tagged(
+            &Caller::Local,
+            None,
+            "chat",
+            &receipt(&key, "r1", "qwen", json!([])),
+            Some(&json!({ "request_id": "r1" })),
+        )
+        .unwrap();
+        // As it was written before the log recorded ids: only the receipt names the request.
+        log.append(&Caller::Local, None, "chat", &receipt(&key, "r2", "qwen", json!([]))).unwrap();
+        // A receipt from before the exchange was bound names no request at all.
+        let legacy = key
+            .sign(json!({
+                "version": 0, "node": key.public(),
+                "decision": { "action": "run", "model": "qwen", "tier": "node", "reason": "requested" },
+                "egress": [],
+            }))
+            .unwrap();
+        log.append(&Caller::Local, None, "chat", &legacy).unwrap();
+        assert_eq!(log.verify(&key.public()), Ok(3), "an entry with no id does not break the chain");
+
+        assert_eq!(log.find("r1").unwrap().unwrap()["receipt"]["request_id"], "r1");
+        assert_eq!(log.find("r2").unwrap().unwrap()["receipt"]["request_id"], "r2");
+        assert_eq!(log.find("none"), Ok(None));
+
+        // One id, two entries: an id names one receipt, so which one is not decided here.
+        log.append_tagged(
+            &Caller::Local,
+            None,
+            "chat",
+            &receipt(&key, "r1", "qwen", json!([])),
+            Some(&json!({ "request_id": "r1" })),
+        )
+        .unwrap();
+        let error = log.find("r1").unwrap_err();
+        assert!(error.contains("request id r1 names 2 entries"), "{error}");
+        assert!(error.contains("none is chosen"), "{error}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn chains_reads_verifies_and_catches_tampering() {
         let home = std::env::temp_dir().join(format!("invincible-audit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
@@ -216,7 +348,7 @@ mod tests {
         let log = AuditLog::new(&home);
         assert_eq!(log.verify(&key.public()), Ok(0));
         log.append(&Caller::Local, Some("autobot-agent"), "chat", &receipt(&key, "a1", "qwen", json!([]))).unwrap();
-        log.append(&Caller::Device("phone".into()), None, "chat", &receipt(&key, "a2", "qwen", json!([]))).unwrap();
+        log.append(&Caller::device("phone", &[7; 32]), None, "chat", &receipt(&key, "a2", "qwen", json!([]))).unwrap();
         // A fresh handle (a restarted node) continues the chain from the file.
         let log = AuditLog::new(&home);
         let egress =
@@ -228,8 +360,8 @@ mod tests {
         assert_eq!(entries[0]["caller"], "device:phone");
         assert_eq!(entries[1]["receipt"]["receipt"]["request_id"], "a3");
         assert_eq!(log.read(0, 10)[0]["client"], "autobot-agent");
-        assert_eq!(log.find("a2").unwrap()["receipt"]["request_id"], "a2");
-        assert!(log.find("zz").is_none());
+        assert_eq!(log.find("a2").unwrap().unwrap()["receipt"]["request_id"], "a2");
+        assert_eq!(log.find("zz"), Ok(None));
         let totals = summary(&log.read(0, 10));
         assert_eq!(totals["ran"], 3);
         assert_eq!(totals["models"][1], json!({ "model": "qwen", "requests": 2, "tokens_in": 20, "tokens_out": 10 }));

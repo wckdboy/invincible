@@ -12,7 +12,9 @@ The Autobot Agent keeps a second log, of its actions ([below](#the-agents-action
 
 `$INVINCIBLE_HOME/audit.jsonl`, mode 0600, one JSON object per line, oldest first. Past 16 MiB it
 is renamed `audit.1.jsonl` (replacing an older one) and a new file continues the chain. There is no
-telemetry: the log is only ever read on the node, or by a paired device that asks for it.
+telemetry: the log is read on the node, by `GET /v1/audit` on loopback with the token. A paired
+device cannot read it (spec/pairing.md, Transport): it holds every caller's model, decision,
+tokens, egress hosts and the cluster's topology, and it is not a device route.
 
 ## An entry
 
@@ -23,7 +25,8 @@ telemetry: the log is only ever read on the node, or by a paired device that ask
   "client": "autobot-agent",
   "api": "chat",
   "prev": "3f1c…",
-  "receipt": { "receipt": { … }, "signature": "…" }
+  "receipt": { "receipt": { … }, "signature": "…" },
+  "request_id": "9f2c8a…"
 }
 ```
 
@@ -35,6 +38,7 @@ telemetry: the log is only ever read on the node, or by a paired device that ask
 | `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
 | `prev` | always | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
+| `request_id` | since ids were recorded | The request's id, the same one the client was given in the `invincible-request-id` response header and the same one inside its receipt's `request_id`. It is what `invincible receipt verify <id>` looks the entry up by. Entries written before this field existed carry no id: they still verify, but only the id inside their receipt (absent on a version 0 receipt) can reach them |
 
 Requests the router asked about or refused are logged too: their receipt's decision says so.
 
@@ -53,10 +57,12 @@ A removed, reordered or edited entry breaks (1) or (2), unless the later entries
 The chain is plain SHA-256, not keyed, and the node's receipt key lives on the same machine. So:
 
 - **Receipts cannot be forged** without the receipt key: what a receipt says (where a request ran,
-  what left the node) holds for any entry that verifies, and a device that kept its own receipts
-  can check them against the log.
-- **The time, the caller and the order** are not signed. Someone who can write the log can change
-  them, or delete entries, and recompute every later `prev`; `--verify` then still passes.
+  what left the node, and — since [receipts.md](receipts.md) version 1 — the request and answer
+  hashes, the caller and the time) holds for any entry that verifies, and a device that kept its own
+  receipts can check them against the log.
+- **The entry's `at` and `caller` fields are not signed** — the receipt's own `at` and `caller` are
+  (version 1), and those are the ones to read. Someone who can write the log can change the entry's
+  fields, or delete entries, and recompute every later `prev`; `--verify` then still passes.
   Removing the newest entries, or the rotated file, is never caught by the chain.
 
 The log is a record kept for the owner, protected by the machine's file permissions; it is not
@@ -69,8 +75,10 @@ paired device (so a later rewrite shows) is a planned addition.
   left). `--since 24h`, `--limit N`, `--summary` (totals per model and per host reached), `--json`.
 - `GET /v1/audit?since=<unix seconds>&limit=<n>` on the loopback API (behind the token) and the
   device API: `{"entries": [...], "summary": {...}, "kept": true}`. The newest `limit` entries at or
-  after `since` (default 100, at most 500), oldest first. Every paired device can read every entry:
-  pairing is for the owner's own devices.
+  after `since` (default 100, at most 500), oldest first. On a device session this needs the
+  `audit` capability (spec/pairing.md, Capabilities): every entry is every caller's — model,
+  decision, tokens, egress hosts, topology — so it is read by a device only when the operator
+  granted it, and a device without it is answered as though the route did not exist.
 
 `summary` is:
 

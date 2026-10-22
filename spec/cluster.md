@@ -1,0 +1,711 @@
+# Cluster: decentralized intelligence across your own devices (v0)
+
+> **Phase 1 implemented, unaudited.** The link rule and the partitioning rule below are
+> normative and pinned by `vectors/cluster.json`. So is speed-aware planning, with its stability
+> rule: it is built, and its cases are in the same vectors (version 2). Everything else past
+> phase 1 is a design: concrete enough to build, open to change when it meets real hardware.
+
+Your devices together can run models none of them can run alone, and later train them. A Mac
+Studio, an older MacBook, a GPU box and a phone on the same desk hold 100+ GB between them. This
+document covers what Invincible does with that: **inference** split across devices (pipeline
+parallel, as exo does, through llama.cpp), and **training** (LoRA fine-tuning on one device, then
+across devices with low-communication sync, DiLoCo-style).
+
+## Goals
+
+1. **Bigger models than any one device holds**, on hardware you own, with nothing else changed:
+   the same OpenAI- and Anthropic-compatible API, the same router, the same receipts.
+2. **Your own devices first.** Only paired devices take part, every link is encrypted and
+   mutually authenticated with the keys pairing already pinned, and the kill switch and the
+   network policy hold.
+3. **Honest receipts.** A receipt names every node that computed part of an answer.
+4. **Fail clearly.** A device that leaves mid-answer ends that answer with an error, the model is
+   planned again over the devices that remain, and the router uses something else meanwhile.
+5. **Training you can run at home.** Fine-tune a model on your own data, on your own devices,
+   without the data leaving them.
+
+## Non-goals (for now)
+
+- Strangers' compute. A region tier of other people's nodes is a later, separate design
+  (verification, payment, privacy against the operator). Phases here assume every device is yours.
+- Speed-ups for models that fit on one device. Splitting a model costs speed (each token crosses
+  every link in turn); the cluster is for capacity. A model that fits stays on one device unless
+  you ask for `split = "always"`.
+- Pretraining from scratch. Fine-tuning and continued training of open models are in scope.
+- Tensor parallel over Wi-Fi. Tensor parallel exchanges data at every layer and wants RDMA or at
+  least 10 GbE; it is a later phase for wired clusters only.
+
+## What exists, and what we take from it
+
+| Project | What it does | What Invincible takes |
+|---|---|---|
+| [exo](https://github.com/exo-explore/exo) | Apple-first cluster inference on MLX. Discovery by UDP multicast beacons, zenoh between nodes since June 2026 ([#2132](https://github.com/exo-explore/exo/commits/main/rust/networking/Cargo.toml)); an elected master places models; pipeline or tensor sharding, RDMA over Thunderbolt 5 on macOS 26.2 | Memory-weighted layer allocation with largest-remainder rounding ([placement_utils.py](https://github.com/exo-explore/exo/blob/main/src/exo/master/placement_utils.py)); "the smallest set of devices that holds it"; RDMA as a later transport |
+| [llama.cpp RPC](https://github.com/ggml-org/llama.cpp/blob/master/tools/rpc/README.md) | `ggml-rpc-server` exposes a machine's ggml devices; `llama-server --rpc` puts layers on them (layer split, `--tensor-split`); weights cached by hash (`-c`); RDMA negotiated when both sides can | **The phase 1 engine.** It already runs every GGUF the node serves, on Metal, CUDA, ROCm, Vulkan and CPU. Its README: "Never run the RPC server on an open network" — there is no authentication and no encryption, so Invincible wraps it |
+| [Petals](https://github.com/bigscience-workshop/petals) | Swarm of servers each holding consecutive blocks; the client keeps the activations it sent and re-routes around a failed server ([paper](https://arxiv.org/abs/2312.08361)) | Resume after a failure by replaying from the client's side (phase 3) |
+| [distributed-llama](https://github.com/b4rtaz/distributed-llama) | Tensor parallel over Ethernet, 2^n nodes, Q80 sync buffers | Numbers: an 8B model syncs 0.5–3.8 MB per token in tensor parallel, against kilobytes in pipeline parallel |
+| [DiLoCo](https://arxiv.org/abs/2311.08105), [OpenDiLoCo](https://arxiv.org/abs/2407.07852), [INTELLECT-1](https://arxiv.org/abs/2412.01152) | Many local steps (AdamW), then an outer step (Nesterov) on the averaged change: 500× less communication than data parallel, robust to workers coming and going | **The training sync** across devices (phase T2) |
+| [DeMo / DisTrO](https://arxiv.org/abs/2411.19870), [Psyche](https://nousresearch.com/nous-psyche/) | Decoupled momentum with DCT + top-k compression, 85× less than AdamW-DDP; Psyche coordinates over a chain with Iroh P2P | Later compression for slow links; not the first choice (DiLoCo is simpler and proven at LoRA scale) |
+| [Hivemind](https://github.com/learning-at-home/hivemind), [Gensyn Verde](https://arxiv.org/abs/2502.19405), [TOPLOC](https://arxiv.org/abs/2501.16007) | DHT and averaging for volunteer training; verification of untrusted compute | Only for a future strangers' tier; not needed among your own devices |
+| [FedIT](https://arxiv.org/abs/2305.05644), [FedSA-LoRA](https://arxiv.org/abs/2410.01463), [FLoRA](https://arxiv.org/abs/2409.05976), [Flower](https://flower.ai/docs/examples/flowertune-llm-code.html) | Federated LoRA: clients train adapters on private data, a server averages them | Phones as federated participants (phase T3), adapters only |
+| [MLX distributed](https://ml-explore.github.io/mlx/build/html/usage/distributed.html), [mlx-lm LoRA](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/LORA.md) | `mx.distributed` over ring (TCP) or JACCL (RDMA over Thunderbolt 5); `mlx_lm.lora` with QLoRA and gradient checkpointing; pipeline and tensor sharded generation | **The training engine on Apple silicon** (phase T1) and a later inference engine for Apple-only clusters |
+
+What runs where:
+
+- **Apple silicon:** llama.cpp (Metal) for inference, split over RPC today; MLX for training and
+  for RDMA clusters later (TB5, macOS 26.2+, full mesh, `rdma_ctl enable` once).
+- **NVIDIA / AMD:** llama.cpp (CUDA, ROCm, Vulkan) for inference, the same RPC; PyTorch + PEFT for
+  training (phase T2), launched as an engine like llama-server.
+- **CPU-only machines:** `ggml-rpc-server` runs there, but no head uses one as a shard: a peer is
+  kept only when its `devices` list is not empty (`caps.shard && !caps.devices.is_empty()`,
+  `crates/invincible/src/cluster.rs`), and `devices` holds only the `--list-devices` lines that
+  carry a memory figure (`parse_devices`, same file). A CPU-only head does not split either: with
+  an empty device list the model runs on the head alone and the note says why (Known limits of
+  phase 1).
+- **Phones:** llama.cpp and MNN already run on Autobot's devices. As inference shards only on
+  charge and on Wi-Fi (below); as federated LoRA participants (phase T3).
+
+## Trust model
+
+- **Only paired devices.** A node takes part in a cluster only with devices it paired with
+  ([pairing.md](pairing.md)): the head paired with each shard as a device (`invincible join`), so
+  each side has pinned the other's static key.
+- **Shards choose their heads.** Being paired is not enough to run work on a shard: the shard
+  names, in `[cluster] heads`, the devices that may. A paired phone cannot use your GPU box as a
+  shard unless you say so. `ggml-rpc-server` parses graphs from its client in C++ with no
+  authentication; whoever reaches it can make it allocate memory and compute, and a parsing bug
+  there is remote code execution. So only heads you named reach it. Two things are separate here:
+  `[cluster] heads` admits the shard *link*, and the `shard` capability ([pairing.md](pairing.md),
+  Capabilities) admits the HTTP routes over which a head probes and sizes the node — a device
+  granted `shard` is still not a head, and a head named in `heads` that was granted nothing else
+  still reaches only those six routes.
+- **llama.cpp RPC is never on the network.** `ggml-rpc-server` listens on a loopback port only.
+  The only way in from another machine is a **shard link**: a Noise session (`Noise_IK_25519_
+  ChaChaPoly_SHA256`, prologue `invincible/0 shard`, mode byte `0x03`), the same handshake and
+  framing as a device session, but the byte stream inside goes to the RPC server instead of the
+  HTTP API. The shard refuses the handshake, before answering it, from a key that is not pinned or
+  not a head. Unpairing a head, or removing it from `heads`, drops its open links at the next frame.
+- **The head's side.** The head runs one loopback door per peer (`127.0.0.1:<port>`); `llama-server
+  --rpc 127.0.0.1:<port>` connects to it and each connection becomes one shard link. (Phase 1
+  limit: any process of any user on the head machine can connect to that loopback port, as with
+  any loopback service; phase 2 restricts it to the head's own llama-server.)
+- **Owned means owned.** A model split across your paired devices is still `tier: node`, data
+  policy `owned`: a request marked `invincible-private` may run on it. What a shard receives is
+  activations, not text, but activations can be inverted to recover much of a prompt, so the
+  receipt says which machines took part and the rule stays "your devices only". Trusted peers that
+  are not yours (a friend's node) will be a separate tier, refused for private requests.
+- **The network policy holds.** Shard links follow the link rule below: never through a proxy,
+  never off the local network, and not at all under the kill switch.
+
+## Links (normative)
+
+Whether a node may open a shard link to one address of a paired peer. Input: the encoded `network`
+mode ([egress.md](egress.md)) and the address's `host`. The first rule that applies decides:
+
+1. Loopback ([egress.md](egress.md), Loopback) is always direct.
+2. `offline` (the kill switch, and any mode that decodes as offline) blocks: reason `offline`.
+3. A host that is not on a local network blocks: reason `not_lan`. Local network, without any
+   lookup: IPv4 `10/8`, `172.16/12`, `192.168/16`, link-local `169.254/16` (the Thunderbolt bridge),
+   `100.64/10` (shared address space, where Tailscale puts its nodes); IPv6 `fc00::/7` and
+   `fe80::/10`; a name ending in `.local` (mDNS) with no empty label.
+4. Otherwise direct, **whatever the mode**: a shard link is never sent through Tor or SOCKS5 (a
+   pipeline stage through Tor would be unusable, and a LAN address through a proxy is wrong
+   anyway). A public peer under Tor is refused, not proxied.
+
+```json
+{ "action": "direct" }
+{ "action": "block", "reason": "offline" }
+{ "action": "block", "reason": "not_lan" }
+```
+
+Why the kill switch stops LAN links too: `offline` means nothing leaves this machine, and the
+apps read it that way. A home cluster without internet sets `network = "direct"` with
+`egress = "never"` (no cloud). Whether LAN links should survive `offline` is an open question below.
+
+Vectors: `vectors/cluster.json`, the `link` cases.
+
+## Discovery
+
+- **Phase 1: paired peers.** A head's peers are the nodes it paired with (`nodes.json`, written by
+  `invincible join` or by `POST /v1/cluster/join`); it reaches each at the addresses pinned at
+  pairing, over a session, and asks for its capabilities. Membership is "paired, reachable, and
+  serving as a shard for me".
+- **Phase 2: mDNS on the LAN.** Each node with `[remote] listen` advertises `_invincible._tcp.local`
+  with a TXT record of its key fingerprint and nothing else (no name, no model list: the record is
+  readable by anyone on the LAN). A head matches announcements against keys it already pinned, so
+  a peer that changed address is found again; a new node is never trusted from an announcement,
+  only from pairing. exo discovers by UDP multicast beacons the same way, and trusts what it finds;
+  Invincible does not.
+- Addresses learned by mDNS go through the link rule like pinned ones.
+
+## Capabilities
+
+`GET /v1/cluster/node` on the device API (a device the node granted `shard`, which is what every
+pairing grants unless the operator says otherwise; over its session):
+
+```json
+{
+  "name": "mini", "version": "0.0.21",
+  "memory_bytes": 38654705664,
+  "devices": [{ "name": "MTL0", "description": "Apple M3 Pro", "total_mib": 28753, "free_mib": 28753 }],
+  "rpc_backend": true,
+  "shard": true
+}
+```
+
+- `devices`: what `llama-server --list-devices` reports, minus devices with no memory of their own
+  (BLAS). Probed afresh on each request: free memory changes.
+- `rpc_backend`: whether this node's llama-server was built with `GGML_RPC=ON`, found by asking it
+  to reach an RPC server on a closed port (a build without it answers "RPC not supported").
+- `shard`: whether this node serves as a shard **for the device asking**.
+- `profiles`: what this machine measured on itself (`invincible tune bench`): per model, per device,
+  the generation and prompt rates, and the hardware tag they are valid for. A head uses a peer's
+  profile for the model it is planning, and only while the peer's `hardware` still matches it.
+- `hardware`: the tag those profiles were measured on (os, arch, cores, memory). A changed machine
+  invalidates them rather than being trusted.
+- `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
+  `{"bytes": n}` for an `n`-byte body and nothing else, and holds none of it (the body is read and
+  dropped a frame at a time — spec/pairing.md, Limits). A head times a link with it — five small
+  posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
+  `$INVINCIBLE_HOME/tune/links.json`, each measurement timestamped on its own, behind the same
+  hardware tag and an hour's freshness: metering one peer does not refresh another's number. A link
+  that cannot be measured leaves the plan without a prediction.
+- `tg_tps`: a device's generation rate for one model, alone on that device, tokens/s, from
+  `invincible tune bench <model> --device <name>` (llama-bench, one repetition). It is not a
+  capability of its own: it is the `tg_tps` of each `profiles` entry above, joined to a device by
+  name. Absent until the node has benchmarked that model, and one unmeasured device keeps a plan
+  on the memory rule. `invincible tune probe` reports the machine only (os, arch, cores, memory,
+  devices, engines) and runs no benchmark; link round-trip time and throughput come from the meter
+  above, not from either `tune` command.
+
+`GET /v1/cluster/node` and `POST /v1/cluster/meter` are both reached through the device API, so
+both are admitted the same way: the `shard` capability first ([pairing.md](pairing.md),
+Capabilities), then the node's ceiling on held device bodies, then the route's own limit — the meter
+last, and only for the time it may spend, since it holds nothing (spec/pairing.md, Limits). A device
+without `shard` gets the same 404 as for a path that does not exist, whatever it posts.
+
+## Partitioning (normative)
+
+Layer-wise pipeline sharding sized by memory, as exo does. Input: the model's file size, the split
+mode, and the devices in order (the head's first, then each peer's in the order the model lists
+its peers):
+
+```json
+{ "model_bytes": 4294967296, "split": "auto",
+  "devices": [{ "node": "studio", "device": "MTL0", "free_mib": 28000 },
+              { "node": "mini", "device": "MTL0", "free_mib": 12000 }] }
+```
+
+1. `need_mib` = ⌈(bytes + bytes/10) / MiB⌉ + 512 (weights, a tenth on top, buffers and a small
+   KV cache; the same estimate `invincible model add` uses). Each device can give 90% of its free
+   memory, rounded down to a whole MiB.
+2. If the head's devices can hold it, and the mode is `auto` or no peer device was given: `local`.
+3. If all devices together cannot: `block`, reason `does_not_fit`.
+4. Otherwise `split`: each device gets thousandths of the layers in proportion to what it can give,
+   rounded by largest remainder (floors first; the thousandths left go to the largest remainders,
+   the earlier device on a tie), so they add up to 1000. Devices with 0 are left out. If only the
+   head's devices remain, it is `local`.
+
+```json
+{ "action": "split", "need_mib": 5018,
+  "shares": [{ "node": "studio", "device": "MTL0", "permille": 700 },
+             { "node": "mini", "device": "MTL0", "permille": 300 }] }
+```
+
+The head runs `llama-server --rpc <door per peer> --tensor-split <shares>`: llama.cpp puts RPC
+devices first, in `--rpc` order and each server's own device order, then the local ones, and
+splits layers in those proportions. The first layers sit on the shards and the last, with the
+output head, on the head, which is what llama.cpp chooses to minimise transfers.
+
+Vectors: `vectors/cluster.json`, the `plan` cases.
+
+### Speed-aware planning (v1, additive)
+
+When every device taking part is calibrated, steps 1–4 still decide *whether* to split; the shares
+are chosen by measured speed instead of memory:
+
+5. Each device's capacity is `⌊usable_i × 1000 / need_mib⌋` thousandths, capped at 1000: memory
+   still bounds a device, it no longer sets its share.
+6. Fill the fastest device (`tg_tps` descending, the order given breaking a tie) to its capacity,
+   then the next, until 1000 thousandths are placed. The head keeps at least 1: its own device runs
+   the output block.
+7. `predicted_tps` = `1 / (Σ (permille_i / 1000) / tg_tps_i + Σ_remote (rtt_ms / 1000 + TOKEN_MIB / mib_s))`.
+   A token crosses every stage, so stage times add; throughputs do not, and every remote stage adds
+   a round trip plus its activation traffic to every token (phase 1 measured ~31 KiB sent and 8.4
+   KiB returned per token, so `TOKEN_MIB` = 0.0385). A remote node whose link has not been measured
+   leaves `predicted_tps` absent: the shares still follow the device measurements, but the rate is
+   never guessed. Vectors: `spec/vectors/cluster.json` version 2.
+8. **Stability.** A `current` split that still fits the capacities is kept whenever its predicted
+   rate is at least `HYSTERESIS` (0.9) of the new plan's. A reshard reloads the model on every node
+   and ends the requests in flight, so a 10% gain is the floor for paying that. A `current` that no
+   longer fits — a peer gone, or less memory than it had — is always replanned.
+9. Any unmeasured device: steps 1–4 apply (memory) and `predicted_tps` is absent.
+
+**Built.** Steps 5–9 are `invincible_policy::plan` (`crates/invincible-policy/src/cluster.rs`), with
+cases in `vectors/cluster.json` (`plan: the fastest device fills first`, `plan: the running split is
+kept when it is close`, `plan: a running split that no longer fits is replanned`, `plan: an
+unmeasured device plans by memory`). Step 8 reaches a live model: after an engine run the supervisor
+keeps the plan and hands its shares back as `current` on the next pass (`supervise`,
+`crates/invincible/src/cluster.rs`), so restarting a model keeps its split instead of resharding it.
+
+Why fill rather than share in proportion: for a pipeline, time per token is `Σ share_i / tps_i`, so
+the minimum puts each layer where it is cheapest — on the fastest device, up to its memory. Equal
+or memory-proportional shares leave a fast device idle while a slow one adds its time to every
+token.
+
+```json
+{ "action": "split", "need_mib": 18535,
+  "shares": [{ "node": "studio", "device": "MTL0", "permille": 806 },
+             { "node": "box", "device": "MTL0", "permille": 194 }],
+  "predicted_tps": 55.37 }
+```
+
+**Still later (phase 2).** Choose the smallest set of devices that holds the model (exo's rule)
+rather than every device offered, and prefer devices whose disk already holds the weights. The link
+round-trip and throughput are in the plan already (step 7, `links`); a slow link lowers the
+predicted rate today, and excluding a peer because of its link is not built.
+
+**Tensor parallel** (phase 5): within one wired, RDMA-capable group only, through MLX (JACCL) or
+llama.cpp's `--split-mode tensor`; never over Wi-Fi.
+
+## The data path
+
+- **Weights** cross each link once, at load: `ggml-rpc-server --cache` keeps every tensor over
+  10 MiB under its hash (in `$INVINCIBLE_HOME/cache/rpc`), so a reload sends hashes, not weights.
+  Phase 2: shards read the GGUF from their own disk when they have the same file (checked by
+  SHA-256), skipping the transfer entirely.
+- **Activations** cross each stage boundary for every token: `hidden_size × 4` bytes in f32
+  (8 KiB for a 2048-wide 1.7B model, 32 KiB for a 72B), plus llama.cpp's graph commands. A prompt
+  of N tokens sends N times that at once (64 MiB per boundary for a 4096-token prompt on a 72B
+  model). Bandwidth is not the limit for generation; **latency is**: each token waits for every
+  hop in turn.
+- **Latency budget.** Per token, per shard: about 2 round trips plus compute. On 10 GbE a round
+  trip is ~0.2 ms ([kjaiswal](https://github.com/kjaiswal/llama-cpp-distributed-benchmarks)), on
+  good Wi-Fi 2–5 ms, with spikes. A target of ≥ 70% of single-device speed holds on Ethernet and
+  Thunderbolt; on Wi-Fi only for large models whose per-token compute dwarfs the hops. The cluster
+  status shows the probe time per peer, and each model's plan carries `predicted_tps`, which the
+  measured link goes into: a slow link lowers it (step 7).
+- **The encrypted link** costs ChaCha20-Poly1305 over each frame and one extra loopback hop on each
+  side. Two details matter: snow's default ChaCha20-Poly1305 has no SIMD path on Apple silicon, so
+  the node uses ring's (`ring-accelerated`, 3–5× faster, the same algorithm and the same vectors);
+  and each direction of a link is its own task, so a bulk transfer encrypts on one core while the
+  other decrypts. Measured below.
+- **Batching.** llama-server's parallel slots batch requests across the whole pipeline, which
+  amortises the hops; phase 3 adds micro-batched prefill (one chunk per stage in flight, as GPipe).
+- **KV cache.** Each device keeps the KV cache of its own layers (llama.cpp does this with layer
+  split), so the cache is split in the same proportions and never crosses a link. Context length
+  is therefore bounded by the sum, not by the head.
+
+## Failure handling
+
+- **A shard leaves mid-answer** (unplugged, asleep, crashed). llama.cpp's RPC client aborts its
+  process on a lost server. The answer in flight ends with an error (a streamed one with an error
+  event, as for any engine that fails; the receipt records it), the supervisor plans again over
+  the peers that still answer: with the rest able to hold the model it is relaunched there
+  (resharded), else it stays unhealthy and is planned again every 15 seconds. Meanwhile the router
+  treats it as an unhealthy node model and falls back to the next model that fits. **Phase 1:
+  fail clearly, then reshard.**
+- **Phase 3: resume.** The head keeps the tokens of every running answer; after a reshard it
+  replays prompt + tokens so far into the new layout (a prefill, not a regeneration) and the client
+  sees a pause, not an error (Petals does this with cached activations).
+- **A peer comes back** with `split = "always"`: used at the model's next relaunch. Phase 2
+  relaunches when the model is idle.
+- **Version skew.** llama.cpp's RPC protocol is versioned (8.0.1 today; the client refuses a
+  different major or a newer minor) and tied to the build's op count: every node must run the same
+  llama.cpp build. Capabilities carry the build tag in phase 2, and a mismatch is reported, not
+  attempted.
+
+## Scheduling with the router
+
+Routing ([routing.md](routing.md)) is unchanged: a split model is a node model, owned, healthy
+when its llama-server answers. What the cluster adds is placement, decided before routing:
+
+1. A model that fits on the head runs there (`auto`).
+2. One that does not is split over the fewest, then fastest, devices that hold it.
+3. One that cannot be placed is unhealthy, so the router falls back (another local model, or the
+   cloud where the rules allow): exactly the existing "model unavailable" path.
+
+Phase 4 adds **remote placement**: the head may run a model entirely on one peer (the GPU box)
+rather than splitting it, forwarding requests over a session; the receipt then names that peer.
+
+## Receipts
+
+A receipt for an answer from a split model carries `cluster` ([receipts.md](receipts.md)): every
+node that held layers, head first, with its share of the layers in thousandths; for each peer its
+static key (as pinned at pairing) and the bytes through its links while the request ran.
+
+```json
+"cluster": [
+  { "name": "studio", "share": 700 },
+  { "name": "mini", "share": 300, "key": "<peer static key>", "bytes_sent": 51200, "bytes_received": 49800 }
+]
+```
+
+Byte counts are of the link, not the request: with several requests on one model at once, each
+receipt counts the others' traffic too (an upper bound). Shard traffic is not `egress`: `egress`
+lists hosts off hardware you own, and `cluster` lists your own machines that took part.
+
+## API, CLI, configuration
+
+- The OpenAI- and Anthropic-compatible API is unchanged. `/v1/models` adds `"cluster": ["mini"]`
+  to a split model's `invincible` block.
+- `GET /v1/cluster/node`: capabilities (device API and loopback).
+- `GET /v1/cluster` (loopback, token): this node, its peers probed now (reachable, probe time,
+  capabilities, which addresses the link rule allows), the heads it serves and the bytes they
+  moved, and each split model's plan, notes and links.
+- `invincible cluster status [--json]`.
+- Later: `invincible cluster plan <model>` (dry run), `invincible cluster train ...` (below). What
+  the plans read is measured by `invincible tune probe`, `tune bench <model>` and `tune show`;
+  there is no `cluster` subcommand for calibration.
+
+### Membership API: pair, join, list, rename, unpair (built)
+
+Pairing and membership used to be CLI-only: `invincible pair` printed a code, `invincible join`
+consumed one on another machine, `invincible devices --remove` unpaired. A phone, a dashboard or
+a provisioning script could do none of it. These five routes do the same work over the node's own
+API — JSON in, JSON out — behind `Authorization: Bearer <token>` from
+`$INVINCIBLE_HOME/token`, like every other admin route: without the token they answer `401
+invalid_api_key`, and a body that would be refused never reaches the handler. None of them is on
+the device API: a paired device cannot mint a code, join, rename or unpair.
+
+They run the same code the CLI does — `Pairing::start_for`, `remote::pair`, and `nodes.json`
+(`crates/invincible/src/membership.rs`) — so a URI minted here is consumed by an
+`invincible join` elsewhere, and a code from `invincible pair` can be joined here. The wire
+protocol does not change, and neither does the CLI's output.
+
+**`POST /v1/cluster/pair`** — opens a pairing code, the same one `invincible pair` shows as a QR
+code. The body is optional:
+
+```json
+{ "ttl_seconds": 600, "name": "add the phone", "capabilities": ["shard", "agent"] }
+```
+
+- `ttl_seconds`: how long the code lives, clamped to 1–86400, default 600.
+- `name`: a label for the code, for the node's log. It renames neither the node nor the device.
+- `capabilities`: what the device that consumes the code will hold ([pairing.md](pairing.md),
+  Capabilities): any of `shard`, `agent`, `audit`, `dispatch`. Absent, the code grants `shard`, the
+  least a session is for. A name that is not one of those is `400 invalid_capabilities`, before a
+  code exists. The set belongs to the code: the device's hello cannot add to it.
+
+```json
+{
+  "code_uri": "invincible://pair?v=0&k=<key>&s=<secret>&a=192.168.1.21:7778",
+  "secret": "<secret>",
+  "fingerprint": "6f1c-2d3e-4a5b-6c7d",
+  "node": "mini",
+  "expires_in_seconds": 600,
+  "expires_at": 1793000600,
+  "capabilities": ["shard"]
+}
+```
+
+`capabilities` repeats the set the code carries, so the default is visible here — where the
+operator decides — and not implied by silence. `POST /v1/admin/pairing`, which `invincible pair`
+uses, takes the same optional body and answers the same field.
+
+The secret appears twice, inside `code_uri` and as `secret`, and is never written to the node's
+log or its audit log: a pairing code is a one-time capability, and a log line holding one hands it
+to whoever reads the log. The node logs that a code was opened, and its label. A code works once,
+and opening one replaces any code already open ([pairing.md](pairing.md)). `409 remote_disabled`
+when `[remote] listen` is unset.
+
+**`POST /v1/cluster/join`** — pairs this machine with the node whose code it is, records it in
+`nodes.json`, and answers the identities a caller can check without reading a file:
+
+```json
+{ "uri": "invincible://pair?v=0&k=…&s=…&a=…", "name": "studio" }
+```
+
+`name` is optional. Without it the name is this machine's own `[remote] name`, exactly as
+`invincible join` defaults it (`crates/invincible/src/config.rs`, `join_name`) — the string the
+peer's `[cluster] heads` has to contain.
+
+```json
+{
+  "node": "mini",
+  "device": "studio",
+  "fingerprint": "6f1c-2d3e-4a5b-6c7d",
+  "heads_must_name": "studio",
+  "addresses": ["192.168.1.21:7778"],
+  "receipt_key": "<mini's receipt key>",
+  "capabilities": ["shard"]
+}
+```
+
+`node` is the peer's own name, `device` is the name it now lists this machine under,
+`heads_must_name` repeats that name for the reader wiring `[cluster] heads`, and `fingerprint` is
+the peer's static key — compare it with the code's. `capabilities` is what the peer granted this
+machine, recorded in `nodes.json` and shown by `GET /v1/cluster/nodes`
+([pairing.md](pairing.md), Capabilities): the peer's own `devices.json` is what it enforces, and a
+device's hello cannot ask for more than the code granted. One join runs at a time. Errors, each with
+a `message` that says what happened and never contains the URI or its secret:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `invalid_pairing_code` | the URI does not parse (wrong scheme, version, missing or malformed key/secret/address) |
+| 400 | `pairing_refused` | the peer declined the code: wrong, already used, replaced or expired |
+| 409 | `join_in_progress` | another join is dialling on this node; wait for it |
+| 502 | `join_failed` | the peer could not be reached, or the handshake broke |
+| 409 | `membership_unavailable` | this process has no home directory to record the node in |
+
+Nothing is written unless the pairing completed: a refused join leaves `nodes.json` as it was and
+pins nothing on the peer.
+
+**`GET /v1/cluster/nodes`** — every node this machine paired with:
+
+```json
+{ "nodes": [ {
+  "name": "mini", "fingerprint": "6f1c-2d3e-4a5b-6c7d",
+  "addresses": ["192.168.1.21:7778"],
+  "link_addresses": ["192.168.1.21:7778"], "refused_addresses": [],
+  "device": "studio", "receipt_key": "…",
+  "capabilities": ["shard"],
+  "reachable": true, "probe_ms": 3
+} ] }
+```
+
+- `device`: the name that node lists this machine under (learned at join). It is the one string a
+  person cannot read from here, and `[cluster] heads` on the peer is compared against it.
+- `capabilities`: what that node granted this machine when it joined ([pairing.md](pairing.md),
+  Capabilities) — the set it enforces for this machine's sessions. It is the answer given at join,
+  kept in `nodes.json`; an operator who grants or revokes on the peer afterwards changes the
+  peer's record, and this side reports what it was told until it joins again.
+- `reachable`: `true` when the peer answered a probe just now, `false` when the connection or the
+  handshake failed (`error` says how), and `null` when this node cannot tell — no `device.key`
+  here, no address the link rule allows (`reason`), or no answer within 1.5 s (`reason`). All the
+  probes run at once and each is capped, so a peer that is asleep cannot make this call slow: it
+  is reported unknown rather than waited for.
+- `probe_ms`: the encrypted round trip that answered, handshake included — the link, measured
+  cheaply. There is no last-seen per node: nothing records it, so none is invented here.
+- `link_addresses` / `refused_addresses`: which of the pinned addresses may carry a link under
+  this node's network mode, and why the rest may not ([Links](#links-normative)).
+
+**`DELETE /v1/cluster/nodes/{name}`** — forgets a node here:
+
+```json
+{ "unpaired": "mini", "nodes_remaining": 0 }
+```
+
+`nodes.json` only: the peer keeps its own record of this machine until someone unpairs it there,
+and nothing is sent to it. `404 not_found` for a name this machine does not know, with the reason
+in `message`.
+
+**`PATCH /v1/cluster/nodes/{name}`** — renames a node here, and/or replaces what this node grants
+the paired device of that name ([pairing.md](pairing.md), Capabilities). Either key or both:
+
+```json
+{ "name": "gpu-box", "capabilities": ["shard", "agent"] }
+```
+
+```json
+{ "name": "gpu-box", "was": "mini", "changed": true }
+```
+
+```json
+{ "device": "phone", "capabilities": ["shard", "agent"], "was": ["shard"], "changed": true }
+```
+
+```json
+{ "device": { "device": "phone", "capabilities": ["shard", "agent"], "was": ["shard"], "changed": true },
+  "node":   { "name": "gpu-box", "was": "mini", "changed": true } }
+```
+
+- `name` renames a node in `nodes.json` (this machine's record of a peer); the peer is not told.
+- `capabilities` replaces, exactly, the set this node grants the device it hosts under {name} in
+  `devices.json` — a grant or a revocation, with no re-pairing: the device keeps its key and its
+  open sessions, and the next request is admitted by the new set. A name this node hosts no device
+  under is `404 not_found`; a capability that is not one of `shard`, `agent`, `audit`, `dispatch`
+  is `400 invalid_capabilities`; the body is parsed and both targets resolved before anything is
+  written, so a refused body changes nothing.
+- The answer is the half that was asked for, or both under `device` and `node` when both keys were
+  given. `was` is the set the device held, and `changed` says whether it differs.
+
+`GET /v1/admin/devices` reports every device this node hosts with its `capabilities`, which is the
+record the gate enforces.
+
+The name is this machine's alone: the peer still calls itself what it did, and nothing is sent to
+it. `nodes.json` is keyed by name, so a name another paired node already has is refused with `409
+name_taken`; `404 not_found` for an unknown source; `400 invalid_name` when the new name is empty,
+longer than 40 characters, or not letters, digits, `-` and `_` (refused rather than cleaned, so a
+rename never quietly means something else).
+
+**When a change takes effect.** `nodes.json`, `[cluster]` and `[[models]] cluster` are read when
+the node starts, and dispatch and the split planner keep the peers they read then. A join, rename
+or unpair made over the API is therefore fully in effect for the *next* `invincible serve`, and
+`GET /v1/cluster/nodes` shows it at once; a running model is not re-planned by it.
+
+On a shard:
+
+```toml
+[remote]
+name = "mini"
+listen = ["0.0.0.0:7778"]
+advertise = ["192.168.1.21:7778"]
+
+[cluster]
+serve = true
+heads = ["studio"]                   # paired devices that may use this node as a shard
+# rpc_server = "/path/ggml-rpc-server"   # default: next to llama_server, else on PATH
+# cache = true                       # weights heads sent, kept for fast reloads
+```
+
+On the head (after `invincible join '<mini's code>' --name studio`):
+
+```toml
+[[models]]
+id = "big"
+path = "/models/Big-70B-Q4_K_M.gguf"
+cluster = ["mini"]                   # paired nodes it may be split across
+split = "auto"                       # or "always"
+```
+
+## Observability
+
+- `invincible cluster status`: who is up, the probe time, free memory per device, each model's
+  placement in thousandths, and why a peer was left out.
+- Logs: `cluster: split` with the shares, every link opened and closed on both sides
+  (`shard link open`, with the head's name), refusals with the reason.
+- Per-link byte counters in the status and in receipts. Phase 2: tokens/s per model in the status,
+  and per-stage timings from llama.cpp (`GGML_RPC_DEBUG`).
+
+## Phones
+
+- **Inference shards: only when charging, on Wi-Fi, and cool.** A phone gives a few GB of memory
+  and its NPU/GPU, but sleeps, roams and throttles. Autobot would run `ggml-rpc-server` (it already
+  embeds llama.cpp) behind the same shard link, and announce itself as a shard only while plugged
+  in, on an unmetered network, and below a thermal threshold; it stops on any of those changing,
+  and the head reshards. Worth it for models just past the desktop's memory; not for speed.
+- **Federated LoRA participants** (phase T3): a phone fine-tunes an adapter on its own data (MNN or
+  llama.cpp on-device, MLX on iOS later) overnight on charge, and sends only the adapter delta to
+  the node, which averages. The data never leaves the phone.
+- Phones never serve as shards for anyone but their owner's paired head.
+
+## Training
+
+The same trust model: your devices, paired links, receipts for runs.
+
+**T1 — LoRA on one device.** `invincible train` runs a fine-tuning job as an engine (a child
+process): `mlx_lm.lora` on Apple silicon (QLoRA on quantized models, gradient checkpointing), PEFT
+on CUDA. llama.cpp's own trainer is still a work in progress (FP32 models only, no merged LoRA
+training: [examples/training](https://github.com/ggml-org/llama.cpp/blob/master/examples/training/README.md)),
+so it is not the first engine. The result is a LoRA adapter served with the base model
+(`llama-server --lora`) as a new model id, after an eval run against the base
+(`invincible eval`): a trained model that does not beat the base on your own tasks is not routed to.
+
+**T2 — Data-parallel LoRA across devices, DiLoCo-style.** Every device holds the base model (or its
+own pipeline-split share of it), trains the adapter on its slice of the data for H local steps
+(AdamW), then the devices exchange only the change in the adapter (a few MB for rank 16 on a 7B
+model) and apply an outer Nesterov step. With H = 100–500 that is hundreds of times less traffic
+than syncing every step ([DiLoCo](https://arxiv.org/abs/2311.08105)), so Wi-Fi is enough, and a
+device that drops out misses rounds without stopping the run. The head is the coordinator; deltas
+travel over shard links (a training mode of the same Noise session); a ring all-reduce among
+wired devices in phase T4.
+
+**T3 — Federated LoRA with phones.** As T2, but devices keep their data: each round sends only
+adapter deltas; FedSA-LoRA's rule (average A, keep B local) when personalisation matters. Optional
+clipping and noise for differential privacy, off by default between your own devices.
+
+**T4 — Larger.** Full fine-tuning and continued pretraining of mid-size models across wired
+machines: pipeline parallel training (MLX, PyTorch) with DiLoCo outer steps between groups; DeMo
+compression for slow links. Distillation from frontier traces (the eval harness's training data
+export) is a natural first dataset.
+
+**Datasets and privacy.**
+
+- Datasets are files in `$INVINCIBLE_HOME/datasets/` (JSONL chat format), with a manifest: source,
+  SHA-256, record count, and the redaction state. Building one from your audit log or agent
+  sessions is explicit (`invincible dataset from-sessions`), never automatic.
+- Data is sharded by record to devices that already hold it where possible; otherwise a shard of
+  it is sent over the paired link and deleted at the end of the run.
+- A training receipt (signed like any other) names the base model, the dataset by hash, the
+  devices and their steps, and the result's hash. No record text is in it.
+- Nothing about training leaves your devices; no model weights are uploaded anywhere.
+
+## Shipping llama.cpp's RPC server
+
+- The node runs `ggml-rpc-server` (renamed from `rpc-server` in late 2026; both names are found).
+  llama.cpp's official release archives include it: `llama-b11799-bin-macos-arm64.tar.gz` has
+  `ggml-rpc-server` and `libggml-rpc.dylib` next to `llama-server` (checked for macOS arm64; the
+  Linux archives are checked in phase 2). `install.sh` installs that archive into
+  `~/.invincible/llama.cpp` and writes only `[engine] llama_server` into the config. Nothing sets
+  `[cluster] rpc_server`, and nothing needs to: with no value there the node looks for
+  `ggml-rpc-server` next to `llama_server` before `PATH` (`find_rpc_server`,
+  `crates/invincible/src/cluster.rs`), which is where the archive puts it.
+- **Homebrew's llama.cpp has no RPC backend** (its ggml is built without `GGML_RPC`: `llama-server
+  --rpc` answers "RPC not supported in this build", and there is no `ggml-rpc-server`). A node on
+  Homebrew's llama.cpp can still be a member and is told why it cannot split, and it still probes
+  its peers, so `invincible cluster status` reports what they are next to that reason rather than
+  showing them as absent. The installer will prefer the release archive when the cluster is turned
+  on.
+- Every node in a cluster must run the same llama.cpp build (the RPC protocol is tied to it). The
+  installer pins one tag (`LLAMA_TAG`) for every machine, which gives this for free when they are
+  on the same Invincible version.
+- RDMA (Thunderbolt 5, macOS 26.2+) bypasses the tunnel and is unencrypted; phase 1 disables it
+  (`GGML_RPC_NO_RDMA=1`). Allowing it over a direct cable between two of your machines, as an
+  explicit opt-in, is an open question.
+
+## Roadmap, with acceptance tests
+
+| Phase | What | Accepted when |
+|---|---|---|
+| **1. Proof (built)** | Shard links (Noise, mode `0x03`, heads only), `ggml-rpc-server` on loopback, the head's doors, capabilities, `GET /v1/cluster` and `invincible cluster status`, memory-weighted plans, split models in the router, `cluster` in receipts, reshard after a shard leaves | Two `invincible serve` on one Mac with separate homes: one GGUF split across both answers through the gateway; receipt names both; ciphertext on the wire; a non-head paired device is refused; killing the shard mid-answer ends that answer with an error and the model comes back on the head alone; vectors pass |
+| 2. Two real machines | mDNS discovery of pinned keys; calibration (tokens/s per device, link round-trip and throughput) on two real machines, with speed-aware plans proved there (the planner and the link meter are built and pinned by vectors; the numbers so far are one machine's); shards load weights from their own copy (by SHA-256); door restricted to the head's own llama-server; build-tag check; installer ships `ggml-rpc-server` | A 70B Q4 model on a 36 GB Mac + a 24 GB GPU box over Ethernet answers at ≥ 70% of the slower machine's tokens/s for a model that fits it, loads in < 1 min after the first time |
+| 3. Resilience | Resume after reshard (replay prompt + tokens); relaunch when idle when a peer returns; micro-batched prefill | Pulling a shard's cable mid-answer gives a pause and a complete answer; no request errors in a 1-hour soak with a shard toggling every 5 minutes |
+| 4. Placement | Whole-model placement on a peer (forwarded over a session), the router picking head, peer or split by measured speed | A model that fits only on the GPU box is served from there via the head, its receipt naming the box |
+| 5. Wired fast paths | Tensor parallel within RDMA/10 GbE groups (MLX JACCL or llama.cpp `--split-mode tensor`), opt-in RDMA between owned machines | 4 Macs over TB5 beat one Mac on a model that fits one (exo's claim: 1.8× on 2) |
+| 6. Phones as shards | Autobot runs `ggml-rpc-server` behind a shard link when charging, on Wi-Fi, cool | A phone holds 10% of a model's layers; unplugging it reshards within 30 s |
+| T1. LoRA on one device | `invincible train` (mlx-lm / PEFT as an engine), datasets with manifests, adapters served as models, eval gate, training receipts | A LoRA trained on 1k records from your sessions beats its base on your eval tasks, served under a new id |
+| T2. DiLoCo LoRA | Data-parallel LoRA over shard links with outer steps every H steps | Two Macs reach the same eval score as one in ≤ 60% of the wall time, moving < 1% of the bytes per-step sync would |
+| T3. Federated with phones | Adapter deltas from phones, FedSA-LoRA option | Three devices (one phone) improve a shared adapter without any record leaving its device (checked by receipts) |
+| T4. Larger | Pipeline-parallel training across machines, DeMo compression | A 7B full fine-tune across two machines that neither fits alone |
+
+## Phase 1: what was measured
+
+On one Apple M3 Pro (36 GB), Qwen3 1.7B Q4_K_M (1.26 GiB), two `invincible serve` processes with
+separate homes on loopback, the shard's `ggml-rpc-server` on the same GPU; medians:
+
+**Preliminary: measured while the machine was shared with other heavy work (load average
+190–470), so the spread is wide; a quiet run replaces these before this phase is called done.**
+
+| What | One node | Split, raw RPC (no tunnel) | Split, through shard links |
+|---|---:|---:|---:|
+| Generation through the gateway, 256 tokens, tok/s (median of 5, two series) | 56.4, 56.0 | — | 42.2, 33.2 |
+| `llama-bench` tg128, tok/s (median of 10, interleaved) | 60.3 | 51.6 | 32.4 (before the pipe fix) |
+| `llama-bench` pp512, tok/s | 1457 | 1389 | 980 |
+| 8 KiB round trip, p50 (micro-benchmark, echo) | — | 21–98 µs | 93–387 µs |
+| Bulk, each way | — | 0.4–1.8 GB/s | 0.16–0.28 GB/s (was 0.02–0.08 before ring and a task per direction) |
+
+- The split model's answers are token-for-token the same as the single-node model's (temperature 0).
+- Per generated token the head sent the shard about 31 KB (llama.cpp's graph and inputs) and
+  received 8.4 KB (the activations: 2048 × 4 bytes); loading put 573 MB of weights (half the
+  model) through the link once.
+- Killing the shard (the node and its RPC server, `kill -9`) mid-answer: the head's llama-server
+  aborted, and 3 s later the model was serving again on the head alone.
+- In the one quiet stretch, raw RPC and shard links were within 2% of each other on generation
+  (44.6 against 43.9 tok/s); under load the links lose more, because each token's few round trips
+  cross four more processes that wait for the scheduler.
+
+Both "devices" share one GPU here, so the split numbers measure the overhead of the pipeline and
+the link, not a gain: on two machines the shard's layers run on its own GPU, and each token also
+pays the network's round trips.
+
+## Known limits of phase 1
+
+- One head per shard at a time (`ggml-rpc-server` serves one client at a time).
+- The head's loopback doors accept any local process (as any loopback service does).
+- A peer that comes back is used at the model's next relaunch, not at once.
+- Byte counts in receipts are per link, so concurrent requests on one model share them.
+- Heads must have a GPU device of their own to anchor a split: `llama-server --list-devices` has to
+  report one. Without it the model runs on the head alone and the note says so. CPU-only heads come
+  later.
+
+## Open questions for the owner
+
+1. **Kill switch and the LAN.** Should `network = "offline"` also stop shard links to your own
+   machines on the LAN (phase 1: yes, fail closed), or should offline mean "no internet" for
+   cluster links?
+2. **RDMA over Thunderbolt** is unencrypted. Allow it as an opt-in between two of your machines on
+   a direct cable (much faster: µs instead of ms), or always keep the encrypted tunnel?
+3. **Friends' nodes.** When trusted peers that are not yours join (a region tier), should private
+   requests be refused on them outright (the plan), or allowed per peer?
+4. **Training engine.** MLX + PyTorch as child processes means Python on the node for training
+   only. Acceptable, or wait for a native trainer (llama.cpp's, still FP32-only)?

@@ -28,6 +28,8 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
+| Discovery | Signed, expiring descriptors published to seeds and mDNS, so a node is found without a pasted code — and still only usable after pairing ([spec/discovery.md](spec/discovery.md)): implemented, unaudited |
+| Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
@@ -82,8 +84,9 @@ middle tier**, and later the regional one.
 
 ### Not in v1
 
-Model training, a chat UI, identity systems, federation between strangers. Each may come later or
-become its own project.
+A chat UI, identity systems, federation between strangers. Each may come later or become its own
+project. Training (LoRA fine-tuning on your devices, then across them) is planned in
+[spec/cluster.md](spec/cluster.md).
 
 ## Deep integration with Autobot
 
@@ -772,11 +775,15 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `[approvals]` says yes ahead of time.
 - **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
-  device can therefore start turns, watch their events (tool runs, receipts, approval questions,
-  the answer) and answer approvals, all inside its Noise session. A turn may carry up to four
+  device granted the `agent` capability can therefore start turns, watch their events (tool runs,
+  receipts, approval questions, the answer) and answer approvals, all inside its Noise session.
+  Granting it is explicit — `invincible pair --capabilities agent`, or `PATCH
+  /v1/cluster/nodes/<name>` on the device already paired — because the proxy speaks with the
+  node's own token: a device granted nothing reaches a 404 there, exactly as for a route that does
+  not exist. A turn may carry up to four
   images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
   that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
-  agent is reachable only from this machine and from devices you paired.
+  agent is reachable from this machine, and over a device session only where you granted it.
 
 ## Bots and channels
 
@@ -1076,10 +1083,11 @@ advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, �
 
 ```sh
 invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
+invincible pair --capabilities agent,audit   # …pre-granting those to the device that joins
 invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
 invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
                                      # (with that machine's token, `invincible token`: web pages cannot use it)
-invincible devices                   # on the node: who is paired
+invincible devices                   # on the node: who is paired, and what each may reach
 invincible devices --remove laptop   # unpair: refused at the next handshake or frame
 ```
 
@@ -1087,11 +1095,104 @@ On macOS with the application firewall on, the first remote connection can wait 
 incoming connections?" prompt for `invincible` (or `System Settings › Network › Firewall`): allow it,
 or pairing hangs until it times out.
 
-Paired devices reach the inference API with no token (their key authenticates them) and never the
-admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer is in
+Every paired device is granted a small set of capabilities when it pairs
+([spec/pairing.md](spec/pairing.md), Capabilities). `shard` (the default, and the least) is the six
+routes above: `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
+cluster's `/v1/cluster/node` and `/v1/cluster/meter`, with no token (the device's key
+authenticates it). `agent` adds `/v1/agent` — the Autobot proxy, which runs with the node's own
+token — `audit` adds the audit log, and `dispatch` adds `/v1/dispatch`, a hop into your other
+nodes. Nothing else is reachable, and a route the device was not granted answers exactly as a path
+that does not exist, so a device cannot even learn it is there. Past that check, each route takes
+only the body it needs (32 MiB for a chat completion, 5 MiB for the meter), and the node holds at
+most `[node] max_buffered_bytes` of device request bodies at once — 256 MiB unless set, refusing
+with 503 and `Retry-After: 2` past it instead of running itself out of memory. A device outside its
+grant never reaches either check, so its 404 says nothing about them
+([spec/pairing.md](spec/pairing.md), Limits). Grant and revoke on the node's own
+API, with no re-pairing:
+
+```sh
+curl -X PATCH localhost:7777/v1/cluster/nodes/laptop \
+     -H "authorization: Bearer $(invincible token)" \
+     -d '{"capabilities": ["shard", "agent"]}'
+```
+
+The list is in [spec/pairing.md](spec/pairing.md) (Transport). Autobot
+pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.
+
+### Finding a node without a pasted code
+
+Pairing starts from a code, which means a human pastes or scans it. Discovery removes *that* step
+and nothing else: a node can publish a small signed record of where it is, and another machine can
+look for it. Finding a node does not trust it; the first connection still needs the node's code.
+
+```toml
+[discovery]
+announce = true                        # off by default: publishing is a decision
+addresses = ["192.168.1.20:7778"]      # what the record says; never detected for you
+seeds = ["https://seed.example"]       # optional: where `invincible announce` posts it
+lan = true                             # let `announce --lan` answer mDNS
+```
+
+```sh
+invincible announce                  # sign this node's descriptor; POST it to [discovery] seeds
+invincible announce --lan            # also answer mDNS on this network, until Ctrl-C
+invincible discover                  # ask the seeds (add --seed URL to ask another), verify, list
+invincible discover --lan            # also browse mDNS for ~3 s; --model ID filters
+invincible seed --listen 127.0.0.1:7789   # run a dumb seed yourself: it stores and returns records
+```
+
+Every record is signed by the node (Ed25519, `receipt.key`) and expires within 24 hours; a seed
+stores and returns it without verifying, so the consumer always checks the signature. `discover`
+prints fingerprints, addresses, model ids and expiry, and marks everything `unpaired` unless a
+pairing already exists. A seed learns who announces, from what address and when — that is the price
+of discovery, and a node that will not pay it leaves `announce = false`. Details and the request
+shapes: [spec/discovery.md](spec/discovery.md).
+
+### A cluster of your own devices
+
+A model too big for one machine can be split across nodes you paired, layer by layer, as exo
+does ([spec/cluster.md](spec/cluster.md)). llama.cpp's RPC server does the work on each shard; it
+has no authentication, so it only ever listens on loopback, and the head reaches it through an
+encrypted shard link (Noise, with the keys pairing pinned), never over the network directly.
+
+On the machine that lends its GPU (the shard), with `[remote]` set up as above:
+
+```toml
+[cluster]
+serve = true
+heads = ["studio"]            # the paired devices that may use this node as a shard
+```
+
+On the machine that serves the model (the head), pair with the shard (`invincible join '<its
+code>' --name studio`), then:
+
+```toml
+[[models]]
+id = "big"
+path = "/models/Big-70B-Q4_K_M.gguf"
+cluster = ["mini"]            # paired nodes it may be split across
+split = "auto"                # only when it does not fit here; "always" to split anyway
+```
+
+```sh
+invincible cluster status     # devices, peers (probed now), heads served, where each model runs
+```
+
+- The split is sized by each device's free memory, or by measured speed once every device taking
+  part has been benchmarked (`invincible tune bench <model>`); receipts list the nodes that took
+  part (`cluster`).
+- Shard links stay on the local network (private, link-local, Tailscale or `.local` addresses),
+  never go through Tor or SOCKS5, and stop under `network = "offline"`.
+- A shard that leaves mid-answer ends that answer with an error event; the model is planned again
+  over what is left (or waits, unhealthy, while the router uses another model).
+- Every node needs the same llama.cpp build with the RPC backend: llama.cpp's release archives have
+  `ggml-rpc-server`; Homebrew's llama.cpp has no RPC backend.
+- A pipeline split needs a GPU device on the head: `llama-server --list-devices` has to report one.
+  Without it the model runs on the head alone, with a note saying why, and a CPU-only peer is kept
+  out of the split ([spec/cluster.md](spec/cluster.md), Known limits of phase 1).
 
 ## Evals: local against frontier, on your own work
 

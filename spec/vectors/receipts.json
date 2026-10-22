@@ -1,6 +1,6 @@
 {
   "spec": "receipts",
-  "version": 0,
+  "version": 1,
   "cases": [
     {
       "name": "a local run: nothing left the node",
@@ -294,6 +294,195 @@
       },
       "expect": {
         "valid": true
+      }
+    },
+    {
+      "name": "a split model: the receipt names the nodes that took part",
+      "input": {
+        "kind": "sign",
+        "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "receipt": {
+          "version": 0,
+          "request_id": "0123456789abcdef0123456789abcdef",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "decision": {
+            "action": "run",
+            "model": "big",
+            "tier": "node",
+            "reason": "local-first"
+          },
+          "data_policy": "owned",
+          "tokens": {
+            "input": 25,
+            "output": 256
+          },
+          "cluster": [
+            {
+              "name": "studio",
+              "share": 700
+            },
+            {
+              "name": "mini",
+              "share": 300,
+              "key": "bxKwd4iR7q3ISPae8CYV9lVYyhqjZvNIeqZAu_jNfUY",
+              "bytes_sent": 7984216,
+              "bytes_received": 2148352
+            }
+          ],
+          "egress": []
+        }
+      },
+      "expect": {
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "canonical": "{\"cluster\":[{\"name\":\"studio\",\"share\":700},{\"bytes_received\":2148352,\"bytes_sent\":7984216,\"key\":\"bxKwd4iR7q3ISPae8CYV9lVYyhqjZvNIeqZAu_jNfUY\",\"name\":\"mini\",\"share\":300}],\"data_policy\":\"owned\",\"decision\":{\"action\":\"run\",\"model\":\"big\",\"reason\":\"local-first\",\"tier\":\"node\"},\"egress\":[],\"node\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"request_id\":\"0123456789abcdef0123456789abcdef\",\"tokens\":{\"input\":25,\"output\":256},\"version\":0}",
+        "signature": "LFixvpQzp3RWuSPQWfYA1T7F9fWch87s_g-H5hOtmDDRbQnM7nM_wqT_hR-Ocy6mca_x3WcL5qrOx322-J3FDg"
+      }
+    },
+    {
+      "name": "a version 1 receipt: the exchange, the caller and the time are all signed",
+      "input": {
+        "kind": "sign",
+        "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "receipt": {
+          "version": 1,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "at": 1761123456,
+          "api": "chat",
+          "caller": {
+            "kind": "device",
+            "name": "phone",
+            "key": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s",
+            "fingerprint": "abab-abab-abab-abab"
+          },
+          "request_sha256": "8fd894a4f83a9479632168ec4cea1c18aeef1f38d7ce48f7051da3e6dd024a6d",
+          "answer_sha256": "13256b6f8950957a6e138301d7b53690fc274816b01ee38c009476538a039ddd",
+          "answer_bytes": 125,
+          "answer_complete": true,
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "requested"
+          },
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "egress": []
+        }
+      },
+      "expect": {
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "canonical": "{\"answer_bytes\":125,\"answer_complete\":true,\"answer_sha256\":\"13256b6f8950957a6e138301d7b53690fc274816b01ee38c009476538a039ddd\",\"api\":\"chat\",\"at\":1761123456,\"caller\":{\"fingerprint\":\"abab-abab-abab-abab\",\"key\":\"q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s\",\"kind\":\"device\",\"name\":\"phone\"},\"decision\":{\"action\":\"run\",\"model\":\"qwen3-0.6b\",\"reason\":\"requested\",\"tier\":\"node\"},\"egress\":[],\"node\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"request_id\":\"00000000000000000000000000000000\",\"request_sha256\":\"8fd894a4f83a9479632168ec4cea1c18aeef1f38d7ce48f7051da3e6dd024a6d\",\"tokens\":{\"input\":19,\"output\":8},\"version\":1}",
+        "signature": "5jsHNhjKN5tywV6derTCPl0CfDGV-Iu7QY8lY-Zv15nv1VGRzSl0kgPwcoXypqscpiEFgH9zOvdmoLJI20vrDQ"
+      }
+    },
+    {
+      "name": "canonical JSON: sorted keys (UTF-16 order), minimal escapes, ECMAScript numbers",
+      "input": {
+        "kind": "canonical",
+        "value": {
+          "z": "line\nbreak\t\"quoted\"\\",
+          "a": [
+            1,
+            -2,
+            0.1,
+            1e+21,
+            1e-07,
+            true,
+            null
+          ],
+          "é": "é",
+          "😀": "grin",
+          "": "private",
+          "nested": {
+            "b": 2.5,
+            "a": {}
+          }
+        }
+      },
+      "expect": {
+        "canonical": "{\"a\":[1,-2,0.1,1e+21,1e-7,true,null],\"nested\":{\"a\":{},\"b\":2.5},\"z\":\"line\\nbreak\\t\\\"quoted\\\"\\\\\",\"é\":\"é\",\"😀\":\"grin\",\"\":\"private\"}",
+        "sha256": "50b0aa6d0d87c54d9fe76e73683e1ae361a5ee991ce8ef8cb1674ee3f0bd44ef"
+      }
+    },
+    {
+      "name": "a version 1 receipt with its public key verifies",
+      "input": {
+        "kind": "verify",
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "receipt": {
+          "version": 1,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "at": 1761123456,
+          "api": "chat",
+          "caller": {
+            "kind": "device",
+            "name": "phone",
+            "key": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s",
+            "fingerprint": "abab-abab-abab-abab"
+          },
+          "request_sha256": "8fd894a4f83a9479632168ec4cea1c18aeef1f38d7ce48f7051da3e6dd024a6d",
+          "answer_sha256": "13256b6f8950957a6e138301d7b53690fc274816b01ee38c009476538a039ddd",
+          "answer_bytes": 125,
+          "answer_complete": true,
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "requested"
+          },
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "egress": []
+        },
+        "signature": "5jsHNhjKN5tywV6derTCPl0CfDGV-Iu7QY8lY-Zv15nv1VGRzSl0kgPwcoXypqscpiEFgH9zOvdmoLJI20vrDQ"
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "name": "the same receipt with one hex digit of the answer hash changed does not",
+      "input": {
+        "kind": "verify",
+        "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "receipt": {
+          "version": 1,
+          "request_id": "00000000000000000000000000000000",
+          "node": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "at": 1761123456,
+          "api": "chat",
+          "caller": {
+            "kind": "device",
+            "name": "phone",
+            "key": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s",
+            "fingerprint": "abab-abab-abab-abab"
+          },
+          "request_sha256": "8fd894a4f83a9479632168ec4cea1c18aeef1f38d7ce48f7051da3e6dd024a6d",
+          "answer_sha256": "03256b6f8950957a6e138301d7b53690fc274816b01ee38c009476538a039ddd",
+          "answer_bytes": 125,
+          "answer_complete": true,
+          "decision": {
+            "action": "run",
+            "model": "qwen3-0.6b",
+            "tier": "node",
+            "reason": "requested"
+          },
+          "tokens": {
+            "input": 19,
+            "output": 8
+          },
+          "egress": []
+        },
+        "signature": "5jsHNhjKN5tywV6derTCPl0CfDGV-Iu7QY8lY-Zv15nv1VGRzSl0kgPwcoXypqscpiEFgH9zOvdmoLJI20vrDQ"
+      },
+      "expect": {
+        "valid": false
       }
     }
   ]

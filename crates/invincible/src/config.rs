@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use invincible_policy::{Egress, NetworkMode, NodeSettings};
 use serde::Deserialize;
 
+use crate::fsutil;
+
 /// ```toml
 /// listen = "127.0.0.1:7777"
 ///
@@ -51,6 +53,74 @@ pub struct Config {
     /// Image generation backends: `POST /v1/images/generations` ([crate::synth]).
     #[serde(default)]
     pub images: Vec<MediaConfig>,
+    /// This node as a shard for paired heads (spec/cluster.md).
+    #[serde(default)]
+    pub cluster: ClusterConfig,
+    /// Discovery (spec/discovery.md): a signed descriptor other nodes can find, and where to find
+    /// them. Off unless the operator turns it on.
+    #[serde(default)]
+    pub discovery: DiscoveryConfig,
+}
+
+/// ```toml
+/// [discovery]
+/// announce = false                       # publish this node's signed descriptor at all
+/// addresses = ["192.168.1.20:7778"]      # what it says; never detected for you
+/// seeds = ["https://seed.example"]       # where `invincible announce` posts it
+/// lifetime = 3600                        # seconds a descriptor is valid (max 86400)
+/// lan = true                             # may answer mDNS as _invincible._udp.local
+/// ```
+///
+/// Discovery is not trust: an announced node is still only usable after pairing
+/// (spec/discovery.md). `announce` has to be a decision, so it defaults to false, and so does the
+/// address list — auto-advertising an interface is a decision, not a convenience.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveryConfig {
+    #[serde(default)]
+    pub announce: bool,
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    #[serde(default = "default_lifetime")]
+    pub lifetime: u64,
+    #[serde(default = "yes")]
+    pub lan: bool,
+}
+
+fn default_lifetime() -> u64 {
+    crate::discovery::LIFETIME
+}
+
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self { announce: false, addresses: Vec::new(), seeds: Vec::new(), lifetime: default_lifetime(), lan: true }
+    }
+}
+
+/// ```toml
+/// [cluster]
+/// serve = true                        # run ggml-rpc-server on loopback for the heads below
+/// heads = ["laptop"]                  # paired devices (by name) that may use this node as a shard
+/// rpc_server = "ggml-rpc-server"      # default: next to llama_server, else on PATH
+/// cache = true                        # keep weights a head sent (fast reloads), in $INVINCIBLE_HOME/cache/rpc
+/// ```
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClusterConfig {
+    #[serde(default)]
+    pub serve: bool,
+    #[serde(default)]
+    pub heads: Vec<String>,
+    #[serde(default)]
+    pub rpc_server: Option<PathBuf>,
+    #[serde(default = "yes")]
+    pub cache: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// ```toml
@@ -240,6 +310,21 @@ fn default_listen() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7777))
 }
 
+/// The name a node lists this machine under when it joins: [name] when given, else this machine's
+/// own `[remote] name` — the string a shard's `[cluster] heads` compares against. Defaulting to
+/// "device" is what let two correct configs disagree with nothing to show for it.
+pub fn join_name(name: Option<String>, home: &Path) -> String {
+    name.unwrap_or_else(|| {
+        let path = home.join("config.toml");
+        fsutil::read_optional(&path)
+            .ok()
+            .flatten()
+            .and_then(|text| Config::parse(&text).ok())
+            .map(|c| c.remote.name())
+            .unwrap_or_else(|| "device".to_owned())
+    })
+}
+
 /// Egress settings, in the encodings of spec/routing.md. Both start fully closed.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -248,6 +333,29 @@ pub struct NodeConfig {
     pub network: String,
     #[serde(default = "never")]
     pub egress: String,
+    /// How many dispatched requests this node will run at once (spec/dispatch.md,
+    /// `dispatch.max_inflight`); 0 marks it as spoken for (a shard), never a dispatch target.
+    #[serde(default = "one")]
+    pub dispatch_max_inflight: u64,
+    /// How many bytes of device request bodies the node holds at once, across every request in
+    /// flight (spec/pairing.md, Limits). A device request that does not fit is refused with 503
+    /// and a retry hint, before its body is read, so 32 sessions cannot pin 32 × 32 MiB.
+    ///
+    /// 256 MiB: eight chat bodies at the 32 MiB per-request limit, a sixteenth of a 4 GB box, and
+    /// small enough that a node running a model still has its memory when a device floods it.
+    #[serde(default = "max_buffered")]
+    pub max_buffered_bytes: u64,
+}
+
+/// What a node holds of device request bodies by default: 256 MiB.
+pub const DEFAULT_MAX_BUFFERED_BYTES: u64 = 256 << 20;
+
+fn max_buffered() -> u64 {
+    DEFAULT_MAX_BUFFERED_BYTES
+}
+
+fn one() -> u64 {
+    1
 }
 
 fn offline() -> String {
@@ -260,7 +368,7 @@ fn never() -> String {
 
 impl Default for NodeConfig {
     fn default() -> Self {
-        Self { network: offline(), egress: never() }
+        Self { network: offline(), egress: never(), dispatch_max_inflight: one(), max_buffered_bytes: max_buffered() }
     }
 }
 
@@ -309,6 +417,17 @@ pub struct ModelConfig {
     /// Whether it takes images; unset: when it has an `mmproj`.
     #[serde(default)]
     pub vision: Option<bool>,
+    /// Paired nodes (by name, as `invincible join` saved them) this model may be split across
+    /// (spec/cluster.md). Empty: this machine only.
+    #[serde(default)]
+    pub cluster: Vec<String>,
+    /// When to split: `auto` (only when it does not fit here) or `always`.
+    #[serde(default = "auto_split")]
+    pub split: invincible_policy::SplitMode,
+}
+
+fn auto_split() -> invincible_policy::SplitMode {
+    invincible_policy::SplitMode::Auto
 }
 
 impl ModelConfig {
@@ -367,6 +486,40 @@ impl Config {
             }
         }
         self.update.channel()?;
+        if self.cluster.serve && !self.remote.enabled() {
+            return Err("[cluster] serve needs [remote] listen: heads reach this node over its paired link".to_owned());
+        }
+        if self.cluster.serve && self.cluster.heads.is_empty() {
+            return Err("[cluster] serve: name the paired devices that may use this node in `heads`".to_owned());
+        }
+        if self.discovery.announce && self.discovery.addresses.is_empty() {
+            return Err("[discovery] announce = true needs `addresses`: the node does not guess where it is reachable"
+                .to_owned());
+        }
+        if self.discovery.announce && !self.remote.enabled() {
+            return Err(
+                "[discovery] announce = true needs [remote] listen: a descriptor points at the paired-device port"
+                    .to_owned(),
+            );
+        }
+        if !(60..=crate::discovery::MAX_LIFETIME).contains(&self.discovery.lifetime) {
+            return Err(format!(
+                "[discovery] lifetime = {}: 60 to {} seconds",
+                self.discovery.lifetime,
+                crate::discovery::MAX_LIFETIME
+            ));
+        }
+        for address in &self.discovery.addresses {
+            if let Some(problem) = crate::discovery::address_problem(address) {
+                return Err(format!("[discovery] addresses: {address:?}: {problem}"));
+            }
+        }
+        for seed in &self.discovery.seeds {
+            let parsed = reqwest::Url::parse(seed).map_err(|e| format!("[discovery] seeds: {seed:?}: {e}"))?;
+            if !matches!(parsed.scheme(), "http" | "https") {
+                return Err(format!("[discovery] seeds: {seed:?}: only http:// and https://"));
+            }
+        }
         for cloud in &self.cloud {
             crate::egress::check(&cloud.base_url).map_err(|e| format!("[[cloud]] {}: {e}", cloud.id))?;
             if cloud.api_key_file.is_some() && cloud.api_key_env.is_some() {
@@ -404,7 +557,7 @@ pub fn home() -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, DEFAULT_MAX_BUFFERED_BYTES};
 
     #[test]
     fn empty_config_is_closed() {
@@ -413,6 +566,63 @@ mod tests {
         let settings = config.node.settings();
         assert!(settings.network.is_offline());
         assert_eq!(settings.egress, invincible_policy::Egress::Never);
+    }
+
+    #[test]
+    fn dispatch_capacity_defaults_to_one_and_zero_means_spoken_for() {
+        assert_eq!(Config::parse("").unwrap().node.dispatch_max_inflight, 1);
+        let four = Config::parse("[node]\ndispatch_max_inflight = 4\n").unwrap();
+        assert_eq!(four.node.dispatch_max_inflight, 4);
+        // A shard says 0 on purpose: it must be read as 0, not as "unset, so 1".
+        assert_eq!(Config::parse("[node]\ndispatch_max_inflight = 0\n").unwrap().node.dispatch_max_inflight, 0);
+    }
+
+    #[test]
+    fn the_device_body_ceiling_defaults_to_256_mib_and_is_settable() {
+        let default = Config::parse("").unwrap();
+        assert_eq!(default.node.max_buffered_bytes, 256 << 20, "a sixteenth of a 4 GB box");
+        assert_eq!(default.node.max_buffered_bytes, DEFAULT_MAX_BUFFERED_BYTES);
+        let small = Config::parse("[node]\nmax_buffered_bytes = 8388608\n").unwrap();
+        assert_eq!(small.node.max_buffered_bytes, 8 << 20, "an operator can hold a node to less");
+        let none = Config::parse("[node]\nmax_buffered_bytes = 0\n").unwrap();
+        assert_eq!(none.node.max_buffered_bytes, 0, "0 refuses every device body, which is a choice too");
+    }
+
+    #[test]
+    fn discovery_is_closed_until_it_is_asked_for() {
+        let empty = Config::parse("").unwrap();
+        assert!(!empty.discovery.announce, "announcing is a decision, so it is off by default");
+        assert!(empty.discovery.addresses.is_empty(), "no address is detected for you");
+        assert!(empty.discovery.seeds.is_empty());
+        assert_eq!(empty.discovery.lifetime, 3600);
+        assert!(empty.discovery.lan);
+
+        let announced = Config::parse(
+            "[remote]\nlisten = [\"192.168.1.20:7778\"]\n\
+             [discovery]\nannounce = true\naddresses = [\"192.168.1.20:7778\"]\nseeds = [\"https://seed.example\"]\n",
+        )
+        .unwrap();
+        assert!(announced.discovery.announce);
+        assert_eq!(announced.discovery.addresses, vec!["192.168.1.20:7778"]);
+    }
+
+    #[test]
+    fn discovery_refuses_what_it_cannot_use() {
+        // announce without an address would publish nothing usable.
+        assert!(Config::parse("[discovery]\nannounce = true\n").unwrap_err().contains("addresses"));
+        // announce without a paired-device port has nowhere to point.
+        assert!(
+            Config::parse("[discovery]\nannounce = true\naddresses = [\"192.168.1.20:7778\"]\n")
+                .unwrap_err()
+                .contains("[remote] listen")
+        );
+        assert!(
+            Config::parse("[discovery]\naddresses = [\"http://192.168.1.20:7778\"]\n")
+                .unwrap_err()
+                .contains("host:port")
+        );
+        assert!(Config::parse("[discovery]\nlifetime = 10\n").unwrap_err().contains("lifetime"));
+        assert!(Config::parse("[discovery]\nseeds = [\"ftp://seed\"]\n").unwrap_err().contains("http"));
     }
 
     #[test]
@@ -485,5 +695,31 @@ mod tests {
     #[test]
     fn refuses_unknown_keys() {
         assert!(Config::parse("listen_on = \"127.0.0.1:1\"").is_err());
+    }
+
+    fn home(name: &str, config: Option<&str>) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("inv-join-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        if let Some(text) = config {
+            std::fs::write(dir.join("config.toml"), text).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn join_name_defaults_to_this_nodes_own_name() {
+        let dir = home("own", Some("[remote]\nname = \"studio\"\n"));
+        assert_eq!(super::join_name(None, &dir), "studio");
+        // An explicit name still wins: the operator may want another label.
+        assert_eq!(super::join_name(Some("laptop".into()), &dir), "laptop");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn join_name_falls_back_when_there_is_no_config() {
+        let dir = home("empty", None);
+        assert_eq!(super::join_name(None, &dir), "device");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

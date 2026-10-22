@@ -3,14 +3,18 @@
 pub mod audit;
 pub mod brand;
 pub mod cloud;
+pub mod cluster;
 pub mod config;
 pub mod devices;
+pub mod discovery;
+pub mod dispatch;
 pub mod egress;
 pub mod engine;
 pub mod eval;
 pub mod fetch;
 pub mod fsutil;
 pub mod media;
+pub mod membership;
 pub mod models;
 pub mod receipts;
 pub mod redact;
@@ -24,6 +28,7 @@ pub mod term;
 #[doc(hidden)]
 pub mod testgen;
 pub mod token;
+pub mod tune;
 pub mod update;
 pub mod version;
 pub mod watchdog;

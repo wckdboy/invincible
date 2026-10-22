@@ -228,8 +228,18 @@ async fn pump(
                 }
                 tx.send(Ok(bytes)).await
             }
+            // The engine went away mid-answer (it crashed; a split model's shard left). A stream
+            // ends with an error event, so the client can tell it from a cut connection.
             Ok(Some(Err(e))) => {
-                let _ = tx.send(Err(std::io::Error::other(e))).await;
+                tracing::warn!("engine stopped mid-answer: {e}");
+                let _ = match every {
+                    Some(_) => {
+                        let event = error_event(502, "api_error", "engine_failed", "the engine stopped mid-answer");
+                        let ended = if between { event } else { Bytes::from([b"\n\n".as_slice(), &event].concat()) };
+                        tx.send(Ok(ended)).await
+                    }
+                    None => tx.send(Err(std::io::Error::other(e))).await,
+                };
                 return;
             }
             Ok(None) => return,
@@ -321,6 +331,32 @@ mod tests {
         let url = engine(Duration::ZERO, 400, r#"{"error":{"message":"bad"}}"#, false).await;
         let (status, _) = relayed(&url, true, Duration::from_secs(5), Duration::from_secs(10)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// An engine that dies mid-stream (a crash, a shard that left) ends the stream with an error
+    /// event, not a cut.
+    #[tokio::test]
+    async fn an_engine_that_dies_mid_stream_ends_it_with_an_error_event() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/x", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = tcp.read(&mut buf).await;
+            // A chunked stream that stops in the middle of its second event.
+            let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+            let first = "data: {\"n\":1}\n\n";
+            let half = "data: {\"n\":";
+            let out = format!("{head}{:x}\r\n{first}\r\n{:x}\r\n{half}\r\n", first.len(), half.len());
+            tcp.write_all(out.as_bytes()).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            drop(tcp);
+        });
+        let (status, body) = relayed(&url, true, Duration::from_secs(5), Duration::from_secs(10)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.starts_with("data: {\"n\":1}\n\ndata: {\"n\":\n\nevent: error\n"), "{body}");
+        assert!(body.contains(r#""code":"engine_failed""#) && body.contains(r#""status":502"#), "{body}");
     }
 
     /// Comments go between events only: a pause inside one (half a line sent) is not filled.

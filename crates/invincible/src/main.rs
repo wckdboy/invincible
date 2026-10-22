@@ -8,13 +8,12 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use invincible::brand;
 use invincible::config::{self, Config};
-use invincible::devices::{Devices, StaticKey, fingerprint};
+use invincible::devices::{Devices, KnownNodes, StaticKey, fingerprint};
 use invincible::engine::{self, Engine, Launch};
 use invincible::remote::{self, Pairing, PairingCode};
 use invincible::server::{self, AppState};
 use invincible::{fsutil, models, token};
 use invincible_policy::{RouteInput, decide};
-use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 #[command(version = invincible::version::VERSION, about = "Intelligence that never relies solely on frontier labs, corporations or countries.")]
@@ -37,6 +36,10 @@ enum Command {
     Pair {
         #[arg(long)]
         config: Option<PathBuf>,
+        /// What the device that joins with this code may reach: any of `shard`, `agent`, `audit`,
+        /// `dispatch`, comma-separated [default: shard, the least].
+        #[arg(long, value_delimiter = ',')]
+        capabilities: Vec<String>,
     },
     /// List the paired devices, or unpair one.
     Devices {
@@ -49,9 +52,9 @@ enum Command {
     /// Pair this machine, as a device, with a node, using the code the node showed.
     Join {
         code: String,
-        /// The name the node lists this device under.
-        #[arg(long, default_value = "device")]
-        name: String,
+        /// The name the node lists this device under [default: this node's own [remote] name].
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Reach a paired node through a local, plain-HTTP door (each connection is an encrypted session).
     Tunnel {
@@ -60,6 +63,55 @@ enum Command {
         node: Option<String>,
         #[arg(long, default_value = "127.0.0.1:7780")]
         listen: std::net::SocketAddr,
+    },
+    /// Publish this node's signed descriptor to its seeds. With --lan, also answer mDNS until
+    /// stopped. Discovery never pairs anything (spec/discovery.md).
+    Announce {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Also answer mDNS on this network, and stay in the foreground while doing it.
+        #[arg(long)]
+        lan: bool,
+    },
+    /// Look for Invincible nodes: from [discovery] seeds (or --seed) and, with --lan, this
+    /// network. Every record is verified; nothing is paired.
+    Discover {
+        /// Only nodes that advertise this model id.
+        #[arg(long)]
+        model: Option<String>,
+        /// A seed to ask, in addition to [discovery] seeds. Repeatable.
+        #[arg(long = "seed")]
+        seeds: Vec<String>,
+        /// Also browse mDNS on this network (waits about three seconds).
+        #[arg(long)]
+        lan: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Run a discovery seed: it stores signed descriptors and returns them. It cannot sign or
+    /// vouch for anything, and it learns who announces (spec/discovery.md).
+    Seed {
+        #[arg(long, default_value = "127.0.0.1:7789")]
+        listen: std::net::SocketAddr,
+        /// How many records it holds (expired ones are dropped as it goes).
+        #[arg(long, default_value_t = invincible::discovery::SEED_RECORDS)]
+        max_records: usize,
+        /// Announces accepted per source address per minute.
+        #[arg(long, default_value_t = invincible::discovery::SEED_PER_IP)]
+        per_ip_per_min: u32,
+    },
+    /// The cluster: this node, its paired peers, and the models split across them (spec/cluster.md).
+    Cluster {
+        #[command(subcommand)]
+        action: ClusterAction,
+    },
+    /// Dispatch: which of the nodes this machine owns would answer a request, and why
+    /// (spec/dispatch.md).
+    Dispatch {
+        #[command(subcommand)]
+        action: DispatchAction,
     },
     /// Add or list the models this node serves.
     Model {
@@ -102,6 +154,11 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Measure this machine and what a model runs at on it: `probe`, `bench`, `show`.
+    Tune {
+        #[command(subcommand)]
+        action: TuneAction,
+    },
     /// Show what the node answered and what left it (the audit log, spec/audit.md).
     Audit {
         /// Only entries this recent: `30m`, `24h`, `7d`.
@@ -119,6 +176,12 @@ enum Command {
         /// Print JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Check a receipt offline (spec/receipts.md): its signature, what it binds, and — given the
+    /// request and the answer — that they are the ones it names.
+    Receipt {
+        #[command(subcommand)]
+        action: ReceiptAction,
     },
     /// Print where a request would run, given a routing input (spec/routing.md) as JSON.
     Route {
@@ -156,6 +219,83 @@ enum Command {
         /// The daily job: updates only when [update] auto is on.
         #[arg(long, hide = true)]
         scheduled: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReceiptAction {
+    /// Verify a receipt from a file (or `-` for stdin), or by request id from this node's audit log.
+    Verify {
+        /// The signed envelope as JSON (a file, `-`, or a request id in this node's audit log).
+        receipt: String,
+        /// The node's receipt public key, base64url [default: this node's own].
+        #[arg(long)]
+        key: Option<String>,
+        /// The request body as the client sent it: its hash is recomputed and compared.
+        #[arg(long)]
+        request: Option<PathBuf>,
+        /// The answer bytes exactly as the client received them: their hash is recomputed.
+        #[arg(long)]
+        answer: Option<PathBuf>,
+        /// Print the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ClusterAction {
+    /// This node's devices, its peers (probed now, over their paired links), the heads it serves
+    /// as a shard, and where each split model runs.
+    Status {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DispatchAction {
+    /// Every candidate node — this one, then each paired node as a fresh probe finds it — and the
+    /// node a request for this model would go to.
+    Status {
+        /// The model the request would name [default: none, an automatic choice].
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TuneAction {
+    /// Report the machine, its accelerators and its engines. No personal data.
+    Probe {
+        /// The JSON, for another program to read.
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Run llama-bench on one model and keep the numbers the cluster planner reads.
+    Bench {
+        /// The model id, as `invincible model list` shows it.
+        model: String,
+        /// The device to measure on [default: the first llama.cpp reports, else CPU].
+        #[arg(long)]
+        device: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Show what has been measured on this machine.
+    Show {
+        /// One model id; without it, every model measured here.
+        model: Option<String>,
     },
 }
 
@@ -459,17 +599,7 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Serve { config } => {
             let home = config::home()?;
-            // A path given on the command line must exist; without one, a node that was never set up
-            // starts with the defaults (offline, no models) instead of failing in a restart loop.
-            let config = match config {
-                Some(path) => Config::load(&path)?,
-                None => match fsutil::read_optional(&home.join("config.toml"))? {
-                    Some(text) => {
-                        Config::parse(&text).map_err(|e| format!("{}: {e}", home.join("config.toml").display()))?
-                    }
-                    None => Config::parse("")?,
-                },
-            };
+            let config = config_for(config, &home)?;
             let token = token::load_or_create(&home.join("token"))?;
             tracing_subscriber::fmt().with_target(false).init();
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
@@ -479,18 +609,27 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("{}", token::load_or_create(&config::home()?.join("token"))?);
             Ok(())
         }
-        Command::Pair { config } => {
-            let reply = admin(config, reqwest::Method::POST, "/v1/admin/pairing")?;
+        Command::Pair { config, capabilities } => {
+            // The set the code carries (spec/pairing.md, Capabilities): named here, it is the
+            // operator's grant; left out, the code grants `shard` only.
+            let body =
+                if capabilities.is_empty() { None } else { Some(serde_json::json!({ "capabilities": capabilities })) };
+            let reply = admin_with(config, reqwest::Method::POST, "/v1/admin/pairing", body)?;
             let code = reply["code"].as_str().ok_or("the node sent no code")?;
             let qr = qrcode::QrCode::new(code.as_bytes()).map_err(|e| e.to_string())?;
             println!("{}", qr.render::<qrcode::render::unicode::Dense1x2>().quiet_zone(true).build());
             println!("{code}\n");
+            let reaches = reply["capabilities"]
+                .as_array()
+                .map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+                .unwrap_or_else(|| "shard".to_owned());
             println!(
                 "Node \"{}\", key {}. The code works once, for {} minutes.",
                 reply["node"].as_str().unwrap_or("?"),
                 reply["fingerprint"].as_str().unwrap_or("?"),
                 reply["expires_in"].as_u64().unwrap_or(0) / 60
             );
+            println!("The device that joins reaches: {reaches}.");
             Ok(())
         }
         Command::Devices { config, remove } => {
@@ -514,6 +653,12 @@ fn run(cli: Cli) -> Result<(), String> {
                     vec![
                         device["name"].as_str().unwrap_or("?").to_owned(),
                         brand::ash(&key.map(|k| fingerprint(&k)).unwrap_or_default()),
+                        // What it may reach (spec/pairing.md, Capabilities): a set of one (`shard`)
+                        // unless you granted more.
+                        device["capabilities"]
+                            .as_array()
+                            .map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+                            .unwrap_or_else(|| "shard".to_owned()),
                     ]
                 })
                 .collect();
@@ -524,26 +669,25 @@ fn run(cli: Cli) -> Result<(), String> {
             let code = PairingCode::decode(&code)?;
             let home = config::home()?;
             let device = StaticKey::load_or_create(&home.join("device.key"))?;
+            // Default to this node's own [remote] name: that is the string the peer's
+            // `[cluster] heads` compares against, and "device" can never match what a person
+            // would have written there. Passing the *peer's* name here is the mistake that made
+            // two correctly configured nodes disagree (spec/cluster.md).
+            let name = invincible::config::join_name(name, &home);
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
             let paired = runtime.block_on(remote::pair(&code, &device, &name))?;
-            let mut nodes = KnownNodes::load(&home)?;
-            nodes.0.retain(|n| n.name != paired.node);
-            nodes.0.push(KnownNode {
-                receipt_key: paired.receipt_key.clone(),
-                name: paired.node.clone(),
-                key: {
-                    use base64::Engine as _;
-                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(code.node_key)
-                },
-                addrs: code.addrs.clone(),
-            });
-            nodes.save(&home)?;
+            // The same record the local API writes for `POST /v1/cluster/join`.
+            invincible::membership::record(&home, &code, &paired)?;
             println!(
                 "paired with node \"{}\" (key {}) as \"{}\"",
                 paired.node,
                 fingerprint(&code.node_key),
                 paired.device
             );
+            println!("on \"{}\", [cluster] heads must name this device as \"{}\"", paired.node, paired.device);
+            // What the node granted this machine (spec/pairing.md, Capabilities): the least unless
+            // it was granted more, which the node's operator changes there.
+            println!("it grants this machine: {}", paired.capabilities.codes().join(", "));
             Ok(())
         }
         Command::Tunnel { node, listen } => {
@@ -583,7 +727,40 @@ fn run(cli: Cli) -> Result<(), String> {
                 Ok(())
             })
         }
+        Command::Announce { config, lan } => announce_command(config, lan),
+        Command::Discover { model, seeds, lan, json, config } => discover_command(config, model, seeds, lan, json),
+        Command::Seed { listen, max_records, per_ip_per_min } => {
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+            let seed = std::sync::Arc::new(invincible::discovery::Seed::with_rate(max_records, per_ip_per_min));
+            println!(
+                "discovery seed on http://{listen} (at most {max_records} records, {per_ip_per_min} announces per address per minute)"
+            );
+            println!("this seed learns the address and timing of every node that announces to it");
+            runtime.block_on(invincible::discovery::serve_seed(seed, listen))
+        }
         Command::Cloud { action } => cloud_command(action),
+        Command::Cluster { action: ClusterAction::Status { config, json } } => {
+            let status = admin(config, reqwest::Method::GET, "/v1/cluster")?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status).expect("json"));
+            } else {
+                print!("{}", cluster_text(&status));
+            }
+            Ok(())
+        }
+        Command::Dispatch { action: DispatchAction::Status { model, config, json } } => {
+            let path = match &model {
+                Some(model) => format!("/v1/dispatch?model={}", query_value(model)),
+                None => "/v1/dispatch".to_owned(),
+            };
+            let status = admin(config, reqwest::Method::GET, &path)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status).expect("json"));
+            } else {
+                print!("{}", dispatch_text(&status));
+            }
+            Ok(())
+        }
         Command::Model { action: ModelAction::List { config } } => {
             let home = config::home()?;
             let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
@@ -795,6 +972,81 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Tune { action } => {
+            let home = config::home()?;
+            // A probe is about the machine, so a missing config is not an error.
+            let load = |path: Option<PathBuf>| -> Result<Config, String> {
+                let path = path.unwrap_or_else(|| home.join("config.toml"));
+                match fsutil::read_optional(&path)? {
+                    Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", path.display())),
+                    None => Config::parse(""),
+                }
+            };
+            match action {
+                TuneAction::Probe { json, config: path } => {
+                    let cfg = load(path)?;
+                    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+                    let probe = runtime.block_on(invincible::tune::probe(Some(&cfg.engine.llama_server)));
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&probe).map_err(|e| e.to_string())?);
+                    } else {
+                        println!("{}", probe.report());
+                    }
+                }
+                TuneAction::Bench { model, device, config: path } => {
+                    let cfg = load(path)?;
+                    let entry = cfg.models.iter().find(|m| m.id == model).ok_or_else(|| {
+                        format!("no model {model:?} in the config (`invincible model list` shows them)")
+                    })?;
+                    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+                    let probe = runtime.block_on(invincible::tune::probe(Some(&cfg.engine.llama_server)));
+                    let program = probe.llama_bench.clone().ok_or(
+                        "llama-bench not found: it ships with llama.cpp (`brew install llama.cpp`, or your CUDA build)",
+                    )?;
+                    let device = device
+                        .or_else(|| probe.devices.first().map(|d| d.name.clone()))
+                        .unwrap_or_else(|| "CPU".to_owned());
+                    println!("measuring {model} on {device} (this takes a minute)…");
+                    let (pp, tg) = invincible::tune::bench(std::path::Path::new(&program), &entry.path, Some(&device))?;
+                    let profile = invincible::tune::Profile {
+                        device: device.clone(),
+                        tg_tps: tg,
+                        pp_tps: pp,
+                        engine: "llama-bench".to_owned(),
+                        at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    };
+                    let set = invincible::tune::record(&home, &model, &invincible::tune::hardware_now(), profile)?;
+                    let prompt = pp.map(|p| format!(", prompt {p:.1} tok/s")).unwrap_or_default();
+                    println!(
+                        "{model} on {device}: {tg:.1} tok/s{prompt} — kept in {} ({} device(s) measured on this machine)",
+                        invincible::tune::set_path(&home, &model).display(),
+                        set.profiles.len()
+                    );
+                    println!(
+                        "the cluster planner uses these numbers on the next plan; `invincible cluster status` shows it"
+                    );
+                }
+                TuneAction::Show { model } => {
+                    let sets = match model {
+                        Some(model) => invincible::tune::load(&home, &model).into_iter().collect(),
+                        None => invincible::tune::load_all(&home),
+                    };
+                    if sets.is_empty() {
+                        println!("{}", brand::ash("nothing measured yet (`invincible tune bench <model>`)"));
+                    }
+                    let now = invincible::tune::hardware_now();
+                    for set in sets {
+                        let current = if set.hardware == now { "this machine" } else { "other hardware, ignored" };
+                        println!("{} · {} · {current}", set.model, set.hardware);
+                        for p in &set.profiles {
+                            let pp = p.pp_tps.map(|v| format!(" · prompt {v:.1}")).unwrap_or_default();
+                            println!("  {:<8} {:>8.1} tok/s{pp}  {}", p.device, p.tg_tps, brand::ash(&p.engine));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
         Command::Audit { since, limit, summary, verify, json } => {
             let home = config::home()?;
             let log = invincible::audit::AuditLog::new(&home);
@@ -862,6 +1114,9 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Receipt { action: ReceiptAction::Verify { receipt, key, request, answer, json } } => {
+            verify_receipt(&receipt, key, request, answer, json)
+        }
         Command::Update { channel, version, check, force, network, no_restart, auto, scheduled } => {
             update_command(UpdateArgs { channel, version, check, force, network, no_restart, auto, scheduled })
         }
@@ -887,13 +1142,78 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let mut engines = Vec::new();
     // Held until shutdown: dropping a supervisor kills its engine.
     let mut supervisors = Vec::new();
+    let heads_split = config.models.iter().any(|m| !m.cluster.is_empty());
+    let peers = KnownNodes::load(&home)?.0;
+    // The key this machine paired with other nodes under: a head's shard links use it.
+    let device_key = if heads_split || !peers.is_empty() {
+        Some(StaticKey::load_or_create(&home.join("device.key"))?)
+    } else {
+        None
+    };
+    let (head_devices, rpc_backend) = if heads_split || config.cluster.serve {
+        let llama = &config.engine.llama_server;
+        let (devices, rpc) =
+            tokio::join!(invincible::cluster::probe_devices(llama), invincible::cluster::probe_rpc_backend(llama));
+        (devices, rpc)
+    } else {
+        (Vec::new(), None)
+    };
+    let mut runs = Vec::new();
     for model in &config.models {
         let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
-        let engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
+        let mut engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
             .with_vision(model.vision(&config.engine));
-        supervisors.push(engine::supervise(engine.clone(), Launch::llama_server(&config.engine, model, port, &logs)));
+        let launch = Launch::llama_server(&config.engine, model, port, &logs);
+        if model.cluster.is_empty() {
+            supervisors.push(engine::supervise(engine.clone(), launch));
+        } else {
+            let network = config.node.settings().network.encode();
+            let device = device_key.clone().expect("a device key for a split model");
+            let mut links = Vec::new();
+            for name in &model.cluster {
+                // One unresolved name must not take every other model down with it: drop that
+                // peer, say which name space to look in, and let the model run where it can.
+                let Some(peer) = peers.iter().find(|p| &p.name == name).cloned() else {
+                    tracing::warn!(
+                        model = %model.id,
+                        peer = %name,
+                        "no node by that name: `invincible join` saves the node's own [remote] name, \
+                         not the name given with --name; running this model without it"
+                    );
+                    continue;
+                };
+                links.push(invincible::cluster::open_link(peer, device.clone(), network.clone()).await?);
+            }
+            let run =
+                Arc::new(invincible::cluster::ClusterRun::new(&model.id, model.split, &config.remote.name(), links));
+            engine = engine.with_cluster(run.clone());
+            let head = invincible::cluster::Head {
+                devices: head_devices.clone(),
+                rpc_backend,
+                device_key: device,
+                network,
+                model_bytes: std::fs::metadata(&model.path).map(|m| m.len()).unwrap_or(0),
+            };
+            supervisors.push(invincible::cluster::supervise(engine.clone(), launch, run.clone(), head));
+            runs.push(run);
+        }
         engines.push(engine);
     }
+    // This node as a shard: ggml-rpc-server on loopback, reached only through shard links.
+    let shard = if config.cluster.serve {
+        let program =
+            invincible::cluster::find_rpc_server(config.cluster.rpc_server.as_deref(), &config.engine.llama_server)
+                .ok_or("[cluster] serve: no ggml-rpc-server (set [cluster] rpc_server; see spec/cluster.md)")?;
+        let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
+        let cache = home.join("cache/rpc");
+        let launch =
+            invincible::cluster::rpc_launch(&program, port, config.cluster.cache.then_some(cache.as_path()), &logs);
+        supervisors.push(engine::keep_running("ggml-rpc-server", launch));
+        tracing::info!(heads = ?config.cluster.heads, "serving as a shard");
+        Some(remote::ShardService { port, heads: config.cluster.heads.clone(), traffic: Arc::default() })
+    } else {
+        None
+    };
     if engines.is_empty() && config.cloud.is_empty() {
         tracing::warn!(
             "no models configured: every request will be blocked (`invincible model add` or `invincible cloud add`)"
@@ -931,27 +1251,83 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             config.agent.url
         ));
     }
+    // Dispatch (spec/dispatch.md): this node always a candidate, plus the nodes it paired with.
+    let dispatch = invincible::dispatch::Dispatch::new(
+        config.remote.name(),
+        config.models.iter().map(|model| model.id.clone()).collect(),
+        config.node.dispatch_max_inflight,
+        home.clone(),
+        peers.clone(),
+        device_key.clone(),
+        config.node.settings().network.encode(),
+    );
     let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
     let receipt_public = receipt_key.public();
+    // The static key exists when either side of the node's network does: paired devices, or a
+    // published descriptor, which points at that same paired-device port.
+    let node_key = if config.remote.enabled() || config.discovery.announce {
+        Some(StaticKey::load_or_create(&home.join("node.key"))?)
+    } else {
+        None
+    };
+    let own_descriptor = if config.discovery.announce {
+        let key = node_key.as_ref().ok_or("no static key for the descriptor")?;
+        Some(invincible::discovery::mint(
+            key,
+            &receipt_key,
+            invincible::discovery::Advert {
+                addresses: config.discovery.addresses.clone(),
+                models: config.models.iter().map(|model| model.id.clone()).collect(),
+                max_inflight: config.node.dispatch_max_inflight,
+                lifetime: config.discovery.lifetime,
+            },
+        )?)
+    } else {
+        None
+    };
     let speech = invincible::synth::from_config(&config.speech, &home);
     let images = invincible::synth::from_config(&config.images, &home);
     let mut state = AppState::new(engines, config.node.settings(), token)
+        .with_max_buffered_bytes(config.node.max_buffered_bytes)
         .with_cloud(cloud)
         .with_media(speech, images)
         .with_receipt_key(&config.remote.name(), receipt_key)
         .with_audit(invincible::audit::AuditLog::new(&home))
-        .with_agent(&config.agent.url);
+        .with_agent(&config.agent.url)
+        .with_membership(home.clone())
+        .with_discovery(invincible::discovery::Discovery {
+            own: own_descriptor,
+            store: invincible::discovery::Store::load(&invincible::discovery::Store::path(&home))?,
+            seeds: config.discovery.seeds.clone(),
+        })
+        .with_dispatch(dispatch);
     if config.remote.enabled() {
-        let pairing = Arc::new(
-            Pairing::new(
-                StaticKey::load_or_create(&home.join("node.key"))?,
-                config.remote.name(),
-                config.remote.advertised(),
-                Devices::load(&home.join("devices.json"))?,
-            )
-            .with_receipt_key(receipt_public),
-        );
+        let key = node_key.ok_or("no static key for pairing")?;
+        let mut pairing = Pairing::new(
+            key,
+            config.remote.name(),
+            config.remote.advertised(),
+            Devices::load(&home.join("devices.json"))?,
+        )
+        .with_receipt_key(receipt_public);
+        if let Some(shard) = shard {
+            pairing = pairing.with_shard(shard);
+        }
+        let pairing = Arc::new(pairing);
         state = state.with_pairing(pairing);
+    }
+    if heads_split || config.cluster.serve || !peers.is_empty() {
+        state = state.with_cluster(invincible::cluster::ClusterState {
+            name: config.remote.name(),
+            llama_server: config.engine.llama_server.clone(),
+            rpc_backend,
+            peers,
+            device_key,
+            runs,
+            shard: config.cluster.serve,
+            models: config.models.iter().map(|model| model.id.clone()).collect(),
+            dispatch_max_inflight: config.node.dispatch_max_inflight,
+        });
     }
     let state = Arc::new(state);
     if let Some(pairing) = state.pairing.clone() {
@@ -1156,6 +1532,117 @@ fn parse_age(text: &str) -> Option<u64> {
     )
 }
 
+/// `invincible receipt verify` (spec/receipts.md, "Verifying"): the offline check. Everything it
+/// says it checked was checked here; what it could not check is listed as such.
+fn verify_receipt(
+    source: &str,
+    key: Option<String>,
+    request: Option<PathBuf>,
+    answer: Option<PathBuf>,
+    json: bool,
+) -> Result<(), String> {
+    let envelope = load_envelope(source)?;
+    let public = match key {
+        Some(key) => key,
+        None => own_receipt_key()?,
+    };
+    let request = request.as_deref().map(read_json).transpose()?;
+    let answer = match answer.as_deref() {
+        Some(path) => Some(std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?),
+        None => None,
+    };
+    let report = invincible::receipts::inspect(&public, &envelope, request.as_ref(), answer.as_deref())?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report).expect("json"));
+        return Ok(());
+    }
+    println!("receipt {}: version {}", report["request_id"].as_str().unwrap_or("?"), report["version"]);
+    println!("  node     {public}");
+    if report["bound"] == serde_json::json!(true) {
+        println!("  api      {}", report["api"].as_str().unwrap_or("?"));
+        let caller = &report["caller"];
+        if caller["kind"] == serde_json::json!("device") {
+            println!(
+                "  caller   device {:?}, key {}, fingerprint {}",
+                caller["name"].as_str().unwrap_or("?"),
+                caller["key"].as_str().unwrap_or("?"),
+                caller["fingerprint"].as_str().unwrap_or("?")
+            );
+        } else {
+            println!("  caller   local (the node's own API, behind its token)");
+        }
+        println!("  at       {} ({}s ago)", report["at"], report["at_ago"]);
+        println!("  request  sha256 {}", report["request_sha256"].as_str().unwrap_or("?"));
+        println!(
+            "  answer   sha256 {} ({} bytes, {})",
+            report["answer_sha256"].as_str().unwrap_or("?"),
+            report["answer_bytes"],
+            if report["answer_complete"] == serde_json::json!(true) { "whole" } else { "cut short" }
+        );
+    } else {
+        println!("  version 0: routing and accounting only — no request, answer, caller or time is bound");
+    }
+    println!("signature: valid");
+    for (title, key) in [("checked", "checked"), ("not checked", "not_checked")] {
+        println!("{title}:");
+        for item in report[key].as_array().into_iter().flatten() {
+            println!("  - {}", item.as_str().unwrap_or("?"));
+        }
+    }
+    Ok(())
+}
+
+/// The envelope `receipt verify` was given: a file, `-` for stdin, or an id in this node's audit log
+/// (where the envelope sits under `receipt`).
+fn load_envelope(source: &str) -> Result<serde_json::Value, String> {
+    let text = if source == "-" {
+        let mut text = String::new();
+        std::io::stdin().read_to_string(&mut text).map_err(|e| format!("stdin: {e}"))?;
+        Some(text)
+    } else if std::path::Path::new(source).is_file() {
+        Some(std::fs::read_to_string(source).map_err(|e| format!("{source}: {e}"))?)
+    } else {
+        None
+    };
+    let value: serde_json::Value = match text {
+        Some(text) => serde_json::from_str(&text).map_err(|e| format!("{source}: not JSON: {e}"))?,
+        None => {
+            let log = invincible::audit::AuditLog::new(&config::home()?);
+            match log.find(source) {
+                Ok(Some(envelope)) => envelope,
+                Ok(None) => {
+                    return Err(format!("no receipt {source}: not a file, and not in this node's audit log"));
+                }
+                // More than one entry names it: which receipt that id is cannot be told from here.
+                Err(why) => return Err(format!("not verifying {source}: {why}")),
+            }
+        }
+    };
+    if value.get("signature").is_none() && value["receipt"].get("signature").is_some() {
+        return Ok(value["receipt"].clone());
+    }
+    Ok(value)
+}
+
+/// This node's receipt public key, for verifying its own receipts without `--key`.
+fn own_receipt_key() -> Result<String, String> {
+    use base64::Engine as _;
+    let path = config::home()?.join("receipt.key");
+    let text = fsutil::read_optional(&path)?
+        .ok_or_else(|| "this node has no receipt key: pass --key <the node's receipt public key>".to_owned())?;
+    let seed: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(text.trim())
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| format!("{}: not a receipt key", path.display()))?;
+    Ok(invincible::receipts::ReceiptKey::from_seed(&seed).public())
+}
+
+fn read_json(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: not JSON: {e}", path.display()))
+}
+
 /// One audit entry as a line: when, who, where it ran, tokens, what left.
 fn audit_line(entry: &serde_json::Value) -> String {
     let at = entry["at"]
@@ -1194,21 +1681,263 @@ fn audit_line(entry: &serde_json::Value) -> String {
     format!("{at}  {who:<22} {what:<32} {tokens:<18} {left}")
 }
 
+/// The config `serve`, `announce` and `discover` read: a path on the command line must exist;
+/// without one, a node that was never set up starts with the defaults (offline, no models)
+/// instead of failing in a restart loop.
+fn config_for(path: Option<PathBuf>, home: &std::path::Path) -> Result<Config, String> {
+    match path {
+        Some(path) => Config::load(&path),
+        None => match fsutil::read_optional(&home.join("config.toml"))? {
+            Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", home.join("config.toml").display())),
+            None => Config::parse(""),
+        },
+    }
+}
+
+/// This node's signed descriptor, from config and its own keys. Nothing is detected: the address
+/// list is the operator's, and the model ids are the ones this node serves.
+fn own_descriptor(config: &Config, home: &std::path::Path) -> Result<invincible::discovery::Descriptor, String> {
+    let node = StaticKey::load_or_create(&home.join("node.key"))?;
+    let signer = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
+    invincible::discovery::mint(
+        &node,
+        &signer,
+        invincible::discovery::Advert {
+            addresses: config.discovery.addresses.clone(),
+            models: config.models.iter().map(|model| model.id.clone()).collect(),
+            max_inflight: config.node.dispatch_max_inflight,
+            lifetime: config.discovery.lifetime,
+        },
+    )
+}
+
+/// `invincible announce`: mint, POST to every configured seed, and with `--lan` answer mDNS until
+/// stopped. It never writes a pairing.
+fn announce_command(config_path: Option<PathBuf>, lan: bool) -> Result<(), String> {
+    use invincible::discovery;
+    let home = config::home()?;
+    let config = config_for(config_path, &home)?;
+    if !config.discovery.announce {
+        return Err("[discovery] announce = false: announcing is a decision; set it to true (with `addresses`) first"
+            .to_owned());
+    }
+    if lan && !config.discovery.lan {
+        return Err("[discovery] lan = false: set it to true to answer mDNS".to_owned());
+    }
+    let descriptor = own_descriptor(&config, &home)?;
+    println!(
+        "{}",
+        brand::step(&format!(
+            "node {} at {} ({} model(s), expires in {}m)",
+            descriptor.fingerprint,
+            descriptor.addresses.join(", "),
+            descriptor.models.len(),
+            descriptor.remaining(discovery::now()?) / 60
+        ))
+    );
+    let seeds = &config.discovery.seeds;
+    if seeds.is_empty() && !lan {
+        return Err("nothing to announce to: set [discovery] seeds, or pass --lan".to_owned());
+    }
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+    let client =
+        reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+    let mut failed = 0usize;
+    for seed in seeds {
+        match runtime.block_on(discovery::announce_to_seed(&client, seed, &descriptor)) {
+            Ok(()) => println!("{}", brand::ok(&format!("announced to {seed}"))),
+            Err(e) => {
+                failed += 1;
+                eprintln!("{}", brand::fail(&e));
+            }
+        }
+    }
+    if lan {
+        let advert = discovery::LanAdvert::register(&descriptor)?;
+        println!("{}", brand::step(&format!("announcing as {} over mDNS; Ctrl-C to stop", advert.fullname)));
+        let period = std::time::Duration::from_secs((config.discovery.lifetime / 3).max(60));
+        loop {
+            let stopped = runtime.block_on(async {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => true,
+                    _ = tokio::time::sleep(period) => false,
+                }
+            });
+            if stopped {
+                break;
+            }
+            // Keep the record's expiry as fresh as the process: a descriptor that outlives the
+            // node is exactly the stale address this format exists to avoid.
+            advert.refresh(&own_descriptor(&config, &home)?)?;
+        }
+    }
+    if failed == 0 { Ok(()) } else { Err(format!("{failed} of {} seeds did not take the descriptor", seeds.len())) }
+}
+
+/// `invincible discover`: ask the seeds, browse the LAN with `--lan`, verify every record, and
+/// print what is out there. Pairing is not something this command can do.
+fn discover_command(
+    config_path: Option<PathBuf>,
+    model: Option<String>,
+    extra: Vec<String>,
+    lan: bool,
+    json: bool,
+) -> Result<(), String> {
+    use invincible::discovery;
+    let home = config::home()?;
+    let config = config_for(config_path, &home)?;
+    if lan && !config.discovery.lan {
+        return Err("[discovery] lan = false: set it to true to browse mDNS".to_owned());
+    }
+    let mut seeds = config.discovery.seeds.clone();
+    seeds.extend(extra);
+    if seeds.is_empty() && !lan {
+        return Err("no seeds to ask: set [discovery] seeds, pass --seed <url>, or use --lan".to_owned());
+    }
+    let at = discovery::now()?;
+    let mut found: Vec<(discovery::Descriptor, String)> = Vec::new();
+    let mut problems: Vec<String> = Vec::new();
+    if lan {
+        match discovery::browse_lan(std::time::Duration::from_secs(3)) {
+            Ok(list) => found.extend(list.into_iter().map(|descriptor| (descriptor, "lan".to_owned()))),
+            Err(e) => problems.push(format!("lan: {e}")),
+        }
+    }
+    if !seeds.is_empty() {
+        let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+        for seed in &seeds {
+            match runtime.block_on(discovery::fetch_peers(&client, seed, None)) {
+                Ok(list) => found.extend(list.into_iter().map(|descriptor| (descriptor, seed.clone()))),
+                Err(e) => problems.push(e),
+            }
+        }
+    }
+    let devices = Devices::load(&home.join("devices.json"))?;
+    let known = KnownNodes::load(&home)?;
+    // Kept only if it verifies, so the store stays "what might be reachable now", not a log.
+    let store = discovery::Store::load(&discovery::Store::path(&home))?;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut kept: Vec<serde_json::Value> = Vec::new();
+    let mut refused = 0usize;
+    let mut filtered = 0usize;
+    let mut seen = std::collections::HashSet::new();
+    let mut claims: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (descriptor, source) in found {
+        if let Err(invalid) = descriptor.verify(at) {
+            refused += 1;
+            problems.push(format!("{} (from {source}): {invalid}", descriptor.fingerprint));
+            continue;
+        }
+        // One row per (identity, signing key): two records claiming the same fingerprint with
+        // different keys are both shown, so a seed cannot hide the genuine one behind a forged
+        // record of the same name.
+        if !seen.insert((descriptor.fingerprint.clone(), descriptor.sign_key.clone())) {
+            continue;
+        }
+        *claims.entry(descriptor.fingerprint.clone()).or_default() += 1;
+        if let Err(invalid) = store.insert_at(&descriptor, at) {
+            problems.push(format!("{}: not stored: {invalid}", descriptor.fingerprint));
+        }
+        if let Some(wanted) = &model
+            && !descriptor.models.iter().any(|advertised| advertised == wanted)
+        {
+            filtered += 1;
+            continue;
+        }
+        let trust = descriptor.trust(&devices, &known);
+        rows.push(vec![
+            descriptor.fingerprint.clone(),
+            descriptor.addresses.join(", "),
+            descriptor.models.join(", "),
+            format!("{}m", descriptor.remaining(at) / 60),
+            trust.clone(),
+            source.clone(),
+        ]);
+        kept.push(serde_json::json!({ "descriptor": descriptor, "trust": trust, "source": source }));
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&kept).expect("json"));
+    } else if rows.is_empty() {
+        println!("{}", brand::ash("no node found"));
+    } else {
+        let mut table = vec![vec![
+            "fingerprint".to_owned(),
+            "addresses".to_owned(),
+            "models".to_owned(),
+            "expires".to_owned(),
+            "trust".to_owned(),
+            "source".to_owned(),
+        ]];
+        table.extend(rows);
+        print!("{}", brand::table(&table));
+    }
+    if let Some(wanted) = &model
+        && filtered > 0
+    {
+        // `--json` writes one document to stdout: the advisory goes to stderr instead.
+        let line = brand::ash(&format!("{filtered} node(s) did not advertise {wanted}"));
+        if json {
+            eprintln!("{line}");
+        } else {
+            println!("{line}");
+        }
+    }
+    for problem in &problems {
+        eprintln!("{}", brand::warn(problem));
+    }
+    if refused > 0 {
+        eprintln!("{}", brand::warn(&format!("{refused} descriptor(s) refused")));
+    }
+    let conflicting = claims.values().filter(|count| **count > 1).count();
+    if conflicting > 0 {
+        eprintln!(
+            "{}",
+            brand::warn(&format!(
+                "{conflicting} fingerprint(s) arrived with more than one signing key: a seed can replay \
+                 a forged record, and only pairing decides which node is real"
+            ))
+        );
+    }
+    let advice =
+        brand::ash("a found node is not a paired node: pairing needs a code from it (`invincible join <code>`)");
+    if json {
+        eprintln!("{advice}");
+    } else {
+        println!("{advice}");
+    }
+    Ok(())
+}
+
 /// Calls the running node's admin API on loopback, with the local token.
 fn admin(config: Option<PathBuf>, method: reqwest::Method, path: &str) -> Result<serde_json::Value, String> {
+    admin_with(config, method, path, None)
+}
+
+/// [admin], with a JSON body when the route takes one.
+fn admin_with(
+    config: Option<PathBuf>,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let home = config::home()?;
     let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
     let token = token::load_or_create(&home.join("token"))?;
     let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
     runtime.block_on(async {
-        let response = invincible::egress::local()
+        let mut request = invincible::egress::local()
             .build()
             .map_err(|e| e.to_string())?
             .request(method, format!("http://{}{path}", config.listen))
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
+            .bearer_auth(token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request.send().await.map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
         let status = response.status();
         let body: serde_json::Value = response.json().await.unwrap_or_default();
         if !status.is_success() {
@@ -1218,33 +1947,165 @@ fn admin(config: Option<PathBuf>, method: reqwest::Method, path: &str) -> Result
     })
 }
 
-/// Nodes this machine paired with as a device (`nodes.json`).
-#[derive(Default, Serialize, Deserialize)]
-struct KnownNodes(Vec<KnownNode>);
-
-#[derive(Serialize, Deserialize)]
-struct KnownNode {
-    name: String,
-    /// Static public key, base64url, pinned at pairing.
-    key: String,
-    addrs: Vec<String>,
-    /// The node's receipt key, pinned at pairing.
-    #[serde(default)]
-    receipt_key: Option<String>,
-}
-
-impl KnownNodes {
-    fn load(home: &std::path::Path) -> Result<Self, String> {
-        let path = home.join("nodes.json");
-        match fsutil::read_optional(&path)? {
-            Some(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
-            None => Ok(Self::default()),
+/// `invincible cluster status` as text.
+fn cluster_text(status: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let mib = |v: &serde_json::Value| v.as_u64().map(|m| format!("{:.1} GiB", m as f64 / 1024.0)).unwrap_or_default();
+    let devices = |caps: &serde_json::Value| {
+        caps["devices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|d| {
+                format!(
+                    "{} {} ({} free)",
+                    d["name"].as_str().unwrap_or("?"),
+                    d["description"].as_str().unwrap_or(""),
+                    mib(&d["free_mib"])
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let node = &status["node"];
+    let _ = writeln!(out, "{}", brand::ok(&format!("{} (this node)", node["name"].as_str().unwrap_or("?"))));
+    let _ = writeln!(out, "  devices: {}", devices(node));
+    let rpc = match node["rpc_backend"].as_bool() {
+        Some(true) => "llama-server can use shards",
+        Some(false) => "llama-server has no RPC backend: it cannot use shards",
+        None => "RPC backend not checked",
+    };
+    let _ = writeln!(out, "  {rpc}");
+    if let Some(shard) = status["shard"].as_object() {
+        let heads: Vec<&str> = shard["heads"].as_array().into_iter().flatten().filter_map(|h| h.as_str()).collect();
+        let _ = writeln!(out, "  serves as a shard for: {}", heads.join(", "));
+    }
+    let peers = status["peers"].as_array().cloned().unwrap_or_default();
+    if peers.is_empty() {
+        let _ = writeln!(out, "{}", brand::ash("no peers (pair with another node: `invincible join` with its code)"));
+    }
+    let rows: Vec<Vec<String>> = peers
+        .iter()
+        .map(|p| {
+            let state = if p["reachable"].as_bool() == Some(true) {
+                let caps = &p["capabilities"];
+                // A node can serve as a shard and still hold nothing: say so, rather than showing
+                // a shard with an empty device list and leaving the reason to guesswork.
+                let role = match (caps["shard"].as_bool(), devices(caps).is_empty()) {
+                    (Some(true), true) => "shard, no usable device",
+                    (Some(true), false) => "shard",
+                    _ => "not a shard for us",
+                };
+                format!("up {} ms, {role}: {}", p["probe_ms"], devices(caps))
+            } else {
+                format!("down: {}", p["error"].as_str().unwrap_or("?"))
+            };
+            vec![
+                p["name"].as_str().unwrap_or("?").to_owned(),
+                brand::ash(p["fingerprint"].as_str().unwrap_or("")),
+                state,
+            ]
+        })
+        .collect();
+    out.push_str(&brand::table(&rows));
+    for model in status["models"].as_array().into_iter().flatten() {
+        let state = &model["state"];
+        let plan = &state["plan"];
+        let placement = match plan["action"].as_str() {
+            Some("split") => plan["shares"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|s| {
+                    format!(
+                        "{}/{} {}‰",
+                        s["node"].as_str().unwrap_or("?"),
+                        s["device"].as_str().unwrap_or("?"),
+                        s["permille"]
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" + "),
+            Some("local") => "this node alone".to_owned(),
+            Some("block") => match plan["reason"].as_str() {
+                Some("no_devices") => "cannot run: no device to place it on (`llama-server --list-devices`)".to_owned(),
+                _ => format!("cannot run: needs {} MiB", plan["need_mib"]),
+            },
+            _ => "starting".to_owned(),
+        };
+        let _ = writeln!(out, "model {}: {placement}", model["id"].as_str().unwrap_or("?"));
+        for note in state["notes"].as_array().into_iter().flatten() {
+            let _ = writeln!(out, "  {}", brand::ash(note.as_str().unwrap_or("")));
         }
     }
+    out
+}
 
-    fn save(&self, home: &std::path::Path) -> Result<(), String> {
-        fsutil::replace_private(&home.join("nodes.json"), &serde_json::to_string_pretty(self).expect("nodes serialise"))
+/// `invincible dispatch status` as text: one row per candidate node, then the choice.
+fn dispatch_text(status: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let head = status["name"].as_str().unwrap_or("this node");
+    let model = status["model"].as_str();
+    let _ = writeln!(
+        out,
+        "{}",
+        brand::ok(&format!("{} dispatches {}", head, model.map_or_else(|| "any model".to_owned(), brand::bold)))
+    );
+    let chosen = status["choice"]["name"].as_str();
+    let mut rows = vec![vec![
+        brand::ash("node"),
+        brand::ash("models"),
+        brand::ash("in flight"),
+        brand::ash("tg/s"),
+        brand::ash("rtt"),
+        brand::ash("state"),
+    ]];
+    for node in status["nodes"].as_array().into_iter().flatten() {
+        let models: Vec<&str> = node["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str()).collect();
+        let models = if models.is_empty() { brand::ash("—") } else { models.join(",") };
+        let tps = node["tg_tps"].as_f64().map_or_else(|| brand::ash("—"), |tps| format!("{tps:.1}"));
+        let rtt = node["rtt_ms"].as_f64().map_or_else(
+            || brand::ash("—"),
+            |ms| if ms >= 1000.0 { format!("{:.1} s", ms / 1000.0) } else { format!("{ms:.1} ms") },
+        );
+        let state = match node["note"].as_str() {
+            Some(note) => brand::ash(note),
+            None if chosen == node["name"].as_str() => brand::ok("answers"),
+            None => "could answer".to_owned(),
+        };
+        rows.push(vec![
+            node["name"].as_str().unwrap_or("?").to_owned(),
+            models,
+            format!("{}/{}", node["inflight"].as_u64().unwrap_or(0), node["max_inflight"].as_u64().unwrap_or(0)),
+            tps,
+            rtt,
+            state,
+        ]);
     }
+    out.push_str(&brand::table(&rows));
+    let _ = writeln!(
+        out,
+        "\n{}",
+        match status["choice"]["action"].as_str() {
+            Some("run") => format!("choice: run on {}", brand::bold(chosen.unwrap_or("?"))),
+            Some("queue") => brand::warn("choice: queue: every eligible node is at capacity"),
+            _ => brand::fail("choice: no capacity: no node can take this request"),
+        }
+    );
+    out
+}
+
+/// A query value: letters, digits and `-._~` as they are, everything else percent-encoded.
+fn query_value(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// Ctrl-C, or SIGTERM: what launchd, systemd and `kill` send to stop a service. Both shut down

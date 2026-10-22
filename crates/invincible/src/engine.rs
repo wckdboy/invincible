@@ -28,6 +28,8 @@ pub struct Engine {
     pub base_url: String,
     /// Whether it takes images (None: not known).
     pub vision: Option<bool>,
+    /// For a model split across paired nodes: which devices hold it now (spec/cluster.md).
+    pub cluster: Option<Arc<crate::cluster::ClusterRun>>,
     healthy: Arc<AtomicBool>,
 }
 
@@ -39,8 +41,15 @@ impl Engine {
             context,
             base_url: base_url.trim_end_matches('/').to_owned(),
             vision: None,
+            cluster: None,
             healthy: Arc::new(AtomicBool::new(healthy)),
         }
+    }
+
+    /// The same engine, split across paired nodes as [run] says.
+    pub fn with_cluster(mut self, run: Arc<crate::cluster::ClusterRun>) -> Self {
+        self.cluster = Some(run);
+        self
     }
 
     /// The same engine, taking images or not.
@@ -65,6 +74,8 @@ pub struct Launch {
     pub args: Vec<String>,
     /// The engine's stdout and stderr go here.
     pub log: PathBuf,
+    /// Extra environment variables.
+    pub env: Vec<(String, String)>,
 }
 
 impl Launch {
@@ -89,7 +100,12 @@ impl Launch {
             args.extend(["--mmproj".to_owned(), mmproj.display().to_string()]);
         }
         args.extend(engine.extra_args.iter().cloned());
-        Self { program: engine.llama_server.clone(), args, log: logs.join(format!("{}.log", model.id)) }
+        Self {
+            program: engine.llama_server.clone(),
+            args,
+            log: logs.join(format!("{}.log", model.id)),
+            env: Vec::new(),
+        }
     }
 }
 
@@ -104,35 +120,70 @@ pub fn free_port() -> std::io::Result<u16> {
 /// Dropping or aborting the returned task kills the engine.
 pub fn supervise(engine: Engine, launch: Launch) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let client = crate::egress::local()
-            .connect_timeout(Duration::from_secs(1))
-            .timeout(Duration::from_secs(2))
-            .build()
-            .expect("HTTP client");
-        let health = format!("{}/health", engine.base_url);
+        let client = health_client();
+        let mut backoff = FIRST_BACKOFF;
+        loop {
+            let started = Instant::now();
+            run_once(&engine, &launch, &client).await;
+            if started.elapsed() >= STABLE_RUN {
+                backoff = FIRST_BACKOFF;
+            }
+            sleep(backoff).await;
+            backoff = (backoff * 2).min(MAX_BACKOFF);
+        }
+    })
+}
+
+/// The client that polls engines' health.
+pub fn health_client() -> reqwest::Client {
+    crate::egress::local()
+        .connect_timeout(Duration::from_secs(1))
+        .timeout(Duration::from_secs(2))
+        .build()
+        .expect("HTTP client")
+}
+
+/// Runs [launch] once, keeping [engine]'s health current, until it exits (or never starts).
+pub async fn run_once(engine: &Engine, launch: &Launch, client: &reqwest::Client) {
+    let health = format!("{}/health", engine.base_url);
+    match spawn(launch) {
+        Err(e) => tracing::error!(model = %engine.id, "engine did not start: {e}"),
+        Ok(mut child) => {
+            tracing::info!(model = %engine.id, url = %engine.base_url, "engine started");
+            loop {
+                tokio::select! {
+                    status = child.wait() => {
+                        engine.set_healthy(false);
+                        tracing::warn!(model = %engine.id, "engine exited: {status:?}");
+                        break;
+                    }
+                    _ = sleep(HEALTH_INTERVAL) => {
+                        let ok = matches!(client.get(&health).send().await, Ok(r) if r.status().is_success());
+                        if ok != engine.healthy() {
+                            tracing::info!(model = %engine.id, healthy = ok, "engine health changed");
+                        }
+                        engine.set_healthy(ok);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Runs [launch] and restarts it whenever it exits, with backoff: for helpers with no health
+/// endpoint (`ggml-rpc-server`). Dropping or aborting the task kills the process.
+pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
+    let name = name.to_owned();
+    tokio::spawn(async move {
         let mut backoff = FIRST_BACKOFF;
         loop {
             let started = Instant::now();
             match spawn(&launch) {
-                Err(e) => tracing::error!(model = %engine.id, "engine did not start: {e}"),
+                Err(e) => tracing::error!("{name} did not start: {e}"),
                 Ok(mut child) => {
-                    tracing::info!(model = %engine.id, url = %engine.base_url, "engine started");
-                    loop {
-                        tokio::select! {
-                            status = child.wait() => {
-                                engine.set_healthy(false);
-                                tracing::warn!(model = %engine.id, "engine exited: {status:?}");
-                                break;
-                            }
-                            _ = sleep(HEALTH_INTERVAL) => {
-                                let ok = matches!(client.get(&health).send().await, Ok(r) if r.status().is_success());
-                                if ok != engine.healthy() {
-                                    tracing::info!(model = %engine.id, healthy = ok, "engine health changed");
-                                }
-                                engine.set_healthy(ok);
-                            }
-                        }
-                    }
+                    tracing::info!("{name} started");
+                    let status = child.wait().await;
+                    tracing::warn!("{name} exited: {status:?}");
                 }
             }
             if started.elapsed() >= STABLE_RUN {
@@ -151,6 +202,7 @@ fn spawn(launch: &Launch) -> std::io::Result<tokio::process::Child> {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&launch.log)?;
     Command::new(&launch.program)
         .args(&launch.args)
+        .envs(launch.env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)

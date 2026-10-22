@@ -264,6 +264,15 @@ pub enum Outcome {
     Updated { from: String, to: String, changed: Vec<String> },
 }
 
+/// Homebrew owns the files it installs: replacing them behind its back leaves the Cellar's
+/// manifest lying, and the next `brew upgrade` behaves oddly. When the binaries live in a brew
+/// prefix, the node says so instead of writing there.
+pub fn brew_managed(bin: &Path) -> Option<&'static str> {
+    let text = bin.to_string_lossy();
+    let brew = text.contains("/Cellar/") || text.contains("/homebrew/") || text.contains("/linuxbrew/");
+    brew.then_some("brew upgrade invincible")
+}
+
 /// Runs one update; see the module docs for the steps.
 pub async fn run(options: Options<'_>) -> Result<Outcome, String> {
     let channel = options.target.channel();
@@ -295,6 +304,13 @@ pub async fn run(options: Options<'_>) -> Result<Outcome, String> {
     }
     if options.check {
         return Ok(Outcome::Available { version: release.version.clone().or(release.tag.clone()) });
+    }
+    if let Some(hint) = brew_managed(&options.bin) {
+        return Err(format!(
+            "{} is managed by Homebrew: run `{hint}` (or `brew uninstall invincible` and install with \
+             install.sh, which self-updates)",
+            options.bin.display()
+        ));
     }
 
     let cache = options.home.join("cache");
@@ -409,7 +425,7 @@ fn swap(unpacked: &Path, options: &Options<'_>, release: &Release) -> Result<Vec
 
 #[cfg(test)]
 mod tests {
-    use super::{Installed, Source, Target, parse_sums};
+    use super::{Installed, Source, Target, brew_managed, parse_sums};
     use crate::version::Channel;
 
     #[test]
@@ -445,5 +461,15 @@ mod tests {
         assert_eq!(loaded.get("version"), Some("0.0.2"));
         assert_eq!(loaded.fields.len(), 1);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_homebrew_install_is_left_to_homebrew() {
+        for brew in ["/opt/homebrew/bin", "/usr/local/Cellar/invincible/0.0.21/bin", "/home/linuxbrew/.linuxbrew/bin"] {
+            assert_eq!(brew_managed(std::path::Path::new(brew)), Some("brew upgrade invincible"), "{brew}");
+        }
+        for own in ["/home/me/.local/bin", "/usr/local/bin", "/root/.invincible/bin"] {
+            assert!(brew_managed(std::path::Path::new(own)).is_none(), "{own}");
+        }
     }
 }
