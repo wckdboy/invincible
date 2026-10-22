@@ -1542,7 +1542,13 @@ fn cluster_text(status: &serde_json::Value) -> String {
         .map(|p| {
             let state = if p["reachable"].as_bool() == Some(true) {
                 let caps = &p["capabilities"];
-                let role = if caps["shard"].as_bool() == Some(true) { "shard" } else { "not a shard for us" };
+                // A node can serve as a shard and still hold nothing: say so, rather than showing
+                // a shard with an empty device list and leaving the reason to guesswork.
+                let role = match (caps["shard"].as_bool(), devices(caps).is_empty()) {
+                    (Some(true), true) => "shard, no usable device",
+                    (Some(true), false) => "shard",
+                    _ => "not a shard for us",
+                };
                 format!("up {} ms, {role}: {}", p["probe_ms"], devices(caps))
             } else {
                 format!("down: {}", p["error"].as_str().unwrap_or("?"))

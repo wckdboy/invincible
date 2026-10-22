@@ -437,6 +437,23 @@ fn after_run(plan: Plan) -> RunState {
     RunState { plan: Some(plan), notes: vec!["restarting".into()] }
 }
 
+/// Whether [caps] can take layers for a model: it serves as a shard, and it names a device to put
+/// them on. When it cannot, [peer_refusal] says which of the two failed.
+fn can_take_layers(caps: &Capabilities) -> bool {
+    caps.shard && !caps.devices.is_empty()
+}
+
+/// Why [caps] cannot take layers for a model, in words. A node told not to serve and a node that
+/// serves but has no device are different causes: reporting the first for the second hid the real
+/// one and sent the reader to `[cluster] serve`, which was already true.
+fn peer_refusal(caps: &Capabilities) -> String {
+    if !caps.shard {
+        "does not serve as a shard for this node (`[cluster] serve` and `heads` on that node)".to_owned()
+    } else {
+        "serves as a shard but reports no usable device (`llama-server --list-devices`)".to_owned()
+    }
+}
+
 /// Plans [run] over the head and the peers that answer, runs llama-server with that plan, and
 /// plans again whenever it exits: a peer that left is planned around (or the model waits,
 /// unhealthy, when the rest cannot hold it), so the router sends requests elsewhere meanwhile.
@@ -465,7 +482,7 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
             } else {
                 for link in &run.links {
                     match probe_peer(&link.peer, &head.device_key, &head.network).await {
-                        Ok(caps) if caps.shard && !caps.devices.is_empty() => {
+                        Ok(caps) if can_take_layers(&caps) => {
                             devices.extend(caps.devices.iter().map(|d| PlanDevice {
                                 node: link.peer.name.clone(),
                                 device: d.name.clone(),
@@ -487,7 +504,9 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                             }
                             peers.push((link.clone(), caps.devices));
                         }
-                        Ok(_) => notes.push(format!("{}: not serving as a shard ([cluster] serve)", link.peer.name)),
+                        Ok(caps) => {
+                            notes.push(format!("{}: {}", link.peer.name, peer_refusal(&caps)));
+                        }
                         Err(e) => notes.push(format!("{}: {e}", link.peer.name)),
                     }
                 }
@@ -821,6 +840,29 @@ mod tests {
         assert_eq!(plan, invincible_policy::plan(&fits));
         assert_eq!(plan.action, PlanAction::Local);
         assert!(plan.need_mib > 512, "the policy measured the model: {}", plan.need_mib);
+    }
+
+    #[test]
+    fn a_serving_peer_with_no_device_is_not_reported_as_told_not_to_serve() {
+        // `[cluster] serve = true` and a llama-server that names no device: the node was told to
+        // serve and cannot. Reporting "not serving as a shard ([cluster] serve)" pointed the reader
+        // at a setting that was already true and hid the cause.
+        let serving = Capabilities { shard: true, devices: Vec::new(), ..Default::default() };
+        assert!(!can_take_layers(&serving));
+        let note = peer_refusal(&serving);
+        assert!(note.contains("no usable device"), "{note}");
+        assert!(!note.contains("[cluster] serve"), "it serves; that is not why it is unused: {note}");
+
+        // Told not to serve (or not for this head): say that, and only that.
+        let told = Capabilities { shard: false, devices: vec![device("CUDA0", 24_000)], ..Default::default() };
+        assert!(!can_take_layers(&told), "a device does not make a node that refuses us usable");
+        let note = peer_refusal(&told);
+        assert!(note.contains("does not serve as a shard"), "{note}");
+        assert!(!note.contains("no usable device"), "it has one; the setting is the cause: {note}");
+
+        // Both: it serves and has a device, so it takes layers and there is nothing to report.
+        let ready = Capabilities { shard: true, devices: vec![device("CUDA0", 24_000)], ..Default::default() };
+        assert!(can_take_layers(&ready));
     }
 
     #[test]
