@@ -591,6 +591,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let mut nodes = KnownNodes::load(&home)?;
             nodes.0.retain(|n| n.name != paired.node);
             nodes.0.push(KnownNode {
+                device: Some(paired.device.clone()),
                 receipt_key: paired.receipt_key.clone(),
                 name: paired.node.clone(),
                 key: {

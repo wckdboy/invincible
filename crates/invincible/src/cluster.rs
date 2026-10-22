@@ -656,6 +656,7 @@ mod tests {
     #[test]
     fn link_addresses_follow_the_rule() {
         let peer = KnownNode {
+            device: None,
             name: "mini".into(),
             key: String::new(),
             addrs: vec!["127.0.0.1:7778".into(), "192.168.1.5:7778".into(), "203.0.113.9:7778".into()],
@@ -671,7 +672,13 @@ mod tests {
 
     fn link(name: &str, port: u16) -> Arc<Link> {
         Arc::new(Link {
-            peer: KnownNode { name: name.into(), key: format!("key-{name}"), addrs: vec![], receipt_key: None },
+            peer: KnownNode {
+                name: name.into(),
+                key: format!("key-{name}"),
+                addrs: vec![],
+                receipt_key: None,
+                device: None,
+            },
             port,
             traffic: Arc::default(),
             open: Arc::default(),

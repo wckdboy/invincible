@@ -146,6 +146,11 @@ pub struct KnownNode {
     /// The node's receipt key, pinned at pairing.
     #[serde(default)]
     pub receipt_key: Option<String>,
+    /// The name this node is listed under *on that node* (what its `[cluster] heads` must
+    /// contain). Learned at join and kept, because it is the one string a person cannot see
+    /// from here, and the reason two correct configs can still disagree.
+    #[serde(default)]
+    pub device: Option<String>,
 }
 
 impl KnownNode {

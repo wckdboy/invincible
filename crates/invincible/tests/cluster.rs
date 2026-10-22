@@ -130,6 +130,7 @@ async fn join(shard: &Shard, device: &StaticKey, name: &str) -> KnownNode {
 fn known(shard: &Shard, addrs: Vec<String>) -> KnownNode {
     use base64::Engine as _;
     KnownNode {
+        device: None,
         name: "mini".into(),
         key: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&shard.pairing.key.public),
         addrs,
