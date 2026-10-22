@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use invincible_policy::{
-    LinkAction, LinkInput, LinkSpeed, Measurement, Plan, PlanAction, PlanDevice, PlanInput, SplitMode, decide_link,
+    LinkAction, LinkInput, LinkSpeed, Measurement, Plan, PlanAction, PlanDevice, PlanInput, Share, SplitMode,
+    decide_link,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -408,6 +409,30 @@ pub fn split_args(plan: &Plan, head: &str, head_devices: &[Device], peers: &[(Ar
     vec!["--rpc".to_owned(), rpc.join(","), "--tensor-split".to_owned(), split.join(",")]
 }
 
+/// The plan for one round of supervision. With no device to anchor layers on, the model runs here
+/// as this node did before the model named a peer: asking the policy would block forever on
+/// `PlanReason::NoDevices`, which reads as a memory shortfall and is not one (spec/cluster.md,
+/// Known limits). With a device, the policy decides, exactly as it would alone.
+fn plan_or_local(head_devices: &[Device], input: &PlanInput) -> Plan {
+    if head_devices.is_empty() {
+        return Plan { action: PlanAction::Local, need_mib: 0, shares: Vec::new(), reason: None, predicted_tps: None };
+    }
+    invincible_policy::plan(input)
+}
+
+/// The split the next plan is compared against: the one in the run state, which survives the engine
+/// exiting so hysteresis has something to compare (spec/cluster.md, Stability). Empty before the
+/// first plan.
+fn current_shares(state: &RunState) -> Vec<Share> {
+    state.plan.as_ref().map(|plan| plan.shares.clone()).unwrap_or_default()
+}
+
+/// The run state after the engine exits: the plan is kept, not cleared. Clearing it left
+/// `PlanInput::current` empty on every replan, made hysteresis dead, and resharded on each restart.
+fn after_run(plan: Plan) -> RunState {
+    RunState { plan: Some(plan), notes: vec!["restarting".into()] }
+}
+
 /// Plans [run] over the head and the peers that answer, runs llama-server with that plan, and
 /// plans again whenever it exits: a peer that left is planned around (or the model waits,
 /// unhealthy, when the rest cannot hold it), so the router sends requests elsewhere meanwhile.
@@ -497,14 +522,8 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
             let mut input = PlanInput::new(head.model_bytes, run.split, devices);
             input.measured = measured;
             input.links = links;
-            input.current = run.state().plan.map(|plan| plan.shares).unwrap_or_default();
-            let plan = if head.devices.is_empty() {
-                // Nothing to anchor layers on: run it here, as this node did before the model named
-                // a peer. Blocking would be a lie about the machine's memory (PlanReason::NoDevices).
-                Plan { action: PlanAction::Local, need_mib: 0, shares: Vec::new(), reason: None, predicted_tps: None }
-            } else {
-                invincible_policy::plan(&input)
-            };
+            input.current = current_shares(&run.state());
+            let plan = plan_or_local(&head.devices, &input);
             for note in &notes {
                 tracing::warn!(model = %run.model, "cluster: {note}");
             }
@@ -528,7 +547,7 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
             crate::engine::run_once(&engine, &launch, &client).await;
             // Keep the plan: it is what the next replan compares against (spec/cluster.md,
             // Stability). Clearing it made hysteresis dead and resharded on every restart.
-            run.set(RunState { plan: Some(plan), notes: vec!["restarting".into()] });
+            run.set(after_run(plan));
             if started.elapsed() >= Duration::from_secs(60) {
                 backoff = Duration::from_secs(1);
             }
@@ -763,5 +782,94 @@ mod tests {
         assert_eq!(launch.args[..4], ["--host", "127.0.0.1", "--port", "5000"]);
         assert!(launch.args.contains(&"--cache".to_owned()));
         assert!(launch.env.contains(&("LLAMA_CACHE".to_owned(), "/c".to_owned())));
+    }
+
+    #[test]
+    fn a_head_without_a_device_runs_the_model_here() {
+        // A CPU-only head has nothing to anchor layers on. Handing that to the policy blocks
+        // (NoDevices), and in the live node a block meant unhealthy and a 15 s sleep for ever: the
+        // model must run here instead, and the plan must not claim a memory need it never measured.
+        let input = PlanInput::new(8 << 30, SplitMode::Auto, Vec::new());
+        assert_eq!(invincible_policy::plan(&input).action, PlanAction::Block, "the policy alone still blocks");
+        let plan = plan_or_local(&[], &input);
+        assert_eq!(plan.action, PlanAction::Local);
+        assert_eq!(plan.need_mib, 0);
+        assert!(plan.shares.is_empty());
+        assert_eq!(plan.reason, None);
+
+        // With a device the policy decides, and its answer is what runs: too big for the head blocks.
+        let head = [device("MTL0", 3000)];
+        let devices = vec![PlanDevice { node: "studio".into(), device: "MTL0".into(), free_mib: 3000 }];
+        let too_big = PlanInput::new(8 << 30, SplitMode::Always, devices.clone());
+        let plan = plan_or_local(&head, &too_big);
+        assert_eq!(plan, invincible_policy::plan(&too_big), "with a device, the policy decides");
+        assert_eq!(plan.action, PlanAction::Block);
+        assert_eq!(plan.reason, Some(invincible_policy::PlanReason::DoesNotFit));
+        // And one that fits is local with the policy's own memory figure, not the fallback's zero:
+        // through the policy, not around it.
+        let fits = PlanInput::new(1 << 30, SplitMode::Auto, devices);
+        let plan = plan_or_local(&head, &fits);
+        assert_eq!(plan, invincible_policy::plan(&fits));
+        assert_eq!(plan.action, PlanAction::Local);
+        assert!(plan.need_mib > 512, "the policy measured the model: {}", plan.need_mib);
+    }
+
+    #[test]
+    fn the_plan_is_kept_after_the_engine_exits() {
+        let plan = invincible_policy::plan(&PlanInput::new(
+            16 << 30,
+            SplitMode::Always,
+            vec![
+                PlanDevice { node: "studio".into(), device: "MTL0".into(), free_mib: 30_000 },
+                PlanDevice { node: "box".into(), device: "MTL0".into(), free_mib: 4_000 },
+            ],
+        ));
+        let state = after_run(plan.clone());
+        assert_eq!(state.plan, Some(plan.clone()), "the plan survives the restart");
+        assert_eq!(state.notes, ["restarting"]);
+        // Which is what the next round hands the policy as `current` (spec/cluster.md, Stability).
+        assert_eq!(current_shares(&state), plan.shares);
+        assert!(current_shares(&RunState::default()).is_empty(), "nothing planned yet");
+    }
+
+    #[test]
+    fn the_node_hands_the_policy_the_split_it_is_running() {
+        // Two rounds as the supervisor runs them, over a peer that got slower between replans.
+        // The fresh best is then all on the head (Local), but the running split is still within
+        // HYSTERESIS of it, so a node that feeds `current` keeps the split and one that does not
+        // reshards. This is the wiring commit efb5b7f restored, made observable.
+        let head = [device("MTL0", 30_000)];
+        let round = |head_tps: f64, peer_tps: f64| {
+            let mut input = PlanInput::new(
+                16 << 30,
+                SplitMode::Always,
+                vec![
+                    PlanDevice { node: "studio".into(), device: "MTL0".into(), free_mib: 30_000 },
+                    PlanDevice { node: "box".into(), device: "MTL0".into(), free_mib: 4_000 },
+                ],
+            );
+            input.measured = vec![
+                Measurement { node: "studio".into(), device: "MTL0".into(), tg_tps: head_tps },
+                Measurement { node: "box".into(), device: "MTL0".into(), tg_tps: peer_tps },
+            ];
+            input.links = vec![LinkSpeed { node: "box".into(), rtt_ms: 0.3, mib_s: 120.0 }];
+            input
+        };
+
+        // First round: nothing running, so the policy splits by speed.
+        let first = plan_or_local(&head, &round(50.0, 100.0));
+        assert_eq!(first.action, PlanAction::Split);
+        assert_eq!(first.shares.iter().map(|s| s.permille).collect::<Vec<_>>(), [806, 194]);
+        let running = current_shares(&after_run(first.clone()));
+
+        // Second round: the peer now measures slower than the head, so the fresh best is Local.
+        let slower = round(50.0, 45.0);
+        assert_eq!(plan_or_local(&head, &slower).action, PlanAction::Local, "the fresh best is all head");
+        let mut next = slower;
+        next.current = running.clone();
+        let plan = plan_or_local(&head, &next);
+        assert_eq!(plan.shares, running, "the running split is kept, not resharded");
+        assert_eq!(plan.action, PlanAction::Split);
+        assert_eq!(plan.predicted_tps, Some(47.5));
     }
 }
