@@ -71,6 +71,12 @@ impl ReceiptKey {
         self.public.clone()
     }
 
+    /// Signs raw bytes (the caller supplies domain separation) and returns the signature,
+    /// base64url. Used by discovery descriptors; receipts go through [ReceiptKey::sign].
+    pub fn sign_bytes(&self, message: &[u8]) -> String {
+        URL_SAFE_NO_PAD.encode(self.signing.sign(message).to_bytes())
+    }
+
     /// The signed envelope `{"receipt": …, "signature": …}`.
     pub fn sign(&self, receipt: Value) -> Result<Value, String> {
         let message = [domain(&receipt)?, canonical(&receipt)?.as_bytes()].concat();

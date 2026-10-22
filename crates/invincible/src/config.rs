@@ -56,6 +56,47 @@ pub struct Config {
     /// This node as a shard for paired heads (spec/cluster.md).
     #[serde(default)]
     pub cluster: ClusterConfig,
+    /// Discovery (spec/discovery.md): a signed descriptor other nodes can find, and where to find
+    /// them. Off unless the operator turns it on.
+    #[serde(default)]
+    pub discovery: DiscoveryConfig,
+}
+
+/// ```toml
+/// [discovery]
+/// announce = false                       # publish this node's signed descriptor at all
+/// addresses = ["192.168.1.20:7778"]      # what it says; never detected for you
+/// seeds = ["https://seed.example"]       # where `invincible announce` posts it
+/// lifetime = 3600                        # seconds a descriptor is valid (max 86400)
+/// lan = true                             # may answer mDNS as _invincible._udp.local
+/// ```
+///
+/// Discovery is not trust: an announced node is still only usable after pairing
+/// (spec/discovery.md). `announce` has to be a decision, so it defaults to false, and so does the
+/// address list — auto-advertising an interface is a decision, not a convenience.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveryConfig {
+    #[serde(default)]
+    pub announce: bool,
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    #[serde(default = "default_lifetime")]
+    pub lifetime: u64,
+    #[serde(default = "yes")]
+    pub lan: bool,
+}
+
+fn default_lifetime() -> u64 {
+    crate::discovery::LIFETIME
+}
+
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self { announce: false, addresses: Vec::new(), seeds: Vec::new(), lifetime: default_lifetime(), lan: true }
+    }
 }
 
 /// ```toml
@@ -436,6 +477,34 @@ impl Config {
         if self.cluster.serve && self.cluster.heads.is_empty() {
             return Err("[cluster] serve: name the paired devices that may use this node in `heads`".to_owned());
         }
+        if self.discovery.announce && self.discovery.addresses.is_empty() {
+            return Err("[discovery] announce = true needs `addresses`: the node does not guess where it is reachable"
+                .to_owned());
+        }
+        if self.discovery.announce && !self.remote.enabled() {
+            return Err(
+                "[discovery] announce = true needs [remote] listen: a descriptor points at the paired-device port"
+                    .to_owned(),
+            );
+        }
+        if !(60..=crate::discovery::MAX_LIFETIME).contains(&self.discovery.lifetime) {
+            return Err(format!(
+                "[discovery] lifetime = {}: 60 to {} seconds",
+                self.discovery.lifetime,
+                crate::discovery::MAX_LIFETIME
+            ));
+        }
+        for address in &self.discovery.addresses {
+            if let Some(problem) = crate::discovery::address_problem(address) {
+                return Err(format!("[discovery] addresses: {address:?}: {problem}"));
+            }
+        }
+        for seed in &self.discovery.seeds {
+            let parsed = reqwest::Url::parse(seed).map_err(|e| format!("[discovery] seeds: {seed:?}: {e}"))?;
+            if !matches!(parsed.scheme(), "http" | "https") {
+                return Err(format!("[discovery] seeds: {seed:?}: only http:// and https://"));
+            }
+        }
         for cloud in &self.cloud {
             crate::egress::check(&cloud.base_url).map_err(|e| format!("[[cloud]] {}: {e}", cloud.id))?;
             if cloud.api_key_file.is_some() && cloud.api_key_env.is_some() {
@@ -491,6 +560,43 @@ mod tests {
         assert_eq!(four.node.dispatch_max_inflight, 4);
         // A shard says 0 on purpose: it must be read as 0, not as "unset, so 1".
         assert_eq!(Config::parse("[node]\ndispatch_max_inflight = 0\n").unwrap().node.dispatch_max_inflight, 0);
+    }
+
+    #[test]
+    fn discovery_is_closed_until_it_is_asked_for() {
+        let empty = Config::parse("").unwrap();
+        assert!(!empty.discovery.announce, "announcing is a decision, so it is off by default");
+        assert!(empty.discovery.addresses.is_empty(), "no address is detected for you");
+        assert!(empty.discovery.seeds.is_empty());
+        assert_eq!(empty.discovery.lifetime, 3600);
+        assert!(empty.discovery.lan);
+
+        let announced = Config::parse(
+            "[remote]\nlisten = [\"192.168.1.20:7778\"]\n\
+             [discovery]\nannounce = true\naddresses = [\"192.168.1.20:7778\"]\nseeds = [\"https://seed.example\"]\n",
+        )
+        .unwrap();
+        assert!(announced.discovery.announce);
+        assert_eq!(announced.discovery.addresses, vec!["192.168.1.20:7778"]);
+    }
+
+    #[test]
+    fn discovery_refuses_what_it_cannot_use() {
+        // announce without an address would publish nothing usable.
+        assert!(Config::parse("[discovery]\nannounce = true\n").unwrap_err().contains("addresses"));
+        // announce without a paired-device port has nowhere to point.
+        assert!(
+            Config::parse("[discovery]\nannounce = true\naddresses = [\"192.168.1.20:7778\"]\n")
+                .unwrap_err()
+                .contains("[remote] listen")
+        );
+        assert!(
+            Config::parse("[discovery]\naddresses = [\"http://192.168.1.20:7778\"]\n")
+                .unwrap_err()
+                .contains("host:port")
+        );
+        assert!(Config::parse("[discovery]\nlifetime = 10\n").unwrap_err().contains("lifetime"));
+        assert!(Config::parse("[discovery]\nseeds = [\"ftp://seed\"]\n").unwrap_err().contains("http"));
     }
 
     #[test]

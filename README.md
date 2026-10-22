@@ -28,6 +28,7 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
+| Discovery | Signed, expiring descriptors published to seeds and mDNS, so a node is found without a pasted code — and still only usable after pairing ([spec/discovery.md](spec/discovery.md)): implemented, unaudited |
 | Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
@@ -1092,6 +1093,35 @@ pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.
+
+### Finding a node without a pasted code
+
+Pairing starts from a code, which means a human pastes or scans it. Discovery removes *that* step
+and nothing else: a node can publish a small signed record of where it is, and another machine can
+look for it. Finding a node does not trust it; the first connection still needs the node's code.
+
+```toml
+[discovery]
+announce = true                        # off by default: publishing is a decision
+addresses = ["192.168.1.20:7778"]      # what the record says; never detected for you
+seeds = ["https://seed.example"]       # optional: where `invincible announce` posts it
+lan = true                             # let `announce --lan` answer mDNS
+```
+
+```sh
+invincible announce                  # sign this node's descriptor; POST it to [discovery] seeds
+invincible announce --lan            # also answer mDNS on this network, until Ctrl-C
+invincible discover                  # ask the seeds (add --seed URL to ask another), verify, list
+invincible discover --lan            # also browse mDNS for ~3 s; --model ID filters
+invincible seed --listen 127.0.0.1:7789   # run a dumb seed yourself: it stores and returns records
+```
+
+Every record is signed by the node (Ed25519, `receipt.key`) and expires within 24 hours; a seed
+stores and returns it without verifying, so the consumer always checks the signature. `discover`
+prints fingerprints, addresses, model ids and expiry, and marks everything `unpaired` unless a
+pairing already exists. A seed learns who announces, from what address and when — that is the price
+of discovery, and a node that will not pay it leaves `announce = false`. Details and the request
+shapes: [spec/discovery.md](spec/discovery.md).
 
 ### A cluster of your own devices
 
