@@ -30,10 +30,11 @@ head's API is loopback-only, so the driver reaches it through `ssh -N -L 17777:1
 
 - **Concurrency is held equal on purpose.** An early transcript reported `2.48x` for dispatch
   against a *sequential* single-node baseline (`0.52 -> 1.28 req/s`). Most of that was the
-  dispatcher's two slots against one client at a time, not two machines against one. Act 2 now sends
-  the same number of clients as act 3, so the speedup is two nodes against one at the same load —
-  measured on two 2-vCPU boxes at `0.96 -> 1.32 req/s`, **1.37x**, with a 4/4 split. The engine
-  batches queued requests on one node, which is why the second machine adds less than double.
+  the dispatcher's two slots against one client at a time, not two machines against one. Act 2 now sends
+  the same number of clients as act 3, so the speedup is two nodes against one at the same load — two
+  runs on two 2-vCPU boxes gave `0.96 -> 1.32 req/s` (**1.37x**) and `1.02 -> 1.35 req/s` (**1.33x**),
+  each with a 4/4 split. The engine batches queued requests on one node, which is why the second
+  machine adds less than double.
 - **A CPU-only head cannot anchor a sharded token rate.** These acts prove pairing, the plan,
   dispatch, discovery and receipts. They do not prove pipeline sharding, which needs a GPU.
 - **A dead peer costs throughput.** With the peer killed, the same load answered at `0.69 req/s`

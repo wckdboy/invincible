@@ -62,3 +62,63 @@ at least one completion token and non-empty text before it was counted.
    one endpoint, two   1.32 req/s   (1.37x)
    one node, peer dead 0.69 req/s   (8/8 answered)
    6/6 acts ran, 8 requests per act, every figure measured in this run
+
+=== second run, same rig, for variance (the suite is run twice) ===
+
+-- 1. two machines, one build
+   <head>      ae16698    invincible 0.0.21    binary d977818744d14dcc
+   <peer>       ae16698    invincible 0.0.21    binary d977818744d14dcc
+   the same binary bytes on both machines
+
+-- 2. one node, the same load
+   8/8 requests in 7.9s -> 1.02 req/s (512 tokens verified)
+
+-- 3. the same work, sent to ONE endpoint, spread across both machines
+   8/8 requests in 5.9s -> 1.35 req/s  speedup 1.33x
+   512 tokens verified, answered by:
+      4 invincible-lab-head
+      4 invincible-lab-peer
+
+-- 4. a node finds a node it was never told about
+   seed: LISTEN 0      128    10.0.1.1:7789 0.0.0.0:*
+   peer announces: ▪ node 465f-01f8-cd02-a5d6 at 10.0.1.2:7778 (1 model(s), expires in 60m)
+   peer announces: ✓ announced to http://10.0.1.1:7789
+   fingerprint          addresses      models      expires  trust                                 source
+     465f-01f8-cd02-a5d6  10.0.1.2:7778  qwen3-0.6b  60m      paired as node "invincible-lab-peer"  http://10.0.1.1:7789
+   a found node is not a paired node: pairing needs a code from it (`invincible join <code>`)
+   a found node is a paired node here: the descriptor matches a key pinned in nodes.json
+
+-- 5. a receipt you can check without trusting the node
+   request 05697b974ea49fa7c0172d61600900fe answered by invincible-lab-head with 64 tokens
+   the signing node publishes its key: PPhVTqgJMtx6CKi-F26K... (fetched, not assumed)
+   receipt 05697b974ea49fa7c0172d61600900fe: version 1
+     node     PPhVTqgJMtx6CKi-F26KIsz-b56jVBK_ZaGvzUVd6Xo
+     api      dispatch
+     caller   local (the node's own API, behind its token)
+     at       1792707899 (6s ago)
+     request  sha256 2f2626831b4114056c17e34ad672f4ab76a97b87a69408f7107852d91cefd714
+     answer   sha256 97659ce87ba21519d107e207f2f8382fe1695a82753d9c4f4ee799391063d439 (881 bytes, whole)
+   signature: valid
+   checked:
+     - the receipt names the key given as its node
+     - the Ed25519 signature over the canonical form
+     - the timestamp is a unix time, not more than 300s ahead of this clock
+   not checked:
+     - that the model in `decision` ran at all, or on the hardware the node names
+     - that the answer is correct, or came from that model
+     - that the node's clock was right when it signed
+     - that the caller is the device named (`caller.key` is the key the node pinned at pairing)
+     - the request: pass the body the client sent to recompute `request_sha256`
+     - the answer: pass the bytes the client received to recompute `answer_sha256`
+
+-- 6. now break it: kill the peer mid-flight
+   peer: down
+   peer down, 8/8 requests still answered in 11.7s (0.69 req/s (68% of one machine's rate))
+   every request was answered by the node that was still up
+   peer back: yes
+
+-- summary
+   one node            1.02 req/s
+   one endpoint, two   1.35 req/s   (1.33x)
+   one node, peer dead 0.69 req/s   (8/8 answered)
+   6/6 acts ran, 8 requests per act, every figure measured in this run
