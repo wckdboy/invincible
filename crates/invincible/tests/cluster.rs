@@ -110,6 +110,8 @@ async fn shard() -> Shard {
             device_key: None,
             runs: vec![],
             shard: true,
+            models: vec![],
+            dispatch_max_inflight: 0,
         },
     ));
     tokio::spawn(remote::serve(listener, pairing.clone(), device_app(state)));
@@ -293,6 +295,8 @@ async fn head(shard: &Shard, laptop: &StaticKey, peer: KnownNode) -> (String, Ar
                 device_key: Some(laptop.clone()),
                 runs: vec![run.clone()],
                 shard: false,
+                models: vec!["big".into()],
+                dispatch_max_inflight: 1,
             }),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -69,6 +69,20 @@ impl AuditLog {
 
     /// Appends one entry for [envelope] (a signed receipt).
     pub fn append(&self, caller: &Caller, client: Option<&str>, api: &str, envelope: &Value) -> Result<(), String> {
+        self.append_tagged(caller, client, api, envelope, None)
+    }
+
+    /// [append], with [extra] fields for this entry only — what the head did that the signed
+    /// receipt must not claim (`dispatch: {"via", "node"}`, spec/dispatch.md). A signed receipt
+    /// describes one machine's work, so this never goes inside [envelope].
+    pub fn append_tagged(
+        &self,
+        caller: &Caller,
+        client: Option<&str>,
+        api: &str,
+        envelope: &Value,
+        extra: Option<&Value>,
+    ) -> Result<(), String> {
         let mut last = self.last.lock().expect("audit lock");
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() >= ROTATE_AT) {
             let prev = Self::tail_hash(&self.path);
@@ -84,6 +98,12 @@ impl AuditLog {
         let mut entry = json!({ "at": now(), "caller": caller.code(), "api": api, "prev": prev, "receipt": envelope });
         if let Some(client) = client {
             entry["client"] = json!(client);
+        }
+        for (key, value) in extra.and_then(Value::as_object).into_iter().flatten() {
+            // Never over the entry's own fields: the chain and the receipt come first.
+            if entry.get(key).is_none() {
+                entry[key] = value.clone();
+            }
         }
         let line = entry.to_string();
         crate::fsutil::append_private(&self.path, &line)?;
@@ -206,6 +226,26 @@ mod tests {
             "tokens": { "input": 10, "output": 5 }, "egress": egress,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn extra_entry_fields_ride_on_the_entry_and_never_over_its_own() {
+        // What a dispatcher records: `dispatch: {"via", "node"}` on the audit line, outside the
+        // signed receipt (spec/dispatch.md).
+        let home = std::env::temp_dir().join(format!("invincible-audit-tag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let key = ReceiptKey::from_seed(&[11; 32]);
+        let log = AuditLog::new(&home);
+        let envelope = receipt(&key, "d1", "qwen", json!([]));
+        let extra = json!({ "dispatch": { "via": "studio", "node": "mini" }, "api": "overwritten" });
+        log.append_tagged(&Caller::Local, None, "dispatch", &envelope, Some(&extra)).unwrap();
+        let entry = log.read(0, 1).pop().unwrap();
+        assert_eq!(entry["dispatch"], json!({ "via": "studio", "node": "mini" }));
+        assert_eq!(entry["api"], "dispatch", "an extra field never replaces the entry's own");
+        assert!(entry["receipt"]["receipt"].get("dispatch").is_none());
+        // The chain still verifies with the extra field in it.
+        assert_eq!(log.verify(&key.public()), Ok(1));
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

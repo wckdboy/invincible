@@ -186,6 +186,10 @@ pub struct Draft {
     pub caller: crate::audit::Caller,
     pub client: Option<String>,
     pub api: &'static str,
+    /// For the audit log, not the receipt: the head this request was dispatched through and the
+    /// node that answered it (spec/dispatch.md, `dispatch.via`). The signed receipt describes one
+    /// machine's work, so it never holds this.
+    pub dispatch: Option<Value>,
     /// The answer's status ([attach]).
     status: u16,
     tail: Vec<u8>,
@@ -204,6 +208,7 @@ impl Draft {
             caller: crate::audit::Caller::Local,
             client: None,
             api: "chat",
+            dispatch: None,
             status: 200,
             tail: Vec::new(),
         })
@@ -301,10 +306,18 @@ impl Drop for Finisher {
         let draft = self.draft.lock().expect("draft lock");
         match self.key.sign(draft.receipt(&self.key.public())) {
             Ok(envelope) => {
-                if let Some(audit) = &self.audit
-                    && let Err(e) = audit.append(&draft.caller, draft.client.as_deref(), draft.api, &envelope)
-                {
-                    tracing::error!("audit log not written: {e}");
+                if let Some(audit) = &self.audit {
+                    // The dispatch record rides on the entry, never inside the signed receipt.
+                    let extra = draft.dispatch.as_ref().map(|node| json!({ "dispatch": node }));
+                    if let Err(e) = audit.append_tagged(
+                        &draft.caller,
+                        draft.client.as_deref(),
+                        draft.api,
+                        &envelope,
+                        extra.as_ref(),
+                    ) {
+                        tracing::error!("audit log not written: {e}");
+                    }
                 }
                 self.store.finish(&draft.id, envelope)
             }

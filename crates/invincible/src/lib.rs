@@ -6,6 +6,7 @@ pub mod cloud;
 pub mod cluster;
 pub mod config;
 pub mod devices;
+pub mod dispatch;
 pub mod egress;
 pub mod engine;
 pub mod eval;

@@ -59,6 +59,9 @@ pub struct AppState {
     pub images: Vec<crate::synth::Backend>,
     /// Cluster membership and the models split across paired nodes (spec/cluster.md).
     pub cluster: Option<Arc<crate::cluster::ClusterState>>,
+    /// Dispatch across the nodes this machine owns (spec/dispatch.md); `None` on a node that does
+    /// not dispatch.
+    pub dispatch: Option<Arc<crate::dispatch::Dispatch>>,
 }
 
 impl AppState {
@@ -87,11 +90,18 @@ impl AppState {
             speech: Vec::new(),
             images: Vec::new(),
             cluster: None,
+            dispatch: None,
         }
     }
 
     pub fn with_cluster(mut self, cluster: crate::cluster::ClusterState) -> Self {
         self.cluster = Some(Arc::new(cluster));
+        self
+    }
+
+    /// Dispatches requests across the nodes this machine owns (spec/dispatch.md).
+    pub fn with_dispatch(mut self, dispatch: crate::dispatch::Dispatch) -> Self {
+        self.dispatch = Some(Arc::new(dispatch));
         self
     }
 
@@ -159,6 +169,7 @@ fn api() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat_completions).layer(DefaultBodyLimit::max(MAX_REQUEST)))
+        .route("/v1/dispatch/chat/completions", post(dispatch_completion).layer(DefaultBodyLimit::max(MAX_REQUEST)))
         .route("/v1/messages", post(messages).layer(DefaultBodyLimit::max(MAX_REQUEST)))
         .route("/v1/audio/speech", post(crate::synth::speech))
         .route("/v1/images/generations", post(crate::synth::images))
@@ -317,6 +328,137 @@ async fn cluster_status(State(state): State<Arc<AppState>>) -> Response {
     Json(cluster.status(&state.node.network.encode(), shard.as_ref()).await).into_response()
 }
 
+/// `GET /v1/dispatch` (loopback): every candidate node — this one, then each paired node as a
+/// fresh probe finds it — and the choice over them (spec/dispatch.md). What
+/// `invincible dispatch status` prints.
+async fn dispatch_status(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<DispatchQuery>,
+) -> Response {
+    let Some(dispatch) = state.dispatch.clone() else {
+        return error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "this node does not dispatch (set [node] dispatch_max_inflight; 0 marks it spoken for)",
+        );
+    };
+    let model = q.model.as_deref().filter(|model| !model.is_empty() && *model != "auto");
+    Json(dispatch.snapshot(model).await.to_json()).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct DispatchQuery {
+    /// The model to choose for; absent or `auto` chooses without a model in mind.
+    model: Option<String>,
+}
+
+/// `POST /v1/dispatch/chat/completions` (spec/dispatch.md): one chat completion, answered whole
+/// by one of the nodes this machine owns. The answering node's name comes back in
+/// `invincible-dispatched-to`; when the first node failed before answering at all, the request is
+/// tried once on another and `invincible-dispatch-retried` names what went wrong.
+///
+/// Only non-streaming requests: a stream cannot be handed to a second node after its first token,
+/// so it would need the head to hold the stream open across a node change. Until that exists,
+/// `stream: true` is refused with a 400 that says where to go instead (`/v1/chat/completions`).
+/// A review of the answer belongs to the node that wrote it: this head's audit line records
+/// `dispatch: {"via", "node"}`, and its signed receipt describes only its own part.
+async fn dispatch_completion(
+    State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(dispatch) = state.dispatch.clone() else {
+        return error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "this node does not dispatch (set [node] dispatch_max_inflight; 0 marks it spoken for)",
+        );
+    };
+    let Ok(parsed) = serde_json::from_slice::<Value>(&body) else {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is not JSON");
+    };
+    if parsed.get("stream").and_then(Value::as_bool) == Some(true) {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "streaming_not_dispatched",
+            "dispatch answers non-streaming requests for now; send a stream to /v1/chat/completions",
+        );
+    }
+    let request = route_request(&headers, &parsed);
+    let named = (request.model != "auto").then(|| request.model.clone());
+    // What this machine would answer with, if the choice is this node: a healthy engine for the
+    // model (or for anything, when the request names none).
+    let self_url = state
+        .engines
+        .iter()
+        .find(|engine| engine.healthy() && named.as_deref().is_none_or(|model| engine.id == model))
+        .map(|engine| engine.base_url.clone());
+    let mut draft = match Draft::new() {
+        Ok(draft) => draft,
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    draft.api = "dispatch";
+    draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
+    draft.client = headers
+        .get(CLIENT_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(64).collect::<String>())
+        .filter(|v| !v.is_empty());
+    draft.data_policy = Some("owned".to_owned());
+    draft.images = crate::media::images(&parsed).iter().map(crate::media::Image::to_json).collect();
+
+    let outcome = dispatch.answer(self_url.as_deref(), named.as_deref(), &body).await;
+    let mut answered_model = None;
+    let (node, response) = match outcome {
+        Ok(reply) => {
+            if reply.retried() {
+                tracing::warn!(answered = %reply.node, failures = ?reply.failures, "dispatch: answered elsewhere");
+            }
+            let mut response = Response::new(Body::from(reply.body.clone()));
+            *response.status_mut() = StatusCode::from_u16(reply.status).unwrap_or(StatusCode::BAD_GATEWAY);
+            if let Ok(value) = HeaderValue::from_str(&reply.node) {
+                response.headers_mut().insert(crate::dispatch::DISPATCHED_TO, value);
+            }
+            if reply.retried()
+                && let Ok(value) = HeaderValue::from_str(&reply.failures.join("; "))
+            {
+                response.headers_mut().insert(crate::dispatch::RETRIED_HEADER, value);
+            }
+            // The answer names the model that ran it, which is what the receipt should say when
+            // the request asked for `auto`.
+            answered_model = serde_json::from_slice::<Value>(&reply.body)
+                .ok()
+                .and_then(|value| value["model"].as_str().map(str::to_owned));
+            (Some(reply.node), response)
+        }
+        Err(unavailable) => {
+            let status = match unavailable {
+                crate::dispatch::Unavailable::Failed(_) => StatusCode::BAD_GATEWAY,
+                _ => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (None, error(status, unavailable.code(), &unavailable.message()))
+        }
+    };
+    draft.decision = Some(Decision {
+        action: Action::Run,
+        // Named here, or the model the answering node reported (an `auto` request).
+        model: named.or(answered_model),
+        tier: Some(Tier::Node),
+        reason: if request.model == "auto" { Reason::LocalFirst } else { Reason::Requested },
+        fallback: false,
+        redact: false,
+    });
+    draft.dispatch = Some(json!({ "via": state.name, "node": node }));
+    crate::receipts::attach(
+        response,
+        Arc::new(std::sync::Mutex::new(draft)),
+        state.receipt_key.clone(),
+        state.receipts.clone(),
+        state.audit.clone(),
+    )
+}
+
 /// `GET /healthz`: unauthenticated, and says only that the node answers and its version (for the
 /// watchdog, the installer and monitoring).
 pub async fn healthz() -> Json<Value> {
@@ -331,7 +473,8 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/admin/pairing", post(start_pairing))
         .route("/v1/admin/devices", get(list_devices))
         .route("/v1/admin/devices/{name}", delete(remove_device))
-        .route("/v1/cluster", get(cluster_status));
+        .route("/v1/cluster", get(cluster_status))
+        .route("/v1/dispatch", get(dispatch_status));
     let guarded = api().merge(admin).route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
