@@ -12,6 +12,7 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 | [receipts.md](receipts.md) | **v1, normative** | The signed receipt for every request: where it ran, what left the node, and the request/answer pair, caller and time it binds; vectors from independent implementations |
 | [cluster.md](cluster.md) | **v0, phase 1 implemented, unaudited** | Inference split across your paired devices (llama.cpp RPC inside Noise shard links), the link and partitioning rules, and the plan for training across devices |
 | [dispatch.md](dispatch.md) | **v0, proposed; policy only** | Which owned node answers an independent request, and what a node advertises to be chosen for one |
+| [discovery.md](discovery.md) | **v0, implemented, unaudited** | Signed, expiring descriptors published to seeds and mDNS: how a node is found without a pasted code, and why finding one is not trust |
 | [audit.md](audit.md) | **v0, implemented** | The node's hash-chained log of every request, and the agent's log of its actions |
 | [agent.md](agent.md) | **v0, implemented** | The Autobot Agent's API, which the gateway passes through to paired devices |
 | [evals.md](evals.md) | **v0, implemented** | Task files for `invincible eval`, and the rule-based checks |

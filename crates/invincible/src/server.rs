@@ -73,6 +73,9 @@ pub struct AppState {
     /// This machine's cluster membership (`nodes.json`, `device.key`); `None` in a process with
     /// no home directory, which then cannot join or forget nodes.
     pub membership: Option<Arc<Membership>>,
+    /// Discovery (spec/discovery.md): the descriptor this node announces, and the verified ones
+    /// it holds. `None` only in a process that never set it up (tests, a bare `AppState`).
+    pub discovery: Option<Arc<crate::discovery::Discovery>>,
 }
 
 impl AppState {
@@ -103,6 +106,7 @@ impl AppState {
             cluster: None,
             dispatch: None,
             membership: None,
+            discovery: None,
         }
     }
 
@@ -179,6 +183,12 @@ impl AppState {
 
     pub fn with_pairing(mut self, pairing: Arc<Pairing>) -> Self {
         self.pairing = Some(pairing);
+        self
+    }
+
+    /// What this node announces and holds for discovery (spec/discovery.md).
+    pub fn with_discovery(mut self, discovery: crate::discovery::Discovery) -> Self {
+        self.discovery = Some(Arc::new(discovery));
         self
     }
 }
@@ -311,6 +321,22 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
         "speech": list(&state.speech),
         "images": list(&state.images),
     }))
+}
+
+/// `GET /v1/discovery`: this node's own descriptor (when it announces one) and the descriptors it
+/// has verified. Read-only, and not a trust list: nothing here is paired.
+async fn discovery_status(State(state): State<Arc<AppState>>) -> Response {
+    let Some(discovery) = state.discovery.clone() else {
+        return error(StatusCode::NOT_FOUND, "not_found", "this node has no discovery state");
+    };
+    Json(json!({
+        "announce": discovery.own.is_some(),
+        "descriptor": discovery.own,
+        "expires_in": discovery.own.as_ref().and_then(|own| crate::discovery::now().ok().map(|at| own.remaining(at))),
+        "seeds": discovery.seeds,
+        "held": discovery.store.list(),
+    }))
+    .into_response()
 }
 
 /// `GET /v1/cluster/node`: what this node can give a cluster (spec/cluster.md). A device that may
@@ -494,6 +520,10 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/admin/devices/{name}", delete(remove_device))
         .route("/v1/cluster", get(cluster_status))
         .route("/v1/dispatch", get(dispatch_status))
+        // Discovery (spec/discovery.md): what this node announces, and the verified descriptors
+        // it holds. Operator-only: a discovered node is not paired, and a paired device has no
+        // business reading this node's candidate list.
+        .route("/v1/discovery", get(discovery_status))
         // Membership (spec/cluster.md, Membership API): a code, a join, the list, rename, unpair.
         .route("/v1/cluster/pair", post(cluster_pair))
         .route("/v1/cluster/join", post(cluster_join))

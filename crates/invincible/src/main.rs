@@ -60,6 +60,44 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:7780")]
         listen: std::net::SocketAddr,
     },
+    /// Publish this node's signed descriptor to its seeds. With --lan, also answer mDNS until
+    /// stopped. Discovery never pairs anything (spec/discovery.md).
+    Announce {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Also answer mDNS on this network, and stay in the foreground while doing it.
+        #[arg(long)]
+        lan: bool,
+    },
+    /// Look for Invincible nodes: from [discovery] seeds (or --seed) and, with --lan, this
+    /// network. Every record is verified; nothing is paired.
+    Discover {
+        /// Only nodes that advertise this model id.
+        #[arg(long)]
+        model: Option<String>,
+        /// A seed to ask, in addition to [discovery] seeds. Repeatable.
+        #[arg(long = "seed")]
+        seeds: Vec<String>,
+        /// Also browse mDNS on this network (waits about three seconds).
+        #[arg(long)]
+        lan: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Run a discovery seed: it stores signed descriptors and returns them. It cannot sign or
+    /// vouch for anything, and it learns who announces (spec/discovery.md).
+    Seed {
+        #[arg(long, default_value = "127.0.0.1:7789")]
+        listen: std::net::SocketAddr,
+        /// How many records it holds (expired ones are dropped as it goes).
+        #[arg(long, default_value_t = invincible::discovery::SEED_RECORDS)]
+        max_records: usize,
+        /// Announces accepted per source address per minute.
+        #[arg(long, default_value_t = invincible::discovery::SEED_PER_IP)]
+        per_ip_per_min: u32,
+    },
     /// The cluster: this node, its paired peers, and the models split across them (spec/cluster.md).
     Cluster {
         #[command(subcommand)]
@@ -557,17 +595,7 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Serve { config } => {
             let home = config::home()?;
-            // A path given on the command line must exist; without one, a node that was never set up
-            // starts with the defaults (offline, no models) instead of failing in a restart loop.
-            let config = match config {
-                Some(path) => Config::load(&path)?,
-                None => match fsutil::read_optional(&home.join("config.toml"))? {
-                    Some(text) => {
-                        Config::parse(&text).map_err(|e| format!("{}: {e}", home.join("config.toml").display()))?
-                    }
-                    None => Config::parse("")?,
-                },
-            };
+            let config = config_for(config, &home)?;
             let token = token::load_or_create(&home.join("token"))?;
             tracing_subscriber::fmt().with_target(false).init();
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
@@ -676,6 +704,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 Ok(())
             })
+        }
+        Command::Announce { config, lan } => announce_command(config, lan),
+        Command::Discover { model, seeds, lan, json, config } => discover_command(config, model, seeds, lan, json),
+        Command::Seed { listen, max_records, per_ip_per_min } => {
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+            let seed = std::sync::Arc::new(invincible::discovery::Seed::with_rate(max_records, per_ip_per_min));
+            println!(
+                "discovery seed on http://{listen} (at most {max_records} records, {per_ip_per_min} announces per address per minute)"
+            );
+            println!("this seed learns the address and timing of every node that announces to it");
+            runtime.block_on(invincible::discovery::serve_seed(seed, listen))
         }
         Command::Cloud { action } => cloud_command(action),
         Command::Cluster { action: ClusterAction::Status { config, json } } => {
@@ -1202,6 +1241,28 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     );
     let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
     let receipt_public = receipt_key.public();
+    // The static key exists when either side of the node's network does: paired devices, or a
+    // published descriptor, which points at that same paired-device port.
+    let node_key = if config.remote.enabled() || config.discovery.announce {
+        Some(StaticKey::load_or_create(&home.join("node.key"))?)
+    } else {
+        None
+    };
+    let own_descriptor = if config.discovery.announce {
+        let key = node_key.as_ref().ok_or("no static key for the descriptor")?;
+        Some(invincible::discovery::mint(
+            key,
+            &receipt_key,
+            invincible::discovery::Advert {
+                addresses: config.discovery.addresses.clone(),
+                models: config.models.iter().map(|model| model.id.clone()).collect(),
+                max_inflight: config.node.dispatch_max_inflight,
+                lifetime: config.discovery.lifetime,
+            },
+        )?)
+    } else {
+        None
+    };
     let speech = invincible::synth::from_config(&config.speech, &home);
     let images = invincible::synth::from_config(&config.images, &home);
     let mut state = AppState::new(engines, config.node.settings(), token)
@@ -1211,10 +1272,16 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         .with_audit(invincible::audit::AuditLog::new(&home))
         .with_agent(&config.agent.url)
         .with_membership(home.clone())
+        .with_discovery(invincible::discovery::Discovery {
+            own: own_descriptor,
+            store: invincible::discovery::Store::load(&invincible::discovery::Store::path(&home))?,
+            seeds: config.discovery.seeds.clone(),
+        })
         .with_dispatch(dispatch);
     if config.remote.enabled() {
+        let key = node_key.ok_or("no static key for pairing")?;
         let mut pairing = Pairing::new(
-            StaticKey::load_or_create(&home.join("node.key"))?,
+            key,
             config.remote.name(),
             config.remote.advertised(),
             Devices::load(&home.join("devices.json"))?,
@@ -1581,6 +1648,237 @@ fn audit_line(entry: &serde_json::Value) -> String {
         .collect();
     let left = if egress.is_empty() { "nothing left".to_owned() } else { format!("left: {}", egress.join(", ")) };
     format!("{at}  {who:<22} {what:<32} {tokens:<18} {left}")
+}
+
+/// The config `serve`, `announce` and `discover` read: a path on the command line must exist;
+/// without one, a node that was never set up starts with the defaults (offline, no models)
+/// instead of failing in a restart loop.
+fn config_for(path: Option<PathBuf>, home: &std::path::Path) -> Result<Config, String> {
+    match path {
+        Some(path) => Config::load(&path),
+        None => match fsutil::read_optional(&home.join("config.toml"))? {
+            Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", home.join("config.toml").display())),
+            None => Config::parse(""),
+        },
+    }
+}
+
+/// This node's signed descriptor, from config and its own keys. Nothing is detected: the address
+/// list is the operator's, and the model ids are the ones this node serves.
+fn own_descriptor(config: &Config, home: &std::path::Path) -> Result<invincible::discovery::Descriptor, String> {
+    let node = StaticKey::load_or_create(&home.join("node.key"))?;
+    let signer = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
+    invincible::discovery::mint(
+        &node,
+        &signer,
+        invincible::discovery::Advert {
+            addresses: config.discovery.addresses.clone(),
+            models: config.models.iter().map(|model| model.id.clone()).collect(),
+            max_inflight: config.node.dispatch_max_inflight,
+            lifetime: config.discovery.lifetime,
+        },
+    )
+}
+
+/// `invincible announce`: mint, POST to every configured seed, and with `--lan` answer mDNS until
+/// stopped. It never writes a pairing.
+fn announce_command(config_path: Option<PathBuf>, lan: bool) -> Result<(), String> {
+    use invincible::discovery;
+    let home = config::home()?;
+    let config = config_for(config_path, &home)?;
+    if !config.discovery.announce {
+        return Err("[discovery] announce = false: announcing is a decision; set it to true (with `addresses`) first"
+            .to_owned());
+    }
+    if lan && !config.discovery.lan {
+        return Err("[discovery] lan = false: set it to true to answer mDNS".to_owned());
+    }
+    let descriptor = own_descriptor(&config, &home)?;
+    println!(
+        "{}",
+        brand::step(&format!(
+            "node {} at {} ({} model(s), expires in {}m)",
+            descriptor.fingerprint,
+            descriptor.addresses.join(", "),
+            descriptor.models.len(),
+            descriptor.remaining(discovery::now()?) / 60
+        ))
+    );
+    let seeds = &config.discovery.seeds;
+    if seeds.is_empty() && !lan {
+        return Err("nothing to announce to: set [discovery] seeds, or pass --lan".to_owned());
+    }
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+    let client =
+        reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+    let mut failed = 0usize;
+    for seed in seeds {
+        match runtime.block_on(discovery::announce_to_seed(&client, seed, &descriptor)) {
+            Ok(()) => println!("{}", brand::ok(&format!("announced to {seed}"))),
+            Err(e) => {
+                failed += 1;
+                eprintln!("{}", brand::fail(&e));
+            }
+        }
+    }
+    if lan {
+        let advert = discovery::LanAdvert::register(&descriptor)?;
+        println!("{}", brand::step(&format!("announcing as {} over mDNS; Ctrl-C to stop", advert.fullname)));
+        let period = std::time::Duration::from_secs((config.discovery.lifetime / 3).max(60));
+        loop {
+            let stopped = runtime.block_on(async {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => true,
+                    _ = tokio::time::sleep(period) => false,
+                }
+            });
+            if stopped {
+                break;
+            }
+            // Keep the record's expiry as fresh as the process: a descriptor that outlives the
+            // node is exactly the stale address this format exists to avoid.
+            advert.refresh(&own_descriptor(&config, &home)?)?;
+        }
+    }
+    if failed == 0 { Ok(()) } else { Err(format!("{failed} of {} seeds did not take the descriptor", seeds.len())) }
+}
+
+/// `invincible discover`: ask the seeds, browse the LAN with `--lan`, verify every record, and
+/// print what is out there. Pairing is not something this command can do.
+fn discover_command(
+    config_path: Option<PathBuf>,
+    model: Option<String>,
+    extra: Vec<String>,
+    lan: bool,
+    json: bool,
+) -> Result<(), String> {
+    use invincible::discovery;
+    let home = config::home()?;
+    let config = config_for(config_path, &home)?;
+    if lan && !config.discovery.lan {
+        return Err("[discovery] lan = false: set it to true to browse mDNS".to_owned());
+    }
+    let mut seeds = config.discovery.seeds.clone();
+    seeds.extend(extra);
+    if seeds.is_empty() && !lan {
+        return Err("no seeds to ask: set [discovery] seeds, pass --seed <url>, or use --lan".to_owned());
+    }
+    let at = discovery::now()?;
+    let mut found: Vec<(discovery::Descriptor, String)> = Vec::new();
+    let mut problems: Vec<String> = Vec::new();
+    if lan {
+        match discovery::browse_lan(std::time::Duration::from_secs(3)) {
+            Ok(list) => found.extend(list.into_iter().map(|descriptor| (descriptor, "lan".to_owned()))),
+            Err(e) => problems.push(format!("lan: {e}")),
+        }
+    }
+    if !seeds.is_empty() {
+        let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+        for seed in &seeds {
+            match runtime.block_on(discovery::fetch_peers(&client, seed, None)) {
+                Ok(list) => found.extend(list.into_iter().map(|descriptor| (descriptor, seed.clone()))),
+                Err(e) => problems.push(e),
+            }
+        }
+    }
+    let devices = Devices::load(&home.join("devices.json"))?;
+    let known = KnownNodes::load(&home)?;
+    // Kept only if it verifies, so the store stays "what might be reachable now", not a log.
+    let store = discovery::Store::load(&discovery::Store::path(&home))?;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut kept: Vec<serde_json::Value> = Vec::new();
+    let mut refused = 0usize;
+    let mut filtered = 0usize;
+    let mut seen = std::collections::HashSet::new();
+    let mut claims: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (descriptor, source) in found {
+        if let Err(invalid) = descriptor.verify(at) {
+            refused += 1;
+            problems.push(format!("{} (from {source}): {invalid}", descriptor.fingerprint));
+            continue;
+        }
+        // One row per (identity, signing key): two records claiming the same fingerprint with
+        // different keys are both shown, so a seed cannot hide the genuine one behind a forged
+        // record of the same name.
+        if !seen.insert((descriptor.fingerprint.clone(), descriptor.sign_key.clone())) {
+            continue;
+        }
+        *claims.entry(descriptor.fingerprint.clone()).or_default() += 1;
+        if let Err(invalid) = store.insert_at(&descriptor, at) {
+            problems.push(format!("{}: not stored: {invalid}", descriptor.fingerprint));
+        }
+        if let Some(wanted) = &model
+            && !descriptor.models.iter().any(|advertised| advertised == wanted)
+        {
+            filtered += 1;
+            continue;
+        }
+        let trust = descriptor.trust(&devices, &known);
+        rows.push(vec![
+            descriptor.fingerprint.clone(),
+            descriptor.addresses.join(", "),
+            descriptor.models.join(", "),
+            format!("{}m", descriptor.remaining(at) / 60),
+            trust.clone(),
+            source.clone(),
+        ]);
+        kept.push(serde_json::json!({ "descriptor": descriptor, "trust": trust, "source": source }));
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&kept).expect("json"));
+    } else if rows.is_empty() {
+        println!("{}", brand::ash("no node found"));
+    } else {
+        let mut table = vec![vec![
+            "fingerprint".to_owned(),
+            "addresses".to_owned(),
+            "models".to_owned(),
+            "expires".to_owned(),
+            "trust".to_owned(),
+            "source".to_owned(),
+        ]];
+        table.extend(rows);
+        print!("{}", brand::table(&table));
+    }
+    if let Some(wanted) = &model
+        && filtered > 0
+    {
+        // `--json` writes one document to stdout: the advisory goes to stderr instead.
+        let line = brand::ash(&format!("{filtered} node(s) did not advertise {wanted}"));
+        if json {
+            eprintln!("{line}");
+        } else {
+            println!("{line}");
+        }
+    }
+    for problem in &problems {
+        eprintln!("{}", brand::warn(problem));
+    }
+    if refused > 0 {
+        eprintln!("{}", brand::warn(&format!("{refused} descriptor(s) refused")));
+    }
+    let conflicting = claims.values().filter(|count| **count > 1).count();
+    if conflicting > 0 {
+        eprintln!(
+            "{}",
+            brand::warn(&format!(
+                "{conflicting} fingerprint(s) arrived with more than one signing key: a seed can replay \
+                 a forged record, and only pairing decides which node is real"
+            ))
+        );
+    }
+    let advice =
+        brand::ash("a found node is not a paired node: pairing needs a code from it (`invincible join <code>`)");
+    if json {
+        eprintln!("{advice}");
+    } else {
+        println!("{advice}");
+    }
+    Ok(())
 }
 
 /// Calls the running node's admin API on loopback, with the local token.
