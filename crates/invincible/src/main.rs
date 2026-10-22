@@ -1516,9 +1516,17 @@ fn load_envelope(source: &str) -> Result<serde_json::Value, String> {
     };
     let value: serde_json::Value = match text {
         Some(text) => serde_json::from_str(&text).map_err(|e| format!("{source}: not JSON: {e}"))?,
-        None => invincible::audit::AuditLog::new(&config::home()?)
-            .find(source)
-            .ok_or_else(|| format!("no receipt {source}: not a file, and not in this node's audit log"))?,
+        None => {
+            let log = invincible::audit::AuditLog::new(&config::home()?);
+            match log.find(source) {
+                Ok(Some(envelope)) => envelope,
+                Ok(None) => {
+                    return Err(format!("no receipt {source}: not a file, and not in this node's audit log"));
+                }
+                // More than one entry names it: which receipt that id is cannot be told from here.
+                Err(why) => return Err(format!("not verifying {source}: {why}")),
+            }
+        }
     };
     if value.get("signature").is_none() && value["receipt"].get("signature").is_some() {
         return Ok(value["receipt"].clone());

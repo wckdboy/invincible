@@ -449,6 +449,9 @@ pub struct Attempt {
 
 /// A receipt being written while its request runs.
 pub struct Draft {
+    /// The request id, already decided before the answer starts: the one in the `invincible-request-id`
+    /// response header, in the signed receipt, and on the audit line (crate::receipts::attach sets
+    /// the header from it; no second id is ever made for the same request).
     pub id: String,
     pub decision: Option<Decision>,
     pub data_policy: Option<String>,
@@ -634,15 +637,16 @@ impl Drop for Finisher {
         match signed {
             Ok(envelope) => {
                 if let Some(audit) = &self.audit {
-                    // The dispatch record rides on the entry, never inside the signed receipt.
-                    let extra = draft.dispatch.as_ref().map(|node| json!({ "dispatch": node }));
-                    if let Err(e) = audit.append_tagged(
-                        &draft.caller,
-                        draft.client.as_deref(),
-                        draft.api,
-                        &envelope,
-                        extra.as_ref(),
-                    ) {
+                    // The request's id rides on the entry (the handle the client was given in
+                    // `invincible-request-id`, and the id inside the receipt), with the dispatch
+                    // record when there was one: never inside the signed receipt.
+                    let mut extra = json!({ "request_id": &draft.id });
+                    if let Some(dispatch) = &draft.dispatch {
+                        extra["dispatch"] = dispatch.clone();
+                    }
+                    if let Err(e) =
+                        audit.append_tagged(&draft.caller, draft.client.as_deref(), draft.api, &envelope, Some(&extra))
+                    {
                         tracing::error!("audit log not written: {e}");
                     }
                 }

@@ -149,16 +149,45 @@ impl AuditLog {
         entries.into_iter().skip(skip).collect()
     }
 
-    /// The signed receipt of request [id], newest entries first.
-    pub fn find(&self, id: &str) -> Option<Value> {
-        let needle = format!("\"request_id\":\"{id}\"");
-        self.lines()
+    /// The signed receipt of request [id], from this log: the envelope of the one entry that names
+    /// it.
+    ///
+    /// An entry names a request by its own `request_id` field, or — for an entry written before the
+    /// log recorded it — by the id inside the receipt it holds. Entries that name no request (a
+    /// receipt from before the exchange was bound) are passed over: not an error, simply not
+    /// reachable by id.
+    ///
+    /// `Ok(None)` when no entry names [id]. `Err` when the log cannot answer with one receipt: more
+    /// than one entry names it (an id is one receipt, so none is chosen), or an entry whose id the
+    /// caller asked for holds a receipt that names another request (that line was edited, so it is
+    /// no answer for either).
+    pub fn find(&self, id: &str) -> Result<Option<Value>, String> {
+        let naming: Vec<Value> = self
+            .lines()
             .iter()
-            .rev()
-            .filter(|l| l.contains(&needle))
-            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-            .find(|e| e["receipt"]["receipt"]["request_id"] == id)
-            .map(|e| e["receipt"].clone())
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|entry| entry["receipt"].get("signature").is_some())
+            .filter(|entry| Self::names(entry, id))
+            .collect();
+        match naming.len() {
+            0 => Ok(None),
+            1 => Ok(naming.into_iter().next().map(|entry| entry["receipt"].clone())),
+            n => Err(format!(
+                "request id {id} names {n} entries in this node's audit log (at {}): an id names one receipt, so none is chosen",
+                naming.iter().map(|entry| entry["at"].to_string()).collect::<Vec<_>>().join(", ")
+            )),
+        }
+    }
+
+    /// Whether [entry] names request [id]: its `request_id`, or the id in the receipt it holds. A
+    /// line whose two ids disagree names neither: the receipt's id is the signed one, and a line
+    /// that claims another is edited, not evidence.
+    fn names(entry: &Value, id: &str) -> bool {
+        let signed = entry["receipt"]["receipt"]["request_id"].as_str();
+        match entry["request_id"].as_str() {
+            Some(recorded) => recorded == id && signed.is_none_or(|signed| signed == id),
+            None => signed == Some(id),
+        }
     }
 
     /// Checks the chain and every receipt's signature against [receipt_key]: the number of entries,
@@ -265,6 +294,53 @@ mod tests {
     }
 
     #[test]
+    fn finds_a_request_by_its_id_and_refuses_a_tie() {
+        let home = std::env::temp_dir().join(format!("invincible-audit-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let key = ReceiptKey::from_seed(&[13; 32]);
+        let log = AuditLog::new(&home);
+        // As this build writes it: the id is on the entry and inside the receipt.
+        log.append_tagged(
+            &Caller::Local,
+            None,
+            "chat",
+            &receipt(&key, "r1", "qwen", json!([])),
+            Some(&json!({ "request_id": "r1" })),
+        )
+        .unwrap();
+        // As it was written before the log recorded ids: only the receipt names the request.
+        log.append(&Caller::Local, None, "chat", &receipt(&key, "r2", "qwen", json!([]))).unwrap();
+        // A receipt from before the exchange was bound names no request at all.
+        let legacy = key
+            .sign(json!({
+                "version": 0, "node": key.public(),
+                "decision": { "action": "run", "model": "qwen", "tier": "node", "reason": "requested" },
+                "egress": [],
+            }))
+            .unwrap();
+        log.append(&Caller::Local, None, "chat", &legacy).unwrap();
+        assert_eq!(log.verify(&key.public()), Ok(3), "an entry with no id does not break the chain");
+
+        assert_eq!(log.find("r1").unwrap().unwrap()["receipt"]["request_id"], "r1");
+        assert_eq!(log.find("r2").unwrap().unwrap()["receipt"]["request_id"], "r2");
+        assert_eq!(log.find("none"), Ok(None));
+
+        // One id, two entries: an id names one receipt, so which one is not decided here.
+        log.append_tagged(
+            &Caller::Local,
+            None,
+            "chat",
+            &receipt(&key, "r1", "qwen", json!([])),
+            Some(&json!({ "request_id": "r1" })),
+        )
+        .unwrap();
+        let error = log.find("r1").unwrap_err();
+        assert!(error.contains("request id r1 names 2 entries"), "{error}");
+        assert!(error.contains("none is chosen"), "{error}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn chains_reads_verifies_and_catches_tampering() {
         let home = std::env::temp_dir().join(format!("invincible-audit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
@@ -284,8 +360,8 @@ mod tests {
         assert_eq!(entries[0]["caller"], "device:phone");
         assert_eq!(entries[1]["receipt"]["receipt"]["request_id"], "a3");
         assert_eq!(log.read(0, 10)[0]["client"], "autobot-agent");
-        assert_eq!(log.find("a2").unwrap()["receipt"]["request_id"], "a2");
-        assert!(log.find("zz").is_none());
+        assert_eq!(log.find("a2").unwrap().unwrap()["receipt"]["request_id"], "a2");
+        assert_eq!(log.find("zz"), Ok(None));
         let totals = summary(&log.read(0, 10));
         assert_eq!(totals["ran"], 3);
         assert_eq!(totals["models"][1], json!({ "model": "qwen", "requests": 2, "tokens_in": 20, "tokens_out": 10 }));

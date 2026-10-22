@@ -267,16 +267,21 @@ async fn receipt(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> 
     if let Some(envelope) = state.receipts.get(&id).await {
         return Json(envelope).into_response();
     }
-    // Older than the ones kept in memory (or from before a restart): the audit log has it.
+    // Older than the ones kept in memory (or from before a restart): the audit log has it, under the
+    // id its entry records (or, for an entry written before that, the id inside its receipt).
     let found = match state.audit.clone() {
         Some(log) if id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) => {
-            tokio::task::spawn_blocking(move || log.find(&id)).await.ok().flatten()
+            tokio::task::spawn_blocking(move || log.find(&id))
+                .await
+                .unwrap_or_else(|e| Err(format!("the audit log could not be read: {e}")))
         }
-        _ => None,
+        _ => Ok(None),
     };
     match found {
-        Some(envelope) => Json(envelope).into_response(),
-        None => error(StatusCode::NOT_FOUND, "not_found", "no such receipt"),
+        Ok(Some(envelope)) => Json(envelope).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "no such receipt"),
+        // The log names more than one entry for this id: answering with one would be a guess.
+        Err(why) => error(StatusCode::CONFLICT, "ambiguous_receipt", &why),
     }
 }
 

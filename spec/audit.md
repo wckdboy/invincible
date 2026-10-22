@@ -25,7 +25,8 @@ tokens, egress hosts and the cluster's topology, and it is not a device route.
   "client": "autobot-agent",
   "api": "chat",
   "prev": "3f1c…",
-  "receipt": { "receipt": { … }, "signature": "…" }
+  "receipt": { "receipt": { … }, "signature": "…" },
+  "request_id": "9f2c8a…"
 }
 ```
 
@@ -37,6 +38,7 @@ tokens, egress hosts and the cluster's topology, and it is not a device route.
 | `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
 | `prev` | always | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
+| `request_id` | since ids were recorded | The request's id, the same one the client was given in the `invincible-request-id` response header and the same one inside its receipt's `request_id`. It is what `invincible receipt verify <id>` looks the entry up by. Entries written before this field existed carry no id: they still verify, but only the id inside their receipt (absent on a version 0 receipt) can reach them |
 
 Requests the router asked about or refused are logged too: their receipt's decision says so.
 

@@ -18,7 +18,9 @@ The point is a claim you can check offline, holding nothing but the node's publi
 2. When the answer has been fully sent (or the client went away), the node finishes the receipt.
 3. `GET /v1/receipts/<id>` returns it. A request that is still running is waited for (up to 10
    seconds); an unknown id answers 404. A node keeps the most recent 4096 receipts in memory, and
-   finds older ones (and ones from before a restart) in its audit log ([audit.md](audit.md)).
+   finds older ones (and ones from before a restart) in its audit log ([audit.md](audit.md)) by the
+   id its entry records; an id that log matches to more than one entry answers 409
+   (`ambiguous_receipt`) instead of one of them.
 4. `GET /v1/node` returns `{"name": "…", "receipt_key": "<public key>", "speech": [...], "images": [...]}`
    (the speech and image backends: `{"id", "tier", "host", "healthy"}` each). A paired device also gets
    the receipt key in the pairing reply ([pairing.md](pairing.md)), over the authenticated channel,
@@ -190,7 +192,11 @@ version 1 from this release on.
 
 `invincible receipt verify <file|id>` does the offline check. `<file>` is a receipt envelope (or a
 line from `audit.jsonl`, which holds it under `receipt`), `-` is stdin, and anything else is a request
-id looked up in this node's audit log. `--key` is the node's receipt public key (base64url); without
+id looked up in this node's audit log: the id the client was given in the `invincible-request-id`
+header, which the entry records in its `request_id` field (and its receipt inside). An id names one
+receipt, so a log in which more than one entry carries it is refused — with how many and when — rather
+than answered with one of them; entries written before the log recorded ids are passed over and are
+not reachable by id. `--key` is the node's receipt public key (base64url); without
 it, this node's own key is used. `--request <body.json>` and `--answer <file>` are the request body
 as the client sent it and the answer bytes as the client received them; giving them makes the check
 compare hashes instead of only reporting them.
