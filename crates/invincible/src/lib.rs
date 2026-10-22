@@ -8,6 +8,7 @@ pub mod config;
 pub mod devices;
 pub mod discovery;
 pub mod dispatch;
+pub mod doctor;
 pub mod egress;
 pub mod engine;
 pub mod eval;

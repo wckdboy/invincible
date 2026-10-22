@@ -24,6 +24,7 @@ What ships today and is being finished.
 | ✅ | Gateway, routing, redaction, receipts, audit, pairing, always-on, bots, channels, evals, backups, alerts | shipped through v0.0.21 |
 | 🔶 | Cluster phase 1: one model split across two paired nodes, on the `cluster` branch, implemented and measured; left: clean numbers on a quiet machine and review | INV-58, INV-59 |
 | 🔶 | Windows: builds, Task Scheduler services, `install.ps1`, CI on windows-latest (PR #14); left: the full test run, release builds, ACLs, a real install | INV-50 |
+| ✅ | `invincible doctor`: every subsystem, with what to do about each, `✗` exits 1 | made plain |
 | ⬜ | Independent security review of pairing and remote access | INV-21 |
 | ⬜ | Encrypt node and agent data at rest, key in keychain / TPM / Secure Enclave | INV-26 |
 | ⬜ | Native packaging: Homebrew, `.deb` / `.rpm`, signed MSIX + winget, Intel Mac | INV-54 |
@@ -98,7 +99,7 @@ same result and less wall time.
 | ⬜ | T3: federated LoRA with phones, data stays on the device | INV-67 |
 | ⬜ | T4: pipeline-parallel training across machines, DeMo compression | INV-68 |
 | ⬜ | The written threat model, with the independent review's findings | security program |
-| ⬜ | `invincible doctor` for every subsystem; a fleet config with the keys kept out | made plain |
+| ⬜ | A fleet config for many machines, with the keys kept out of it | made plain |
 | ❓ | Region tier: trusted operators only, or a design safe with strangers' compute | the README's open question |
 
 ## Across every milestone: made plain

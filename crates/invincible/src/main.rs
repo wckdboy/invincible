@@ -32,6 +32,14 @@ enum Command {
     },
     /// Print the local API token (created on first use).
     Token,
+    /// Check the node: engines, devices, links, services, with what to do about each. Reads only;
+    /// `✗` means configured-but-cannot-work and exits 1, `!` is something to look at.
+    Doctor {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show a one-time code (and QR code) that pairs a device with this node.
     Pair {
         #[arg(long)]
@@ -607,6 +615,22 @@ fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Token => {
             println!("{}", token::load_or_create(&config::home()?.join("token"))?);
+            Ok(())
+        }
+        Command::Doctor { config: path, json } => {
+            let home = config::home()?;
+            let report = invincible::doctor::run(&home, path.as_deref());
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report.json()).map_err(|e| e.to_string())?);
+            } else {
+                print!("{}", report.report());
+            }
+            // The report is the message; the exit code is for the shell. A `✗` is a thing that was
+            // configured and cannot work, so a script or a CI step can lean on this without
+            // parsing the glyphs.
+            if report.exit_code() != 0 {
+                std::process::exit(1);
+            }
             Ok(())
         }
         Command::Pair { config, capabilities } => {
