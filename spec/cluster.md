@@ -159,7 +159,8 @@ Vectors: `vectors/cluster.json`, the `link` cases.
 - `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
   `{"bytes": n}` for an `n`-byte body and nothing else. A head times a link with it — five small
   posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
-  `$INVINCIBLE_HOME/tune/links.json`, behind the same hardware tag and an hour's freshness. A link
+  `$INVINCIBLE_HOME/tune/links.json`, each measurement timestamped on its own, behind the same
+  hardware tag and an hour's freshness: metering one peer does not refresh another's number. A link
   that cannot be measured leaves the plan without a prediction.
 - `tg_tps`: a device's generation rate for one model, alone on that device, tokens/s, from
   `invincible tune bench <model> --device <name>` (llama-bench, one repetition). It is not a
@@ -442,8 +443,10 @@ export) is a natural first dataset.
   `crates/invincible/src/cluster.rs`), which is where the archive puts it.
 - **Homebrew's llama.cpp has no RPC backend** (its ggml is built without `GGML_RPC`: `llama-server
   --rpc` answers "RPC not supported in this build", and there is no `ggml-rpc-server`). A node on
-  Homebrew's llama.cpp can still be a member and is told why it cannot split; `invincible cluster
-  status` says so. The installer will prefer the release archive when the cluster is turned on.
+  Homebrew's llama.cpp can still be a member and is told why it cannot split, and it still probes
+  its peers, so `invincible cluster status` reports what they are next to that reason rather than
+  showing them as absent. The installer will prefer the release archive when the cluster is turned
+  on.
 - Every node in a cluster must run the same llama.cpp build (the RPC protocol is tied to it). The
   installer pins one tag (`LLAMA_TAG`) for every machine, which gives this for free when they are
   on the same Invincible version.
