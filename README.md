@@ -25,7 +25,7 @@ Early, and used daily. What is built, and what is not yet:
 
 | Part | State |
 | --- | --- |
-| Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
+| Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs, embeddings from an embedding model the node serves, speech to text and text to speech and images through backends on this machine; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
@@ -1035,6 +1035,28 @@ for a private request, offline or under `egress = "never"`, and asked about when
 The text that leaves (what to say, the prompt) is redacted first. Every request gets a receipt
 (`api` `speech` or `images` in the audit log). `GET /v1/node` lists the backends, and the agent
 offers `speak` and `generate_image` when there are some.
+
+### Transcriptions and embeddings (optional)
+
+`POST /v1/audio/transcriptions` (multipart, OpenAI's shape) goes to a speech-to-text server on
+this machine, and `POST /v1/embeddings` to an embedding model the node serves itself:
+
+```toml
+[[transcription]]
+id = "whisper"
+base_url = "http://127.0.0.1:8080/v1"   # whisper.cpp's server, faster-whisper, … on this machine
+
+[[models]]
+id = "nomic-embed"
+path = "/models/nomic-embed-text-v1.5-Q8_0.gguf"
+embeddings = true                       # llama-server --embeddings: this engine only embeds
+```
+
+Neither ever leaves the node. Audio cannot be redacted the way text is, so a transcription
+backend off this machine is listed by `GET /v1/node` and refused (`audio_not_redactable`); there
+is no cloud embedding backend at all. An embedding engine is not offered to the chat router, and
+`GET /v1/models` marks it. Every request gets a receipt (`api` `transcriptions` or `embeddings`
+in the audit log), and the audio itself is never kept.
 
 ### Receipts
 

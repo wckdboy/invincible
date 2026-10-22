@@ -32,7 +32,7 @@ telemetry: the log is only ever read on the node, or by a paired device that ask
 | `at` | always | Unix seconds when the answer finished |
 | `caller` | always | `local` (the loopback API, with the token) or `device:<name>` (a paired device, by the name it was pinned under) |
 | `client` | when sent | What the caller says it is, from the `invincible-client` request header (64 printable ASCII characters at most). The Autobot Agent sends `autobot-agent`. Not authenticated: `caller` is. |
-| `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
+| `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`), `transcriptions` (`/v1/audio/transcriptions`), `embeddings` (`/v1/embeddings`) or `fetch` (`/v1/fetch`) |
 | `prev` | always | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
 
