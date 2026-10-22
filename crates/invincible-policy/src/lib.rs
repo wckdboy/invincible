@@ -9,8 +9,8 @@ mod network;
 mod routing;
 
 pub use cluster::{
-    LinkAction, LinkDecision, LinkInput, LinkReason, Measurement, Plan, PlanAction, PlanDevice, PlanInput, PlanReason,
-    Share, SplitMode, decide_link, is_lan, plan,
+    LinkAction, LinkDecision, LinkInput, LinkReason, LinkSpeed, Measurement, Plan, PlanAction, PlanDevice, PlanInput,
+    PlanReason, Share, SplitMode, decide_link, is_lan, plan,
 };
 pub use egress::{EgressAction, EgressDecision, EgressInput, EgressReason, decide_egress, is_loopback};
 pub use network::NetworkMode;

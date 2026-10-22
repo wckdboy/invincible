@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use invincible_policy::{
-    LinkAction, LinkInput, Measurement, Plan, PlanAction, PlanDevice, PlanInput, SplitMode, decide_link,
+    LinkAction, LinkInput, LinkSpeed, Measurement, Plan, PlanAction, PlanDevice, PlanInput, SplitMode, decide_link,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -26,6 +26,8 @@ use crate::remote::{self, Traffic};
 
 /// How long a peer may take to answer a capability probe.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the link meter may take before the plan goes ahead without it.
+const LINK_METER_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long to wait before planning again when a model cannot run.
 const REPLAN: Duration = Duration::from_secs(15);
 
@@ -163,6 +165,22 @@ pub fn rpc_launch(program: &Path, port: u16, cache: Option<&Path>, logs: &Path) 
 /// The host part of `host:port` (`[fd00::1]:7778` keeps its brackets).
 fn host_of(addr: &str) -> &str {
     addr.rsplit_once(':').map_or(addr, |(host, _)| host)
+}
+
+/// Times the link to [peer] and reports what it costs per token (spec/cluster.md, Capabilities):
+/// the median round trip over five small posts, then the throughput of a 4 MiB post.
+pub async fn meter(peer: &KnownNode, device: &StaticKey, network: &str) -> Result<LinkSpeed, String> {
+    let (addrs, refused) = link_addrs(peer, network);
+    if addrs.is_empty() {
+        return Err(if refused.is_empty() {
+            format!("{}: no address to reach", peer.name)
+        } else {
+            refused.join("; ")
+        });
+    }
+    let key = peer.key_bytes()?;
+    let (rtt_ms, mib_s) = crate::remote::meter_link(&addrs, &key, device, 5, 4 << 20).await?;
+    Ok(LinkSpeed { node: peer.name.clone(), rtt_ms, mib_s })
 }
 
 /// The addresses of [peer] a shard link may use under [network] (spec/cluster.md, Links), and why
@@ -431,7 +449,8 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                     }
                 }
             }
-            // This machine's own measurements, and the split already running (for the hysteresis).
+            // This machine's own measurements, the links, and the split already running.
+            let mut links = Vec::new();
             if let Ok(home) = crate::config::home() {
                 measured.extend(crate::tune::measured(
                     &home,
@@ -440,9 +459,30 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                     &crate::tune::hardware_now(),
                     &head.devices,
                 ));
+                links = crate::tune::load_links(&home, 1);
+                for (peer_link, _) in &peers {
+                    if links.iter().any(|l| l.node == peer_link.peer.name) {
+                        continue;
+                    }
+                    // A slow or unreachable peer must not hold up the plan: time the meter out.
+                    let metered = tokio::time::timeout(
+                        LINK_METER_TIMEOUT,
+                        meter(&peer_link.peer, &head.device_key, &head.network),
+                    )
+                    .await;
+                    match metered {
+                        Ok(Ok(speed)) => {
+                            let _ = crate::tune::record_link(&home, speed.clone());
+                            links.push(speed);
+                        }
+                        Ok(Err(e)) => notes.push(format!("{}: link not measured: {e}", peer_link.peer.name)),
+                        Err(_) => notes.push(format!("{}: link meter timed out", peer_link.peer.name)),
+                    }
+                }
             }
             let mut input = PlanInput::new(head.model_bytes, run.split, devices);
             input.measured = measured;
+            input.links = links;
             input.current = run.state().plan.map(|plan| plan.shares).unwrap_or_default();
             let plan = invincible_policy::plan(&input);
             for note in &notes {

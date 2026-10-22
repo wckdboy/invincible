@@ -676,6 +676,70 @@ pub async fn get_json(
     serde_json::from_slice(&body).map_err(|e| format!("{path}: {e}"))
 }
 
+/// Times a link to a paired node: [rounds] small posts for the median round trip, then one
+/// [bulk]-byte post for the throughput (the round trip subtracted). One encrypted session carries
+/// them all, the way a shard link carries a stream of tokens.
+pub async fn meter_link(
+    addrs: &[String],
+    node_key: &[u8],
+    device: &StaticKey,
+    rounds: usize,
+    bulk: usize,
+) -> Result<(f64, f64), String> {
+    let (tcp, transport) = connect(addrs, node_key, device).await?;
+    let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
+    tokio::spawn(async move { pipe(tcp, transport, theirs, || true).await });
+    let (mut sender, connection) =
+        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(ours)).await.map_err(|e| e.to_string())?;
+    tokio::spawn(connection);
+
+    let mut rtts = Vec::new();
+    for _ in 0..rounds.clamp(1, 32) {
+        let started = tokio::time::Instant::now();
+        let got = post_measured(&mut sender, 1024).await?;
+        if got != 1024 {
+            return Err(format!("/v1/cluster/meter answered {got} bytes, not 1024"));
+        }
+        rtts.push(started.elapsed().as_secs_f64());
+    }
+    rtts.sort_by(f64::total_cmp);
+    let rtt = rtts[rtts.len() / 2];
+
+    let started = tokio::time::Instant::now();
+    let got = post_measured(&mut sender, bulk).await?;
+    let elapsed = started.elapsed().as_secs_f64() - rtt;
+    if got != bulk {
+        return Err(format!("/v1/cluster/meter answered {got} bytes, not {bulk}"));
+    }
+    if elapsed <= 0.0 {
+        return Err("the link answered faster than its own round trip".to_owned());
+    }
+    Ok((rtt * 1000.0, (bulk as f64 / (1 << 20) as f64) / elapsed))
+}
+
+/// One `POST /v1/cluster/meter` of [len] zero bytes; the byte count the node answered.
+async fn post_measured(
+    sender: &mut hyper::client::conn::http1::SendRequest<axum::body::Body>,
+    len: usize,
+) -> Result<usize, String> {
+    let request = axum::http::Request::post("/v1/cluster/meter")
+        .header(axum::http::header::HOST, "node")
+        .body(axum::body::Body::from(vec![0u8; len]))
+        .map_err(|e| e.to_string())?;
+    let response = sender.send_request(request).await.map_err(|e| e.to_string())?;
+    let status = response.status();
+    let body =
+        axum::body::to_bytes(axum::body::Body::new(response.into_body()), 1 << 20).await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("/v1/cluster/meter: {status}"));
+    }
+    serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v["bytes"].as_u64())
+        .map(|n| n as usize)
+        .ok_or_else(|| "the meter answered without a byte count".to_owned())
+}
+
 /// The tunnel's door: where the node is, and the local token a request must carry.
 struct Door {
     addrs: Vec<String>,

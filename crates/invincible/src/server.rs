@@ -166,6 +166,7 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/audit", get(audit))
         .route("/v1/node", get(node_info))
         .route("/v1/cluster/node", get(cluster_node))
+        .route("/v1/cluster/meter", post(cluster_meter).layer(DefaultBodyLimit::max(16 << 20)))
         .route("/v1/agent", any(agent))
         .route("/v1/agent/{*rest}", any(agent))
 }
@@ -297,6 +298,13 @@ async fn cluster_node(State(state): State<Arc<AppState>>, caller: Option<Extensi
     };
     caps.shard = cluster.shard && may;
     Json(caps).into_response()
+}
+
+/// `POST /v1/cluster/meter`: answers the body's length and nothing else. A head times a link with
+/// it — a small body for the round trip, a large one for the throughput — inside the same
+/// encrypted session the shard link uses (spec/cluster.md, Capabilities).
+async fn cluster_meter(body: Bytes) -> Response {
+    Json(json!({ "bytes": body.len() })).into_response()
 }
 
 /// `GET /v1/cluster` (loopback): this node, its peers probed now, the heads it serves and the
@@ -725,6 +733,20 @@ pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
 mod tests {
     use super::estimate_tokens;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn the_meter_answers_the_body_length() {
+        // What a head times a link with: the body goes in, its length comes back.
+        let response = super::cluster_meter(axum::body::Bytes::from(vec![7u8; 4096])).await;
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["bytes"], 4096);
+
+        let empty = super::cluster_meter(axum::body::Bytes::new()).await;
+        let body = axum::body::to_bytes(empty.into_body(), 1 << 20).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["bytes"], 0, "an empty body is a round trip too");
+    }
 
     #[test]
     fn the_agent_proxy_passes_plain_agent_paths_only() {

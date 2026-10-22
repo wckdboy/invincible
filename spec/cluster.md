@@ -151,6 +151,11 @@ Vectors: `vectors/cluster.json`, the `link` cases.
   profile for the model it is planning, and only while the peer's `hardware` still matches it.
 - `hardware`: the tag those profiles were measured on (os, arch, cores, memory). A changed machine
   invalidates them rather than being trusted.
+- `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
+  `{"bytes": n}` for an `n`-byte body and nothing else. A head times a link with it — five small
+  posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
+  `$INVINCIBLE_HOME/tune/links.json`, behind the same hardware tag and an hour's freshness. A link
+  that cannot be measured leaves the plan without a prediction.
 - `tg_tps`: the model's generation rate on this device alone, tokens/s, from the node's calibration
   run (`invincible tune probe`). Absent until the node has measured itself, and one unmeasured
   device keeps a plan on the memory rule. Link round-trip time and throughput per peer come from
