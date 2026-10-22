@@ -921,6 +921,36 @@ mod tests {
         assert_eq!(peer_note(&idle, None), Some(peer_refusal(&idle)));
     }
 
+    #[tokio::test]
+    async fn the_advertised_dispatch_capacity_is_the_configured_one() {
+        // Whatever a node advertises on `GET /v1/cluster/node` is what dispatchers size it by
+        // (spec/dispatch.md). It must be `[node] dispatch_max_inflight`, read from the config, not
+        // a literal in this module: one request, four, or zero for a node that is spoken for.
+        let state = |config: &crate::config::Config| ClusterState {
+            name: "studio".into(),
+            llama_server: PathBuf::from("/nonexistent/llama-server"),
+            rpc_backend: None,
+            peers: Vec::new(),
+            device_key: None,
+            runs: Vec::new(),
+            shard: false,
+            models: vec!["qwen3-4b".into()],
+            dispatch_max_inflight: config.node.dispatch_max_inflight,
+        };
+        let default = crate::config::Config::parse("").unwrap();
+        assert_eq!(default.node.dispatch_max_inflight, 1, "the default is one at a time");
+        let caps = state(&default).capabilities().await;
+        assert_eq!(caps.dispatch.map(|d| d.max_inflight), Some(1));
+
+        let four = crate::config::Config::parse("[node]\ndispatch_max_inflight = 4\n").unwrap();
+        let caps = state(&four).capabilities().await;
+        assert_eq!(caps.dispatch.map(|d| d.max_inflight), Some(4), "the configured number, not a literal");
+
+        let zero = crate::config::Config::parse("[node]\ndispatch_max_inflight = 0\n").unwrap();
+        let caps = state(&zero).capabilities().await;
+        assert_eq!(caps.dispatch.map(|d| d.max_inflight), Some(0), "zero is spoken for, not unset");
+    }
+
     #[test]
     fn the_plan_is_kept_after_the_engine_exits() {
         let plan = invincible_policy::plan(&PlanInput::new(

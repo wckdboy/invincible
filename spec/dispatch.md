@@ -2,8 +2,9 @@
 
 > **Not implemented in the node.** The rules exist as a tested policy
 > (`invincible_policy::choose`, `crates/invincible-policy/src/dispatch.rs`), and a node now
-> advertises them in its capabilities as `dispatch: { max_inflight, queue }` (both fixed: 1 and 0;
-> a shard advertises none, `crates/invincible/src/cluster.rs`). Nothing on the head reads that yet:
+> advertises them in its capabilities as `dispatch: { max_inflight, queue }` (`queue` fixed at 0,
+> `max_inflight` from `[node] dispatch_max_inflight`, default 1; a shard advertises none,
+> `crates/invincible/src/cluster.rs`). Nothing on the head reads that yet:
 > no request is dispatched, queued or retried. This document stays normative for what will be
 > built.
 
@@ -23,8 +24,8 @@ client can verify the result — an answer is right or wrong on its own.
 { "dispatch": { "max_inflight": 4, "queue": 0 } }
 ```
 
-- `max_inflight`: requests this node will run at once. Default 1 on a single-GPU node, 0 when the
-  node is a shard for someone else (its capacity is spoken for).
+- `max_inflight`: requests this node will run at once: `[node] dispatch_max_inflight`, default 1, 0
+  when the node is a shard for someone else (its capacity is spoken for).
 - `queue`: how many are waiting now. Refreshed on every probe; a stale number costs one slow
   request, never a wrong answer.
 
