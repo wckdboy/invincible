@@ -1,5 +1,12 @@
 # Dispatch: many requests, many nodes (v0, proposed)
 
+> **Not implemented in the node.** The rules exist as a tested policy
+> (`invincible_policy::choose`, `crates/invincible-policy/src/dispatch.rs`), and a node now
+> advertises them in its capabilities as `dispatch: { max_inflight, queue }` (both fixed: 1 and 0;
+> a shard advertises none, `crates/invincible/src/cluster.rs`). Nothing on the head reads that yet:
+> no request is dispatched, queued or retried. This document stays normative for what will be
+> built.
+
 Cluster sharding (spec/cluster.md) splits *one* model across devices, and a token crosses every
 stage, so more nodes make a bigger model possible and every token slower. Dispatch is the other
 direction and the one that scales: **independent requests spread across the nodes you own**, each

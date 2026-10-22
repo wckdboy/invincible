@@ -95,8 +95,9 @@ pub struct PlanDevice {
 }
 
 /// A device's measured generation rate for this model, alone on that device (tokens/s), from a
-/// calibration run (`invincible tune probe`). Joined to [`PlanDevice`] by (node, device): a device
-/// with no entry is uncalibrated, and one uncalibrated device makes the whole plan memory-only.
+/// benchmark (`invincible tune bench <model> --device <name>`). Joined to [`PlanDevice`] by (node,
+/// device): a device with no entry is uncalibrated, and one uncalibrated device makes the whole plan
+/// memory-only.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Measurement {
     pub node: String,
@@ -128,8 +129,9 @@ pub struct PlanInput {
     /// What the nodes measured about themselves. Empty or partial: plan by memory (v0).
     #[serde(default)]
     pub measured: Vec<Measurement>,
-    /// What the shard links cost per token (`invincible tune link`). Without an entry for a remote
-    /// node the plan still picks shares by device speed, but reports no prediction.
+    /// What the shard links cost per token, measured by the head over the link itself (`POST
+    /// /v1/cluster/meter`). Without an entry for a remote node the plan still picks shares by
+    /// device speed, but reports no prediction.
     #[serde(default)]
     pub links: Vec<LinkSpeed>,
     /// The split running now, if any: kept unless another predicts at least [`HYSTERESIS`] better,

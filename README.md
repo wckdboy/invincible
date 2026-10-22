@@ -1120,13 +1120,18 @@ split = "auto"                # only when it does not fit here; "always" to spli
 invincible cluster status     # devices, peers (probed now), heads served, where each model runs
 ```
 
-- The split is sized by each device's free memory; receipts list the nodes that took part (`cluster`).
+- The split is sized by each device's free memory, or by measured speed once every device taking
+  part has been benchmarked (`invincible tune bench <model>`); receipts list the nodes that took
+  part (`cluster`).
 - Shard links stay on the local network (private, link-local, Tailscale or `.local` addresses),
   never go through Tor or SOCKS5, and stop under `network = "offline"`.
 - A shard that leaves mid-answer ends that answer with an error event; the model is planned again
   over what is left (or waits, unhealthy, while the router uses another model).
 - Every node needs the same llama.cpp build with the RPC backend: llama.cpp's release archives have
   `ggml-rpc-server`; Homebrew's llama.cpp has no RPC backend.
+- A pipeline split needs a GPU device on the head: `llama-server --list-devices` has to report one.
+  Without it the model runs on the head alone, with a note saying why, and a CPU-only peer is kept
+  out of the split ([spec/cluster.md](spec/cluster.md), Known limits of phase 1).
 
 ## Evals: local against frontier, on your own work
 
