@@ -1,5 +1,8 @@
 /target/
 
+# Python
+__pycache__/
+
 # Model weights
 *.gguf
 *.safetensors
