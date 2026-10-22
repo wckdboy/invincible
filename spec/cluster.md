@@ -158,7 +158,8 @@ Vectors: `vectors/cluster.json`, the `link` cases.
 - `hardware`: the tag those profiles were measured on (os, arch, cores, memory). A changed machine
   invalidates them rather than being trusted.
 - `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
-  `{"bytes": n}` for an `n`-byte body and nothing else. A head times a link with it — five small
+  `{"bytes": n}` for an `n`-byte body and nothing else, and holds none of it (the body is read and
+  dropped a frame at a time — spec/pairing.md, Limits). A head times a link with it — five small
   posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
   `$INVINCIBLE_HOME/tune/links.json`, each measurement timestamped on its own, behind the same
   hardware tag and an hour's freshness: metering one peer does not refresh another's number. A link

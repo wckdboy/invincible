@@ -50,14 +50,19 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("invincible-scope-{tag}-{n:x}"))
 }
 
-/// An engine that answers a chat completion with what it was asked.
+/// An engine that answers a chat completion with what it was asked — at once, or after the
+/// `hold_ms` the request asks for, so a test can keep a request in flight.
 async fn stub_engine() -> String {
     let router = Router::new().route(
         "/v1/chat/completions",
         post(|body: Bytes| async move {
             let request: Value = serde_json::from_slice(&body).unwrap();
-            axum::Json(json!({ "engine_saw": request })).into_response()
-        }),
+            if let Some(ms) = request["hold_ms"].as_u64() {
+                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            }
+            axum::Json(json!({ "engine_saw": request, "seen_bytes": body.len() })).into_response()
+        })
+        .layer(axum::extract::DefaultBodyLimit::max(64 << 20)),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -86,6 +91,12 @@ async fn stub_agent() -> (String, Arc<AtomicU64>) {
 /// A node with one engine, a stub agent, an audit log, a cluster and a dispatcher: every operator
 /// route the device is refused has something to answer with.
 async fn node() -> Node {
+    node_holding(invincible::config::DEFAULT_MAX_BUFFERED_BYTES).await
+}
+
+/// The same node, holding at most [ceiling] bytes of device request bodies at once
+/// (`[node] max_buffered_bytes`, spec/pairing.md, Limits).
+async fn node_holding(ceiling: u64) -> Node {
     let dir = temp_dir("node");
     std::fs::create_dir_all(&dir).unwrap();
     let engine = Engine::attached("small", &stub_engine().await, None, true);
@@ -125,6 +136,7 @@ async fn node() -> Node {
             .with_agent(&agent_url)
             .with_cluster(cluster)
             .with_dispatch(dispatch)
+            .with_max_buffered_bytes(ceiling)
             .with_pairing(pairing.clone()),
     );
     tokio::spawn(remote::serve(listener, pairing.clone(), device_app(state.clone())));
@@ -292,6 +304,66 @@ async fn a_device_reaches_exactly_what_its_app_and_a_shard_need() {
             .unwrap();
         assert_eq!(answer["bytes"], len as u64);
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_device_cannot_hold_more_than_the_nodes_body_ceiling() {
+    // 2 MiB of device bodies at once, over the real session path: the door, the Noise pipe, the
+    // listener. Bodies of 1.5 MiB are legal on their own; four at once are not.
+    let node = node_holding(2 << 20).await;
+    let (phone, dir) = device("phone-ceiling");
+    pair(&node, &phone).await;
+    let door = door(&node, &phone).await;
+    let client = client();
+    let body = json!({
+        "model": "small",
+        "max_tokens": 16,
+        "messages": [{ "role": "user", "content": "x".repeat(1 << 20) }],
+        "hold_ms": 1_000,
+    });
+
+    let mut tasks = Vec::new();
+    for _ in 0..4 {
+        let url = format!("{door}/v1/chat/completions");
+        let body = body.clone();
+        let client = client.clone();
+        tasks.push(tokio::spawn(async move {
+            let response = client.post(url).json(&body).send().await.unwrap();
+            let status = response.status().as_u16();
+            let retry = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).map(str::to_owned);
+            (status, retry, response.text().await.unwrap())
+        }));
+    }
+    let mut answered = 0;
+    let mut refused = 0;
+    for task in tasks {
+        let (status, retry, body) = task.await.unwrap();
+        match status {
+            200 => answered += 1,
+            503 => {
+                refused += 1;
+                assert_eq!(retry.as_deref(), Some("2"), "a refusal says when to come back");
+                assert!(body.contains(&(2 << 20).to_string()), "a refusal names the ceiling: {body}");
+            }
+            other => panic!("unexpected answer {other}: {body}"),
+        }
+    }
+    assert!(answered <= 1, "{answered} bodies of 1.5 MiB were held past a 2 MiB ceiling");
+    assert!(refused >= 1, "nothing was refused, so the ceiling was not applied");
+
+    // Refusing did not take the node with it: healthz, the operator's API, and one more device
+    // turn all answer.
+    assert_eq!(client.get(format!("{}/healthz", node.url)).send().await.unwrap().status(), 200);
+    let operator = operator();
+    assert_eq!(operator.get(format!("{}/v1/audit", node.url)).send().await.unwrap().status(), 200);
+    let chat = client
+        .post(format!("{door}/v1/chat/completions"))
+        .json(&json!({ "model": "small", "messages": [{ "role": "user", "content": "hi" }] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(chat.status(), 200);
     let _ = std::fs::remove_dir_all(dir);
 }
 

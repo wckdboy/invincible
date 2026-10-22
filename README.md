@@ -1088,7 +1088,11 @@ or pairing hangs until it times out.
 Paired devices reach `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
 cluster's `/v1/cluster/node` and `/v1/cluster/meter` with no token (their key authenticates them),
 and nothing else: the agent, the audit log, dispatch and the admin endpoints answer them exactly as
-a path that does not exist. The list is in [spec/pairing.md](spec/pairing.md) (Transport). Autobot
+a path that does not exist. The list is in [spec/pairing.md](spec/pairing.md) (Transport). Each
+route takes only the body it needs (32 MiB for a chat completion, 5 MiB for the meter), and the node
+holds at most `[node] max_buffered_bytes` of device request bodies at once — 256 MiB unless set,
+refusing with 503 and `Retry-After: 2` past it instead of running itself out of memory
+([spec/pairing.md](spec/pairing.md), Limits). Autobot
 pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
