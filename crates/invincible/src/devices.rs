@@ -18,17 +18,26 @@ pub struct StaticKey {
 }
 
 impl StaticKey {
+    /// Reads the key at [path]; `None` when there is none. Never creates one, for code that only
+    /// wants to know whether this machine has a key (a listing, say).
+    pub fn load(path: &Path) -> Result<Option<Self>, String> {
+        let Some(text) = fsutil::read_optional(path)? else {
+            return Ok(None);
+        };
+        let mut lines = text.lines().map(|l| URL_SAFE_NO_PAD.decode(l.trim()));
+        match (lines.next(), lines.next()) {
+            (Some(Ok(private)), Some(Ok(public))) if private.len() == 32 && public.len() == 32 => {
+                Ok(Some(Self { private, public }))
+            }
+            _ => Err(format!("{}: not a key file", path.display())),
+        }
+    }
+
     /// Reads the key at [path] (two base64url lines: private, public), creating it (mode 0600)
     /// when absent. The private key never leaves this file.
     pub fn load_or_create(path: &Path) -> Result<Self, String> {
-        if let Some(text) = fsutil::read_optional(path)? {
-            let mut lines = text.lines().map(|l| URL_SAFE_NO_PAD.decode(l.trim()));
-            return match (lines.next(), lines.next()) {
-                (Some(Ok(private)), Some(Ok(public))) if private.len() == 32 && public.len() == 32 => {
-                    Ok(Self { private, public })
-                }
-                _ => Err(format!("{}: not a key file", path.display())),
-            };
+        if let Some(key) = Self::load(path)? {
+            return Ok(key);
         }
         let params = SESSION_PATTERN.parse().expect("Noise pattern");
         let pair = snow::Builder::new(params).generate_keypair().map_err(|e| format!("key generation: {e}"))?;

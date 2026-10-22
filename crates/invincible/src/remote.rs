@@ -570,6 +570,32 @@ pub struct Paired {
     pub receipt_key: Option<String>,
 }
 
+/// Why a pairing attempt failed, told apart so a caller can say whether the code was wrong or the
+/// network was: [PairError::Refused] is the node declining the code (wrong, used or expired),
+/// which is the user's input to fix; [PairError::Failed] is everything else — no address, no
+/// connection, a handshake that broke.
+#[derive(Debug)]
+pub enum PairError {
+    Refused(String),
+    Failed(String),
+}
+
+impl std::fmt::Display for PairError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(message) | Self::Failed(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for PairError {}
+
+impl From<PairError> for String {
+    fn from(error: PairError) -> Self {
+        error.to_string()
+    }
+}
+
 async fn dial(addrs: &[String]) -> Result<TcpStream, String> {
     let mut last = "no address".to_owned();
     for addr in addrs {
@@ -586,26 +612,34 @@ async fn dial(addrs: &[String]) -> Result<TcpStream, String> {
 }
 
 /// Pairs [device] with the node in [code], under [name].
-pub async fn pair(code: &PairingCode, device: &StaticKey, name: &str) -> Result<Paired, String> {
-    let mut tcp = dial(&code.addrs).await?;
+pub async fn pair(code: &PairingCode, device: &StaticKey, name: &str) -> Result<Paired, PairError> {
+    let mut tcp = dial(&code.addrs).await.map_err(PairError::Failed)?;
     let work = async {
-        let mut hs = initiator(PAIR_PATTERN, device, &code.node_key, PAIR_PROLOGUE, Some(&code.secret))?;
+        let mut hs = initiator(PAIR_PATTERN, device, &code.node_key, PAIR_PROLOGUE, Some(&code.secret))
+            .map_err(PairError::Failed)?;
         let mut out = vec![0u8; MAX_FRAME];
         let hello = json!({ "name": name }).to_string();
-        let m = hs.write_message(hello.as_bytes(), &mut out).map_err(|e| e.to_string())?;
-        tcp.write_u8(MODE_PAIR).await.map_err(|e| e.to_string())?;
-        write_frame(&mut tcp, &out[..m]).await.map_err(|e| e.to_string())?;
-        let reply = read_frame(&mut tcp).await.map_err(|_| "the node refused pairing (code wrong, used or expired)")?;
+        let m = hs.write_message(hello.as_bytes(), &mut out).map_err(|e| PairError::Failed(e.to_string()))?;
+        tcp.write_u8(MODE_PAIR).await.map_err(|e| PairError::Failed(e.to_string()))?;
+        write_frame(&mut tcp, &out[..m]).await.map_err(|e| PairError::Failed(e.to_string()))?;
+        // The node closes the connection, without a reply, when it will not pair us: the code is
+        // wrong, already used, replaced or expired. That is the caller's input, not the network.
+        let reply = read_frame(&mut tcp)
+            .await
+            .map_err(|_| PairError::Refused("the node refused pairing (code wrong, used or expired)".to_owned()))?;
         let mut payload = vec![0u8; MAX_FRAME];
-        let n = hs.read_message(&reply, &mut payload).map_err(|e| format!("pairing handshake failed: {e}"))?;
-        let reply: serde_json::Value = serde_json::from_slice(&payload[..n]).map_err(|e| e.to_string())?;
+        let n = hs
+            .read_message(&reply, &mut payload)
+            .map_err(|e| PairError::Failed(format!("pairing handshake failed: {e}")))?;
+        let reply: serde_json::Value =
+            serde_json::from_slice(&payload[..n]).map_err(|e| PairError::Failed(e.to_string()))?;
         Ok(Paired {
             node: reply["node"].as_str().unwrap_or("node").to_owned(),
             device: reply["device"].as_str().unwrap_or(name).to_owned(),
             receipt_key: reply["receipts"].as_str().filter(|k| !k.is_empty()).map(str::to_owned),
         })
     };
-    timeout(HANDSHAKE_TIMEOUT, work).await.map_err(|_| "pairing timed out".to_owned())?
+    timeout(HANDSHAKE_TIMEOUT, work).await.map_err(|_| PairError::Failed("pairing timed out".to_owned()))?
 }
 
 /// Opens an encrypted session to a node whose key the device pinned when it paired.

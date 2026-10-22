@@ -1,12 +1,16 @@
-# Dispatch: many requests, many nodes (v0, proposed)
+# Dispatch: many requests, many nodes (v0)
 
-> **Not implemented in the node.** The rules exist as a tested policy
-> (`invincible_policy::choose`, `crates/invincible-policy/src/dispatch.rs`), and a node now
-> advertises them in its capabilities as `dispatch: { max_inflight, queue }` (`queue` fixed at 0,
-> `max_inflight` from `[node] dispatch_max_inflight`, default 1; a shard advertises none,
-> `crates/invincible/src/cluster.rs`). Nothing on the head reads that yet:
-> no request is dispatched, queued or retried. This document stays normative for what will be
-> built.
+> **Built on the head, unaudited.** `POST /v1/dispatch/chat/completions` takes one non-streaming
+> completion and answers it whole from one of the nodes this machine owns
+> (`crates/invincible/src/dispatch.rs`): the answering node comes back in
+> `invincible-dispatched-to`, a retry in `invincible-dispatch-retried`, and
+> `dispatch: {"via", "node"}` is written to the head's audit line only — never into the signed
+> receipt. `stream: true` is refused with a 400 (`streaming_not_dispatched`) that points at
+> `/v1/chat/completions`. A node advertises what it will take in its capabilities as
+> `dispatch: { max_inflight, queue }` (`queue` fixed at 0, `max_inflight` from
+> `[node] dispatch_max_inflight`, default 1; a shard advertises none,
+> `crates/invincible/src/cluster.rs`). The rules below are normative for what is built and for the
+> parts still to build; "Where v0 differs" lists what a caller will notice today.
 
 Cluster sharding (spec/cluster.md) splits *one* model across devices, and a token crosses every
 stage, so more nodes make a bigger model possible and every token slower. Dispatch is the other
@@ -50,12 +54,13 @@ refused. If no node is eligible, it answers `503 no_capacity` with the reason pe
 
 ## Lifecycle and failure
 
-- The head opens one session per request (as `/v1/agent` already does) and streams the answer
+- The head opens one session per request (as `/v1/agent` already does) and relays the answer
   through, headers and receipt id included.
 - **Before the first token**, a failed node is retried on the next eligible node, up to one retry.
   **After** the first token the request is committed: the stream ends with an error event and the
   request appears in the receipt with `error.code = "dispatched_node_failed"`. Half an answer from
-  a second node would be a lie.
+  a second node would be a lie. (v0 answers whole, so every failure it sees is before the first
+  token; the after-token case is what streaming adds.)
 - The answering node's receipt stays the receipt of record. The head adds
   `dispatch: { "via": "<head name>", "node": "<node name>" }` to its audit line only — never to
   the signed receipt, which must describe one machine's work.

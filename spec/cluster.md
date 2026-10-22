@@ -122,8 +122,9 @@ Vectors: `vectors/cluster.json`, the `link` cases.
 ## Discovery
 
 - **Phase 1: paired peers.** A head's peers are the nodes it paired with (`nodes.json`, written by
-  `invincible join`); it reaches each at the addresses pinned at pairing, over a session, and asks
-  for its capabilities. Membership is "paired, reachable, and serving as a shard for me".
+  `invincible join` or by `POST /v1/cluster/join`); it reaches each at the addresses pinned at
+  pairing, over a session, and asks for its capabilities. Membership is "paired, reachable, and
+  serving as a shard for me".
 - **Phase 2: mDNS on the LAN.** Each node with `[remote] listen` advertises `_invincible._tcp.local`
   with a TXT record of its key fingerprint and nothing else (no name, no model list: the record is
   readable by anyone on the LAN). A head matches announcements against keys it already pinned, so
@@ -343,6 +344,141 @@ lists hosts off hardware you own, and `cluster` lists your own machines that too
 - Later: `invincible cluster plan <model>` (dry run), `invincible cluster train ...` (below). What
   the plans read is measured by `invincible tune probe`, `tune bench <model>` and `tune show`;
   there is no `cluster` subcommand for calibration.
+
+### Membership API: pair, join, list, rename, unpair (built)
+
+Pairing and membership used to be CLI-only: `invincible pair` printed a code, `invincible join`
+consumed one on another machine, `invincible devices --remove` unpaired. A phone, a dashboard or
+a provisioning script could do none of it. These five routes do the same work over the node's own
+API — JSON in, JSON out — behind `Authorization: Bearer <token>` from
+`$INVINCIBLE_HOME/token`, like every other admin route: without the token they answer `401
+invalid_api_key`, and a body that would be refused never reaches the handler. None of them is on
+the device API: a paired device cannot mint a code, join, rename or unpair.
+
+They run the same code the CLI does — `Pairing::start_for`, `remote::pair`, and `nodes.json`
+(`crates/invincible/src/membership.rs`) — so a URI minted here is consumed by an
+`invincible join` elsewhere, and a code from `invincible pair` can be joined here. The wire
+protocol does not change, and neither does the CLI's output.
+
+**`POST /v1/cluster/pair`** — opens a pairing code, the same one `invincible pair` shows as a QR
+code. The body is optional:
+
+```json
+{ "ttl_seconds": 600, "name": "add the phone" }
+```
+
+- `ttl_seconds`: how long the code lives, clamped to 1–86400, default 600.
+- `name`: a label for the code, for the node's log. It renames neither the node nor the device.
+
+```json
+{
+  "code_uri": "invincible://pair?v=0&k=<key>&s=<secret>&a=192.168.1.21:7778",
+  "secret": "<secret>",
+  "fingerprint": "6f1c-2d3e-4a5b-6c7d",
+  "node": "mini",
+  "expires_in_seconds": 600,
+  "expires_at": 1793000600
+}
+```
+
+The secret appears twice, inside `code_uri` and as `secret`, and is never written to the node's
+log or its audit log: a pairing code is a one-time capability, and a log line holding one hands it
+to whoever reads the log. The node logs that a code was opened, and its label. A code works once,
+and opening one replaces any code already open ([pairing.md](pairing.md)). `409 remote_disabled`
+when `[remote] listen` is unset.
+
+**`POST /v1/cluster/join`** — pairs this machine with the node whose code it is, records it in
+`nodes.json`, and answers the identities a caller can check without reading a file:
+
+```json
+{ "uri": "invincible://pair?v=0&k=…&s=…&a=…", "name": "studio" }
+```
+
+`name` is optional. Without it the name is this machine's own `[remote] name`, exactly as
+`invincible join` defaults it (`crates/invincible/src/config.rs`, `join_name`) — the string the
+peer's `[cluster] heads` has to contain.
+
+```json
+{
+  "node": "mini",
+  "device": "studio",
+  "fingerprint": "6f1c-2d3e-4a5b-6c7d",
+  "heads_must_name": "studio",
+  "addresses": ["192.168.1.21:7778"],
+  "receipt_key": "<mini's receipt key>"
+}
+```
+
+`node` is the peer's own name, `device` is the name it now lists this machine under,
+`heads_must_name` repeats that name for the reader wiring `[cluster] heads`, and `fingerprint` is
+the peer's static key — compare it with the code's. One join runs at a time. Errors, each with a
+`message` that says what happened and never contains the URI or its secret:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `invalid_pairing_code` | the URI does not parse (wrong scheme, version, missing or malformed key/secret/address) |
+| 400 | `pairing_refused` | the peer declined the code: wrong, already used, replaced or expired |
+| 409 | `join_in_progress` | another join is dialling on this node; wait for it |
+| 502 | `join_failed` | the peer could not be reached, or the handshake broke |
+| 409 | `membership_unavailable` | this process has no home directory to record the node in |
+
+Nothing is written unless the pairing completed: a refused join leaves `nodes.json` as it was and
+pins nothing on the peer.
+
+**`GET /v1/cluster/nodes`** — every node this machine paired with:
+
+```json
+{ "nodes": [ {
+  "name": "mini", "fingerprint": "6f1c-2d3e-4a5b-6c7d",
+  "addresses": ["192.168.1.21:7778"],
+  "link_addresses": ["192.168.1.21:7778"], "refused_addresses": [],
+  "device": "studio", "receipt_key": "…",
+  "reachable": true, "probe_ms": 3
+} ] }
+```
+
+- `device`: the name that node lists this machine under (learned at join). It is the one string a
+  person cannot read from here, and `[cluster] heads` on the peer is compared against it.
+- `reachable`: `true` when the peer answered a probe just now, `false` when the connection or the
+  handshake failed (`error` says how), and `null` when this node cannot tell — no `device.key`
+  here, no address the link rule allows (`reason`), or no answer within 1.5 s (`reason`). All the
+  probes run at once and each is capped, so a peer that is asleep cannot make this call slow: it
+  is reported unknown rather than waited for.
+- `probe_ms`: the encrypted round trip that answered, handshake included — the link, measured
+  cheaply. There is no last-seen per node: nothing records it, so none is invented here.
+- `link_addresses` / `refused_addresses`: which of the pinned addresses may carry a link under
+  this node's network mode, and why the rest may not ([Links](#links-normative)).
+
+**`DELETE /v1/cluster/nodes/{name}`** — forgets a node here:
+
+```json
+{ "unpaired": "mini", "nodes_remaining": 0 }
+```
+
+`nodes.json` only: the peer keeps its own record of this machine until someone unpairs it there,
+and nothing is sent to it. `404 not_found` for a name this machine does not know, with the reason
+in `message`.
+
+**`PATCH /v1/cluster/nodes/{name}`** — renames a node here:
+
+```json
+{ "name": "gpu-box" }
+```
+
+```json
+{ "name": "gpu-box", "was": "mini", "changed": true }
+```
+
+The name is this machine's alone: the peer still calls itself what it did, and nothing is sent to
+it. `nodes.json` is keyed by name, so a name another paired node already has is refused with `409
+name_taken`; `404 not_found` for an unknown source; `400 invalid_name` when the new name is empty,
+longer than 40 characters, or not letters, digits, `-` and `_` (refused rather than cleaned, so a
+rename never quietly means something else).
+
+**When a change takes effect.** `nodes.json`, `[cluster]` and `[[models]] cluster` are read when
+the node starts, and dispatch and the split planner keep the peers they read then. A join, rename
+or unpair made over the API is therefore fully in effect for the *next* `invincible serve`, and
+`GET /v1/cluster/nodes` shows it at once; a running model is not re-planned by it.
 
 On a shard:
 
