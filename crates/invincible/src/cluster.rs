@@ -418,7 +418,10 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                     "this llama-server has no RPC backend (build it with GGML_RPC=ON; see spec/cluster.md)".into(),
                 );
             } else if head.devices.is_empty() {
-                notes.push("this machine reports no GPU device to anchor a split".into());
+                notes.push(
+                    "no GPU device (`llama-server --list-devices`): running locally. A split needs a GPU head (spec/cluster.md, Known limits)"
+                        .into(),
+                );
             } else {
                 for link in &run.links {
                     match probe_peer(&link.peer, &head.device_key, &head.network).await {
@@ -484,7 +487,13 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
             input.measured = measured;
             input.links = links;
             input.current = run.state().plan.map(|plan| plan.shares).unwrap_or_default();
-            let plan = invincible_policy::plan(&input);
+            let plan = if head.devices.is_empty() {
+                // Nothing to anchor layers on: run it here, as this node did before the model named
+                // a peer. Blocking would be a lie about the machine's memory (PlanReason::NoDevices).
+                Plan { action: PlanAction::Local, need_mib: 0, shares: Vec::new(), reason: None, predicted_tps: None }
+            } else {
+                invincible_policy::plan(&input)
+            };
             for note in &notes {
                 tracing::warn!(model = %run.model, "cluster: {note}");
             }
@@ -503,10 +512,12 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                 }
                 PlanAction::Local => tracing::info!(model = %run.model, "cluster: runs on this machine alone"),
             }
-            run.set(RunState { plan: Some(plan), notes });
+            run.set(RunState { plan: Some(plan.clone()), notes });
             let started = tokio::time::Instant::now();
             crate::engine::run_once(&engine, &launch, &client).await;
-            run.set(RunState { plan: None, notes: vec!["restarting".into()] });
+            // Keep the plan: it is what the next replan compares against (spec/cluster.md,
+            // Stability). Clearing it made hysteresis dead and resharded on every restart.
+            run.set(RunState { plan: Some(plan), notes: vec!["restarting".into()] });
             if started.elapsed() >= Duration::from_secs(60) {
                 backoff = Duration::from_secs(1);
             }

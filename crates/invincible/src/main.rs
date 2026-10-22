@@ -1049,10 +1049,17 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             let device = device_key.clone().expect("a device key for a split model");
             let mut links = Vec::new();
             for name in &model.cluster {
-                let peer = peers.iter().find(|p| &p.name == name).cloned().ok_or(format!(
-                    "model {}: no paired node {name:?} (pair with it first: `invincible join` with its code)",
-                    model.id
-                ))?;
+                // One unresolved name must not take every other model down with it: drop that
+                // peer, say which name space to look in, and let the model run where it can.
+                let Some(peer) = peers.iter().find(|p| &p.name == name).cloned() else {
+                    tracing::warn!(
+                        model = %model.id,
+                        peer = %name,
+                        "no node by that name: `invincible join` saves the node's own [remote] name, \
+                         not the name given with --name; running this model without it"
+                    );
+                    continue;
+                };
                 links.push(invincible::cluster::open_link(peer, device.clone(), network.clone()).await?);
             }
             let run =
@@ -1497,7 +1504,10 @@ fn cluster_text(status: &serde_json::Value) -> String {
                 .collect::<Vec<_>>()
                 .join(" + "),
             Some("local") => "this node alone".to_owned(),
-            Some("block") => format!("cannot run: needs {} MiB", plan["need_mib"]),
+            Some("block") => match plan["reason"].as_str() {
+                Some("no_devices") => "cannot run: no device to place it on (`llama-server --list-devices`)".to_owned(),
+                _ => format!("cannot run: needs {} MiB", plan["need_mib"]),
+            },
             _ => "starting".to_owned(),
         };
         let _ = writeln!(out, "model {}: {placement}", model["id"].as_str().unwrap_or("?"));

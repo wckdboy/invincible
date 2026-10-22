@@ -158,6 +158,8 @@ pub enum PlanAction {
 #[serde(rename_all = "snake_case")]
 pub enum PlanReason {
     DoesNotFit,
+    /// No device answered: nothing to place layers on. Not the same as "too small".
+    NoDevices,
 }
 
 /// One device's part of a split: thousandths of the layers.
@@ -355,7 +357,16 @@ pub fn plan(input: &PlanInput) -> Plan {
         return local;
     }
     let total: u64 = input.devices.iter().map(usable).sum();
-    if need_mib > total || total == 0 {
+    if total == 0 {
+        return Plan {
+            action: PlanAction::Block,
+            need_mib,
+            shares: Vec::new(),
+            reason: Some(PlanReason::NoDevices),
+            predicted_tps: None,
+        };
+    }
+    if need_mib > total {
         return Plan {
             action: PlanAction::Block,
             need_mib,

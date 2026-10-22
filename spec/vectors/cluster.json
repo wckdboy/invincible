@@ -1,6 +1,6 @@
 {
   "spec": "cluster",
-  "version": 1,
+  "version": 2,
   "cases": [
     {
       "name": "link: loopback is always direct",
@@ -460,7 +460,7 @@
       "expect": {
         "action": "block",
         "need_mib": 1639,
-        "reason": "does_not_fit"
+        "reason": "no_devices"
       }
     },
     {
