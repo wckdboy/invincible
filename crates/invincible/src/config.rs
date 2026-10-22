@@ -337,6 +337,21 @@ pub struct NodeConfig {
     /// `dispatch.max_inflight`); 0 marks it as spoken for (a shard), never a dispatch target.
     #[serde(default = "one")]
     pub dispatch_max_inflight: u64,
+    /// How many bytes of device request bodies the node holds at once, across every request in
+    /// flight (spec/pairing.md, Limits). A device request that does not fit is refused with 503
+    /// and a retry hint, before its body is read, so 32 sessions cannot pin 32 × 32 MiB.
+    ///
+    /// 256 MiB: eight chat bodies at the 32 MiB per-request limit, a sixteenth of a 4 GB box, and
+    /// small enough that a node running a model still has its memory when a device floods it.
+    #[serde(default = "max_buffered")]
+    pub max_buffered_bytes: u64,
+}
+
+/// What a node holds of device request bodies by default: 256 MiB.
+pub const DEFAULT_MAX_BUFFERED_BYTES: u64 = 256 << 20;
+
+fn max_buffered() -> u64 {
+    DEFAULT_MAX_BUFFERED_BYTES
 }
 
 fn one() -> u64 {
@@ -353,7 +368,7 @@ fn never() -> String {
 
 impl Default for NodeConfig {
     fn default() -> Self {
-        Self { network: offline(), egress: never(), dispatch_max_inflight: one() }
+        Self { network: offline(), egress: never(), dispatch_max_inflight: one(), max_buffered_bytes: max_buffered() }
     }
 }
 
@@ -542,7 +557,7 @@ pub fn home() -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, DEFAULT_MAX_BUFFERED_BYTES};
 
     #[test]
     fn empty_config_is_closed() {
@@ -560,6 +575,17 @@ mod tests {
         assert_eq!(four.node.dispatch_max_inflight, 4);
         // A shard says 0 on purpose: it must be read as 0, not as "unset, so 1".
         assert_eq!(Config::parse("[node]\ndispatch_max_inflight = 0\n").unwrap().node.dispatch_max_inflight, 0);
+    }
+
+    #[test]
+    fn the_device_body_ceiling_defaults_to_256_mib_and_is_settable() {
+        let default = Config::parse("").unwrap();
+        assert_eq!(default.node.max_buffered_bytes, 256 << 20, "a sixteenth of a 4 GB box");
+        assert_eq!(default.node.max_buffered_bytes, DEFAULT_MAX_BUFFERED_BYTES);
+        let small = Config::parse("[node]\nmax_buffered_bytes = 8388608\n").unwrap();
+        assert_eq!(small.node.max_buffered_bytes, 8 << 20, "an operator can hold a node to less");
+        let none = Config::parse("[node]\nmax_buffered_bytes = 0\n").unwrap();
+        assert_eq!(none.node.max_buffered_bytes, 0, "0 refuses every device body, which is a choice too");
     }
 
     #[test]

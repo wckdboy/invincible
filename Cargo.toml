@@ -16,6 +16,8 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "signal", "sync", "time", "fs", "io-util"] }
 axum = "0.8"
+# Bodies: `BytesMut` for the one place the API buffers a request (a body limit read chunk by chunk).
+bytes = "1"
 # rustls with the system's trust roots; SOCKS for Tor and SOCKS5 egress.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "socks"] }
 toml = "0.9"

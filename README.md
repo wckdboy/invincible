@@ -1097,7 +1097,12 @@ cluster's `/v1/cluster/node` and `/v1/cluster/meter`, with no token (the device'
 authenticates it). `agent` adds `/v1/agent` — the Autobot proxy, which runs with the node's own
 token — `audit` adds the audit log, and `dispatch` adds `/v1/dispatch`, a hop into your other
 nodes. Nothing else is reachable, and a route the device was not granted answers exactly as a path
-that does not exist, so a device cannot even learn it is there. Grant and revoke on the node's own
+that does not exist, so a device cannot even learn it is there. Past that check, each route takes
+only the body it needs (32 MiB for a chat completion, 5 MiB for the meter), and the node holds at
+most `[node] max_buffered_bytes` of device request bodies at once — 256 MiB unless set, refusing
+with 503 and `Retry-After: 2` past it instead of running itself out of memory. A device outside its
+grant never reaches either check, so its 404 says nothing about them
+([spec/pairing.md](spec/pairing.md), Limits). Grant and revoke on the node's own
 API, with no re-pairing:
 
 ```sh

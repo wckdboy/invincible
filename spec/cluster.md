@@ -163,7 +163,8 @@ pairing grants unless the operator says otherwise; over its session):
 - `hardware`: the tag those profiles were measured on (os, arch, cores, memory). A changed machine
   invalidates them rather than being trusted.
 - `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
-  `{"bytes": n}` for an `n`-byte body and nothing else. A head times a link with it — five small
+  `{"bytes": n}` for an `n`-byte body and nothing else, and holds none of it (the body is read and
+  dropped a frame at a time — spec/pairing.md, Limits). A head times a link with it — five small
   posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
   `$INVINCIBLE_HOME/tune/links.json`, each measurement timestamped on its own, behind the same
   hardware tag and an hour's freshness: metering one peer does not refresh another's number. A link
@@ -175,6 +176,12 @@ pairing grants unless the operator says otherwise; over its session):
   on the memory rule. `invincible tune probe` reports the machine only (os, arch, cores, memory,
   devices, engines) and runs no benchmark; link round-trip time and throughput come from the meter
   above, not from either `tune` command.
+
+`GET /v1/cluster/node` and `POST /v1/cluster/meter` are both reached through the device API, so
+both are admitted the same way: the `shard` capability first ([pairing.md](pairing.md),
+Capabilities), then the node's ceiling on held device bodies, then the route's own limit — the meter
+last, and only for the time it may spend, since it holds nothing (spec/pairing.md, Limits). A device
+without `shard` gets the same 404 as for a path that does not exist, whatever it posts.
 
 ## Partitioning (normative)
 

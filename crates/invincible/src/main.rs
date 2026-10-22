@@ -1288,6 +1288,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let speech = invincible::synth::from_config(&config.speech, &home);
     let images = invincible::synth::from_config(&config.images, &home);
     let mut state = AppState::new(engines, config.node.settings(), token)
+        .with_max_buffered_bytes(config.node.max_buffered_bytes)
         .with_cloud(cloud)
         .with_media(speech, images)
         .with_receipt_key(&config.remote.name(), receipt_key)

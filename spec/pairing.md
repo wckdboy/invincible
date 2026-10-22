@@ -178,10 +178,41 @@ Membership API).
   until one finishes (each has 10 seconds).
 - A paired device holds at most 32 sessions at once.
 - Request headers must arrive within 30 seconds.
-- One `POST /v1/cluster/meter` body is at most 5 MiB on a device session: the 4 MiB bulk payload
-  the link meter sends, and no more. A larger one is refused with 413 before it is buffered. (The
-  loopback API takes a larger body on that route; a device does not need one.)
-- Bodies on the other device routes are the same limits as loopback: 32 MiB for a chat completion.
+- Body limits, per route, on both listeners — a route takes what it needs and no more. A body over
+  its route's limit is refused with **413** and a message that names the limit in bytes, before the
+  body is read:
+
+  | Route | Device session | Loopback | Why that number |
+  |---|---|---|---|
+  | `POST /v1/chat/completions` | 32 MiB (33554432) | 32 MiB | a conversation's text plus its images (below) |
+  | `POST /v1/dispatch/chat/completions` | 32 MiB | 32 MiB | a chat completion, forwarded whole; a device reaches it with the `dispatch` capability |
+  | `POST /v1/messages` | — | 32 MiB | the same conversation, Anthropic's shape |
+  | `POST /v1/cluster/meter` | 5 MiB (5242880) | 16 MiB | the 4 MiB bulk payload the link meter sends, and room for a larger post on the operator's own bench |
+  | `POST /v1/agent*` | 64 MiB for a turn, 1 MiB otherwise | 64 MiB for a turn, 1 MiB otherwise | the agent's own caps (spec/agent.md) |
+
+  A route a device was not granted is not limited on its way to a 404: it is refused there. The
+  checks run in one order — **capability, then the node's ceiling, then the route's limit** —
+  because a 413 or a 503 answers with a number from this node's configuration, and a device the
+  operator did not admit may not learn that number, nor make the node reserve a byte for a body it
+  will never read ([Capabilities](#capabilities), `require_capability`).
+
+- The chat limit is not a context window, because a chat body is not bounded by one. Its text is
+  (128k tokens is about 512 KiB at four characters a token), but its images arrive as base64
+  `data:` URLs — a third larger than the bytes they carry — the token estimate charges 1 600 tokens
+  an image whatever its size, and a provider takes 20 MB an image. So bytes bound an image, and
+  32 MiB holds a few of them. It is also the operator's documented ceiling and the size a head
+  dispatches to a paired node unchanged, which is why a device session's chat limit cannot be
+  lower than loopback's: a request the operator's API accepted must still arrive over a session.
+- The node holds at most `[node] max_buffered_bytes` of device request bodies at once, across every
+  request in flight: **256 MiB (268435456)** unless the operator sets it. Each device request
+  reserves what its body can hold — its `Content-Length`, or the route's limit when it declares
+  none — before the first byte is read, and gives it back when the request is answered. A request
+  that would pass the ceiling is refused with **503** and `Retry-After: 2`, before anything is
+  allocated, so 32 sessions × 32 MiB is refused at the ceiling rather than taking the node down
+  with it; the node keeps answering everything else (healthz, the operator's API, a completion
+  that fits). Nothing else is counted: the meter reads and discards its body as it arrives (no more
+  than one frame of it is held at a time), and the operator's own loopback bodies are not charged to
+  a ceiling meant for the callers the node does not sit behind.
 
 ## The tunnel
 
