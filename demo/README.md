@@ -18,8 +18,9 @@ sh demo/run.py --token "$(invincible token on the head)" \
 | 2 | one node, the same load | what one machine does alone, with `--requests` clients in flight at once |
 | 3 | the same work through **one** URL | dispatch: both nodes answer, the split is counted per answer from `invincible-dispatched-to`, and the speedup is act 3 against act 2 |
 | 4 | a node nobody configured | `announce` → seed → `discover`, and the line that matters: `paired as node "…"` only when the fingerprint matches a key pinned in `nodes.json` |
-| 5 | a receipt checked off-box | the envelope and the node's public key are fetched, then `receipt verify` runs here: `checked` and `not checked` printed side by side |
+| 5 | a receipt checked off-box | the envelope and the node's public key are fetched, then `receipt verify` runs here: `checked` and `not checked` printed side by side. A **dispatched** answer has two receipts — the head's for the exchange it returned (the id in the header) and the answering node's for the work — so both are verified, against both keys, and the two must name the same answer hash |
 | 6 | break it | the peer is killed mid-flight and the same load is sent again: every request must still be answered |
+| 7 | a misconfiguration named | one line (`dispatch_max_inflight = 0`) on a node that is not a shard: `invincible doctor` names it and its consequence before a request is sent, then the load proves the consequence (nothing is sent there), then the rig is put back |
 
 Prerequisites: two machines that are already paired and serving the same model (see
 `spec/cluster.md` and `references/test-lab.md` in the node skill), a discovery seed reachable from
@@ -31,10 +32,10 @@ head's API is loopback-only, so the driver reaches it through `ssh -N -L 17777:1
 - **Concurrency is held equal on purpose.** An early transcript reported `2.48x` for dispatch
   against a *sequential* single-node baseline (`0.52 -> 1.28 req/s`). Most of that was the
   the dispatcher's two slots against one client at a time, not two machines against one. Act 2 now sends
-  the same number of clients as act 3, so the speedup is two nodes against one at the same load — two
-  runs on two 2-vCPU boxes gave `0.96 -> 1.32 req/s` (**1.37x**) and `1.02 -> 1.35 req/s` (**1.33x**),
-  each with a 4/4 split. The engine batches queued requests on one node, which is why the second
-  machine adds less than double.
+  the same number of clients as act 3, so the speedup is two nodes against one at the same load — four
+  runs on two 2-vCPU boxes gave `0.94 -> 1.29`, `0.96 -> 1.32`, `1.02 -> 1.35` and `0.95 -> 1.36 req/s`
+  (**1.33x–1.43x**), each with a 4/4 split. The engine batches queued requests on one node, which is
+  why the second machine adds less than double.
 - **A CPU-only head cannot anchor a sharded token rate.** These acts prove pairing, the plan,
   dispatch, discovery and receipts. They do not prove pipeline sharding, which needs a GPU.
 - **A dead peer costs throughput.** With the peer killed, the same load answered at `0.69 req/s`
