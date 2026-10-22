@@ -454,6 +454,37 @@ fn peer_refusal(caps: &Capabilities) -> String {
     }
 }
 
+/// Why this head cannot split a model now, in words; `None` when it can. Kept apart from the peer
+/// probing below: a head that cannot shard still asks its peers what they are.
+fn head_blocker(rpc_backend: Option<bool>, devices: &[Device]) -> Option<&'static str> {
+    if rpc_backend == Some(false) {
+        Some("this llama-server has no RPC backend (build it with GGML_RPC=ON; see spec/cluster.md)")
+    } else if devices.is_empty() {
+        Some(
+            "no GPU device (`llama-server --list-devices`): running locally. A split needs a GPU head (spec/cluster.md, Known limits)",
+        )
+    } else {
+        None
+    }
+}
+
+/// What to record about a peer whose capabilities were just read: `None` when it takes layers and
+/// this head can send it some. [here] is this head's own reason for not splitting, when it has one:
+/// the peer's real capability is then reported next to it, so "this head cannot shard here" is
+/// never read as "the peer is not there".
+fn peer_note(caps: &Capabilities, here: Option<&str>) -> Option<String> {
+    let usable = can_take_layers(caps);
+    if usable && here.is_none() {
+        return None;
+    }
+    let devices: Vec<&str> = caps.devices.iter().map(|d| d.name.as_str()).collect();
+    let what = if usable { format!("serves as a shard ({})", devices.join(", ")) } else { peer_refusal(caps) };
+    Some(match here {
+        Some(why) => format!("{what}; cannot shard here: {why}"),
+        None => what,
+    })
+}
+
 /// Plans [run] over the head and the peers that answer, runs llama-server with that plan, and
 /// plans again whenever it exits: a peer that left is planned around (or the model waits,
 /// unhealthy, when the rest cannot hold it), so the router sends requests elsewhere meanwhile.
@@ -470,45 +501,43 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                 .collect();
             let mut peers = Vec::new();
             let mut measured = Vec::new();
-            if head.rpc_backend == Some(false) {
-                notes.push(
-                    "this llama-server has no RPC backend (build it with GGML_RPC=ON; see spec/cluster.md)".into(),
-                );
-            } else if head.devices.is_empty() {
-                notes.push(
-                    "no GPU device (`llama-server --list-devices`): running locally. A split needs a GPU head (spec/cluster.md, Known limits)"
-                        .into(),
-                );
-            } else {
-                for link in &run.links {
-                    match probe_peer(&link.peer, &head.device_key, &head.network).await {
-                        Ok(caps) if can_take_layers(&caps) => {
-                            devices.extend(caps.devices.iter().map(|d| PlanDevice {
-                                node: link.peer.name.clone(),
-                                device: d.name.clone(),
-                                free_mib: d.free_mib,
-                            }));
-                            // What the peer measured on itself, for this model and this hardware.
-                            for set in
-                                caps.profiles.iter().filter(|s| s.model == run.model && s.hardware == caps.hardware)
+            // Probe the peers even when this head cannot split: their capabilities are what
+            // `cluster status` reports, and "this head cannot shard here" is not "the peer is not
+            // there". They are only used when the head can shard.
+            let here = head_blocker(head.rpc_backend, &head.devices);
+            if let Some(why) = here {
+                notes.push(why.to_owned());
+            }
+            for link in &run.links {
+                match probe_peer(&link.peer, &head.device_key, &head.network).await {
+                    Ok(caps) => {
+                        if let Some(note) = peer_note(&caps, here) {
+                            notes.push(format!("{}: {note}", link.peer.name));
+                        }
+                        if here.is_some() || !can_take_layers(&caps) {
+                            continue;
+                        }
+                        devices.extend(caps.devices.iter().map(|d| PlanDevice {
+                            node: link.peer.name.clone(),
+                            device: d.name.clone(),
+                            free_mib: d.free_mib,
+                        }));
+                        // What the peer measured on itself, for this model and this hardware.
+                        for set in caps.profiles.iter().filter(|s| s.model == run.model && s.hardware == caps.hardware)
+                        {
+                            for profile in
+                                set.profiles.iter().filter(|p| caps.devices.iter().any(|d| d.name == p.device))
                             {
-                                for profile in
-                                    set.profiles.iter().filter(|p| caps.devices.iter().any(|d| d.name == p.device))
-                                {
-                                    measured.push(Measurement {
-                                        node: link.peer.name.clone(),
-                                        device: profile.device.clone(),
-                                        tg_tps: profile.tg_tps,
-                                    });
-                                }
+                                measured.push(Measurement {
+                                    node: link.peer.name.clone(),
+                                    device: profile.device.clone(),
+                                    tg_tps: profile.tg_tps,
+                                });
                             }
-                            peers.push((link.clone(), caps.devices));
                         }
-                        Ok(caps) => {
-                            notes.push(format!("{}: {}", link.peer.name, peer_refusal(&caps)));
-                        }
-                        Err(e) => notes.push(format!("{}: {e}", link.peer.name)),
+                        peers.push((link.clone(), caps.devices));
                     }
+                    Err(e) => notes.push(format!("{}: {e}", link.peer.name)),
                 }
             }
             // This machine's own measurements, the links, and the split already running.
@@ -863,6 +892,33 @@ mod tests {
         // Both: it serves and has a device, so it takes layers and there is nothing to report.
         let ready = Capabilities { shard: true, devices: vec![device("CUDA0", 24_000)], ..Default::default() };
         assert!(can_take_layers(&ready));
+    }
+
+    #[test]
+    fn a_head_that_cannot_shard_still_says_what_its_peers_are() {
+        // A head built without RPC used to skip the peers entirely, so nothing about them reached
+        // the plan's notes (`cluster status` prints those). The peers are reachable and capable;
+        // what is missing is the head, and the note must say both.
+        let no_rpc = head_blocker(Some(false), &[device("MTL0", 28_000)]);
+        assert!(no_rpc.unwrap().contains("no RPC backend"));
+        let no_device = head_blocker(Some(true), &[]);
+        assert!(no_device.unwrap().contains("no GPU device"));
+        assert_eq!(head_blocker(Some(true), &[device("MTL0", 28_000)]), None);
+        assert_eq!(head_blocker(None, &[device("MTL0", 28_000)]), None, "an unchecked build is tried");
+
+        let peer = Capabilities { shard: true, devices: vec![device("CUDA0", 24_000)], ..Default::default() };
+        let note = peer_note(&peer, no_rpc).expect("the peer's capability is reported");
+        assert!(note.contains("serves as a shard (CUDA0)"), "{note}");
+        assert!(note.contains("cannot shard here: "), "{note}");
+        assert!(note.contains("no RPC backend"), "the head's own cause is named: {note}");
+        // With a head that can shard, a peer like that is used and there is nothing to say.
+        assert_eq!(peer_note(&peer, None), None);
+
+        // A peer that cannot take layers says why, with the head's reason after it when there is one.
+        let idle = Capabilities { shard: true, devices: Vec::new(), ..Default::default() };
+        let note = peer_note(&idle, no_rpc).unwrap();
+        assert!(note.contains("no usable device") && note.contains("cannot shard here"), "{note}");
+        assert_eq!(peer_note(&idle, None), Some(peer_refusal(&idle)));
     }
 
     #[test]
