@@ -123,6 +123,105 @@ async fn the_audit_log_keeps_every_receipt_with_who_asked() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The id the client was given in the header is the id in the log — one id, not two — and
+/// `invincible receipt verify <id>` finds the receipt from it.
+#[tokio::test]
+async fn the_requests_id_is_in_the_audit_line_and_finds_its_receipt() {
+    let dir = std::env::temp_dir().join(format!("invincible-audit-id-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let engine = Engine::attached("local", &engine().await, Some(64), true);
+    // The key the node signs with is the one in its home, so the CLI resolves it without `--key`.
+    let key = ReceiptKey::load_or_create(&dir.join("receipt.key")).unwrap();
+    let public = key.public();
+    let state =
+        AppState::new(vec![engine], NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto }, "t".into())
+            .with_receipt_key("studio", key)
+            .with_audit(invincible::audit::AuditLog::new(&dir));
+    let node = serve(app(Arc::new(state))).await;
+    let response = client()
+        .post(format!("{node}/v1/chat/completions"))
+        .bearer_auth("t")
+        .json(&say("auto", "hi"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let id = response.headers()[REQUEST_ID_HEADER].to_str().unwrap().to_owned();
+    // Reading the body to its end finishes the receipt, and the audit line with it.
+    let _ = response.bytes().await.unwrap();
+    let text = std::fs::read_to_string(dir.join("audit.jsonl")).unwrap();
+    let entry: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    assert_eq!(entry["request_id"].as_str(), Some(id.as_str()), "the id the client holds is on the line");
+    assert_eq!(entry["receipt"]["receipt"]["request_id"].as_str(), Some(id.as_str()));
+    let found =
+        invincible::audit::AuditLog::new(&dir).find(&id).unwrap().expect("the log resolves the id the client holds");
+    assert_eq!(found["receipt"]["request_id"].as_str(), Some(id.as_str()));
+    assert!(verify(&public, &found["receipt"], found["signature"].as_str().unwrap()));
+    // The client that holds the id runs this, and it finds the receipt.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_invincible"))
+        .args(["receipt", "verify", id.as_str()])
+        .env("INVINCIBLE_HOME", &dir)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(out.contains(&format!("receipt {id}: version 1")), "{out}");
+    assert!(out.contains("signature: valid"), "{out}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A receipt outlives the memory it was made in: after a restart (a fresh store, the same audit log)
+/// `GET /v1/receipts/<id>` still answers with it, resolved from the id its entry records.
+#[tokio::test]
+async fn a_receipt_is_found_in_the_audit_log_after_a_restart() {
+    let dir = std::env::temp_dir().join(format!("invincible-audit-restart-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let first = AppState::new(
+        vec![Engine::attached("local", &engine().await, Some(64), true)],
+        NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto },
+        "t".into(),
+    )
+    .with_receipt_key("studio", ReceiptKey::from_seed(&[9; 32]))
+    .with_audit(invincible::audit::AuditLog::new(&dir));
+    let node = serve(app(Arc::new(first))).await;
+    let response = client()
+        .post(format!("{node}/v1/chat/completions"))
+        .bearer_auth("t")
+        .json(&say("auto", "hi"))
+        .send()
+        .await
+        .unwrap();
+    let id = response.headers()[REQUEST_ID_HEADER].to_str().unwrap().to_owned();
+    let _ = response.bytes().await.unwrap();
+    drop(node);
+
+    // Restarted: the same log, an empty store.
+    let second = AppState::new(
+        vec![Engine::attached("local", &engine().await, Some(64), true)],
+        NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto },
+        "t".into(),
+    )
+    .with_receipt_key("studio", ReceiptKey::from_seed(&[9; 32]))
+    .with_audit(invincible::audit::AuditLog::new(&dir));
+    let restarted = serve(app(Arc::new(second))).await;
+    let found: Value = client()
+        .get(format!("{restarted}/v1/receipts/{id}"))
+        .bearer_auth("t")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(found["receipt"]["request_id"].as_str(), Some(id.as_str()));
+    assert!(verify(&ReceiptKey::from_seed(&[9; 32]).public(), &found["receipt"], found["signature"].as_str().unwrap()));
+    // An id the log does not have is still not found.
+    let missing =
+        client().get(format!("{restarted}/v1/receipts/{}", "0".repeat(32))).bearer_auth("t").send().await.unwrap();
+    assert_eq!(missing.status(), 404);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn client() -> reqwest::Client {
     reqwest::Client::new()
 }
