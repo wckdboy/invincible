@@ -32,7 +32,9 @@ invincible://pair?v=0&k=<node public key>&s=<secret>&a=<host:port>,<host:port>
   code invalid.
 
 A code is valid for 10 minutes and for one successful pairing. Opening a new code replaces the old
-one. After 5 failed pairing handshakes the code is burned.
+one. After 5 failed pairing handshakes the code is burned. Both ends of this are also on the node's
+API, for a client with no shell: `POST /v1/cluster/pair` mints a code and `POST /v1/cluster/join`
+consumes one, with the same parsing and the same handshake (spec/cluster.md, Membership API).
 
 ## Connection
 

@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use invincible_policy::{Egress, NetworkMode, NodeSettings};
 use serde::Deserialize;
 
+use crate::fsutil;
+
 /// ```toml
 /// listen = "127.0.0.1:7777"
 ///
@@ -265,6 +267,21 @@ impl RemoteConfig {
 
 fn default_listen() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7777))
+}
+
+/// The name a node lists this machine under when it joins: [name] when given, else this machine's
+/// own `[remote] name` — the string a shard's `[cluster] heads` compares against. Defaulting to
+/// "device" is what let two correct configs disagree with nothing to show for it.
+pub fn join_name(name: Option<String>, home: &Path) -> String {
+    name.unwrap_or_else(|| {
+        let path = home.join("config.toml");
+        fsutil::read_optional(&path)
+            .ok()
+            .flatten()
+            .and_then(|text| Config::parse(&text).ok())
+            .map(|c| c.remote.name())
+            .unwrap_or_else(|| "device".to_owned())
+    })
 }
 
 /// Egress settings, in the encodings of spec/routing.md. Both start fully closed.
@@ -546,5 +563,31 @@ mod tests {
     #[test]
     fn refuses_unknown_keys() {
         assert!(Config::parse("listen_on = \"127.0.0.1:1\"").is_err());
+    }
+
+    fn home(name: &str, config: Option<&str>) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("inv-join-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        if let Some(text) = config {
+            std::fs::write(dir.join("config.toml"), text).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn join_name_defaults_to_this_nodes_own_name() {
+        let dir = home("own", Some("[remote]\nname = \"studio\"\n"));
+        assert_eq!(super::join_name(None, &dir), "studio");
+        // An explicit name still wins: the operator may want another label.
+        assert_eq!(super::join_name(Some("laptop".into()), &dir), "laptop");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn join_name_falls_back_when_there_is_no_config() {
+        let dir = home("empty", None);
+        assert_eq!(super::join_name(None, &dir), "device");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

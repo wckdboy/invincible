@@ -13,6 +13,7 @@ pub mod eval;
 pub mod fetch;
 pub mod fsutil;
 pub mod media;
+pub mod membership;
 pub mod models;
 pub mod receipts;
 pub mod redact;

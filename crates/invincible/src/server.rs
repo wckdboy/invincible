@@ -14,14 +14,17 @@ use axum::extract::{DefaultBodyLimit, Path, Request as HttpRequest, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, delete, get, post};
+use axum::routing::{any, delete, get, patch, post};
 use axum::{Extension, Json, Router};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reason, Request, RouteInput, Tier, decide};
 use serde_json::{Value, json};
 
 use crate::audit::{AuditLog, Caller};
 use crate::cloud::{CloudError, CloudModel};
 use crate::engine::Engine;
+use crate::membership::{self, Membership};
 use crate::receipts::{Attempt, Draft, ReceiptKey, ReceiptStore};
 use crate::remote::{CODE_LIFETIME, Pairing};
 
@@ -62,6 +65,9 @@ pub struct AppState {
     /// Dispatch across the nodes this machine owns (spec/dispatch.md); `None` on a node that does
     /// not dispatch.
     pub dispatch: Option<Arc<crate::dispatch::Dispatch>>,
+    /// This machine's cluster membership (`nodes.json`, `device.key`); `None` in a process with
+    /// no home directory, which then cannot join or forget nodes.
+    pub membership: Option<Arc<Membership>>,
 }
 
 impl AppState {
@@ -91,7 +97,15 @@ impl AppState {
             images: Vec::new(),
             cluster: None,
             dispatch: None,
+            membership: None,
         }
+    }
+
+    /// This machine's membership, so the cluster routes can join, list, rename and unpair
+    /// (spec/cluster.md, Membership API).
+    pub fn with_membership(mut self, home: impl Into<std::path::PathBuf>) -> Self {
+        self.membership = Some(Arc::new(Membership::new(home)));
+        self
     }
 
     pub fn with_cluster(mut self, cluster: crate::cluster::ClusterState) -> Self {
@@ -474,7 +488,12 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/admin/devices", get(list_devices))
         .route("/v1/admin/devices/{name}", delete(remove_device))
         .route("/v1/cluster", get(cluster_status))
-        .route("/v1/dispatch", get(dispatch_status));
+        .route("/v1/dispatch", get(dispatch_status))
+        // Membership (spec/cluster.md, Membership API): a code, a join, the list, rename, unpair.
+        .route("/v1/cluster/pair", post(cluster_pair))
+        .route("/v1/cluster/join", post(cluster_join))
+        .route("/v1/cluster/nodes", get(cluster_nodes))
+        .route("/v1/cluster/nodes/{name}", patch(cluster_rename).delete(cluster_unpair));
     let guarded = api().merge(admin).route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
@@ -560,6 +579,151 @@ async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
 async fn list_devices(State(state): State<Arc<AppState>>) -> Json<Value> {
     let devices = state.pairing.as_ref().map(|p| p.devices.list()).unwrap_or_default();
     Json(json!({ "devices": devices }))
+}
+
+/// A body that may be left out: `{}` when there is none.
+fn json_body(body: &Bytes) -> Result<Value, &'static str> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(json!({}));
+    }
+    serde_json::from_slice(body).map_err(|_| "the body is not JSON")
+}
+
+/// `POST /v1/cluster/pair`: a pairing code as `invincible pair` shows one — the same
+/// `Pairing::start_for`, so either side's join consumes it (spec/cluster.md, Membership API).
+///
+/// Body, both optional: `{"ttl_seconds": 600, "name": "phone"}`. The `name` labels the code in the
+/// node's log; it does not rename the node or the device. The secret goes out twice, inside
+/// `code_uri` and as `secret`, and is never written to the log or the audit log: a pairing code is
+/// a one-time capability, and a log line with one in it hands it to whoever reads the log.
+async fn cluster_pair(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
+    let Some(pairing) = &state.pairing else {
+        return error(
+            StatusCode::CONFLICT,
+            "remote_disabled",
+            "remote access is off: set [remote] listen in the config",
+        );
+    };
+    let body = match json_body(&body) {
+        Ok(body) => body,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
+    };
+    let ttl = body
+        .get("ttl_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(CODE_LIFETIME.as_secs())
+        .clamp(membership::MIN_TTL_SECONDS, membership::MAX_TTL_SECONDS);
+    let label = body.get("name").and_then(Value::as_str).map(str::trim).filter(|label| !label.is_empty());
+    match pairing.start_for(std::time::Duration::from_secs(ttl)) {
+        Ok(code) => {
+            match label {
+                Some(label) => tracing::info!(label = %label, "pairing code opened"),
+                None => tracing::info!("pairing code opened"),
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_secs())
+                .unwrap_or_default();
+            Json(json!({
+                "code_uri": code.encode(),
+                "secret": URL_SAFE_NO_PAD.encode(code.secret),
+                "fingerprint": crate::devices::fingerprint(&pairing.key.public),
+                "node": pairing.name,
+                "expires_in_seconds": ttl,
+                "expires_at": now + ttl,
+            }))
+            .into_response()
+        }
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/cluster/join {"uri": "invincible://pair?…", "name"?: "…"}`: pairs this machine with
+/// the node whose code it is, records it in `nodes.json`, and answers the identities a caller can
+/// check without reading a file (spec/cluster.md, Membership API).
+///
+/// The name defaults the way `invincible join`'s does — this node's own `[remote] name`, the string
+/// the peer's `[cluster] heads` must contain. One join runs at a time: a second one is refused with
+/// `409 join_in_progress` rather than racing the first for `nodes.json`.
+async fn cluster_join(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
+    let Some(membership) = state.membership.clone() else {
+        return error(
+            StatusCode::CONFLICT,
+            "membership_unavailable",
+            "this node has no home directory to record paired nodes in",
+        );
+    };
+    let body = match json_body(&body) {
+        Ok(body) => body,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
+    };
+    let Some(uri) = body.get("uri").and_then(Value::as_str) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "the body is {\"uri\": \"invincible://pair?v=0&…\"} (what `invincible pair` prints)",
+        );
+    };
+    let name = body.get("name").and_then(Value::as_str).map(str::to_owned);
+    match membership.join(uri, name).await {
+        Ok(joined) => Json(joined).into_response(),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+/// `GET /v1/cluster/nodes`: every node this machine paired with, whether it answers now, and the
+/// name it lists this machine under (spec/cluster.md, Membership API).
+async fn cluster_nodes(State(state): State<Arc<AppState>>) -> Response {
+    let Some(membership) = state.membership.clone() else {
+        return error(
+            StatusCode::CONFLICT,
+            "membership_unavailable",
+            "this node has no home directory to read paired nodes from",
+        );
+    };
+    match membership.nodes(&state.node.network.encode()).await {
+        Ok(nodes) => Json(nodes).into_response(),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+/// `DELETE /v1/cluster/nodes/{name}`: forgets a node here. `nodes.json` only — the peer keeps its
+/// own record, and this never connects to it.
+async fn cluster_unpair(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
+    let Some(membership) = state.membership.clone() else {
+        return error(
+            StatusCode::CONFLICT,
+            "membership_unavailable",
+            "this node has no home directory to record paired nodes in",
+        );
+    };
+    match membership.unpair(&name) {
+        Ok(unpaired) => Json(unpaired).into_response(),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+/// `PATCH /v1/cluster/nodes/{name} {"name": "new"}`: renames a node here. The name it is listed
+/// under on the peer does not change, so nothing is renamed there.
+async fn cluster_rename(State(state): State<Arc<AppState>>, Path(name): Path<String>, body: Bytes) -> Response {
+    let Some(membership) = state.membership.clone() else {
+        return error(
+            StatusCode::CONFLICT,
+            "membership_unavailable",
+            "this node has no home directory to record paired nodes in",
+        );
+    };
+    let body = match json_body(&body) {
+        Ok(body) => body,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
+    };
+    let Some(new) = body.get("name").and_then(Value::as_str) else {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is {\"name\": \"new\"}");
+    };
+    match membership.rename(&name, new) {
+        Ok(renamed) => Json(renamed).into_response(),
+        Err(refusal) => refusal.into_response(),
+    }
 }
 
 async fn remove_device(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
