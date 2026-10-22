@@ -770,11 +770,15 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `[approvals]` says yes ahead of time.
 - **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
-  device can therefore start turns, watch their events (tool runs, receipts, approval questions,
-  the answer) and answer approvals, all inside its Noise session. A turn may carry up to four
+  device granted the `agent` capability can therefore start turns, watch their events (tool runs,
+  receipts, approval questions, the answer) and answer approvals, all inside its Noise session.
+  Granting it is explicit — `invincible pair --capabilities agent`, or `PATCH
+  /v1/cluster/nodes/<name>` on the device already paired — because the proxy speaks with the
+  node's own token: a device granted nothing reaches a 404 there, exactly as for a route that does
+  not exist. A turn may carry up to four
   images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
   that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
-  agent is reachable only from this machine and from devices you paired.
+  agent is reachable from this machine, and over a device session only where you granted it.
 
 ## Bots and channels
 
@@ -1074,10 +1078,11 @@ advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, �
 
 ```sh
 invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
+invincible pair --capabilities agent,audit   # …pre-granting those to the device that joins
 invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
 invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
                                      # (with that machine's token, `invincible token`: web pages cannot use it)
-invincible devices                   # on the node: who is paired
+invincible devices                   # on the node: who is paired, and what each may reach
 invincible devices --remove laptop   # unpair: refused at the next handshake or frame
 ```
 
@@ -1085,10 +1090,23 @@ On macOS with the application firewall on, the first remote connection can wait 
 incoming connections?" prompt for `invincible` (or `System Settings › Network › Firewall`): allow it,
 or pairing hangs until it times out.
 
-Paired devices reach `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
-cluster's `/v1/cluster/node` and `/v1/cluster/meter` with no token (their key authenticates them),
-and nothing else: the agent, the audit log, dispatch and the admin endpoints answer them exactly as
-a path that does not exist. The list is in [spec/pairing.md](spec/pairing.md) (Transport). Autobot
+Every paired device is granted a small set of capabilities when it pairs
+([spec/pairing.md](spec/pairing.md), Capabilities). `shard` (the default, and the least) is the six
+routes above: `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
+cluster's `/v1/cluster/node` and `/v1/cluster/meter`, with no token (the device's key
+authenticates it). `agent` adds `/v1/agent` — the Autobot proxy, which runs with the node's own
+token — `audit` adds the audit log, and `dispatch` adds `/v1/dispatch`, a hop into your other
+nodes. Nothing else is reachable, and a route the device was not granted answers exactly as a path
+that does not exist, so a device cannot even learn it is there. Grant and revoke on the node's own
+API, with no re-pairing:
+
+```sh
+curl -X PATCH localhost:7777/v1/cluster/nodes/laptop \
+     -H "authorization: Bearer $(invincible token)" \
+     -d '{"capabilities": ["shard", "agent"]}'
+```
+
+The list is in [spec/pairing.md](spec/pairing.md) (Transport). Autobot
 pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been

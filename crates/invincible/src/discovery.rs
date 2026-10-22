@@ -938,6 +938,7 @@ mod tests {
                 addrs: vec!["192.0.2.1:7778".to_owned()],
                 receipt_key: Some(receipt),
                 device: None,
+                capabilities: Default::default(),
             }])
         };
         assert_eq!(descriptor.trust(&devices, &known(descriptor.sign_key.clone())), "paired as node \"studio\"");

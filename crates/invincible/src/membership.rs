@@ -64,6 +64,11 @@ impl Refusal {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
     }
 
+    /// A route that needs this machine's home directory, in a process that has none.
+    pub fn unavailable() -> Self {
+        Self::conflict("membership_unavailable", "this node has no home directory to record paired nodes in")
+    }
+
     /// `error`'s shape from server.rs, so a refusal looks like every other error on this API.
     pub fn into_response(self) -> axum::response::Response {
         crate::server::error(self.status, self.code, &self.message)
@@ -114,6 +119,8 @@ impl Membership {
         let fingerprint = devices::fingerprint(&code.node_key);
         // `heads_must_name` is the name the *peer* lists this machine under: the one string a
         // person cannot read from here and a shard's `[cluster] heads` must contain.
+        // `capabilities` is what the peer granted this machine when it joined (spec/pairing.md,
+        // Capabilities): the peer's own record is what it enforces.
         Ok(json!({
             "node": paired.node,
             "device": paired.device,
@@ -121,6 +128,7 @@ impl Membership {
             "heads_must_name": paired.device,
             "addresses": code.addrs,
             "receipt_key": paired.receipt_key,
+            "capabilities": paired.capabilities.codes(),
         }))
     }
 
@@ -147,6 +155,10 @@ impl Membership {
                 // `[cluster] heads` is compared against it).
                 "device": node.device,
                 "receipt_key": node.receipt_key,
+                // What the peer granted this machine at join (spec/pairing.md, Capabilities).
+                // The peer enforces its own record, which an operator can change there later;
+                // this is the answer it gave here.
+                "capabilities": node.capabilities.codes(),
                 // No per-node last-seen is recorded anywhere: `reachable` and `probe_ms` are what
                 // this node actually knows, and both are from just now.
                 "reachable": Value::Null,
@@ -252,6 +264,7 @@ pub fn record(home: &Path, code: &PairingCode, paired: &remote::Paired) -> Resul
     nodes.0.push(KnownNode {
         device: Some(paired.device.clone()),
         receipt_key: paired.receipt_key.clone(),
+        capabilities: paired.capabilities.clone(),
         name: paired.node.clone(),
         key: URL_SAFE_NO_PAD.encode(code.node_key),
         addrs: code.addrs.clone(),

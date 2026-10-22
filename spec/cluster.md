@@ -73,7 +73,11 @@ What runs where:
   names, in `[cluster] heads`, the devices that may. A paired phone cannot use your GPU box as a
   shard unless you say so. `ggml-rpc-server` parses graphs from its client in C++ with no
   authentication; whoever reaches it can make it allocate memory and compute, and a parsing bug
-  there is remote code execution. So only heads you named reach it.
+  there is remote code execution. So only heads you named reach it. Two things are separate here:
+  `[cluster] heads` admits the shard *link*, and the `shard` capability ([pairing.md](pairing.md),
+  Capabilities) admits the HTTP routes over which a head probes and sizes the node — a device
+  granted `shard` is still not a head, and a head named in `heads` that was granted nothing else
+  still reaches only those six routes.
 - **llama.cpp RPC is never on the network.** `ggml-rpc-server` listens on a loopback port only.
   The only way in from another machine is a **shard link**: a Noise session (`Noise_IK_25519_
   ChaChaPoly_SHA256`, prologue `invincible/0 shard`, mode byte `0x03`), the same handshake and
@@ -135,7 +139,8 @@ Vectors: `vectors/cluster.json`, the `link` cases.
 
 ## Capabilities
 
-`GET /v1/cluster/node` on the device API (any paired device, over its session):
+`GET /v1/cluster/node` on the device API (a device the node granted `shard`, which is what every
+pairing grants unless the operator says otherwise; over its session):
 
 ```json
 {
@@ -364,11 +369,15 @@ protocol does not change, and neither does the CLI's output.
 code. The body is optional:
 
 ```json
-{ "ttl_seconds": 600, "name": "add the phone" }
+{ "ttl_seconds": 600, "name": "add the phone", "capabilities": ["shard", "agent"] }
 ```
 
 - `ttl_seconds`: how long the code lives, clamped to 1–86400, default 600.
 - `name`: a label for the code, for the node's log. It renames neither the node nor the device.
+- `capabilities`: what the device that consumes the code will hold ([pairing.md](pairing.md),
+  Capabilities): any of `shard`, `agent`, `audit`, `dispatch`. Absent, the code grants `shard`, the
+  least a session is for. A name that is not one of those is `400 invalid_capabilities`, before a
+  code exists. The set belongs to the code: the device's hello cannot add to it.
 
 ```json
 {
@@ -377,9 +386,14 @@ code. The body is optional:
   "fingerprint": "6f1c-2d3e-4a5b-6c7d",
   "node": "mini",
   "expires_in_seconds": 600,
-  "expires_at": 1793000600
+  "expires_at": 1793000600,
+  "capabilities": ["shard"]
 }
 ```
+
+`capabilities` repeats the set the code carries, so the default is visible here — where the
+operator decides — and not implied by silence. `POST /v1/admin/pairing`, which `invincible pair`
+uses, takes the same optional body and answers the same field.
 
 The secret appears twice, inside `code_uri` and as `secret`, and is never written to the node's
 log or its audit log: a pairing code is a one-time capability, and a log line holding one hands it
@@ -405,14 +419,18 @@ peer's `[cluster] heads` has to contain.
   "fingerprint": "6f1c-2d3e-4a5b-6c7d",
   "heads_must_name": "studio",
   "addresses": ["192.168.1.21:7778"],
-  "receipt_key": "<mini's receipt key>"
+  "receipt_key": "<mini's receipt key>",
+  "capabilities": ["shard"]
 }
 ```
 
 `node` is the peer's own name, `device` is the name it now lists this machine under,
 `heads_must_name` repeats that name for the reader wiring `[cluster] heads`, and `fingerprint` is
-the peer's static key — compare it with the code's. One join runs at a time. Errors, each with a
-`message` that says what happened and never contains the URI or its secret:
+the peer's static key — compare it with the code's. `capabilities` is what the peer granted this
+machine, recorded in `nodes.json` and shown by `GET /v1/cluster/nodes`
+([pairing.md](pairing.md), Capabilities): the peer's own `devices.json` is what it enforces, and a
+device's hello cannot ask for more than the code granted. One join runs at a time. Errors, each with
+a `message` that says what happened and never contains the URI or its secret:
 
 | Status | `code` | When |
 |---|---|---|
@@ -433,12 +451,17 @@ pins nothing on the peer.
   "addresses": ["192.168.1.21:7778"],
   "link_addresses": ["192.168.1.21:7778"], "refused_addresses": [],
   "device": "studio", "receipt_key": "…",
+  "capabilities": ["shard"],
   "reachable": true, "probe_ms": 3
 } ] }
 ```
 
 - `device`: the name that node lists this machine under (learned at join). It is the one string a
   person cannot read from here, and `[cluster] heads` on the peer is compared against it.
+- `capabilities`: what that node granted this machine when it joined ([pairing.md](pairing.md),
+  Capabilities) — the set it enforces for this machine's sessions. It is the answer given at join,
+  kept in `nodes.json`; an operator who grants or revokes on the peer afterwards changes the
+  peer's record, and this side reports what it was told until it joins again.
 - `reachable`: `true` when the peer answered a probe just now, `false` when the connection or the
   handshake failed (`error` says how), and `null` when this node cannot tell — no `device.key`
   here, no address the link rule allows (`reason`), or no answer within 1.5 s (`reason`). All the
@@ -459,15 +482,38 @@ pins nothing on the peer.
 and nothing is sent to it. `404 not_found` for a name this machine does not know, with the reason
 in `message`.
 
-**`PATCH /v1/cluster/nodes/{name}`** — renames a node here:
+**`PATCH /v1/cluster/nodes/{name}`** — renames a node here, and/or replaces what this node grants
+the paired device of that name ([pairing.md](pairing.md), Capabilities). Either key or both:
 
 ```json
-{ "name": "gpu-box" }
+{ "name": "gpu-box", "capabilities": ["shard", "agent"] }
 ```
 
 ```json
 { "name": "gpu-box", "was": "mini", "changed": true }
 ```
+
+```json
+{ "device": "phone", "capabilities": ["shard", "agent"], "was": ["shard"], "changed": true }
+```
+
+```json
+{ "device": { "device": "phone", "capabilities": ["shard", "agent"], "was": ["shard"], "changed": true },
+  "node":   { "name": "gpu-box", "was": "mini", "changed": true } }
+```
+
+- `name` renames a node in `nodes.json` (this machine's record of a peer); the peer is not told.
+- `capabilities` replaces, exactly, the set this node grants the device it hosts under {name} in
+  `devices.json` — a grant or a revocation, with no re-pairing: the device keeps its key and its
+  open sessions, and the next request is admitted by the new set. A name this node hosts no device
+  under is `404 not_found`; a capability that is not one of `shard`, `agent`, `audit`, `dispatch`
+  is `400 invalid_capabilities`; the body is parsed and both targets resolved before anything is
+  written, so a refused body changes nothing.
+- The answer is the half that was asked for, or both under `device` and `node` when both keys were
+  given. `was` is the set the device held, and `changed` says whether it differs.
+
+`GET /v1/admin/devices` reports every device this node hosts with its `capabilities`, which is the
+record the gate enforces.
 
 The name is this machine's alone: the peer still calls itself what it did, and nothing is sent to
 it. `nodes.json` is keyed by name, so a name another paired node already has is refused with `409

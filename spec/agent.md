@@ -2,15 +2,23 @@
 
 The Autobot Agent (`autobot serve`) answers on loopback (default `127.0.0.1:7792`). Invincible
 Gateway passes every request under `/v1/agent` through to it, for local clients with the gateway's
-token. **A paired device does not reach it** (spec/pairing.md, Transport): the proxy carries the
-node's own bearer token, so a device that could call it would take agent turns with the node's
-tools, write schedules on the node and spend its cloud models — operator-equivalent, not what
-pairing grants. Letting a phone do that needs a per-device capability recorded at pairing, which
-does not exist yet; until it does, `/v1/agent` is loopback only.
+token, and for a paired device only when the node granted that device the `agent` capability
+(spec/pairing.md, Capabilities) — never by default.
+
+The reason it is a capability and not a route every device has: the proxy carries the node's own
+bearer token, so a device that can call it takes agent turns with the node's tools, writes
+schedules on the node and spends its cloud models — operator-equivalent, not what pairing grants.
+A device without the capability is answered exactly as a path that does not exist (404, same body),
+so it cannot even learn the route is there. Granting is the operator's: `POST /v1/cluster/pair
+{"capabilities": ["shard", "agent"]}` pre-grants a code, `PATCH /v1/cluster/nodes/{name}
+{"capabilities": [...]}` grants or revokes a device already paired, and `GET /v1/admin/devices`
+shows what each holds. A device cannot widen its own set: the pairing hello is not an input, and
+the device API has no route that changes it.
 
 The agent accepts only requests that carry the gateway's token (`Authorization: Bearer ***
 the file `$INVINCIBLE_HOME/token`). The gateway adds it when it passes a request through,
-with `invincible-caller: local` saying who is asking (a device never gets this far).
+with `invincible-caller: local` or `invincible-caller: device:<name>` saying who is asking (the
+agent uses it for a recipe's origin).
 If the agent is not running, the gateway answers `503` with error type `agent_unavailable`.
 
 One path needs no token: `GET /healthz` on the agent's own address (not under `/v1/agent`, so not

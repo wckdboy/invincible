@@ -75,8 +75,10 @@ paired device (so a later rewrite shows) is a planned addition.
   left). `--since 24h`, `--limit N`, `--summary` (totals per model and per host reached), `--json`.
 - `GET /v1/audit?since=<unix seconds>&limit=<n>` on the loopback API (behind the token) and the
   device API: `{"entries": [...], "summary": {...}, "kept": true}`. The newest `limit` entries at or
-  after `since` (default 100, at most 500), oldest first. Every paired device can read every entry:
-  pairing is for the owner's own devices.
+  after `since` (default 100, at most 500), oldest first. On a device session this needs the
+  `audit` capability (spec/pairing.md, Capabilities): every entry is every caller's — model,
+  decision, tokens, egress hosts, topology — so it is read by a device only when the operator
+  granted it, and a device without it is answered as though the route did not exist.
 
 `summary` is:
 

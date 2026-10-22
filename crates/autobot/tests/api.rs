@@ -269,9 +269,10 @@ async fn a_stopped_agent_is_reported_and_devices_cannot_reach_the_agent() {
     let reply = reqwest::Client::new().get(format!("{gateway}/v1/agent")).bearer_auth(TOKEN).send().await.unwrap();
     assert_eq!(reply.status(), 503);
     assert_eq!(reply.json::<Value>().await.unwrap()["error"]["type"], "agent_unavailable");
-    // The device app (what a paired device reaches over Noise) does not have the route at all:
-    // the proxy forwards with the node's own token, so a device reaching it would be the operator
-    // (spec/pairing.md, Transport).
+    // The device app (what a paired device reaches over Noise) mounts the route but admits it only
+    // for a device the node granted `agent`: the proxy forwards with the node's own token, so a
+    // device without that capability is answered as though the route did not exist
+    // (spec/pairing.md, Capabilities). A bare `device_app` here has no device session behind it.
     let device = listen(invincible::server::device_app(state)).await;
     assert_eq!(reqwest::Client::new().get(format!("{device}/v1/agent")).send().await.unwrap().status(), 404);
 }

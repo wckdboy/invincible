@@ -137,6 +137,7 @@ fn known(shard: &Shard, addrs: Vec<String>) -> KnownNode {
         key: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&shard.pairing.key.public),
         addrs,
         receipt_key: None,
+        capabilities: Default::default(),
     }
 }
 

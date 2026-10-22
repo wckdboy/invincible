@@ -166,6 +166,7 @@ async fn head(fakes: &[&Fake]) -> Head {
             addrs: vec![fake.addr.clone()],
             receipt_key: None,
             device: Some("studio".into()),
+            capabilities: Default::default(),
         });
     }
     // This machine's engine, on loopback, answering like llama-server would.

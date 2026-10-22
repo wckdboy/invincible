@@ -137,6 +137,9 @@ async fn a_code_minted_over_http_pairs_two_nodes_and_both_sides_show_it() {
     assert!(uri.contains(&format!("s={}", code["secret"].as_str().expect("a secret"))));
     assert_eq!(code["node"], "studio");
     assert_eq!(code["expires_in_seconds"], 120);
+    // A code with no capabilities grants `shard`, and says so: the default is visible here, where
+    // the operator decides (spec/pairing.md, Capabilities).
+    assert_eq!(code["capabilities"], json!(["shard"]));
     assert_eq!(code["fingerprint"], fingerprint(&studio.pairing.key.public));
     assert!(code["expires_at"].as_u64().unwrap() > 1_700_000_000, "an absolute time, not a duration");
     // The secret is in the answer twice, and in no log: the node logs the code's label only.
@@ -147,16 +150,20 @@ async fn a_code_minted_over_http_pairs_two_nodes_and_both_sides_show_it() {
     assert_eq!(joined["node"], "studio");
     assert_eq!(joined["device"], "laptop");
     assert_eq!(joined["heads_must_name"], "laptop");
+    // What the peer granted the joining machine, in the answer to the join itself.
+    assert_eq!(joined["capabilities"], json!(["shard"]));
     // The fingerprint the caller can compare against the code it was given.
     assert_eq!(joined["fingerprint"], code["fingerprint"]);
 
     // Both sides agree on who is who.
     assert_eq!(studio.pairing.devices.list().len(), 1);
     assert_eq!(studio.pairing.devices.list()[0].name, "laptop", "the name the peer lists it under");
+    assert_eq!(studio.pairing.devices.list()[0].capabilities.codes(), ["shard"], "the default grant");
     let seen = nodes(&client, &laptop).await;
     assert_eq!(seen["nodes"][0]["name"], "studio");
     assert_eq!(seen["nodes"][0]["device"], "laptop", "what studio lists this machine as");
     assert_eq!(seen["nodes"][0]["fingerprint"], code["fingerprint"]);
+    assert_eq!(seen["nodes"][0]["capabilities"], json!(["shard"]), "the set the peer said it grants");
     assert_eq!(seen["nodes"][0]["reachable"], true, "{seen}");
     assert!(seen["nodes"][0]["probe_ms"].is_u64());
 
@@ -211,6 +218,113 @@ async fn the_list_says_whether_each_node_answers_now() {
     assert!(seen["nodes"][0]["reachable"].is_null(), "unknown, not down: {seen}");
     let reason = seen["nodes"][0]["reason"].as_str().expect("a reason");
     assert!(reason.contains("no answer within"), "{reason}");
+}
+
+#[tokio::test]
+async fn capabilities_are_granted_at_pairing_and_changed_over_the_membership_api() {
+    let studio = node("studio").await;
+    let laptop = node("laptop").await;
+    let client = reqwest::Client::new();
+
+    // A code that pre-grants: what the joining machine records is what the reply said.
+    let (status, code) = pair(&client, &studio, json!({ "capabilities": ["shard", "audit"] })).await;
+    assert_eq!(status, 200, "{code}");
+    assert_eq!(code["capabilities"], json!(["shard", "audit"]));
+    let (status, joined) = join(&client, &laptop, json!({ "uri": code["code_uri"] })).await;
+    assert_eq!(status, 200, "{joined}");
+    assert_eq!(joined["capabilities"], json!(["shard", "audit"]));
+    assert_eq!(studio.pairing.devices.list()[0].capabilities.codes(), ["shard", "audit"]);
+    assert_eq!(nodes(&client, &laptop).await["nodes"][0]["capabilities"], json!(["shard", "audit"]));
+    // `nodes.json` holds it too: what a later `invincible tunnel` reads without asking again.
+    assert_eq!(laptop.nodes()[0]["capabilities"], json!(["shard", "audit"]));
+
+    // Revoking over the same route the rename uses: the node's own record, and the answer says
+    // what the device held before.
+    let revoked: Value = client
+        .patch(format!("{}/v1/cluster/nodes/laptop", studio.url))
+        .bearer_auth(studio.token())
+        .json(&json!({ "capabilities": ["shard"] }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(revoked["device"], "laptop");
+    assert_eq!(revoked["capabilities"], json!(["shard"]));
+    assert_eq!(revoked["was"], json!(["shard", "audit"]));
+    assert_eq!(revoked["changed"], true);
+    assert_eq!(studio.pairing.devices.list()[0].capabilities.codes(), ["shard"]);
+    // The laptop's list still says what the peer told it when it joined: the peer enforces its own
+    // record, and this side does not invent a change it was never told.
+    assert_eq!(nodes(&client, &laptop).await["nodes"][0]["capabilities"], json!(["shard", "audit"]));
+
+    // Joining again through a code shows the codes set on both sides: `shard` this time.
+    let (status, code) = pair(&client, &studio, json!({})).await;
+    assert_eq!(status, 200, "{code}");
+    let (status, joined) = join(&client, &laptop, json!({ "uri": code["code_uri"] })).await;
+    assert_eq!(status, 200, "{joined}");
+    assert_eq!(joined["capabilities"], json!(["shard"]));
+    assert_eq!(nodes(&client, &laptop).await["nodes"][0]["capabilities"], json!(["shard"]));
+
+    // A capability that is not one is refused, and the set stands; a device this node does not
+    // host is a 404, as an unknown node is for a rename.
+    let response = client
+        .patch(format!("{}/v1/cluster/nodes/laptop", studio.url))
+        .bearer_auth(studio.token())
+        .json(&json!({ "capabilities": ["shard", "root"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "invalid_capabilities");
+    assert!(body["error"]["message"].as_str().unwrap().contains("root"), "{body}");
+    assert_eq!(studio.pairing.devices.list()[0].capabilities.codes(), ["shard"]);
+    let response = client
+        .patch(format!("{}/v1/cluster/nodes/nowhere", studio.url))
+        .bearer_auth(studio.token())
+        .json(&json!({ "capabilities": ["shard"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    let body: Value = response.json().await.unwrap();
+    assert!(body["error"]["message"].as_str().unwrap().contains("nowhere"), "{body}");
+
+    // A refused body writes nothing it named: a rename that 404s takes its grant down with it.
+    let response = client
+        .patch(format!("{}/v1/cluster/nodes/laptop", studio.url))
+        .bearer_auth(studio.token())
+        .json(&json!({ "name": "mbp", "capabilities": ["shard", "agent"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404, "studio knows no node called \"laptop\" yet");
+    assert_eq!(studio.pairing.devices.list()[0].capabilities.codes(), ["shard"], "nothing was granted");
+
+    // Now it does know one: studio joins the laptop, listed here under the same name, so the name
+    // finds a node this machine knows and a device it hosts. Both halves apply to their own record.
+    let (status, code) = pair(&client, &laptop, json!({})).await;
+    assert_eq!(status, 200, "{code}");
+    let (status, joined) = join(&client, &studio, json!({ "uri": code["code_uri"], "name": "laptop" })).await;
+    assert_eq!(status, 200, "{joined}");
+    let both: Value = client
+        .patch(format!("{}/v1/cluster/nodes/laptop", studio.url))
+        .bearer_auth(studio.token())
+        .json(&json!({ "name": "laptop-2", "capabilities": ["shard", "agent"] }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(both["node"]["name"], "laptop-2");
+    assert_eq!(both["node"]["was"], "laptop");
+    assert_eq!(both["device"]["device"], "laptop");
+    assert_eq!(both["device"]["capabilities"], json!(["shard", "agent"]));
+    assert_eq!(studio.pairing.devices.list()[0].capabilities.codes(), ["shard", "agent"]);
+    assert!(studio.nodes().iter().any(|node| node["name"] == "laptop-2"), "the rename is in nodes.json");
 }
 
 #[tokio::test]

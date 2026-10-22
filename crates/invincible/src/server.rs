@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 
 use crate::audit::{AuditLog, Caller};
 use crate::cloud::{CloudError, CloudModel};
+use crate::devices::{Capabilities as DeviceCapabilities, Capability};
 use crate::engine::Engine;
 use crate::membership::{self, Membership};
 use crate::receipts::{Attempt, Draft, ReceiptKey, ReceiptStore};
@@ -533,7 +534,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/cluster/pair", post(cluster_pair))
         .route("/v1/cluster/join", post(cluster_join))
         .route("/v1/cluster/nodes", get(cluster_nodes))
-        .route("/v1/cluster/nodes/{name}", patch(cluster_rename).delete(cluster_unpair));
+        .route("/v1/cluster/nodes/{name}", patch(cluster_patch).delete(cluster_unpair));
     let guarded = api().merge(admin).route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
@@ -542,21 +543,76 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// What paired devices reach through their encrypted session: an allowlist, not the API.
+/// What a device request is admitted by: the route's capability, and the set that device was
+/// granted at pairing (spec/pairing.md, Capabilities).
+///
+/// One table, one place. Every device route is here or nowhere; `None` means the device API does
+/// not mount the path at all, so the router's fallback answers — the same 404 for a path that
+/// never existed. A path whose capability the device does not hold is answered by
+/// [`require_capability`] with exactly that 404, so a grant is invisible from outside until it
+/// is held, and a revocation is invisible after it.
+fn capability_for(path: &str) -> Option<Capability> {
+    let path = path.split('?').next().unwrap_or_default();
+    match path {
+        // The six a shard head needs of this node: the app's three, what a peer probes, and the
+        // meter that times the link (`spec/cluster.md`, Capabilities).
+        "/v1/models" | "/v1/chat/completions" | "/v1/node" | "/v1/cluster/node" | "/v1/cluster/meter" => {
+            Some(Capability::Shard)
+        }
+        "/v1/audit" => Some(Capability::Audit),
+        "/v1/dispatch" | "/v1/dispatch/chat/completions" => Some(Capability::Dispatch),
+        "/v1/agent" => Some(Capability::Agent),
+        path if path.starts_with("/v1/agent/") => Some(Capability::Agent),
+        path if path.starts_with("/v1/receipts/") => Some(Capability::Shard),
+        _ => None,
+    }
+}
+
+/// The device API's one gate: a request is admitted only when the capability its route needs is
+/// in the set the device was granted at pairing.
+///
+/// A device that lacks it gets the router's fallback answer, byte for byte (status, body and
+/// headers), including its `content-type`: `404` with `{"error":{"message":"no such endpoint",
+/// "type":"not_found","code":"not_found"}}`. Deliberately not a 403 — a 403 would map which
+/// routes exist, and to whom.
+async fn require_capability(
+    State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
+    request: HttpRequest,
+    next: Next,
+) -> Response {
+    let Some(needed) = capability_for(request.uri().path()) else {
+        // Not a route of the device API: the fallback answers, as for any path.
+        return next.run(request).await;
+    };
+    let granted = match caller {
+        Some(Extension(Caller::Device { key, .. })) => {
+            state.pairing.as_ref().and_then(|pairing| pairing.devices.capabilities_of(&key))
+        }
+        // No device session behind this request (a bare `device_app` in a test, say): nothing is
+        // granted. In service the session always says who is asking.
+        _ => None,
+    };
+    match granted {
+        Some(capabilities) if capabilities.contains(needed) => next.run(request).await,
+        _ => error(StatusCode::NOT_FOUND, "not_found", "no such endpoint"),
+    }
+}
+
+/// What paired devices reach through their encrypted session: an allowlist, not the API, and per
+/// device — each route needs a capability recorded for that device at pairing
+/// (spec/pairing.md, Capabilities).
 ///
 /// A paired device is authenticated by its pinned key, not by the node's token, and it is not the
 /// operator: a phone, or a peer that uses this node as a shard. It gets the inference its app
 /// runs, the node's own description, and what a cluster head needs to size and time this node —
-/// exactly what `spec/pairing.md` (Transport) documents. Nothing else is mounted, so every other
-/// path is a 404 from the fallback below, which is also what a path that does not exist gets: a
-/// device cannot tell an operator route from no route at all.
+/// the six routes `spec/pairing.md` (Transport) documents — and only the further three
+/// (`/v1/agent`, `/v1/audit`, `/v1/dispatch`) when the operator granted them. Every other path is
+/// a 404 from the fallback below, which is also what a path that does not exist gets, and so is a
+/// route the device lacks the capability for: a device cannot tell an operator route from no
+/// route at all, nor which grants another device holds.
 ///
-/// Deliberately absent (each would be operator-equivalent or worse):
-/// - `/v1/agent*` — the proxy runs Autobot here with the node's own bearer token, so a device
-///   could take agent turns with shell tools and write cron jobs on this machine.
-/// - `/v1/audit` — every caller's records: model, decision, tokens, egress hosts, topology.
-/// - `/v1/dispatch` (status) and `/v1/dispatch/chat/completions` — control of, and a hop through,
-///   the operator's other nodes.
+/// Deliberately absent from every set (each would be operator-equivalent beyond a capability):
 /// - `/v1/messages`, `/v1/audio/speech`, `/v1/images/generations` — inference the device protocol
 ///   does not document and no peer needs over a session.
 /// - `/v1/fetch`, `/v1/cluster*` except the two above, `/v1/admin/*` — outbound fetch, membership
@@ -574,11 +630,19 @@ fn device_api() -> Router<Arc<AppState>> {
         // The meter: a head times the link with one post of the size `meter_link` sends. Its
         // limit is the payload, not the loopback route's 16 MiB.
         .route("/v1/cluster/meter", post(cluster_meter).layer(DefaultBodyLimit::max(METER_BODY)))
+        // Granted explicitly, never by default: the Autobot proxy (which runs with this node's own
+        // token), the audit log, and a hop into the operator's other nodes.
+        .route("/v1/agent", any(agent))
+        .route("/v1/agent/{*rest}", any(agent))
+        .route("/v1/audit", get(audit))
+        .route("/v1/dispatch", get(dispatch_status))
+        .route("/v1/dispatch/chat/completions", post(dispatch_completion).layer(DefaultBodyLimit::max(MAX_REQUEST)))
         .fallback(|| async { error(StatusCode::NOT_FOUND, "not_found", "no such endpoint") })
 }
 
 pub fn device_app(state: Arc<AppState>) -> Router {
-    device_api().with_state(state)
+    let gate = middleware::from_fn_with_state(state.clone(), require_capability);
+    device_api().route_layer(gate).with_state(state)
 }
 
 /// `POST /v1/fetch {"url"}`: a web page through the node's network policy, receipted
@@ -629,7 +693,10 @@ async fn fetch(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(body
     )
 }
 
-async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
+/// `POST /v1/admin/pairing`: opens a pairing code. Body optional; `{"capabilities": [...]}`
+/// pre-grants the device that consumes it (spec/pairing.md, Capabilities), and without it the
+/// code grants `shard` only — which the answer says, so the default is visible where the code is.
+async fn start_pairing(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
     let Some(pairing) = &state.pairing else {
         return error(
             StatusCode::CONFLICT,
@@ -637,12 +704,24 @@ async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
             "remote access is off: set [remote] listen in the config",
         );
     };
-    match pairing.start() {
+    let body = match json_body(&body) {
+        Ok(body) => body,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
+    };
+    let capabilities = match body.get("capabilities") {
+        Some(value) => match DeviceCapabilities::from_json(value) {
+            Ok(capabilities) => capabilities,
+            Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_capabilities", &message),
+        },
+        None => DeviceCapabilities::shard(),
+    };
+    match pairing.start_granting(CODE_LIFETIME, capabilities.clone()) {
         Ok(code) => Json(json!({
             "code": code.encode(),
             "node": pairing.name,
             "fingerprint": crate::devices::fingerprint(&pairing.key.public),
             "expires_in": CODE_LIFETIME.as_secs(),
+            "capabilities": capabilities.codes(),
         }))
         .into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
@@ -650,6 +729,8 @@ async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
 }
 
 async fn list_devices(State(state): State<Arc<AppState>>) -> Json<Value> {
+    // Each device with what it may reach (spec/pairing.md, Capabilities): the operator's view of
+    // the grants, and how one checks what a device holds before revoking it.
     let devices = state.pairing.as_ref().map(|p| p.devices.list()).unwrap_or_default();
     Json(json!({ "devices": devices }))
 }
@@ -663,12 +744,16 @@ fn json_body(body: &Bytes) -> Result<Value, &'static str> {
 }
 
 /// `POST /v1/cluster/pair`: a pairing code as `invincible pair` shows one — the same
-/// `Pairing::start_for`, so either side's join consumes it (spec/cluster.md, Membership API).
+/// [`Pairing::start_granting`] the CLI's `/v1/admin/pairing` uses, so either side's join consumes
+/// it (spec/cluster.md, Membership API).
 ///
-/// Body, both optional: `{"ttl_seconds": 600, "name": "phone"}`. The `name` labels the code in the
-/// node's log; it does not rename the node or the device. The secret goes out twice, inside
-/// `code_uri` and as `secret`, and is never written to the log or the audit log: a pairing code is
-/// a one-time capability, and a log line with one in it hands it to whoever reads the log.
+/// Body, all optional: `{"ttl_seconds": 600, "name": "phone", "capabilities": ["shard", "agent"]}`.
+/// The `name` labels the code in the node's log; it does not rename the node or the device. The
+/// `capabilities` are what the device that consumes the code will hold (spec/pairing.md,
+/// Capabilities); absent, the code grants `shard` only, and the answer says which. The secret goes
+/// out twice, inside `code_uri` and as `secret`, and is never written to the log or the audit log:
+/// a pairing code is a one-time capability, and a log line with one in it hands it to whoever
+/// reads the log.
 async fn cluster_pair(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
     let Some(pairing) = &state.pairing else {
         return error(
@@ -687,11 +772,20 @@ async fn cluster_pair(State(state): State<Arc<AppState>>, body: Bytes) -> Respon
         .unwrap_or(CODE_LIFETIME.as_secs())
         .clamp(membership::MIN_TTL_SECONDS, membership::MAX_TTL_SECONDS);
     let label = body.get("name").and_then(Value::as_str).map(str::trim).filter(|label| !label.is_empty());
-    match pairing.start_for(std::time::Duration::from_secs(ttl)) {
+    let capabilities = match body.get("capabilities") {
+        Some(value) => match DeviceCapabilities::from_json(value) {
+            Ok(capabilities) => capabilities,
+            Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_capabilities", &message),
+        },
+        None => DeviceCapabilities::shard(),
+    };
+    match pairing.start_granting(std::time::Duration::from_secs(ttl), capabilities.clone()) {
         Ok(code) => {
             match label {
-                Some(label) => tracing::info!(label = %label, "pairing code opened"),
-                None => tracing::info!("pairing code opened"),
+                Some(label) => {
+                    tracing::info!(label = %label, capabilities = ?capabilities.codes(), "pairing code opened")
+                }
+                None => tracing::info!(capabilities = ?capabilities.codes(), "pairing code opened"),
             }
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -704,6 +798,7 @@ async fn cluster_pair(State(state): State<Arc<AppState>>, body: Bytes) -> Respon
                 "node": pairing.name,
                 "expires_in_seconds": ttl,
                 "expires_at": now + ttl,
+                "capabilities": capabilities.codes(),
             }))
             .into_response()
         }
@@ -776,27 +871,87 @@ async fn cluster_unpair(State(state): State<Arc<AppState>>, Path(name): Path<Str
     }
 }
 
-/// `PATCH /v1/cluster/nodes/{name} {"name": "new"}`: renames a node here. The name it is listed
-/// under on the peer does not change, so nothing is renamed there.
-async fn cluster_rename(State(state): State<Arc<AppState>>, Path(name): Path<String>, body: Bytes) -> Response {
-    let Some(membership) = state.membership.clone() else {
-        return error(
-            StatusCode::CONFLICT,
-            "membership_unavailable",
-            "this node has no home directory to record paired nodes in",
-        );
-    };
+/// `PATCH /v1/cluster/nodes/{name}`: renames a node here, and/or replaces what this node grants
+/// the paired device of that name (spec/cluster.md, Membership API).
+///
+/// Body, either or both: `{"name": "gpu-box"}` renames a node in `nodes.json`; `{"capabilities":
+/// ["shard", "agent"]}` grants the device this node hosts under {name} exactly that set
+/// (spec/pairing.md, Capabilities). Both are checked before either is written, so a body that is
+/// refused changes nothing. A grant or a revocation is enforced from the next request: the device
+/// gate reads `devices.json` on every request, so no re-pairing is involved.
+async fn cluster_patch(State(state): State<Arc<AppState>>, Path(name): Path<String>, body: Bytes) -> Response {
     let body = match json_body(&body) {
         Ok(body) => body,
         Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
     };
-    let Some(new) = body.get("name").and_then(Value::as_str) else {
-        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is {\"name\": \"new\"}");
+    let renamed_to = match (body.get("name"), body.get("capabilities")) {
+        (None, None) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "the body is {\"name\": \"new\"} and/or {\"capabilities\": [\"shard\"], \u{2026}}",
+            );
+        }
+        (Some(new), _) => match new.as_str() {
+            Some(new) => Some(new.to_owned()),
+            None => return error(StatusCode::BAD_REQUEST, "invalid_request_error", "`name` is a string"),
+        },
+        (None, Some(_)) => None,
     };
-    match membership.rename(&name, new) {
-        Ok(renamed) => Json(renamed).into_response(),
-        Err(refusal) => refusal.into_response(),
+    let granted = match body.get("capabilities") {
+        Some(value) => match DeviceCapabilities::from_json(value) {
+            Ok(capabilities) => Some(capabilities),
+            Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_capabilities", &message),
+        },
+        None => None,
+    };
+    // Resolve both targets before writing anything: a name that is in neither record is a 404
+    // with nothing changed.
+    if granted.is_some() && state.pairing.as_ref().is_none_or(|pairing| pairing.devices.named(&name).is_none()) {
+        return error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            &format!("no paired device \"{name}\" (GET /v1/admin/devices lists them)"),
+        );
     }
+    let rename = match renamed_to.as_deref().map(|new| rename_node(&state, &name, new)) {
+        Some(Ok(rename)) => Some(rename),
+        Some(Err(refusal)) => return refusal.into_response(),
+        None => None,
+    };
+    let mut grant = None;
+    if let (Some(capabilities), Some(pairing)) = (&granted, state.pairing.clone()) {
+        let was = pairing.devices.named(&name).map(|device| device.capabilities);
+        let device = match pairing.devices.set_capabilities(&name, capabilities.clone()) {
+            Ok(Some(device)) => device,
+            Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "no such device"),
+            Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+        };
+        tracing::info!(device = %name, capabilities = ?device.capabilities.codes(), "device capabilities set");
+        let changed = was.as_ref() != Some(&device.capabilities);
+        grant = Some(json!({
+            "device": device.name,
+            "capabilities": device.capabilities.codes(),
+            "was": was.map(|was| was.codes()),
+            "changed": changed,
+        }));
+    }
+    match (grant, rename) {
+        (Some(grant), Some(rename)) => Json(json!({ "device": grant, "node": rename })).into_response(),
+        (Some(grant), None) => Json(grant).into_response(),
+        (None, Some(rename)) => Json(rename).into_response(),
+        // Neither: the body was refused above.
+        (None, None) => error(StatusCode::BAD_REQUEST, "invalid_request_error", "nothing to change"),
+    }
+}
+
+/// `PATCH /v1/cluster/nodes/{name} {"name": "new"}`'s rename half: a node in `nodes.json`. The
+/// name it is listed under on the peer does not change, so nothing is renamed there.
+fn rename_node(state: &Arc<AppState>, name: &str, new: &str) -> Result<Value, membership::Refusal> {
+    let Some(membership) = state.membership.clone() else {
+        return Err(membership::Refusal::unavailable());
+    };
+    membership.rename(name, new)
 }
 
 async fn remove_device(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
