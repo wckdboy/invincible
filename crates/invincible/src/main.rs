@@ -48,9 +48,9 @@ enum Command {
     /// Pair this machine, as a device, with a node, using the code the node showed.
     Join {
         code: String,
-        /// The name the node lists this device under.
-        #[arg(long, default_value = "device")]
-        name: String,
+        /// The name the node lists this device under [default: this node's own [remote] name].
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Reach a paired node through a local, plain-HTTP door (each connection is an encrypted session).
     Tunnel {
@@ -573,6 +573,19 @@ fn run(cli: Cli) -> Result<(), String> {
             let code = PairingCode::decode(&code)?;
             let home = config::home()?;
             let device = StaticKey::load_or_create(&home.join("device.key"))?;
+            // Default to this node's own [remote] name: that is the string the peer's
+            // `[cluster] heads` compares against, and "device" can never match what a person
+            // would have written there. Passing the *peer's* name here is the mistake that made
+            // two correctly configured nodes disagree (spec/cluster.md).
+            let name = name.unwrap_or_else(|| {
+                let path = home.join("config.toml");
+                fsutil::read_optional(&path)
+                    .ok()
+                    .flatten()
+                    .and_then(|text| Config::parse(&text).ok())
+                    .map(|c| c.remote.name())
+                    .unwrap_or_else(|| "device".to_owned())
+            });
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
             let paired = runtime.block_on(remote::pair(&code, &device, &name))?;
             let mut nodes = KnownNodes::load(&home)?;
@@ -593,6 +606,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 fingerprint(&code.node_key),
                 paired.device
             );
+            println!("on \"{}\", [cluster] heads must name this device as \"{}\"", paired.node, paired.device);
             Ok(())
         }
         Command::Tunnel { node, listen } => {
