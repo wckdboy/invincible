@@ -268,14 +268,14 @@ async fn head(shard: &Shard, laptop: &StaticKey, peer: KnownNode) -> (String, Ar
     let engine_addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let run = Arc::new(ClusterRun::new("big", SplitMode::Always, "studio", vec![link]));
-    let plan = invincible_policy::plan(&PlanInput {
-        model_bytes: 1 << 30,
-        split: SplitMode::Always,
-        devices: vec![
+    let plan = invincible_policy::plan(&PlanInput::new(
+        1 << 30,
+        SplitMode::Always,
+        vec![
             PlanDevice { node: "studio".into(), device: "MTL0".into(), free_mib: 3000 },
             PlanDevice { node: "mini".into(), device: "MTL0".into(), free_mib: 1000 },
         ],
-    });
+    ));
     run.set(RunState { plan: Some(plan), notes: vec![] });
     let engine = Engine::attached("big", &format!("http://{engine_addr}"), None, true).with_cluster(run.clone());
     let dir = temp_dir("head");

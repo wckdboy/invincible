@@ -725,6 +725,269 @@
         "need_mib": 512,
         "reason": "does_not_fit"
       }
+    },
+    {
+      "name": "plan: the fastest device fills first",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 8589934592,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 8000
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "free_mib": 48000
+          }
+        ],
+        "measured": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "tg_tps": 10.0
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "tg_tps": 60.0
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 9524,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 1
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "permille": 999
+          }
+        ],
+        "predicted_tps": 59.7
+      }
+    },
+    {
+      "name": "plan: memory caps a fast device",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 17179869184,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 30000
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "free_mib": 4000
+          }
+        ],
+        "measured": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "tg_tps": 50.0
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "tg_tps": 100.0
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 18535,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 806
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "permille": 194
+          }
+        ],
+        "predicted_tps": 55.37
+      }
+    },
+    {
+      "name": "plan: the running split is kept when it is close",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 17179869184,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 30000
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "free_mib": 4000
+          }
+        ],
+        "measured": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "tg_tps": 50.0
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "tg_tps": 100.0
+          }
+        ],
+        "current": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 900
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "permille": 100
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 18535,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 900
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "permille": 100
+          }
+        ],
+        "predicted_tps": 52.63
+      }
+    },
+    {
+      "name": "plan: a running split that no longer fits is replanned",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 17179869184,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 30000
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "free_mib": 4000
+          }
+        ],
+        "measured": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "tg_tps": 50.0
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "tg_tps": 100.0
+          }
+        ],
+        "current": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 500
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "permille": 500
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 18535,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 806
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "permille": 194
+          }
+        ],
+        "predicted_tps": 55.37
+      }
+    },
+    {
+      "name": "plan: an unmeasured device plans by memory",
+      "input": {
+        "kind": "plan",
+        "model_bytes": 17179869184,
+        "split": "always",
+        "devices": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "free_mib": 30000
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "free_mib": 4000
+          }
+        ],
+        "measured": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "tg_tps": 50.0
+          }
+        ]
+      },
+      "expect": {
+        "action": "split",
+        "need_mib": 18535,
+        "shares": [
+          {
+            "node": "studio",
+            "device": "MTL0",
+            "permille": 882
+          },
+          {
+            "node": "box",
+            "device": "MTL0",
+            "permille": 118
+          }
+        ]
+      }
     }
   ]
 }

@@ -94,6 +94,16 @@ pub struct PlanDevice {
     pub free_mib: u64,
 }
 
+/// A device's measured generation rate for this model, alone on that device (tokens/s), from a
+/// calibration run (`invincible tune probe`). Joined to [`PlanDevice`] by (node, device): a device
+/// with no entry is uncalibrated, and one uncalibrated device makes the whole plan memory-only.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Measurement {
+    pub node: String,
+    pub device: String,
+    pub tg_tps: f64,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct PlanInput {
     /// The model's file size.
@@ -101,6 +111,20 @@ pub struct PlanInput {
     pub split: SplitMode,
     /// In order: the head's devices first, then each peer's.
     pub devices: Vec<PlanDevice>,
+    /// What the nodes measured about themselves. Empty or partial: plan by memory (v0).
+    #[serde(default)]
+    pub measured: Vec<Measurement>,
+    /// The split running now, if any: kept unless another predicts at least [`HYSTERESIS`] better,
+    /// because a reshard reloads the model on every node.
+    #[serde(default)]
+    pub current: Vec<Share>,
+}
+
+impl PlanInput {
+    /// What a node knows before anything is calibrated: memory only, no running split.
+    pub fn new(model_bytes: u64, split: SplitMode, devices: Vec<PlanDevice>) -> Self {
+        Self { model_bytes, split, devices, measured: Vec::new(), current: Vec::new() }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -119,14 +143,14 @@ pub enum PlanReason {
 }
 
 /// One device's part of a split: thousandths of the layers.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Share {
     pub node: String,
     pub device: String,
     pub permille: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Plan {
     pub action: PlanAction,
     /// MiB the model needs (weights, 10% on top, 512 MiB of buffers and cache).
@@ -135,36 +159,75 @@ pub struct Plan {
     pub shares: Vec<Share>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<PlanReason>,
+    /// The generation rate these shares predict (tokens/s): a token crosses every stage, so stage
+    /// times add. Absent when a device taking part is uncalibrated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub predicted_tps: Option<f64>,
 }
 
 const MIB: u64 = 1 << 20;
+
+/// A reshard reloads the model on every node and ends the requests in flight, so a running split is
+/// kept unless another predicts at least 10% more tokens/s.
+pub const HYSTERESIS: f64 = 0.9;
 
 /// What one device can hold: 90% of what it reports free.
 fn usable(device: &PlanDevice) -> u64 {
     device.free_mib / 10 * 9 + device.free_mib % 10 * 9 / 10
 }
 
-/// Shares a model's layers out over devices in proportion to the memory each can give (spec/cluster.md,
-/// Partitioning), as exo does: pipeline (layer) parallel, memory-weighted.
-pub fn plan(input: &PlanInput) -> Plan {
-    let need_mib = input.model_bytes.saturating_add(input.model_bytes / 10).div_ceil(MIB).saturating_add(512);
-    let head = input.devices.first().map(|d| d.node.clone()).unwrap_or_default();
-    let head_usable: u64 = input.devices.iter().filter(|d| d.node == head).map(usable).sum();
-    let peers = input.devices.iter().any(|d| d.node != head);
-    let local = Plan { action: PlanAction::Local, need_mib, shares: Vec::new(), reason: None };
-    let fits_alone = need_mib <= head_usable;
-    if !peers && fits_alone {
-        return local;
+fn round2(x: f64) -> f64 {
+    (x * 100.0).round() / 100.0
+}
+
+fn measured_tps(input: &PlanInput, device: &PlanDevice) -> Option<f64> {
+    input
+        .measured
+        .iter()
+        .find(|m| m.node == device.node && m.device == device.device)
+        .map(|m| m.tg_tps)
+        .filter(|t| t.is_finite() && *t > 0.0)
+}
+
+/// Thousandths of the model each device can hold, from its usable memory.
+fn capacities(input: &PlanInput, need_mib: u64) -> Vec<u64> {
+    input.devices.iter().map(|d| (usable(d).saturating_mul(1000) / need_mib.max(1)).min(1000)).collect()
+}
+
+/// Tokens/s predicted for these shares: `1 / Σ share_i / tps_i`. Every token crosses every stage,
+/// so throughputs do not add — times do.
+fn pipeline_tps(shares: &[Share], input: &PlanInput) -> Option<f64> {
+    if shares.is_empty() || shares.iter().map(|s| s.permille).sum::<u64>() != 1000 {
+        return None;
     }
-    if fits_alone && input.split == SplitMode::Auto {
-        return local;
+    let mut seconds = 0.0;
+    for share in shares {
+        let device = input.devices.iter().find(|d| d.node == share.node && d.device == share.device)?;
+        seconds += (share.permille as f64 / 1000.0) / measured_tps(input, device)?;
     }
-    let total: u64 = input.devices.iter().map(usable).sum();
-    if need_mib > total || total == 0 {
-        return Plan { action: PlanAction::Block, need_mib, shares: Vec::new(), reason: Some(PlanReason::DoesNotFit) };
+    (seconds > 0.0).then(|| 1.0 / seconds)
+}
+
+/// Whether a given split still fits the devices as they are now (a peer may have gone, or lost
+/// memory since the split was made).
+fn fits_within_caps(input: &PlanInput, shares: &[Share], need_mib: u64) -> bool {
+    if shares.iter().map(|s| s.permille).sum::<u64>() != 1000 {
+        return false;
     }
-    // Largest remainder: floors first, then the leftover thousandths to the largest remainders
-    // (earlier devices first on a tie), so the shares always add up to 1000.
+    let caps = capacities(input, need_mib);
+    shares.iter().all(|s| {
+        input
+            .devices
+            .iter()
+            .position(|d| d.node == s.node && d.device == s.device)
+            .is_some_and(|i| s.permille <= caps[i])
+    })
+}
+
+/// Shares by memory, as exo does: proportional to what each device can give, largest remainder —
+/// floors first, then the leftover thousandths to the largest remainders (earlier devices first on
+/// a tie), so the shares always add up to 1000.
+fn memory_permille(input: &PlanInput, total: u64) -> Vec<u64> {
     let exact: Vec<(u64, u64)> = input
         .devices
         .iter()
@@ -184,22 +247,129 @@ pub fn plan(input: &PlanInput) -> Plan {
         permille[i] += 1;
         left -= 1;
     }
-    let shares: Vec<Share> = input
+    permille
+}
+
+/// Shares by measured speed: fill the fastest device to what its memory allows, then the next.
+///
+/// For a pipeline a token's time is `Σ share_i / tps_i`, so the best split puts layers where a layer
+/// is cheapest — on the fastest device, up to its memory — not in proportion to throughput. The
+/// head keeps at least one thousandth: its own device runs the output block.
+fn speed_permille(input: &PlanInput, need_mib: u64) -> Vec<u64> {
+    let caps = capacities(input, need_mib);
+    let mut permille = vec![0u64; input.devices.len()];
+    let mut order: Vec<usize> = (0..input.devices.len()).collect();
+    order.sort_by(|a, b| {
+        let ta = measured_tps(input, &input.devices[*a]).unwrap_or(0.0);
+        let tb = measured_tps(input, &input.devices[*b]).unwrap_or(0.0);
+        tb.total_cmp(&ta).then(a.cmp(b))
+    });
+
+    let mut left = 1000u64;
+    for &i in &order {
+        if left == 0 {
+            break;
+        }
+        let take = caps[i].min(left);
+        permille[i] = take;
+        left -= take;
+    }
+    // Flooring the capacities can leave a thousandth or two: the fastest devices take them.
+    for &i in &order {
+        if left == 0 {
+            break;
+        }
+        permille[i] += 1;
+        left -= 1;
+    }
+
+    let head = input.devices.first().map(|d| d.node.clone()).unwrap_or_default();
+    let on_head: u64 = input.devices.iter().zip(&permille).filter(|(d, _)| d.node == head).map(|(_, p)| *p).sum();
+    if on_head == 0 {
+        let largest = (0..permille.len()).max_by_key(|i| permille[*i]);
+        if let (Some(from), Some(to)) = (largest, input.devices.iter().position(|d| d.node == head))
+            && permille[from] > 1
+        {
+            permille[from] -= 1;
+            permille[to] += 1;
+        }
+    }
+    permille
+}
+
+fn shares_of(input: &PlanInput, permille: Vec<u64>) -> Vec<Share> {
+    input
         .devices
         .iter()
         .zip(permille)
         .filter(|(_, p)| *p > 0)
         .map(|(d, permille)| Share { node: d.node.clone(), device: d.device.clone(), permille })
-        .collect();
+        .collect()
+}
+
+/// Shares a model's layers out over devices (spec/cluster.md, Partitioning): by measured speed when
+/// every device has been calibrated, else by memory as exo does. Either way pipeline (layer)
+/// parallel, and the split already running is kept while it is close to the best.
+pub fn plan(input: &PlanInput) -> Plan {
+    let need_mib = input.model_bytes.saturating_add(input.model_bytes / 10).div_ceil(MIB).saturating_add(512);
+    let head = input.devices.first().map(|d| d.node.clone()).unwrap_or_default();
+    let head_usable: u64 = input.devices.iter().filter(|d| d.node == head).map(usable).sum();
+    let peers = input.devices.iter().any(|d| d.node != head);
+    let local = Plan { action: PlanAction::Local, need_mib, shares: Vec::new(), reason: None, predicted_tps: None };
+    let fits_alone = need_mib <= head_usable;
+    if !peers && fits_alone {
+        return local;
+    }
+    if fits_alone && input.split == SplitMode::Auto {
+        return local;
+    }
+    let total: u64 = input.devices.iter().map(usable).sum();
+    if need_mib > total || total == 0 {
+        return Plan {
+            action: PlanAction::Block,
+            need_mib,
+            shares: Vec::new(),
+            reason: Some(PlanReason::DoesNotFit),
+            predicted_tps: None,
+        };
+    }
+    let calibrated = input.devices.iter().all(|d| measured_tps(input, d).is_some());
+    let permille = if calibrated { speed_permille(input, need_mib) } else { memory_permille(input, total) };
+    let mut shares = shares_of(input, permille);
+    let mut predicted = if calibrated { pipeline_tps(&shares, input).map(round2) } else { None };
+
+    // Keep the split already running unless another predicts at least HYSTERESIS better.
+    if calibrated
+        && !input.current.is_empty()
+        && fits_within_caps(input, &input.current, need_mib)
+        && let (Some(running), Some(best)) = (pipeline_tps(&input.current, input), predicted)
+        && running >= best * HYSTERESIS
+    {
+        shares = input.current.clone();
+        predicted = Some(round2(running));
+    }
+
     if shares.iter().all(|s| s.node == head) {
         return local;
     }
-    Plan { action: PlanAction::Split, need_mib, shares, reason: None }
+    Plan { action: PlanAction::Split, need_mib, shares, reason: None, predicted_tps: predicted }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn device(node: &str, free_mib: u64) -> PlanDevice {
+        PlanDevice { node: node.into(), device: "MTL0".into(), free_mib }
+    }
+
+    fn measured(node: &str, tps: f64) -> Measurement {
+        Measurement { node: node.into(), device: "MTL0".into(), tg_tps: tps }
+    }
+
+    fn input(model_bytes: u64, devices: Vec<PlanDevice>) -> PlanInput {
+        PlanInput { model_bytes, split: SplitMode::Always, devices, measured: Vec::new(), current: Vec::new() }
+    }
 
     #[test]
     fn lan_addresses() {
@@ -225,7 +395,70 @@ mod tests {
         let devices = (0..7)
             .map(|i| PlanDevice { node: format!("n{i}"), device: "GPU".into(), free_mib: 1000 + i * 37 })
             .collect();
-        let plan = plan(&PlanInput { model_bytes: 1 << 30, split: SplitMode::Always, devices });
+        let plan = plan(&input(1 << 30, devices));
         assert_eq!(plan.shares.iter().map(|s| s.permille).sum::<u64>(), 1000);
+        assert_eq!(plan.predicted_tps, None);
+    }
+
+    #[test]
+    fn the_fastest_device_fills_first() {
+        // 8 GiB model: 9404 MiB needed. The peer is six times faster, so it takes every layer it
+        // can hold; the head keeps its output block.
+        let mut i = input(8 << 30, vec![device("studio", 8_000), device("box", 48_000)]);
+        i.measured = vec![measured("studio", 10.0), measured("box", 60.0)];
+        let plan = plan(&i);
+        assert_eq!(plan.action, PlanAction::Split);
+        let shares: Vec<(&str, u64)> = plan.shares.iter().map(|s| (s.node.as_str(), s.permille)).collect();
+        assert_eq!(shares, vec![("studio", 1), ("box", 999)]);
+        // 1 / (0.001/10 + 0.999/60) = 59.70
+        assert_eq!(plan.predicted_tps, Some(59.7));
+    }
+
+    #[test]
+    fn memory_caps_a_fast_device() {
+        // 16 GiB model: 18535 MiB needed. The peer is twice as fast but can hold only 0.194 of it.
+        let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
+        i.measured = vec![measured("studio", 50.0), measured("box", 100.0)];
+        let plan = plan(&i);
+        let shares: Vec<(&str, u64)> = plan.shares.iter().map(|s| (s.node.as_str(), s.permille)).collect();
+        assert_eq!(shares, vec![("studio", 806), ("box", 194)]);
+        // 1 / (0.194/100 + 0.806/50) = 55.37
+        assert_eq!(plan.predicted_tps, Some(55.37));
+    }
+
+    #[test]
+    fn the_running_split_is_kept_when_it_is_close() {
+        let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
+        i.measured = vec![measured("studio", 50.0), measured("box", 100.0)];
+        i.current = vec![
+            Share { node: "studio".into(), device: "MTL0".into(), permille: 900 },
+            Share { node: "box".into(), device: "MTL0".into(), permille: 100 },
+        ];
+        let plan = plan(&i);
+        // 1 / (0.9/50 + 0.1/100) = 52.63, within 10% of 55.37: not worth a reload.
+        assert_eq!(plan.shares, i.current);
+        assert_eq!(plan.predicted_tps, Some(52.63));
+    }
+
+    #[test]
+    fn a_running_split_that_no_longer_fits_is_replanned() {
+        let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
+        i.measured = vec![measured("studio", 50.0), measured("box", 100.0)];
+        i.current = vec![
+            Share { node: "studio".into(), device: "MTL0".into(), permille: 500 },
+            Share { node: "box".into(), device: "MTL0".into(), permille: 500 },
+        ];
+        let plan = plan(&i);
+        assert_eq!(plan.shares.iter().map(|s| s.permille).collect::<Vec<_>>(), vec![806, 194]);
+    }
+
+    #[test]
+    fn an_unmeasured_device_plans_by_memory() {
+        let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
+        i.measured = vec![measured("studio", 50.0)]; // the peer never calibrated
+        let plan = plan(&i);
+        assert_eq!(plan.predicted_tps, None);
+        // 27000 : 3600 by memory.
+        assert_eq!(plan.shares.iter().map(|s| s.permille).collect::<Vec<_>>(), vec![882, 118]);
     }
 }

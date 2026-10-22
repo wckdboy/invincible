@@ -407,7 +407,7 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                     }
                 }
             }
-            let plan = invincible_policy::plan(&PlanInput { model_bytes: head.model_bytes, split: run.split, devices });
+            let plan = invincible_policy::plan(&PlanInput::new(head.model_bytes, run.split, devices));
             for note in &notes {
                 tracing::warn!(model = %run.model, "cluster: {note}");
             }
@@ -611,15 +611,14 @@ mod tests {
                 free_mib: d.free_mib,
             }));
         }
-        let plan = invincible_policy::plan(&PlanInput { model_bytes: 50 << 30, split: SplitMode::Auto, devices });
+        let plan = invincible_policy::plan(&PlanInput::new(50 << 30, SplitMode::Auto, devices));
         assert_eq!(plan.action, PlanAction::Split);
         // The idle peer holds nothing, so llama-server is not given it.
         assert_eq!(
             split_args(&plan, "studio", &head, &peers),
             ["--rpc", "127.0.0.1:4001", "--tensor-split", "316,316,368"]
         );
-        let local =
-            invincible_policy::plan(&PlanInput { model_bytes: 1 << 30, split: SplitMode::Auto, devices: vec![] });
+        let local = invincible_policy::plan(&PlanInput::new(1 << 30, SplitMode::Auto, vec![]));
         assert!(split_args(&local, "studio", &head, &peers).is_empty());
     }
 
@@ -627,15 +626,15 @@ mod tests {
     fn a_split_names_its_nodes_head_first() {
         let run = ClusterRun::new("big", SplitMode::Always, "studio", vec![link("mini", 1), link("box", 2)]);
         assert!(run.uses().is_empty(), "nothing planned yet");
-        let plan = invincible_policy::plan(&PlanInput {
-            model_bytes: 1 << 30,
-            split: SplitMode::Always,
-            devices: vec![
+        let plan = invincible_policy::plan(&PlanInput::new(
+            1 << 30,
+            SplitMode::Always,
+            vec![
                 PlanDevice { node: "studio".into(), device: "MTL0".into(), free_mib: 2000 },
                 PlanDevice { node: "box".into(), device: "CUDA0".into(), free_mib: 1000 },
                 PlanDevice { node: "box".into(), device: "CUDA1".into(), free_mib: 1000 },
             ],
-        });
+        ));
         run.set(RunState { plan: Some(plan), notes: vec![] });
         let uses: Vec<Value> = run.uses().iter().map(ShardUse::to_json).collect();
         assert_eq!(

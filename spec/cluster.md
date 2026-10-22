@@ -146,8 +146,10 @@ Vectors: `vectors/cluster.json`, the `link` cases.
 - `rpc_backend`: whether this node's llama-server was built with `GGML_RPC=ON`, found by asking it
   to reach an RPC server on a closed port (a build without it answers "RPC not supported").
 - `shard`: whether this node serves as a shard **for the device asking**.
-- Phase 2 adds measured numbers: memory bandwidth and FLOPs from a short calibration run
-  (`llama-bench` pp/tg on a tiny model), and link round-trip time and throughput per peer.
+- `tg_tps`: the model's generation rate on this device alone, tokens/s, from the node's calibration
+  run (`invincible tune probe`). Absent until the node has measured itself, and one unmeasured
+  device keeps a plan on the memory rule. Link round-trip time and throughput per peer come from
+  the same run.
 
 ## Partitioning (normative)
 
@@ -184,9 +186,41 @@ output head, on the head, which is what llama.cpp chooses to minimise transfers.
 
 Vectors: `vectors/cluster.json`, the `plan` cases.
 
-**Later (phase 2).** Speed-aware weights: proportional to measured throughput, capped by memory,
-so a fast GPU is not starved because a slower machine has more RAM. Prefer the smallest set of
-devices that holds the model (exo's rule), and devices with the weights already cached.
+### Speed-aware planning (v1, additive)
+
+When every device taking part is calibrated, steps 1–4 still decide *whether* to split; the shares
+are chosen by measured speed instead of memory:
+
+5. Each device's capacity is `⌊usable_i × 1000 / need_mib⌋` thousandths, capped at 1000: memory
+   still bounds a device, it no longer sets its share.
+6. Fill the fastest device (`tg_tps` descending, the order given breaking a tie) to its capacity,
+   then the next, until 1000 thousandths are placed. The head keeps at least 1: its own device runs
+   the output block.
+7. `predicted_tps` = `1 / Σ (permille_i / 1000) / tg_tps_i`. A token crosses every stage, so stage
+   times add; throughputs do not. It is a prediction from the measurements, and a plan states it
+   rather than claiming it.
+8. **Stability.** A `current` split that still fits the capacities is kept whenever its predicted
+   rate is at least `HYSTERESIS` (0.9) of the new plan's. A reshard reloads the model on every node
+   and ends the requests in flight, so a 10% gain is the floor for paying that. A `current` that no
+   longer fits — a peer gone, or less memory than it had — is always replanned.
+9. Any unmeasured device: steps 1–4 apply (memory) and `predicted_tps` is absent.
+
+Why fill rather than share in proportion: for a pipeline, time per token is `Σ share_i / tps_i`, so
+the minimum puts each layer where it is cheapest — on the fastest device, up to its memory. Equal
+or memory-proportional shares leave a fast device idle while a slow one adds its time to every
+token.
+
+```json
+{ "action": "split", "need_mib": 18535,
+  "shares": [{ "node": "studio", "device": "MTL0", "permille": 806 },
+             { "node": "box", "device": "MTL0", "permille": 194 }],
+  "predicted_tps": 55.37 }
+```
+
+**Still later (phase 2).** Choose the smallest set of devices that holds the model (exo's rule)
+rather than every device offered, and prefer devices whose disk already holds the weights; carry
+the calibration's link round-trip and throughput into the plan so a slow link can rule a peer out.
+
 **Tensor parallel** (phase 5): within one wired, RDMA-capable group only, through MLX (JACCL) or
 llama.cpp's `--split-mode tensor`; never over Wi-Fi.
 
