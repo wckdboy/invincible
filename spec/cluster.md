@@ -1,8 +1,9 @@
 # Cluster: decentralized intelligence across your own devices (v0)
 
 > **Phase 1 implemented, unaudited.** The link rule and the partitioning rule below are
-> normative and pinned by `vectors/cluster.json`. Everything past phase 1 is a design: concrete
-> enough to build, open to change when it meets real hardware.
+> normative and pinned by `vectors/cluster.json`. So is speed-aware planning, with its stability
+> rule: it is built, and its cases are in the same vectors (version 2). Everything else past
+> phase 1 is a design: concrete enough to build, open to change when it meets real hardware.
 
 Your devices together can run models none of them can run alone, and later train them. A Mac
 Studio, an older MacBook, a GPU box and a phone on the same desk hold 100+ GB between them. This
@@ -54,8 +55,12 @@ What runs where:
   for RDMA clusters later (TB5, macOS 26.2+, full mesh, `rdma_ctl enable` once).
 - **NVIDIA / AMD:** llama.cpp (CUDA, ROCm, Vulkan) for inference, the same RPC; PyTorch + PEFT for
   training (phase T2), launched as an engine like llama-server.
-- **CPU-only machines:** `ggml-rpc-server` exposes one CPU device; useful as a memory shard for
-  small parts of a model, slow.
+- **CPU-only machines:** `ggml-rpc-server` runs there, but no head uses one as a shard: a peer is
+  kept only when its `devices` list is not empty (`caps.shard && !caps.devices.is_empty()`,
+  `crates/invincible/src/cluster.rs`), and `devices` holds only the `--list-devices` lines that
+  carry a memory figure (`parse_devices`, same file). A CPU-only head does not split either: with
+  an empty device list the model runs on the head alone and the note says why (Known limits of
+  phase 1).
 - **Phones:** llama.cpp and MNN already run on Autobot's devices. As inference shards only on
   charge and on Wi-Fi (below); as federated LoRA participants (phase T3).
 
@@ -156,10 +161,13 @@ Vectors: `vectors/cluster.json`, the `link` cases.
   posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
   `$INVINCIBLE_HOME/tune/links.json`, behind the same hardware tag and an hour's freshness. A link
   that cannot be measured leaves the plan without a prediction.
-- `tg_tps`: the model's generation rate on this device alone, tokens/s, from the node's calibration
-  run (`invincible tune probe`). Absent until the node has measured itself, and one unmeasured
-  device keeps a plan on the memory rule. Link round-trip time and throughput per peer come from
-  the same run.
+- `tg_tps`: a device's generation rate for one model, alone on that device, tokens/s, from
+  `invincible tune bench <model> --device <name>` (llama-bench, one repetition). It is not a
+  capability of its own: it is the `tg_tps` of each `profiles` entry above, joined to a device by
+  name. Absent until the node has benchmarked that model, and one unmeasured device keeps a plan
+  on the memory rule. `invincible tune probe` reports the machine only (os, arch, cores, memory,
+  devices, engines) and runs no benchmark; link round-trip time and throughput come from the meter
+  above, not from either `tune` command.
 
 ## Partitioning (normative)
 
@@ -211,12 +219,19 @@ are chosen by measured speed instead of memory:
    a round trip plus its activation traffic to every token (phase 1 measured ~31 KiB sent and 8.4
    KiB returned per token, so `TOKEN_MIB` = 0.0385). A remote node whose link has not been measured
    leaves `predicted_tps` absent: the shares still follow the device measurements, but the rate is
-   never guessed. Vectors: `spec/vectors/cluster.json` version 1.
+   never guessed. Vectors: `spec/vectors/cluster.json` version 2.
 8. **Stability.** A `current` split that still fits the capacities is kept whenever its predicted
    rate is at least `HYSTERESIS` (0.9) of the new plan's. A reshard reloads the model on every node
    and ends the requests in flight, so a 10% gain is the floor for paying that. A `current` that no
    longer fits — a peer gone, or less memory than it had — is always replanned.
 9. Any unmeasured device: steps 1–4 apply (memory) and `predicted_tps` is absent.
+
+**Built.** Steps 5–9 are `invincible_policy::plan` (`crates/invincible-policy/src/cluster.rs`), with
+cases in `vectors/cluster.json` (`plan: the fastest device fills first`, `plan: the running split is
+kept when it is close`, `plan: a running split that no longer fits is replanned`, `plan: an
+unmeasured device plans by memory`). Step 8 reaches a live model: after an engine run the supervisor
+keeps the plan and hands its shares back as `current` on the next pass (`supervise`,
+`crates/invincible/src/cluster.rs`), so restarting a model keeps its split instead of resharding it.
 
 Why fill rather than share in proportion: for a pipeline, time per token is `Σ share_i / tps_i`, so
 the minimum puts each layer where it is cheapest — on the fastest device, up to its memory. Equal
@@ -231,8 +246,9 @@ token.
 ```
 
 **Still later (phase 2).** Choose the smallest set of devices that holds the model (exo's rule)
-rather than every device offered, and prefer devices whose disk already holds the weights; carry
-the calibration's link round-trip and throughput into the plan so a slow link can rule a peer out.
+rather than every device offered, and prefer devices whose disk already holds the weights. The link
+round-trip and throughput are in the plan already (step 7, `links`); a slow link lowers the
+predicted rate today, and excluding a peer because of its link is not built.
 
 **Tensor parallel** (phase 5): within one wired, RDMA-capable group only, through MLX (JACCL) or
 llama.cpp's `--split-mode tensor`; never over Wi-Fi.
@@ -252,7 +268,8 @@ llama.cpp's `--split-mode tensor`; never over Wi-Fi.
   trip is ~0.2 ms ([kjaiswal](https://github.com/kjaiswal/llama-cpp-distributed-benchmarks)), on
   good Wi-Fi 2–5 ms, with spikes. A target of ≥ 70% of single-device speed holds on Ethernet and
   Thunderbolt; on Wi-Fi only for large models whose per-token compute dwarfs the hops. The cluster
-  status shows the measured probe time per peer, and phase 2 plans with it.
+  status shows the probe time per peer, and each model's plan carries `predicted_tps`, which the
+  measured link goes into: a slow link lowers it (step 7).
 - **The encrypted link** costs ChaCha20-Poly1305 over each frame and one extra loopback hop on each
   side. Two details matter: snow's default ChaCha20-Poly1305 has no SIMD path on Apple silicon, so
   the node uses ring's (`ring-accelerated`, 3–5× faster, the same algorithm and the same vectors);
@@ -322,8 +339,9 @@ lists hosts off hardware you own, and `cluster` lists your own machines that too
   capabilities, which addresses the link rule allows), the heads it serves and the bytes they
   moved, and each split model's plan, notes and links.
 - `invincible cluster status [--json]`.
-- Later: `invincible cluster plan <model>` (dry run), `invincible cluster bench` (calibration),
-  `invincible cluster train ...` (below).
+- Later: `invincible cluster plan <model>` (dry run), `invincible cluster train ...` (below). What
+  the plans read is measured by `invincible tune probe`, `tune bench <model>` and `tune show`;
+  there is no `cluster` subcommand for calibration.
 
 On a shard:
 
@@ -417,8 +435,11 @@ export) is a natural first dataset.
 - The node runs `ggml-rpc-server` (renamed from `rpc-server` in late 2026; both names are found).
   llama.cpp's official release archives include it: `llama-b11799-bin-macos-arm64.tar.gz` has
   `ggml-rpc-server` and `libggml-rpc.dylib` next to `llama-server` (checked for macOS arm64; the
-  Linux archives are checked in phase 2). `install.sh` installs that archive into `~/.invincible/llama.cpp` and will set
-  `[cluster] rpc_server` from it when it does.
+  Linux archives are checked in phase 2). `install.sh` installs that archive into
+  `~/.invincible/llama.cpp` and writes only `[engine] llama_server` into the config. Nothing sets
+  `[cluster] rpc_server`, and nothing needs to: with no value there the node looks for
+  `ggml-rpc-server` next to `llama_server` before `PATH` (`find_rpc_server`,
+  `crates/invincible/src/cluster.rs`), which is where the archive puts it.
 - **Homebrew's llama.cpp has no RPC backend** (its ggml is built without `GGML_RPC`: `llama-server
   --rpc` answers "RPC not supported in this build", and there is no `ggml-rpc-server`). A node on
   Homebrew's llama.cpp can still be a member and is told why it cannot split; `invincible cluster
@@ -435,7 +456,7 @@ export) is a natural first dataset.
 | Phase | What | Accepted when |
 |---|---|---|
 | **1. Proof (built)** | Shard links (Noise, mode `0x03`, heads only), `ggml-rpc-server` on loopback, the head's doors, capabilities, `GET /v1/cluster` and `invincible cluster status`, memory-weighted plans, split models in the router, `cluster` in receipts, reshard after a shard leaves | Two `invincible serve` on one Mac with separate homes: one GGUF split across both answers through the gateway; receipt names both; ciphertext on the wire; a non-head paired device is refused; killing the shard mid-answer ends that answer with an error and the model comes back on the head alone; vectors pass |
-| 2. Two real machines | mDNS discovery of pinned keys; calibration (FLOPs, bandwidth, RTT) in capabilities and speed-aware plans; shards load weights from their own copy (by SHA-256); door restricted to the head's own llama-server; build-tag check; installer ships `ggml-rpc-server` | A 70B Q4 model on a 36 GB Mac + a 24 GB GPU box over Ethernet answers at ≥ 70% of the slower machine's tokens/s for a model that fits it, loads in < 1 min after the first time |
+| 2. Two real machines | mDNS discovery of pinned keys; calibration (tokens/s per device, link round-trip and throughput) on two real machines, with speed-aware plans proved there (the planner and the link meter are built and pinned by vectors; the numbers so far are one machine's); shards load weights from their own copy (by SHA-256); door restricted to the head's own llama-server; build-tag check; installer ships `ggml-rpc-server` | A 70B Q4 model on a 36 GB Mac + a 24 GB GPU box over Ethernet answers at ≥ 70% of the slower machine's tokens/s for a model that fits it, loads in < 1 min after the first time |
 | 3. Resilience | Resume after reshard (replay prompt + tokens); relaunch when idle when a peer returns; micro-batched prefill | Pulling a shard's cable mid-answer gives a pause and a complete answer; no request errors in a 1-hour soak with a shard toggling every 5 minutes |
 | 4. Placement | Whole-model placement on a peer (forwarded over a session), the router picking head, peer or split by measured speed | A model that fits only on the GPU box is served from there via the head, its receipt naming the box |
 | 5. Wired fast paths | Tensor parallel within RDMA/10 GbE groups (MLX JACCL or llama.cpp `--split-mode tensor`), opt-in RDMA between owned machines | 4 Macs over TB5 beat one Mac on a model that fits one (exo's claim: 1.8× on 2) |
@@ -481,7 +502,9 @@ pays the network's round trips.
 - The head's loopback doors accept any local process (as any loopback service does).
 - A peer that comes back is used at the model's next relaunch, not at once.
 - Byte counts in receipts are per link, so concurrent requests on one model share them.
-- Heads must have a GPU device of their own to anchor a split; CPU-only heads come later.
+- Heads must have a GPU device of their own to anchor a split: `llama-server --list-devices` has to
+  report one. Without it the model runs on the head alone and the note says so. CPU-only heads come
+  later.
 
 ## Open questions for the owner
 
