@@ -91,10 +91,23 @@ the code. The first implementation had exactly this bug, and a test caught it.)
 
 After the handshake each frame holds one Noise transport message carrying at most 65519 bytes of
 plaintext. In each direction the plaintexts, concatenated, form a byte stream, and that stream is
-plain **HTTP/1.1** to the node's API. A device reaches `/v1/models`, `/v1/chat/completions`,
-`/v1/receipts/<id>` and `/v1/node`
-(the same endpoints, headers and behaviour as on loopback) with no token, because its key already
-authenticates it. A device cannot reach the admin endpoints.
+plain **HTTP/1.1** to a fixed list of node endpoints — not the node's whole API. A device reaches
+these with no token, because its key already authenticates it; headers and behaviour are the same
+as on loopback:
+
+| Route | Why a device has it |
+|---|---|
+| `GET /v1/models` | The app picks the `model` it asks for from this list. |
+| `POST /v1/chat/completions` | One turn, streamed or whole. A request a head dispatches to this node arrives here too. |
+| `GET /v1/receipts/<id>` | The signed receipt for a request it made ([receipts.md](receipts.md)). |
+| `GET /v1/node` | The node's name and receipt key: the probe a peer makes before listing it as reachable. |
+| `GET /v1/cluster/node` | What this node can give a cluster, so a head can size a split here; a device this node does not name in `[cluster] heads` is told `shard: false`. |
+| `POST /v1/cluster/meter` | Times the link: small round trips, then one bulk payload ([cluster.md](cluster.md), Capabilities). |
+
+Nothing else is mounted. Every other path — `/v1/agent` (which would drive Autobot on the node
+with the node's own token), `/v1/audit`, `/v1/dispatch`, `/v1/fetch`, the membership routes,
+`/v1/admin/*` — answers exactly as a path that does not exist: the same 404 and the same body. A
+device therefore cannot tell which routes the node has, and cannot reach the operator's.
 
 ## Vectors
 
@@ -117,6 +130,10 @@ authenticates it. A device cannot reach the admin endpoints.
   until one finishes (each has 10 seconds).
 - A paired device holds at most 32 sessions at once.
 - Request headers must arrive within 30 seconds.
+- One `POST /v1/cluster/meter` body is at most 5 MiB on a device session: the 4 MiB bulk payload
+  the link meter sends, and no more. A larger one is refused with 413 before it is buffered. (The
+  loopback API takes a larger body on that route; a device does not need one.)
+- Bodies on the other device routes are the same limits as loopback: 32 MiB for a chat completion.
 
 ## The tunnel
 
