@@ -71,14 +71,19 @@ the code. The first implementation had exactly this bug, and a test caught it.)
 
 1. Device → node, handshake message 1. Payload: `{"name": "<device name>"}` (UTF-8 JSON, at most
    1024 bytes; a longer one is refused).
-2. The node uses up the code, then pins the device's static key under the name. Using up the code
+2. The node uses up the code, then pins the device's static key under the name, with the
+   **capability set** the code grants (below). Using up the code
    is atomic: of two handshakes that both prove the same code, only the first pins a device, and a
    handshake whose code was replaced, burned or expired while it ran pins nothing. Names are
    cleaned to ASCII letters, digits, `-` and `_`, at most 40 characters. A name already in use by another key gets a number (`phone-2`). A
    key that paired before keeps one entry, renamed.
 3. Node → device, handshake message 2. Payload:
-   `{"node": "<node name>", "device": "<name pinned>", "receipts": "<receipt public key>"}`. The device
-   pins the receipt key and uses it to verify the node's receipts ([receipts.md](receipts.md)).
+   `{"node": "<node name>", "device": "<name pinned>", "receipts": "<receipt public key>", "capabilities": ["shard"]}`. The device
+   pins the receipt key and uses it to verify the node's receipts ([receipts.md](receipts.md)), and
+   reads its own set: what it may reach over the session. A node from before capabilities sends no
+   `capabilities`, which a device must read as `shard` — the least, and what a session reached then.
+   **The device's hello is not an input to this.** Only `name` is read from message 1; a device that
+   puts `capabilities` in its hello is granted the code's set, so asking is not a way to escalate.
 4. The connection continues as a session (below).
 
 ### Session (`0x02`)
@@ -93,21 +98,61 @@ After the handshake each frame holds one Noise transport message carrying at mos
 plaintext. In each direction the plaintexts, concatenated, form a byte stream, and that stream is
 plain **HTTP/1.1** to a fixed list of node endpoints — not the node's whole API. A device reaches
 these with no token, because its key already authenticates it; headers and behaviour are the same
-as on loopback:
+as on loopback. Which of them it reaches is decided by the capability set recorded for it at
+pairing ([Capabilities](#capabilities)):
 
-| Route | Why a device has it |
+| Route | Capability | Why a device has it |
+|---|---|---|
+| `GET /v1/models` | `shard` | The app picks the `model` it asks for from this list. |
+| `POST /v1/chat/completions` | `shard` | One turn, streamed or whole. A request a head dispatches to this node arrives here too. |
+| `GET /v1/receipts/<id>` | `shard` | The signed receipt for a request it made ([receipts.md](receipts.md)). |
+| `GET /v1/node` | `shard` | The node's name and receipt key: the probe a peer makes before listing it as reachable. |
+| `GET /v1/cluster/node` | `shard` | What this node can give a cluster, so a head can size a split here; a device this node does not name in `[cluster] heads` is told `shard: false`. |
+| `POST /v1/cluster/meter` | `shard` | Times the link: small round trips, then one bulk payload ([cluster.md](cluster.md), Capabilities). |
+| `GET /v1/audit` | `audit` | Every caller's records ([audit.md](audit.md)). |
+| `GET /v1/dispatch`, `POST /v1/dispatch/chat/completions` | `dispatch` | The peers the operator owns, and a hop into them ([dispatch.md](dispatch.md)). |
+| `/v1/agent`, `/v1/agent/{path}` (any method) | `agent` | The Autobot Agent proxy, which runs with the node's own token (spec/agent.md). |
+
+Nothing else is mounted. Every other path — `/v1/fetch`, `/v1/messages`, `/v1/audio/speech`,
+`/v1/images/generations`, the rest of `/v1/cluster*`, `/v1/admin/*` — answers exactly as a path
+that does not exist: the same 404 and the same body. **A route whose capability the device does not
+hold answers with that same 404, byte for byte.** Deliberately not a 403: a 403 would map which
+routes exist and which grants the caller lacks, and a device has no business learning either. So a
+device cannot tell an operator route from no route at all, nor whether another device holds more.
+
+## Capabilities
+
+What a device may reach is a small closed set, recorded **at pairing** with the device in
+`devices.json` on the node it paired with, and changed only by the operator ([cluster.md](cluster.md),
+Membership API).
+
+| Code | What it grants |
 |---|---|
-| `GET /v1/models` | The app picks the `model` it asks for from this list. |
-| `POST /v1/chat/completions` | One turn, streamed or whole. A request a head dispatches to this node arrives here too. |
-| `GET /v1/receipts/<id>` | The signed receipt for a request it made ([receipts.md](receipts.md)). |
-| `GET /v1/node` | The node's name and receipt key: the probe a peer makes before listing it as reachable. |
-| `GET /v1/cluster/node` | What this node can give a cluster, so a head can size a split here; a device this node does not name in `[cluster] heads` is told `shard: false`. |
-| `POST /v1/cluster/meter` | Times the link: small round trips, then one bulk payload ([cluster.md](cluster.md), Capabilities). |
+| `shard` | The six routes a head needs of this node: models, chat completions, receipts, node, cluster/node, meter. |
+| `agent` | `/v1/agent*`: the Autobot proxy on this machine, with this node's token — agent turns with its tools, schedules, bots. |
+| `audit` | `GET /v1/audit`: every caller's records. |
+| `dispatch` | `GET /v1/dispatch` and `POST /v1/dispatch/chat/completions`: the operator's other nodes. |
 
-Nothing else is mounted. Every other path — `/v1/agent` (which would drive Autobot on the node
-with the node's own token), `/v1/audit`, `/v1/dispatch`, `/v1/fetch`, the membership routes,
-`/v1/admin/*` — answers exactly as a path that does not exist: the same 404 and the same body. A
-device therefore cannot tell which routes the node has, and cannot reach the operator's.
+- **The default is `shard`, and only `shard`.** A code minted with no capabilities grants it, and
+  every answer that hands out a code says which set it carries, so the default is visible where the
+  decision is made. A device that pairs and is granted nothing else is exactly what a paired device
+  was before capabilities existed.
+- **A code may pre-grant a set** — `POST /v1/cluster/pair {"capabilities": ["shard", "agent"]}` on
+  the node's own API, `{"capabilities": ["shard", "agent"]}` on `POST /v1/admin/pairing`. Only
+  there: the device API has no route that mints a code, and the pairing hello cannot add to what
+  the code grants. A code that grants less resets the device to less if it pairs again.
+- **Grants and revocations need no re-pairing.** `PATCH /v1/cluster/nodes/{name}
+  {"capabilities": [...]}` on the node replaces the set of the device that node hosts under that
+  name; the next request is admitted by the new set. `GET /v1/admin/devices` and `GET
+  /v1/cluster/nodes` report the sets, and a pairing reply says what the joining device got.
+- **A missing set is `shard`.** A `devices.json` written before capabilities existed has no set for
+  its devices, and the safe reading of "nothing recorded" is the least: `shard`, which is what those
+  devices could reach. Nothing is migrated ahead of time; the entry is written back with its set the
+  next time it changes.
+- The set governs the HTTP surface. A shard *link* (mode `0x03`, [cluster.md](cluster.md)) is
+  admitted by `[cluster] heads`, which names the devices that may run work on this machine — being
+  granted `shard` is not being named a head, and `GET /v1/cluster/node` says `shard: false` to a
+  device that is not one.
 
 ## Vectors
 
@@ -122,6 +167,9 @@ device therefore cannot tell which routes the node has, and cannot reach the ope
 - `invincible devices --remove <name>` on the node unpins a device. Its next handshake fails, and an
   open connection is dropped at the next frame in either direction (a stream the device is only
   reading stops too).
+- Revoking a capability (not the pairing) is `PATCH /v1/cluster/nodes/{name} {"capabilities":
+  [...]}`: the device stays paired, keeps its key and its sessions, and the route that capability
+  held answers as an unknown path from the next request. A grant is the same call with more.
 - A panic wipe in Autobot deletes `device.key`, and with it every pairing.
 
 ## Limits

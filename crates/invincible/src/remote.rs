@@ -14,7 +14,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Instant, timeout};
 
-use crate::devices::{Devices, StaticKey};
+use crate::devices::{Capabilities, Devices, StaticKey};
 
 /// `psk1`, not `psk2`: the secret must be mixed in by the end of the *first* message, so the node
 /// can tell a device that knows the code from one that does not before pinning anything. With
@@ -309,6 +309,9 @@ struct Pending {
     secret: [u8; 32],
     expires: Instant,
     failures: u32,
+    /// What the device that consumes this code is granted (spec/pairing.md, Capabilities): the
+    /// operator's decision, carried by the code, never something the device asks for.
+    capabilities: Capabilities,
 }
 
 impl Pairing {
@@ -345,15 +348,23 @@ impl Pairing {
     }
 
     /// Opens a pairing code (replacing any open one), valid for [CODE_LIFETIME] and one pairing.
+    /// The device that consumes it is granted `shard`: the least a session is for.
     pub fn start(&self) -> Result<PairingCode, String> {
         self.start_for(CODE_LIFETIME)
     }
 
-    /// [Pairing::start] with another lifetime.
+    /// [Pairing::start] with another lifetime, still granting `shard` only.
     pub fn start_for(&self, lifetime: Duration) -> Result<PairingCode, String> {
+        self.start_granting(lifetime, Capabilities::shard())
+    }
+
+    /// [Pairing::start] with another lifetime and the set the device that consumes the code will
+    /// hold (spec/pairing.md, Capabilities). The set belongs to the code, not to the handshake:
+    /// a device that asks for more in its hello is given what this says.
+    pub fn start_granting(&self, lifetime: Duration, capabilities: Capabilities) -> Result<PairingCode, String> {
         let secret = crate::token::random::<32>()?;
         *self.pending.lock().expect("pending lock") =
-            Some(Pending { secret, expires: Instant::now() + lifetime, failures: 0 });
+            Some(Pending { secret, expires: Instant::now() + lifetime, failures: 0, capabilities });
         Ok(PairingCode {
             node_key: self.key.public.as_slice().try_into().expect("32-byte key"),
             secret,
@@ -383,16 +394,19 @@ impl Pairing {
         }
     }
 
-    /// Uses up the code [secret] once its handshake succeeded: true for exactly one caller, and
-    /// only while it is still the open, unexpired code (two handshakes racing on one code, or a
-    /// code replaced or burned meanwhile, pin nothing).
-    fn take_code(&self, secret: &[u8; 32]) -> bool {
+    /// Uses up the code [secret] once its handshake succeeded, answering what it grants: Some
+    /// for exactly one caller, and only while it is still the open, unexpired code (two
+    /// handshakes racing on one code, or a code replaced or burned meanwhile, pin nothing).
+    fn take_code(&self, secret: &[u8; 32]) -> Option<Capabilities> {
         let mut pending = self.pending.lock().expect("pending lock");
-        let open = pending.as_ref().is_some_and(|p| &p.secret == secret && Instant::now() < p.expires);
-        if open {
+        let granted = match pending.as_ref() {
+            Some(p) if &p.secret == secret && Instant::now() < p.expires => Some(p.capabilities.clone()),
+            _ => None,
+        };
+        if granted.is_some() {
             *pending = None;
         }
-        open
+        granted
     }
 
     /// Counts a session of device [key]; None when it has [MAX_SESSIONS_PER_DEVICE] open already.
@@ -524,14 +538,28 @@ async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportSta
             let hello: serde_json::Value =
                 serde_json::from_slice(&payload[..n]).map_err(|_| "pairing hello is not JSON".to_owned())?;
             let device_key = hs.get_remote_static().ok_or("no device key")?.to_vec();
-            if !pairing.take_code(&secret) {
+            let Some(granted) = pairing.take_code(&secret) else {
                 return Err("the pairing code was used, replaced or expired meanwhile".to_owned());
-            }
-            let name = pairing.devices.add(hello["name"].as_str().unwrap_or("device"), &device_key)?;
-            let reply = json!({ "node": pairing.name, "device": name, "receipts": pairing.receipt_key }).to_string();
+            };
+            // Only the name is read from the hello. A device that puts `capabilities` in it gets
+            // the code's set: what the operator granted, never what the device asked for.
+            let name =
+                pairing.devices.add_with(hello["name"].as_str().unwrap_or("device"), &device_key, granted.clone())?;
+            let reply = json!({
+                "node": pairing.name,
+                "device": name,
+                "receipts": pairing.receipt_key,
+                "capabilities": granted.codes(),
+            })
+            .to_string();
             let m = hs.write_message(reply.as_bytes(), &mut out).map_err(|e| e.to_string())?;
             write_frame(tcp, &out[..m]).await.map_err(|e| e.to_string())?;
-            tracing::info!(device = %name, key = %crate::devices::fingerprint(&device_key), "device paired");
+            tracing::info!(
+                device = %name,
+                key = %crate::devices::fingerprint(&device_key),
+                capabilities = ?granted.codes(),
+                "device paired"
+            );
             Ok((hs.into_transport_mode().map_err(|e| e.to_string())?, device_key, MODE_SESSION))
         }
         MODE_SESSION | MODE_SHARD => {
@@ -561,13 +589,17 @@ async fn respond(tcp: &mut TcpStream, pairing: &Pairing) -> Result<(TransportSta
 // ---------------------------------------------------------------------------------------------
 // Client side
 
-/// What pairing told the device: the node's name and the name it pinned the device under.
+/// What pairing told the device: the node's name, the name it pinned the device under, and what
+/// that device may reach (spec/pairing.md, Capabilities).
 #[derive(Debug)]
 pub struct Paired {
     pub node: String,
     pub device: String,
     /// The node's receipt key, received over the authenticated channel; pin it.
     pub receipt_key: Option<String>,
+    /// What the node grants this device, as its reply said. A node from before capabilities
+    /// sends none, which reads as `shard` — what a session reached then.
+    pub capabilities: Capabilities,
 }
 
 /// Why a pairing attempt failed, told apart so a caller can say whether the code was wrong or the
@@ -613,12 +645,27 @@ async fn dial(addrs: &[String]) -> Result<TcpStream, String> {
 
 /// Pairs [device] with the node in [code], under [name].
 pub async fn pair(code: &PairingCode, device: &StaticKey, name: &str) -> Result<Paired, PairError> {
+    pair_with_hello(code, device, json!({ "name": name })).await
+}
+
+/// The pairing handshake with a hello of the caller's choosing.
+///
+/// Only `name` is read from it (spec/pairing.md): a device that puts `capabilities` in its hello
+/// is granted what the code says and nothing more, so asking is not a way to escalate. The
+/// parameter exists because that has to be testable against a real node.
+async fn pair_with_hello(
+    code: &PairingCode,
+    device: &StaticKey,
+    hello: serde_json::Value,
+) -> Result<Paired, PairError> {
     let mut tcp = dial(&code.addrs).await.map_err(PairError::Failed)?;
     let work = async {
         let mut hs = initiator(PAIR_PATTERN, device, &code.node_key, PAIR_PROLOGUE, Some(&code.secret))
             .map_err(PairError::Failed)?;
         let mut out = vec![0u8; MAX_FRAME];
-        let hello = json!({ "name": name }).to_string();
+        // What the node was asked to call us, for a reply that leaves the name out.
+        let requested = hello["name"].as_str().unwrap_or("device").to_owned();
+        let hello = hello.to_string();
         let m = hs.write_message(hello.as_bytes(), &mut out).map_err(|e| PairError::Failed(e.to_string()))?;
         tcp.write_u8(MODE_PAIR).await.map_err(|e| PairError::Failed(e.to_string()))?;
         write_frame(&mut tcp, &out[..m]).await.map_err(|e| PairError::Failed(e.to_string()))?;
@@ -635,8 +682,9 @@ pub async fn pair(code: &PairingCode, device: &StaticKey, name: &str) -> Result<
             serde_json::from_slice(&payload[..n]).map_err(|e| PairError::Failed(e.to_string()))?;
         Ok(Paired {
             node: reply["node"].as_str().unwrap_or("node").to_owned(),
-            device: reply["device"].as_str().unwrap_or(name).to_owned(),
+            device: reply["device"].as_str().unwrap_or(&requested).to_owned(),
             receipt_key: reply["receipts"].as_str().filter(|k| !k.is_empty()).map(str::to_owned),
+            capabilities: Capabilities::reported(reply.get("capabilities")),
         })
     };
     timeout(HANDSHAKE_TIMEOUT, work).await.map_err(|_| PairError::Failed("pairing timed out".to_owned()))?
@@ -899,13 +947,17 @@ mod tests {
             crate::devices::Devices::load(&dir.join("devices.json")).unwrap(),
         );
         let first = pairing.start().unwrap();
-        assert!(pairing.take_code(&first.secret));
-        assert!(!pairing.take_code(&first.secret), "used once");
+        assert_eq!(pairing.take_code(&first.secret), Some(crate::devices::Capabilities::shard()));
+        assert_eq!(pairing.take_code(&first.secret), None, "used once");
         let old = pairing.start().unwrap();
         let _new = pairing.start().unwrap();
-        assert!(!pairing.take_code(&old.secret), "replaced");
+        assert_eq!(pairing.take_code(&old.secret), None, "replaced");
         let short = pairing.start_for(std::time::Duration::ZERO).unwrap();
-        assert!(!pairing.take_code(&short.secret), "expired");
+        assert_eq!(pairing.take_code(&short.secret), None, "expired");
+        // A code opened with a set carries it to the device that consumes it.
+        let granted = crate::devices::Capabilities::parse(&["shard", "audit"]).unwrap();
+        let code = pairing.start_granting(super::CODE_LIFETIME, granted.clone()).unwrap();
+        assert_eq!(pairing.take_code(&code.secret), Some(granted));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -936,5 +988,60 @@ mod tests {
         {
             assert!(!super::loopback_host(bad), "{bad}");
         }
+    }
+
+    /// A device that puts `capabilities` in its pairing hello is granted what the code says and
+    /// nothing more: the set is the operator's, recorded at pairing, never the device's ask. This
+    /// runs the real handshake — a real node, a real Noise session — with a hello no client would
+    /// send, because that is the only way to show the field is not read.
+    #[tokio::test]
+    async fn a_hello_asking_for_capabilities_gets_the_codes_set() {
+        let dir = std::env::temp_dir().join(format!("invincible-ask-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let pairing = std::sync::Arc::new(super::Pairing::new(
+            crate::devices::StaticKey::load_or_create(&dir.join("node.key")).unwrap(),
+            "studio".into(),
+            vec![addr],
+            crate::devices::Devices::load(&dir.join("devices.json")).unwrap(),
+        ));
+        let settings = invincible_policy::NodeSettings {
+            network: invincible_policy::NetworkMode::Offline,
+            egress: invincible_policy::Egress::Never,
+        };
+        let state = std::sync::Arc::new(
+            crate::server::AppState::new(Vec::new(), settings, "token".into()).with_pairing(pairing.clone()),
+        );
+        tokio::spawn(super::serve(listener, pairing.clone(), crate::server::device_app(state)));
+        let device = crate::devices::StaticKey::load_or_create(&dir.join("device.key")).unwrap();
+        let hello = serde_json::json!({
+            "name": "phone",
+            "capabilities": ["shard", "agent", "audit", "dispatch"],
+        });
+
+        // The default code grants `shard`: the device is told so, and recorded so.
+        let code = super::PairingCode::decode(&pairing.start().unwrap().encode()).unwrap();
+        let paired = super::pair_with_hello(&code, &device, hello.clone()).await.unwrap();
+        assert_eq!(paired.capabilities.codes(), ["shard"], "the code's grant, not the hello's ask");
+        assert_eq!(paired.device, "phone");
+        assert_eq!(pairing.devices.named("phone").unwrap().capabilities.codes(), ["shard"]);
+
+        // A code that grants `agent` gives exactly that, asked for or not.
+        let granted = crate::devices::Capabilities::parse(&["shard", "agent"]).unwrap();
+        let code = super::PairingCode::decode(&pairing.start_granting(super::CODE_LIFETIME, granted).unwrap().encode())
+            .unwrap();
+        let paired = super::pair_with_hello(&code, &device, hello).await.unwrap();
+        assert_eq!(paired.capabilities.codes(), ["shard", "agent"]);
+        assert_eq!(pairing.devices.named("phone").unwrap().capabilities.codes(), ["shard", "agent"]);
+
+        // Pairing again through a code that grants less narrows the device: the code decides, so
+        // re-pairing is not a way back to more.
+        let code = super::PairingCode::decode(&pairing.start().unwrap().encode()).unwrap();
+        let paired = super::pair_with_hello(&code, &device, serde_json::json!({ "name": "phone" })).await.unwrap();
+        assert_eq!(paired.capabilities.codes(), ["shard"]);
+        assert_eq!(pairing.devices.list().len(), 1, "one key, one entry");
+        assert_eq!(pairing.devices.named("phone").unwrap().capabilities.codes(), ["shard"]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

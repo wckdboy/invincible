@@ -36,6 +36,10 @@ enum Command {
     Pair {
         #[arg(long)]
         config: Option<PathBuf>,
+        /// What the device that joins with this code may reach: any of `shard`, `agent`, `audit`,
+        /// `dispatch`, comma-separated [default: shard, the least].
+        #[arg(long, value_delimiter = ',')]
+        capabilities: Vec<String>,
     },
     /// List the paired devices, or unpair one.
     Devices {
@@ -605,18 +609,27 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("{}", token::load_or_create(&config::home()?.join("token"))?);
             Ok(())
         }
-        Command::Pair { config } => {
-            let reply = admin(config, reqwest::Method::POST, "/v1/admin/pairing")?;
+        Command::Pair { config, capabilities } => {
+            // The set the code carries (spec/pairing.md, Capabilities): named here, it is the
+            // operator's grant; left out, the code grants `shard` only.
+            let body =
+                if capabilities.is_empty() { None } else { Some(serde_json::json!({ "capabilities": capabilities })) };
+            let reply = admin_with(config, reqwest::Method::POST, "/v1/admin/pairing", body)?;
             let code = reply["code"].as_str().ok_or("the node sent no code")?;
             let qr = qrcode::QrCode::new(code.as_bytes()).map_err(|e| e.to_string())?;
             println!("{}", qr.render::<qrcode::render::unicode::Dense1x2>().quiet_zone(true).build());
             println!("{code}\n");
+            let reaches = reply["capabilities"]
+                .as_array()
+                .map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+                .unwrap_or_else(|| "shard".to_owned());
             println!(
                 "Node \"{}\", key {}. The code works once, for {} minutes.",
                 reply["node"].as_str().unwrap_or("?"),
                 reply["fingerprint"].as_str().unwrap_or("?"),
                 reply["expires_in"].as_u64().unwrap_or(0) / 60
             );
+            println!("The device that joins reaches: {reaches}.");
             Ok(())
         }
         Command::Devices { config, remove } => {
@@ -640,6 +653,12 @@ fn run(cli: Cli) -> Result<(), String> {
                     vec![
                         device["name"].as_str().unwrap_or("?").to_owned(),
                         brand::ash(&key.map(|k| fingerprint(&k)).unwrap_or_default()),
+                        // What it may reach (spec/pairing.md, Capabilities): a set of one (`shard`)
+                        // unless you granted more.
+                        device["capabilities"]
+                            .as_array()
+                            .map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+                            .unwrap_or_else(|| "shard".to_owned()),
                     ]
                 })
                 .collect();
@@ -666,6 +685,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 paired.device
             );
             println!("on \"{}\", [cluster] heads must name this device as \"{}\"", paired.node, paired.device);
+            // What the node granted this machine (spec/pairing.md, Capabilities): the least unless
+            // it was granted more, which the node's operator changes there.
+            println!("it grants this machine: {}", paired.capabilities.codes().join(", "));
             Ok(())
         }
         Command::Tunnel { node, listen } => {
@@ -1891,19 +1913,30 @@ fn discover_command(
 
 /// Calls the running node's admin API on loopback, with the local token.
 fn admin(config: Option<PathBuf>, method: reqwest::Method, path: &str) -> Result<serde_json::Value, String> {
+    admin_with(config, method, path, None)
+}
+
+/// [admin], with a JSON body when the route takes one.
+fn admin_with(
+    config: Option<PathBuf>,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let home = config::home()?;
     let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
     let token = token::load_or_create(&home.join("token"))?;
     let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
     runtime.block_on(async {
-        let response = invincible::egress::local()
+        let mut request = invincible::egress::local()
             .build()
             .map_err(|e| e.to_string())?
             .request(method, format!("http://{}{path}", config.listen))
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
+            .bearer_auth(token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request.send().await.map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
         let status = response.status();
         let body: serde_json::Value = response.json().await.unwrap_or_default();
         if !status.is_success() {

@@ -751,6 +751,7 @@ mod tests {
             key: String::new(),
             addrs: vec!["127.0.0.1:7778".into(), "192.168.1.5:7778".into(), "203.0.113.9:7778".into()],
             receipt_key: None,
+            capabilities: Default::default(),
         };
         let (ok, refused) = link_addrs(&peer, "direct");
         assert_eq!(ok, ["127.0.0.1:7778", "192.168.1.5:7778"]);
@@ -768,6 +769,7 @@ mod tests {
                 addrs: vec![],
                 receipt_key: None,
                 device: None,
+                capabilities: Default::default(),
             },
             port,
             traffic: Arc::default(),

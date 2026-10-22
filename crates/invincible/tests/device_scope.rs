@@ -1,11 +1,18 @@
-//! What a paired device may reach (spec/pairing.md, Transport), end to end over the same Noise
-//! session a phone or a cluster head uses.
+//! What a paired device may reach (spec/pairing.md, Transport and Capabilities), end to end over
+//! the same Noise session a phone or a cluster head uses.
 //!
 //! The node here is a real one: `remote::serve` in front of `device_app`, the loopback `app` with
 //! the operator's token beside it, a stub engine, a stub Autobot (which counts what reaches it),
-//! an audit log with entries in it, a cluster and a dispatcher, so every route the device is
+//! an audit log with entries in it, a cluster and a dispatcher, so every route a device is
 //! refused would answer 200 for the token. The device pairs over loopback, as the other tests do,
 //! and then asks through `remote::tunnel` — the same plain-HTTP door `invincible tunnel` opens.
+//!
+//! A device is admitted by the capability set it was granted at pairing: `shard` (the default,
+//! and the six routes this file's first two tests walk), and `agent`, `audit`, `dispatch` only
+//! when the operator granted them on the node's own API. The tests here are about that boundary:
+//! a shard is a shard, a grant opens exactly one more route, a revocation closes it again with no
+//! re-pairing, and a device cannot widen its own set — the 404 it gets answers byte for byte like
+//! a path that was never mounted.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -86,7 +93,11 @@ async fn stub_agent() -> (String, Arc<AtomicU64>) {
 /// A node with one engine, a stub agent, an audit log, a cluster and a dispatcher: every operator
 /// route the device is refused has something to answer with.
 async fn node() -> Node {
-    let dir = temp_dir("node");
+    node_in(temp_dir("node")).await
+}
+
+/// [node], in a home of the caller's choosing (so a test can put a `devices.json` there first).
+async fn node_in(dir: std::path::PathBuf) -> Node {
     std::fs::create_dir_all(&dir).unwrap();
     let engine = Engine::attached("small", &stub_engine().await, None, true);
     let (agent_url, agent_hits) = stub_agent().await;
@@ -176,8 +187,56 @@ fn operator() -> reqwest::Client {
     reqwest::Client::builder().default_headers(headers).timeout(std::time::Duration::from_secs(30)).build().unwrap()
 }
 
+/// `PATCH /v1/cluster/nodes/{name}` on the operator API with [capabilities]; the status and body.
+async fn grant(node: &Node, name: &str, capabilities: Value) -> (u16, Value) {
+    let response = operator()
+        .patch(format!("{}/v1/cluster/nodes/{name}", node.url))
+        .json(&json!({ "capabilities": capabilities }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap())
+}
+
+/// `POST` [path] on the operator API with [body]; the status and the answer's JSON.
+async fn operator_post(node: &Node, path: &str, body: Value) -> (u16, Value) {
+    let response = operator().post(format!("{}{path}", node.url)).json(&body).send().await.unwrap();
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+/// `GET /v1/admin/devices` on the operator API: every paired device with its set.
+async fn listed(node: &Node) -> Value {
+    operator().get(format!("{}/v1/admin/devices", node.url)).send().await.unwrap().json().await.unwrap()
+}
+
+/// A request through the door, and the status and body it answered.
+async fn ask(client: &reqwest::Client, door: &str, method: &str, path: &str) -> (u16, String) {
+    let mut request = client
+        .request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), format!("{door}{path}"))
+        .header("content-type", "application/json");
+    if method != "GET" {
+        request = request.body(r#"{}"#);
+    }
+    let response = request.send().await.unwrap_or_else(|e| panic!("{method} {path}: {e}"));
+    (response.status().as_u16(), response.text().await.unwrap())
+}
+
+/// Asserts [method] [path] is answered exactly as a path that was never mounted: same status and
+/// the same bytes. This is the property a revoked or un-granted route keeps.
+async fn refused_like_unknown(client: &reqwest::Client, door: &str, method: &str, path: &str) {
+    let (status, body) = ask(client, door, method, path).await;
+    assert_eq!(status, 404, "{method} {path} is not in this device's set");
+    let (unknown_status, unknown) = ask(client, door, "GET", "/v1/nothing-here").await;
+    assert_eq!(unknown_status, 404);
+    assert_eq!(body, unknown, "{method} {path} answers like an unknown path");
+}
+
 /// Every operator route, with a body where one is needed: the ones the audit found reachable, the
-/// membership and admin routes, and a path that does not exist at all (`/v1/user/models`).
+/// membership and admin routes, and a path that does not exist at all (`/v1/user/models`). All of
+/// them are refused for a device holding the default set — `shard`, which is what pairing grants
+/// unless the operator says otherwise — including the three routes a grant can open.
 const DENIED: &[(&str, &str, Option<&str>)] = &[
     ("GET", "/v1/agent", None),
     ("POST", "/v1/agent", Some(r#"{}"#)),
@@ -292,6 +351,11 @@ async fn a_device_reaches_exactly_what_its_app_and_a_shard_need() {
             .unwrap();
         assert_eq!(answer["bytes"], len as u64);
     }
+
+    // And the set it all comes from is the default one, visible to the operator: pairing granted
+    // `shard` and nothing else (spec/pairing.md, Capabilities).
+    assert_eq!(listed(&node).await["devices"][0]["name"], "phone");
+    assert_eq!(listed(&node).await["devices"][0]["capabilities"], json!(["shard"]));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -329,4 +393,172 @@ async fn the_meter_takes_one_bulk_payload_and_a_bigger_post_is_413() {
         .unwrap();
     assert_eq!(chat.status(), 200);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn granting_agent_opens_the_proxy_and_revoking_it_closes_it_without_re_pairing() {
+    let node = node().await;
+    let (phone, dir) = device("phone-grant");
+    assert_eq!(pair(&node, &phone).await, "phone");
+    let door = door(&node, &phone).await;
+    let client = client();
+
+    // The default: `shard`, so the proxy is not there — and says so the way any absent path does.
+    refused_like_unknown(&client, &door, "GET", "/v1/agent").await;
+    refused_like_unknown(&client, &door, "POST", "/v1/agent/turns").await;
+    assert_eq!(node.agent_hits.load(Ordering::SeqCst), 0, "a shard drove the agent");
+
+    // The operator grants `agent` on the device this node hosts.
+    let (status, answer) = grant(&node, "phone", json!(["shard", "agent"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["device"], "phone");
+    assert_eq!(answer["capabilities"], json!(["shard", "agent"]));
+    assert_eq!(answer["was"], json!(["shard"]));
+    assert_eq!(answer["changed"], true);
+
+    // The same pairing, the same doorway, no re-pairing: the proxy answers now, with the node's
+    // token, and Autobot is the one that answered.
+    let reply = client.get(format!("{door}/v1/agent")).send().await.unwrap();
+    assert_eq!(reply.status(), 200);
+    assert_eq!(node.agent_hits.load(Ordering::SeqCst), 1);
+    let turn =
+        client.post(format!("{door}/v1/agent/sessions/s1/turns")).json(&json!({ "text": "hi" })).send().await.unwrap();
+    assert_eq!(turn.status(), 200);
+    assert_eq!(node.agent_hits.load(Ordering::SeqCst), 2);
+
+    // One capability is one route family: what was not granted stays absent, byte for byte.
+    refused_like_unknown(&client, &door, "GET", "/v1/audit").await;
+    refused_like_unknown(&client, &door, "POST", "/v1/dispatch/chat/completions").await;
+    // And a grant is not a whole-API grant: the admin and membership routes are still not there.
+    refused_like_unknown(&client, &door, "PATCH", "/v1/cluster/nodes/phone").await;
+    refused_like_unknown(&client, &door, "POST", "/v1/cluster/pair").await;
+
+    // Revoking is the same route with the smaller set, and it needs no re-pairing either.
+    let (status, revoked) = grant(&node, "phone", json!(["shard"])).await;
+    assert_eq!(status, 200, "{revoked}");
+    assert_eq!(revoked["capabilities"], json!(["shard"]));
+    assert_eq!(revoked["was"], json!(["shard", "agent"]));
+    assert_eq!(revoked["changed"], true);
+    let before = node.agent_hits.load(Ordering::SeqCst);
+    refused_like_unknown(&client, &door, "GET", "/v1/agent").await;
+    assert_eq!(node.agent_hits.load(Ordering::SeqCst), before, "a revoked device still reached the agent");
+
+    // A shard stays a shard: the six routes answer, and the device is still the one that paired.
+    assert!(node.pairing.devices.is_pinned(&phone.public), "the device was never unpinned");
+    assert_eq!(node.pairing.devices.list().len(), 1);
+    for path in ["/v1/models", "/v1/node", "/v1/cluster/node"] {
+        assert_eq!(client.get(format!("{door}{path}")).send().await.unwrap().status(), 200, "{path}");
+    }
+    // The operator's listing is the record the gate reads.
+    assert_eq!(listed(&node).await["devices"][0]["capabilities"], json!(["shard"]));
+
+    // Revoking a capability the device does not hold changes nothing, and says so.
+    let (status, same) = grant(&node, "phone", json!(["shard"])).await;
+    assert_eq!(status, 200);
+    assert_eq!(same["changed"], false);
+    // A device this node does not host, and a name that is not a capability.
+    let (status, unknown) = grant(&node, "nowhere", json!(["shard"])).await;
+    assert_eq!(status, 404, "{unknown}");
+    assert!(unknown["error"]["message"].as_str().unwrap().contains("nowhere"), "{unknown}");
+    let (status, bad) = grant(&node, "phone", json!(["root"])).await;
+    assert_eq!(status, 400, "{bad}");
+    assert_eq!(bad["error"]["code"], "invalid_capabilities");
+    assert_eq!(listed(&node).await["devices"][0]["capabilities"], json!(["shard"]), "a refused grant wrote nothing");
+
+    // A set can be emptied: the device stays paired, and reaches nothing — no route at all, each
+    // answered as an unknown path. Its key is still pinned and it can be granted again.
+    let (status, empty) = grant(&node, "phone", json!([])).await;
+    assert_eq!(status, 200, "{empty}");
+    assert_eq!(empty["capabilities"], json!([]));
+    assert_eq!(empty["was"], json!(["shard"]));
+    for path in ["/v1/models", "/v1/node", "/v1/cluster/node", "/v1/agent"] {
+        refused_like_unknown(&client, &door, "GET", path).await;
+    }
+    assert!(node.pairing.devices.is_pinned(&phone.public));
+    let (status, _) = grant(&node, "phone", json!(["shard"])).await;
+    assert_eq!(status, 200);
+    assert_eq!(client.get(format!("{door}/v1/models")).send().await.unwrap().status(), 200);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_code_carries_the_grant_and_a_device_cannot_widen_its_own_set() {
+    let node = node().await;
+    let client = client();
+
+    // A code minted with no capabilities grants `shard`, and the answer says so where the code is
+    // handed out: the default is visible, not implied.
+    let (status, code) = operator_post(&node, "/v1/cluster/pair", json!({ "name": "a phone" })).await;
+    assert_eq!(status, 200, "{code}");
+    assert_eq!(code["capabilities"], json!(["shard"]));
+
+    // A code that pre-grants `agent` gives the device that consumes it the proxy at once.
+    let (status, code) = operator_post(&node, "/v1/cluster/pair", json!({ "capabilities": ["shard", "agent"] })).await;
+    assert_eq!(status, 200, "{code}");
+    assert_eq!(code["capabilities"], json!(["shard", "agent"]));
+    let (phone, dir) = device("phone-pregrant");
+    let code = PairingCode::decode(code["code_uri"].as_str().unwrap()).unwrap();
+    let paired = remote::pair(&code, &phone, "phone").await.unwrap();
+    assert_eq!(paired.capabilities.codes(), ["shard", "agent"], "the joining side is told what it got");
+    let door = door(&node, &phone).await;
+    assert_eq!(client.get(format!("{door}/v1/agent")).send().await.unwrap().status(), 200);
+
+    // The device cannot widen its set: every route that would change it is absent to it, and each
+    // refusal is byte for byte an unknown path's.
+    refused_like_unknown(&client, &door, "PATCH", "/v1/cluster/nodes/phone").await;
+    refused_like_unknown(&client, &door, "POST", "/v1/cluster/pair").await;
+    refused_like_unknown(&client, &door, "POST", "/v1/cluster/join").await;
+    refused_like_unknown(&client, &door, "DELETE", "/v1/admin/devices/phone").await;
+    let (patch_status, _) = ask(&client, &door, "PATCH", "/v1/cluster/nodes/phone").await;
+    assert_eq!(patch_status, 404, "a device asked for more and was answered with no such route");
+    assert_eq!(
+        node.pairing.devices.named("phone").unwrap().capabilities.codes(),
+        ["shard", "agent"],
+        "the set the code granted, unchanged by anything the device sent"
+    );
+
+    // A body naming a capability that does not exist is refused before a code exists at all.
+    let (status, bad) = operator_post(&node, "/v1/cluster/pair", json!({ "capabilities": ["shard", "root"] })).await;
+    assert_eq!(status, 400, "{bad}");
+    assert_eq!(bad["error"]["code"], "invalid_capabilities");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_device_recorded_before_capabilities_loads_as_a_shard() {
+    let (phone, dir) = device("phone-legacy");
+    // A `devices.json` exactly as an older node wrote it: a name and a key, no set at all.
+    let home = temp_dir("node-legacy");
+    std::fs::create_dir_all(&home).unwrap();
+    let legacy = json!([{ "name": "phone", "key": base64_key(&phone.public) }]);
+    std::fs::write(home.join("devices.json"), serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+    let node = node_in(home).await;
+    let door = door(&node, &phone).await;
+    let client = client();
+
+    // No re-pairing: the key is already pinned, and the safe reading of "no set" is `shard`.
+    assert!(node.pairing.devices.is_pinned(&phone.public));
+    assert_eq!(listed(&node).await["devices"][0]["capabilities"], json!(["shard"]));
+    for path in ["/v1/models", "/v1/node", "/v1/cluster/node"] {
+        assert_eq!(client.get(format!("{door}{path}")).send().await.unwrap().status(), 200, "{path}");
+    }
+    // And it is a shard only: the grants an older file could not have recorded are absent.
+    refused_like_unknown(&client, &door, "GET", "/v1/agent").await;
+    refused_like_unknown(&client, &door, "GET", "/v1/audit").await;
+    refused_like_unknown(&client, &door, "GET", "/v1/dispatch").await;
+    assert_eq!(node.agent_hits.load(Ordering::SeqCst), 0);
+
+    // Granting works on a migrated record like on any other.
+    let (status, answer) = grant(&node, "phone", json!(["shard", "audit"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["was"], json!(["shard"]));
+    let audit: Value = client.get(format!("{door}/v1/audit")).send().await.unwrap().json().await.unwrap();
+    assert!(audit["entries"].is_array(), "{audit}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// [key] as `devices.json` holds it: base64url, no padding.
+fn base64_key(key: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key)
 }
