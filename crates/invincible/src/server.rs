@@ -321,7 +321,7 @@ async fn cluster_node(State(state): State<Arc<AppState>>, caller: Option<Extensi
     };
     let mut caps = cluster.capabilities().await;
     let may = match caller.map(|Extension(c)| c) {
-        Some(Caller::Device(name)) => {
+        Some(Caller::Device { name, .. }) => {
             state.pairing.as_ref().and_then(|p| p.shard.as_ref()).is_some_and(|s| s.heads.contains(&name))
         }
         _ => cluster.shard,
@@ -417,7 +417,7 @@ async fn dispatch_completion(
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
-    draft.api = "dispatch";
+    draft.bind_request("dispatch", &parsed);
     draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
     draft.client = headers
         .get(CLIENT_HEADER)
@@ -563,7 +563,7 @@ async fn fetch(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(body
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
-    draft.api = "fetch";
+    draft.bind_request("fetch", &body);
     draft.client = headers.get(CLIENT_HEADER).and_then(|v| v.to_str().ok()).map(|v| v.chars().take(64).collect());
     let received = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let result = crate::fetch::get(&client, url, received.clone()).await;
@@ -890,10 +890,13 @@ async fn infer(
         .and_then(|v| v.to_str().ok())
         .map(|v| v.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(64).collect::<String>())
         .filter(|v| !v.is_empty());
-    draft.api = match api {
-        Api::Chat => "chat",
-        Api::Messages => "messages",
-    };
+    draft.bind_request(
+        match api {
+            Api::Chat => "chat",
+            Api::Messages => "messages",
+        },
+        &parsed,
+    );
     // A cloud backend that fails is marked down and the request is routed again; each round
     // takes one backend out, so this ends.
     let mut rounds = 0;

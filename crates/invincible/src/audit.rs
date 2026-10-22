@@ -20,14 +20,30 @@ const ROTATE_AT: u64 = 16 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Caller {
     Local,
-    Device(String),
+    /// A paired device: the name it is listed under, its pinned static key (base64url), and the
+    /// fingerprint people compare ([crate::devices::fingerprint]). The key is the identity; the
+    /// name is a label the owner can change.
+    Device {
+        name: String,
+        key: String,
+        fingerprint: String,
+    },
 }
 
 impl Caller {
+    /// A paired device, from its static public key as the session handshake gave it.
+    pub fn device(name: &str, key: &[u8]) -> Self {
+        Self::Device {
+            name: name.to_owned(),
+            key: base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, key),
+            fingerprint: crate::devices::fingerprint(key),
+        }
+    }
+
     pub fn code(&self) -> String {
         match self {
             Self::Local => "local".to_owned(),
-            Self::Device(name) => format!("device:{name}"),
+            Self::Device { name, .. } => format!("device:{name}"),
         }
     }
 }
@@ -256,7 +272,7 @@ mod tests {
         let log = AuditLog::new(&home);
         assert_eq!(log.verify(&key.public()), Ok(0));
         log.append(&Caller::Local, Some("autobot-agent"), "chat", &receipt(&key, "a1", "qwen", json!([]))).unwrap();
-        log.append(&Caller::Device("phone".into()), None, "chat", &receipt(&key, "a2", "qwen", json!([]))).unwrap();
+        log.append(&Caller::device("phone", &[7; 32]), None, "chat", &receipt(&key, "a2", "qwen", json!([]))).unwrap();
         // A fresh handle (a restarted node) continues the chain from the file.
         let log = AuditLog::new(&home);
         let egress =
