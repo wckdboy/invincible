@@ -1,7 +1,7 @@
 //! The `invincible` command.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -504,6 +504,21 @@ fn main() -> ExitCode {
     }
 }
 
+/// The name a node lists this device under: `--name` when given, else this node's own
+/// `[remote] name` — the string a shard's `[cluster] heads` compares against. Defaulting to
+/// "device" is what let two correct configs disagree with nothing to show for it.
+fn join_name(name: Option<String>, home: &Path) -> String {
+    name.unwrap_or_else(|| {
+        let path = home.join("config.toml");
+        invincible::fsutil::read_optional(&path)
+            .ok()
+            .flatten()
+            .and_then(|text| Config::parse(&text).ok())
+            .map(|c| c.remote.name())
+            .unwrap_or_else(|| "device".to_owned())
+    })
+}
+
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Serve { config } => {
@@ -577,15 +592,7 @@ fn run(cli: Cli) -> Result<(), String> {
             // `[cluster] heads` compares against, and "device" can never match what a person
             // would have written there. Passing the *peer's* name here is the mistake that made
             // two correctly configured nodes disagree (spec/cluster.md).
-            let name = name.unwrap_or_else(|| {
-                let path = home.join("config.toml");
-                fsutil::read_optional(&path)
-                    .ok()
-                    .flatten()
-                    .and_then(|text| Config::parse(&text).ok())
-                    .map(|c| c.remote.name())
-                    .unwrap_or_else(|| "device".to_owned())
-            });
+            let name = join_name(name, &home);
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
             let paired = runtime.block_on(remote::pair(&code, &device, &name))?;
             let mut nodes = KnownNodes::load(&home)?;
@@ -1553,5 +1560,36 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_name;
+
+    fn home(name: &str, config: Option<&str>) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("inv-join-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        if let Some(text) = config {
+            std::fs::write(dir.join("config.toml"), text).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn join_name_defaults_to_this_nodes_own_name() {
+        let dir = home("own", Some("[remote]\nname = \"studio\"\n"));
+        assert_eq!(join_name(None, &dir), "studio");
+        // An explicit name still wins: the operator may want another label.
+        assert_eq!(join_name(Some("laptop".into()), &dir), "laptop");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn join_name_falls_back_when_there_is_no_config() {
+        let dir = home("empty", None);
+        assert_eq!(join_name(None, &dir), "device");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

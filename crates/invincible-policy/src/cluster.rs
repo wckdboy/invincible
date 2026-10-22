@@ -519,6 +519,15 @@ mod tests {
     }
 
     #[test]
+    fn no_devices_is_its_own_reason_not_a_size_problem() {
+        // A machine with nothing to place layers on must not be reported as "does not fit":
+        // that reads as a memory shortfall and hides the real cause (spec/cluster.md).
+        let plan = plan(&input(4 << 30, Vec::new()));
+        assert_eq!(plan.action, PlanAction::Block);
+        assert_eq!(plan.reason, Some(PlanReason::NoDevices));
+    }
+
+    #[test]
     fn an_unmeasured_device_plans_by_memory() {
         let mut i = input(16 << 30, vec![device("studio", 30_000), device("box", 4_000)]);
         i.measured = vec![measured("studio", 50.0)]; // the peer never calibrated
