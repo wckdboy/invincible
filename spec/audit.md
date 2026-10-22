@@ -55,10 +55,12 @@ A removed, reordered or edited entry breaks (1) or (2), unless the later entries
 The chain is plain SHA-256, not keyed, and the node's receipt key lives on the same machine. So:
 
 - **Receipts cannot be forged** without the receipt key: what a receipt says (where a request ran,
-  what left the node) holds for any entry that verifies, and a device that kept its own receipts
-  can check them against the log.
-- **The time, the caller and the order** are not signed. Someone who can write the log can change
-  them, or delete entries, and recompute every later `prev`; `--verify` then still passes.
+  what left the node, and — since [receipts.md](receipts.md) version 1 — the request and answer
+  hashes, the caller and the time) holds for any entry that verifies, and a device that kept its own
+  receipts can check them against the log.
+- **The entry's `at` and `caller` fields are not signed** — the receipt's own `at` and `caller` are
+  (version 1), and those are the ones to read. Someone who can write the log can change the entry's
+  fields, or delete entries, and recompute every later `prev`; `--verify` then still passes.
   Removing the newest entries, or the rotated file, is never caught by the chain.
 
 The log is a record kept for the owner, protected by the machine's file permissions; it is not

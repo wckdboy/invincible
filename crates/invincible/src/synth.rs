@@ -232,7 +232,7 @@ async fn handle(
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
-    draft.api = kind.api();
+    draft.bind_request(kind.api(), &parsed);
     draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
     draft.client = headers
         .get(CLIENT_HEADER)

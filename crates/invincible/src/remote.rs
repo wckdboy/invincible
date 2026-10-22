@@ -487,7 +487,7 @@ async fn accept(
     let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
     // Requests on this session are the device's (for the audit log).
     let name = pairing.devices.name_of(&device_key).unwrap_or_else(|| crate::devices::fingerprint(&device_key));
-    let app = app.layer(axum::Extension(crate::audit::Caller::Device(name)));
+    let app = app.layer(axum::Extension(crate::audit::Caller::device(&name, &device_key)));
     let service = hyper_util::service::TowerToHyperService::new(app);
     tokio::spawn(async move {
         let _ = hyper::server::conn::http1::Builder::new()

@@ -63,7 +63,7 @@ fn redaction() {
 
 #[test]
 fn receipts() {
-    use invincible::receipts::{ReceiptKey, canonical, verify};
+    use invincible::receipts::{ReceiptKey, canonical, hash, verify};
     let cases = cases("receipts");
     assert!(!cases.is_empty());
     let failures: Vec<String> = cases
@@ -71,6 +71,10 @@ fn receipts() {
         .filter_map(|case| {
             let input = &case["input"];
             let got = match input["kind"].as_str().unwrap() {
+                "canonical" => json!({
+                    "canonical": canonical(&input["value"]).unwrap(),
+                    "sha256": hash(&input["value"]).unwrap(),
+                }),
                 "sign" => {
                     let seed: [u8; 32] =
                         URL_SAFE_NO_PAD.decode(input["seed"].as_str().unwrap()).unwrap().try_into().unwrap();

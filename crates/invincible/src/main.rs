@@ -135,6 +135,12 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Check a receipt offline (spec/receipts.md): its signature, what it binds, and — given the
+    /// request and the answer — that they are the ones it names.
+    Receipt {
+        #[command(subcommand)]
+        action: ReceiptAction,
+    },
     /// Print where a request would run, given a routing input (spec/routing.md) as JSON.
     Route {
         /// The input file; reads stdin when absent or `-`.
@@ -171,6 +177,27 @@ enum Command {
         /// The daily job: updates only when [update] auto is on.
         #[arg(long, hide = true)]
         scheduled: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReceiptAction {
+    /// Verify a receipt from a file (or `-` for stdin), or by request id from this node's audit log.
+    Verify {
+        /// The signed envelope as JSON (a file, `-`, or a request id in this node's audit log).
+        receipt: String,
+        /// The node's receipt public key, base64url [default: this node's own].
+        #[arg(long)]
+        key: Option<String>,
+        /// The request body as the client sent it: its hash is recomputed and compared.
+        #[arg(long)]
+        request: Option<PathBuf>,
+        /// The answer bytes exactly as the client received them: their hash is recomputed.
+        #[arg(long)]
+        answer: Option<PathBuf>,
+        /// Print the report as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1026,6 +1053,9 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Receipt { action: ReceiptAction::Verify { receipt, key, request, answer, json } } => {
+            verify_receipt(&receipt, key, request, answer, json)
+        }
         Command::Update { channel, version, check, force, network, no_restart, auto, scheduled } => {
             update_command(UpdateArgs { channel, version, check, force, network, no_restart, auto, scheduled })
         }
@@ -1410,6 +1440,109 @@ fn parse_age(text: &str) -> Option<u64> {
             _ => return None,
         },
     )
+}
+
+/// `invincible receipt verify` (spec/receipts.md, "Verifying"): the offline check. Everything it
+/// says it checked was checked here; what it could not check is listed as such.
+fn verify_receipt(
+    source: &str,
+    key: Option<String>,
+    request: Option<PathBuf>,
+    answer: Option<PathBuf>,
+    json: bool,
+) -> Result<(), String> {
+    let envelope = load_envelope(source)?;
+    let public = match key {
+        Some(key) => key,
+        None => own_receipt_key()?,
+    };
+    let request = request.as_deref().map(read_json).transpose()?;
+    let answer = match answer.as_deref() {
+        Some(path) => Some(std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?),
+        None => None,
+    };
+    let report = invincible::receipts::inspect(&public, &envelope, request.as_ref(), answer.as_deref())?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report).expect("json"));
+        return Ok(());
+    }
+    println!("receipt {}: version {}", report["request_id"].as_str().unwrap_or("?"), report["version"]);
+    println!("  node     {public}");
+    if report["bound"] == serde_json::json!(true) {
+        println!("  api      {}", report["api"].as_str().unwrap_or("?"));
+        let caller = &report["caller"];
+        if caller["kind"] == serde_json::json!("device") {
+            println!(
+                "  caller   device {:?}, key {}, fingerprint {}",
+                caller["name"].as_str().unwrap_or("?"),
+                caller["key"].as_str().unwrap_or("?"),
+                caller["fingerprint"].as_str().unwrap_or("?")
+            );
+        } else {
+            println!("  caller   local (the node's own API, behind its token)");
+        }
+        println!("  at       {} ({}s ago)", report["at"], report["at_ago"]);
+        println!("  request  sha256 {}", report["request_sha256"].as_str().unwrap_or("?"));
+        println!(
+            "  answer   sha256 {} ({} bytes, {})",
+            report["answer_sha256"].as_str().unwrap_or("?"),
+            report["answer_bytes"],
+            if report["answer_complete"] == serde_json::json!(true) { "whole" } else { "cut short" }
+        );
+    } else {
+        println!("  version 0: routing and accounting only — no request, answer, caller or time is bound");
+    }
+    println!("signature: valid");
+    for (title, key) in [("checked", "checked"), ("not checked", "not_checked")] {
+        println!("{title}:");
+        for item in report[key].as_array().into_iter().flatten() {
+            println!("  - {}", item.as_str().unwrap_or("?"));
+        }
+    }
+    Ok(())
+}
+
+/// The envelope `receipt verify` was given: a file, `-` for stdin, or an id in this node's audit log
+/// (where the envelope sits under `receipt`).
+fn load_envelope(source: &str) -> Result<serde_json::Value, String> {
+    let text = if source == "-" {
+        let mut text = String::new();
+        std::io::stdin().read_to_string(&mut text).map_err(|e| format!("stdin: {e}"))?;
+        Some(text)
+    } else if std::path::Path::new(source).is_file() {
+        Some(std::fs::read_to_string(source).map_err(|e| format!("{source}: {e}"))?)
+    } else {
+        None
+    };
+    let value: serde_json::Value = match text {
+        Some(text) => serde_json::from_str(&text).map_err(|e| format!("{source}: not JSON: {e}"))?,
+        None => invincible::audit::AuditLog::new(&config::home()?)
+            .find(source)
+            .ok_or_else(|| format!("no receipt {source}: not a file, and not in this node's audit log"))?,
+    };
+    if value.get("signature").is_none() && value["receipt"].get("signature").is_some() {
+        return Ok(value["receipt"].clone());
+    }
+    Ok(value)
+}
+
+/// This node's receipt public key, for verifying its own receipts without `--key`.
+fn own_receipt_key() -> Result<String, String> {
+    use base64::Engine as _;
+    let path = config::home()?.join("receipt.key");
+    let text = fsutil::read_optional(&path)?
+        .ok_or_else(|| "this node has no receipt key: pass --key <the node's receipt public key>".to_owned())?;
+    let seed: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(text.trim())
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| format!("{}: not a receipt key", path.display()))?;
+    Ok(invincible::receipts::ReceiptKey::from_seed(&seed).public())
+}
+
+fn read_json(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: not JSON: {e}", path.display()))
 }
 
 /// One audit entry as a line: when, who, where it ran, tokens, what left.
