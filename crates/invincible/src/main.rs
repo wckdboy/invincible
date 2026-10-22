@@ -106,6 +106,11 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Measure this machine and what a model runs at on it: `probe`, `bench`, `show`.
+    Tune {
+        #[command(subcommand)]
+        action: TuneAction,
+    },
     /// Show what the node answered and what left it (the audit log, spec/audit.md).
     Audit {
         /// Only entries this recent: `30m`, `24h`, `7d`.
@@ -173,6 +178,33 @@ enum ClusterAction {
         /// Print JSON.
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TuneAction {
+    /// Report the machine, its accelerators and its engines. No personal data.
+    Probe {
+        /// The JSON, for another program to read.
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Run llama-bench on one model and keep the numbers the cluster planner reads.
+    Bench {
+        /// The model id, as `invincible model list` shows it.
+        model: String,
+        /// The device to measure on [default: the first llama.cpp reports, else CPU].
+        #[arg(long)]
+        device: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Show what has been measured on this machine.
+    Show {
+        /// One model id; without it, every model measured here.
+        model: Option<String>,
     },
 }
 
@@ -818,6 +850,81 @@ fn run(cli: Cli) -> Result<(), String> {
                     .into();
                 std::fs::write(&out, serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?)
                     .map_err(|e| format!("{}: {e}", out.display()))?;
+            }
+            Ok(())
+        }
+        Command::Tune { action } => {
+            let home = config::home()?;
+            // A probe is about the machine, so a missing config is not an error.
+            let load = |path: Option<PathBuf>| -> Result<Config, String> {
+                let path = path.unwrap_or_else(|| home.join("config.toml"));
+                match fsutil::read_optional(&path)? {
+                    Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", path.display())),
+                    None => Config::parse(""),
+                }
+            };
+            match action {
+                TuneAction::Probe { json, config: path } => {
+                    let cfg = load(path)?;
+                    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+                    let probe = runtime.block_on(invincible::tune::probe(Some(&cfg.engine.llama_server)));
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&probe).map_err(|e| e.to_string())?);
+                    } else {
+                        println!("{}", probe.report());
+                    }
+                }
+                TuneAction::Bench { model, device, config: path } => {
+                    let cfg = load(path)?;
+                    let entry = cfg.models.iter().find(|m| m.id == model).ok_or_else(|| {
+                        format!("no model {model:?} in the config (`invincible model list` shows them)")
+                    })?;
+                    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+                    let probe = runtime.block_on(invincible::tune::probe(Some(&cfg.engine.llama_server)));
+                    let program = probe.llama_bench.clone().ok_or(
+                        "llama-bench not found: it ships with llama.cpp (`brew install llama.cpp`, or your CUDA build)",
+                    )?;
+                    let device = device
+                        .or_else(|| probe.devices.first().map(|d| d.name.clone()))
+                        .unwrap_or_else(|| "CPU".to_owned());
+                    println!("measuring {model} on {device} (this takes a minute)…");
+                    let (pp, tg) = invincible::tune::bench(std::path::Path::new(&program), &entry.path, Some(&device))?;
+                    let profile = invincible::tune::Profile {
+                        device: device.clone(),
+                        tg_tps: tg,
+                        pp_tps: pp,
+                        engine: "llama-bench".to_owned(),
+                        at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    };
+                    let set = invincible::tune::record(&home, &model, &invincible::tune::hardware_now(), profile)?;
+                    let prompt = pp.map(|p| format!(", prompt {p:.1} tok/s")).unwrap_or_default();
+                    println!(
+                        "{model} on {device}: {tg:.1} tok/s{prompt} — kept in {} ({} device(s) measured on this machine)",
+                        invincible::tune::set_path(&home, &model).display(),
+                        set.profiles.len()
+                    );
+                    println!(
+                        "the cluster planner uses these numbers on the next plan; `invincible cluster status` shows it"
+                    );
+                }
+                TuneAction::Show { model } => {
+                    let sets = match model {
+                        Some(model) => invincible::tune::load(&home, &model).into_iter().collect(),
+                        None => invincible::tune::load_all(&home),
+                    };
+                    if sets.is_empty() {
+                        println!("{}", brand::ash("nothing measured yet (`invincible tune bench <model>`)"));
+                    }
+                    let now = invincible::tune::hardware_now();
+                    for set in sets {
+                        let current = if set.hardware == now { "this machine" } else { "other hardware, ignored" };
+                        println!("{} · {} · {current}", set.model, set.hardware);
+                        for p in &set.profiles {
+                            let pp = p.pp_tps.map(|v| format!(" · prompt {v:.1}")).unwrap_or_default();
+                            println!("  {:<8} {:>8.1} tok/s{pp}  {}", p.device, p.tg_tps, brand::ash(&p.engine));
+                        }
+                    }
+                }
             }
             Ok(())
         }

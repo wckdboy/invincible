@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use invincible_policy::{LinkAction, LinkInput, Plan, PlanAction, PlanDevice, PlanInput, SplitMode, decide_link};
+use invincible_policy::{
+    LinkAction, LinkInput, Measurement, Plan, PlanAction, PlanDevice, PlanInput, SplitMode, decide_link,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -133,6 +135,13 @@ pub struct Capabilities {
     /// Whether it serves as a shard (`[cluster] serve`).
     #[serde(default)]
     pub shard: bool,
+    /// What this machine measured about itself (`invincible tune bench`), so a head can plan by
+    /// speed rather than only by memory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<crate::tune::Set>,
+    /// The machine those profiles are valid for; a head ignores profiles from other hardware.
+    #[serde(default)]
+    pub hardware: String,
 }
 
 /// `ggml-rpc-server` on loopback [port] only, caching the weights heads send in [cache].
@@ -385,6 +394,7 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                 .map(|d| PlanDevice { node: run.head.clone(), device: d.name.clone(), free_mib: d.free_mib })
                 .collect();
             let mut peers = Vec::new();
+            let mut measured = Vec::new();
             if head.rpc_backend == Some(false) {
                 notes.push(
                     "this llama-server has no RPC backend (build it with GGML_RPC=ON; see spec/cluster.md)".into(),
@@ -400,6 +410,20 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                                 device: d.name.clone(),
                                 free_mib: d.free_mib,
                             }));
+                            // What the peer measured on itself, for this model and this hardware.
+                            for set in
+                                caps.profiles.iter().filter(|s| s.model == run.model && s.hardware == caps.hardware)
+                            {
+                                for profile in
+                                    set.profiles.iter().filter(|p| caps.devices.iter().any(|d| d.name == p.device))
+                                {
+                                    measured.push(Measurement {
+                                        node: link.peer.name.clone(),
+                                        device: profile.device.clone(),
+                                        tg_tps: profile.tg_tps,
+                                    });
+                                }
+                            }
                             peers.push((link.clone(), caps.devices));
                         }
                         Ok(_) => notes.push(format!("{}: not serving as a shard ([cluster] serve)", link.peer.name)),
@@ -407,7 +431,20 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
                     }
                 }
             }
-            let plan = invincible_policy::plan(&PlanInput::new(head.model_bytes, run.split, devices));
+            // This machine's own measurements, and the split already running (for the hysteresis).
+            if let Ok(home) = crate::config::home() {
+                measured.extend(crate::tune::measured(
+                    &home,
+                    &run.model,
+                    &run.head,
+                    &crate::tune::hardware_now(),
+                    &head.devices,
+                ));
+            }
+            let mut input = PlanInput::new(head.model_bytes, run.split, devices);
+            input.measured = measured;
+            input.current = run.state().plan.map(|plan| plan.shares).unwrap_or_default();
+            let plan = invincible_policy::plan(&input);
             for note in &notes {
                 tracing::warn!(model = %run.model, "cluster: {note}");
             }
@@ -465,6 +502,8 @@ impl ClusterState {
             devices: probe_devices(&self.llama_server).await,
             rpc_backend: self.rpc_backend,
             shard: self.shard,
+            profiles: crate::config::home().map(|home| crate::tune::load_all(&home)).unwrap_or_default(),
+            hardware: crate::tune::hardware_now(),
         }
     }
 

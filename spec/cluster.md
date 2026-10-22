@@ -146,6 +146,11 @@ Vectors: `vectors/cluster.json`, the `link` cases.
 - `rpc_backend`: whether this node's llama-server was built with `GGML_RPC=ON`, found by asking it
   to reach an RPC server on a closed port (a build without it answers "RPC not supported").
 - `shard`: whether this node serves as a shard **for the device asking**.
+- `profiles`: what this machine measured on itself (`invincible tune bench`): per model, per device,
+  the generation and prompt rates, and the hardware tag they are valid for. A head uses a peer's
+  profile for the model it is planning, and only while the peer's `hardware` still matches it.
+- `hardware`: the tag those profiles were measured on (os, arch, cores, memory). A changed machine
+  invalidates them rather than being trusted.
 - `tg_tps`: the model's generation rate on this device alone, tokens/s, from the node's calibration
   run (`invincible tune probe`). Absent until the node has measured itself, and one unmeasured
   device keeps a plan on the memory rule. Link round-trip time and throughput per peer come from

@@ -25,6 +25,7 @@ pub mod term;
 #[doc(hidden)]
 pub mod testgen;
 pub mod token;
+pub mod tune;
 pub mod update;
 pub mod version;
 pub mod watchdog;
