@@ -6,6 +6,7 @@ pub mod cloud;
 pub mod config;
 pub mod devices;
 pub mod egress;
+pub mod embed;
 pub mod engine;
 pub mod eval;
 pub mod fetch;
@@ -24,6 +25,7 @@ pub mod term;
 #[doc(hidden)]
 pub mod testgen;
 pub mod token;
+pub mod transcribe;
 pub mod update;
 pub mod version;
 pub mod watchdog;

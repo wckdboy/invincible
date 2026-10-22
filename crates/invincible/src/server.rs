@@ -57,6 +57,8 @@ pub struct AppState {
     /// Speech and image backends ([crate::synth]).
     pub speech: Vec<crate::synth::Backend>,
     pub images: Vec<crate::synth::Backend>,
+    /// Speech-to-text backends ([crate::transcribe]).
+    pub transcription: Vec<crate::synth::Backend>,
 }
 
 impl AppState {
@@ -84,7 +86,14 @@ impl AppState {
             agent_url: "http://127.0.0.1:7792".to_owned(),
             speech: Vec::new(),
             images: Vec::new(),
+            transcription: Vec::new(),
         }
+    }
+
+    /// With speech-to-text backends ([crate::transcribe]).
+    pub fn with_transcription(mut self, transcription: Vec<crate::synth::Backend>) -> Self {
+        self.transcription = transcription;
+        self
     }
 
     /// With speech and image backends ([crate::synth]).
@@ -115,9 +124,10 @@ impl AppState {
         self
     }
 
-    /// Every model the router can choose from: the node's engines, then the cloud backends.
+    /// Every model the router can choose from for a chat: the node's engines (an embedding
+    /// engine cannot chat), then the cloud backends.
     fn route_models(&self) -> Vec<Model> {
-        let node = self.engines.iter().map(|e| Model {
+        let node = self.engines.iter().filter(|e| !e.embeddings).map(|e| Model {
             id: e.id.clone(),
             tier: Tier::Node,
             healthy: e.healthy(),
@@ -154,6 +164,11 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/messages", post(messages).layer(DefaultBodyLimit::max(MAX_REQUEST)))
         .route("/v1/audio/speech", post(crate::synth::speech))
         .route("/v1/images/generations", post(crate::synth::images))
+        .route("/v1/embeddings", post(crate::embed::embeddings).layer(DefaultBodyLimit::max(MAX_REQUEST)))
+        .route(
+            "/v1/audio/transcriptions",
+            post(crate::transcribe::transcriptions).layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO)),
+        )
         .route("/v1/receipts/{id}", get(receipt))
         .route("/v1/audit", get(audit))
         .route("/v1/node", get(node_info))
@@ -270,6 +285,8 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
         "receipt_key": state.receipt_key.public(),
         "speech": list(&state.speech),
         "images": list(&state.images),
+        "transcription": list(&state.transcription),
+        "embeddings": state.engines.iter().filter(|e| e.embeddings).map(|e| json!({ "id": e.id, "healthy": e.healthy() })).collect::<Vec<_>>(),
     }))
 }
 
@@ -403,7 +420,7 @@ async fn require_token(State(state): State<Arc<AppState>>, request: HttpRequest,
 }
 
 async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let data: Vec<Value> = state
+    let mut data: Vec<Value> = state
         .route_models()
         .iter()
         .map(|m| {
@@ -421,6 +438,21 @@ async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
             })
         })
         .collect();
+    // Embedding engines too, marked, so a client that lists models finds them.
+    data.extend(state.engines.iter().filter(|e| e.embeddings).map(|e| {
+        json!({
+            "id": e.id,
+            "object": "model",
+            "owned_by": "invincible",
+            "invincible": {
+                "tier": Tier::Node,
+                "healthy": e.healthy(),
+                "context": e.context,
+                "data_policy": "owned",
+                "embeddings": true,
+            },
+        })
+    }));
     Json(json!({ "object": "list", "data": data }))
 }
 
@@ -672,7 +704,7 @@ pub(crate) fn ask_message(decision: &Decision) -> &'static str {
 }
 
 /// An error in the OpenAI shape.
-pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
+pub fn error(status: StatusCode, code: &str, message: &str) -> Response {
     (status, Json(json!({ "error": { "message": message, "type": code, "code": code } }))).into_response()
 }
 

@@ -28,6 +28,8 @@ pub struct Engine {
     pub base_url: String,
     /// Whether it takes images (None: not known).
     pub vision: Option<bool>,
+    /// An embedding engine: it answers `/v1/embeddings` and nothing else ([crate::embed]).
+    pub embeddings: bool,
     healthy: Arc<AtomicBool>,
 }
 
@@ -39,8 +41,15 @@ impl Engine {
             context,
             base_url: base_url.trim_end_matches('/').to_owned(),
             vision: None,
+            embeddings: false,
             healthy: Arc::new(AtomicBool::new(healthy)),
         }
+    }
+
+    /// The same engine, as an embedding engine or not.
+    pub fn with_embeddings(mut self, embeddings: bool) -> Self {
+        self.embeddings = embeddings;
+        self
     }
 
     /// The same engine, taking images or not.
@@ -87,6 +96,9 @@ impl Launch {
         }
         if let Some(mmproj) = &model.mmproj {
             args.extend(["--mmproj".to_owned(), mmproj.display().to_string()]);
+        }
+        if model.embeddings {
+            args.push("--embeddings".to_owned());
         }
         args.extend(engine.extra_args.iter().cloned());
         Self { program: engine.llama_server.clone(), args, log: logs.join(format!("{}.log", model.id)) }

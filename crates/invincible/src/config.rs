@@ -51,6 +51,9 @@ pub struct Config {
     /// Image generation backends: `POST /v1/images/generations` ([crate::synth]).
     #[serde(default)]
     pub images: Vec<MediaConfig>,
+    /// Speech-to-text backends on this machine: `POST /v1/audio/transcriptions` ([crate::transcribe]).
+    #[serde(default)]
+    pub transcription: Vec<MediaConfig>,
 }
 
 /// ```toml
@@ -309,6 +312,9 @@ pub struct ModelConfig {
     /// Whether it takes images; unset: when it has an `mmproj`.
     #[serde(default)]
     pub vision: Option<bool>,
+    /// An embedding model: the engine answers `/v1/embeddings` only ([crate::embed]).
+    #[serde(default)]
+    pub embeddings: bool,
 }
 
 impl ModelConfig {

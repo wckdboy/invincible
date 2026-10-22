@@ -890,7 +890,8 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     for model in &config.models {
         let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
         let engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
-            .with_vision(model.vision(&config.engine));
+            .with_vision(model.vision(&config.engine))
+            .with_embeddings(model.embeddings);
         supervisors.push(engine::supervise(engine.clone(), Launch::llama_server(&config.engine, model, port, &logs)));
         engines.push(engine);
     }
@@ -935,9 +936,14 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let receipt_public = receipt_key.public();
     let speech = invincible::synth::from_config(&config.speech, &home);
     let images = invincible::synth::from_config(&config.images, &home);
+    let transcription = invincible::synth::from_config(&config.transcription, &home);
+    for backend in transcription.iter().filter(|b| b.tier != invincible_policy::Tier::Node) {
+        tracing::warn!(backend = %backend.id, "a transcription backend off this machine is never used: audio cannot be redacted");
+    }
     let mut state = AppState::new(engines, config.node.settings(), token)
         .with_cloud(cloud)
         .with_media(speech, images)
+        .with_transcription(transcription)
         .with_receipt_key(&config.remote.name(), receipt_key)
         .with_audit(invincible::audit::AuditLog::new(&home))
         .with_agent(&config.agent.url);
