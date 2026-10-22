@@ -144,6 +144,17 @@ pub struct Capabilities {
     /// The machine those profiles are valid for; a head ignores profiles from other hardware.
     #[serde(default)]
     pub hardware: String,
+    /// How much this node will take (spec/dispatch.md). Absent on a node too old to say, which a
+    /// dispatcher must read as "unknown", never as "unlimited".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<Dispatch>,
+}
+
+/// What a node offers a dispatcher: how many requests it will run at once, and how many wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dispatch {
+    pub max_inflight: u64,
+    pub queue: u64,
 }
 
 /// `ggml-rpc-server` on loopback [port] only, caching the weights heads send in [cache].
@@ -555,6 +566,9 @@ impl ClusterState {
             shard: self.shard,
             profiles: crate::config::home().map(|home| crate::tune::load_all(&home)).unwrap_or_default(),
             hardware: crate::tune::hardware_now(),
+            // One request at a time unless the node is configured otherwise; a shard advertises
+            // nothing, because its capacity is spoken for by the model it splits.
+            dispatch: (!self.shard).then_some(Dispatch { max_inflight: 1, queue: 0 }),
         }
     }
 
