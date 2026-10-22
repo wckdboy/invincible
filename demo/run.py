@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The demo: five acts, each printing a number measured in this run, and one that breaks it.
+"""The demo: seven acts, each printing a number measured in this run, and one that breaks it.
 
   act 1  two machines, one build          the same commit and the same binary bytes on both
   act 2  one node, one request at a time  what one machine does alone
@@ -7,6 +7,7 @@
   act 4  a node nobody configured        announce -> seed -> discover, and what it refuses to mean
   act 5  a receipt you can check offline  what the signature proves, and what it does not
   act 6  break it                         kill the peer mid-flight and keep sending
+  act 7  a misconfiguration named          one line the node reports about itself, and its cost
 
 Every act verifies its own answers - HTTP 200, at least one completion token, and non-empty
 text (a thinking model puts it in `reasoning_content` and leaves `content` empty) - and prints
@@ -63,12 +64,12 @@ class Act:
         print(f"\n-- {self.n}. {self.title}", flush=True)
 
 
-def ssh(host: str, key: str, command: str, timeout: int = 300) -> tuple[int, str]:
+def ssh(host: str, key: str, command: str, timeout: int = 300, stdin: str | None = None) -> tuple[int, str]:
     argv = ["ssh", *SSH_BASE]
     if key:
         argv += ["-i", key]
     argv += [host, command]
-    p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, input=stdin)
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
@@ -393,6 +394,59 @@ def main() -> int:
     act.say(f"peer back: {'yes' if back else 'no'}")
     if not back:
         broke = True
+
+    # ---- 7. a misconfiguration the node names itself ---------------------------------------------
+    act = Act(7, "a misconfiguration the node names itself")
+    acts.append(act)
+    act.head()
+    config_path = "/root/.invincible/config.toml"
+    code, config = ssh(args.peer_host, args.ssh_key, f"cat {config_path}")
+    if code != 0 or "[node]" not in config:
+        act.say("the peer's config has no [node] table: nothing to misconfigure")
+        broke = True
+    else:
+        # One line: the peer advertises no capacity while not being a shard. A dispatcher that
+        # never looks will simply stop sending work there, with nothing printed anywhere.
+        broken = config.replace("[node]", "[node]\ndispatch_max_inflight = 0", 1)
+        ssh(args.peer_host, args.ssh_key, f"cp -p {config_path} {config_path}.doctor-bak")
+        ssh(args.peer_host, args.ssh_key, f"cat > {config_path}", stdin=broken)
+        ssh(args.peer_host, args.ssh_key, "/root/node-up.sh")
+        code, out = ssh(args.peer_host, args.ssh_key, "/root/.local/bin/invincible doctor 2>&1")
+        named = False
+        for line in out.splitlines():
+            if "dispatch" in line and ("0" in line or "nothing will be sent" in line):
+                act.say(f"peer doctor: {line.strip()[:150]}")
+                named = True
+            elif "ok," in line or "all clear" in line:
+                act.say(f"peer doctor: {line.strip()[:150]}")
+        if not named:
+            act.say("THE DOCTOR DID NOT NAME THE MISCONFIGURATION")
+            broke = True
+        else:
+            act.say("the doctor named it before any request was sent, and why")
+        # The consequence, measured: the same load, and the node with no capacity is never chosen.
+        blind_elapsed, blind, blind_fail = run_batch(dispatch, args.token, n, conc)
+        counts: dict[str, int] = {}
+        for answer in blind:
+            counts[answer["by"] or "(no header)"] = counts.get(answer["by"] or "(no header)", 0) + 1
+        act.say(f"{len(blind)}/{n} answered in {blind_elapsed:.1f}s, by {', '.join(f'{k} {v}' for k, v in sorted(counts.items())) or 'nobody'}")
+        if len(blind) != n or any(k.startswith("invincible-lab-peer") for k in counts):
+            act.say("A REQUEST WAS LOST OR SENT TO THE NODE WITH NO CAPACITY")
+            broke = True
+        # Put the rig back the way it was, and say so with the fleet's own view of itself.
+        ssh(args.peer_host, args.ssh_key, f"cp -p {config_path}.doctor-bak {config_path} && rm -f {config_path}.doctor-bak && /root/node-up.sh")
+        restored = False
+        for _ in range(12):
+            code, out = ssh(args.peer_host, args.ssh_key, "/root/.local/bin/invincible cluster status >/dev/null 2>&1 && echo up")
+            if out.strip().endswith("up"):
+                restored = True
+                break
+            time.sleep(3)
+        status, fleet = get(f"{args.head}/v1/dispatch", args.token) if restored else (0, {})
+        capacity = [f"{node['name']} {node['max_inflight']}" for node in (fleet.get("nodes") or [])] if status == 200 else []
+        act.say(f"restored: {'backend up, ' if restored else ''}{', '.join(capacity) or 'capacity not readable'}")
+        if not restored:
+            broke = True
 
     # ---- summary ----------------------------------------------------------------------------------
     print("\n-- summary")

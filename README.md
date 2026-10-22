@@ -1069,6 +1069,24 @@ invincible audit --verify           # check the chain and every receipt's signat
 Paired devices read the same log with `GET /v1/audit`. There is no telemetry: nothing about your
 requests leaves the node unless you send it.
 
+### Checking the node
+
+```sh
+invincible doctor                   # every subsystem: engines, devices, links, models, receipts
+invincible doctor --json            # the same, for a script
+```
+
+One line per subsection, in the order that breaks a node: the engine and its RPC backend, the
+devices llama.cpp can use, each model file, the pairing key, the network setting, the shard
+contract, dispatch capacity, the receipt key, the audit log, whether the API is answering, and the
+space left. Each line that needs something says what to do about it.
+
+The glyphs mean what they mean everywhere else: `✓` is fine, `!` is something to look at (a fresh
+install with no config, a node that is not running yet), and `✗` is a thing that was configured and
+cannot work — a model file that is not readable, a config that does not parse, an engine that is not
+installed. `✗` exits 1, so a service unit or a CI step can lean on it. The doctor never creates
+state: no key, token or config is written, so it is safe on a machine that is serving.
+
 ### Pairing other machines
 
 Other devices reach the node over an encrypted, mutually authenticated Noise channel, never over
