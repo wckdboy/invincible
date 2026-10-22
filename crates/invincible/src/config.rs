@@ -275,6 +275,14 @@ pub struct NodeConfig {
     pub network: String,
     #[serde(default = "never")]
     pub egress: String,
+    /// How many dispatched requests this node will run at once (spec/dispatch.md,
+    /// `dispatch.max_inflight`); 0 marks it as spoken for (a shard), never a dispatch target.
+    #[serde(default = "one")]
+    pub dispatch_max_inflight: u64,
+}
+
+fn one() -> u64 {
+    1
 }
 
 fn offline() -> String {
@@ -287,7 +295,7 @@ fn never() -> String {
 
 impl Default for NodeConfig {
     fn default() -> Self {
-        Self { network: offline(), egress: never() }
+        Self { network: offline(), egress: never(), dispatch_max_inflight: one() }
     }
 }
 
@@ -457,6 +465,15 @@ mod tests {
         let settings = config.node.settings();
         assert!(settings.network.is_offline());
         assert_eq!(settings.egress, invincible_policy::Egress::Never);
+    }
+
+    #[test]
+    fn dispatch_capacity_defaults_to_one_and_zero_means_spoken_for() {
+        assert_eq!(Config::parse("").unwrap().node.dispatch_max_inflight, 1);
+        let four = Config::parse("[node]\ndispatch_max_inflight = 4\n").unwrap();
+        assert_eq!(four.node.dispatch_max_inflight, 4);
+        // A shard says 0 on purpose: it must be read as 0, not as "unset, so 1".
+        assert_eq!(Config::parse("[node]\ndispatch_max_inflight = 0\n").unwrap().node.dispatch_max_inflight, 0);
     }
 
     #[test]

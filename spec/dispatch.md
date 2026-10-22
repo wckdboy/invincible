@@ -76,3 +76,25 @@ wrong tensor.
 4. node fails before the first token → retried once on the next; fails after → error event, no
    silent half-answer.
 5. `dispatch.max_inflight = 0` (a shard) → never eligible.
+
+## Where v0 differs, and why
+
+The rules above stand; these are the parts a v0 will notice.
+
+- **Non-streaming only.** `POST /v1/dispatch/chat/completions` answers one whole completion and
+  refuses `stream: true` with a 400 (`streaming_not_dispatched`) that points at
+  `/v1/chat/completions`. A stream cannot change nodes after its first token, so the head has to
+  hold the stream open across the change; that is the next piece of work, not a silent fallback.
+- **The wait is bounded.** "Queued, not refused" needs a queue. v0 keeps a per-node in-flight
+  count in the head, waits up to 60 s for a slot, and then answers `503 capacity_timeout` naming
+  each node's state: a wait nobody can see is worse than an answer.
+- **Retry on the node's failures.** A node that answers `429` or a `5xx` did not answer the
+  request, so the retry goes ahead; a `4xx` would be refused by every node alike, so it is passed
+  back to the client instead.
+- **`rtt_ms` is the probe's own time** unless the cluster's link meter measured that link in the
+  last day: the meter's median costs 4 MiB a run, too much per status call. It is an upper bound
+  (handshake included), which only ever makes a node look slower than it is.
+- **A node too old to advertise `dispatch` is read as taking nothing** (`max_inflight: 0`), and a
+  node that names no models serves none. Unknown is never unlimited.
+- **The head's receipt has no `dispatch` field.** `dispatch: {"via", "node"}` is written to the
+  head's audit line only; the answering node's receipt stays the receipt of record.

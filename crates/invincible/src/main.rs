@@ -65,6 +65,12 @@ enum Command {
         #[command(subcommand)]
         action: ClusterAction,
     },
+    /// Dispatch: which of the nodes this machine owns would answer a request, and why
+    /// (spec/dispatch.md).
+    Dispatch {
+        #[command(subcommand)]
+        action: DispatchAction,
+    },
     /// Add or list the models this node serves.
     Model {
         #[command(subcommand)]
@@ -173,6 +179,22 @@ enum ClusterAction {
     /// This node's devices, its peers (probed now, over their paired links), the heads it serves
     /// as a shard, and where each split model runs.
     Status {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DispatchAction {
+    /// Every candidate node — this one, then each paired node as a fresh probe finds it — and the
+    /// node a request for this model would go to.
+    Status {
+        /// The model the request would name [default: none, an automatic choice].
+        #[arg(long)]
+        model: Option<String>,
         #[arg(long)]
         config: Option<PathBuf>,
         /// Print JSON.
@@ -664,6 +686,19 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Dispatch { action: DispatchAction::Status { model, config, json } } => {
+            let path = match &model {
+                Some(model) => format!("/v1/dispatch?model={}", query_value(model)),
+                None => "/v1/dispatch".to_owned(),
+            };
+            let status = admin(config, reqwest::Method::GET, &path)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status).expect("json"));
+            } else {
+                print!("{}", dispatch_text(&status));
+            }
+            Ok(())
+        }
         Command::Model { action: ModelAction::List { config } } => {
             let home = config::home()?;
             let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
@@ -1151,6 +1186,16 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             config.agent.url
         ));
     }
+    // Dispatch (spec/dispatch.md): this node always a candidate, plus the nodes it paired with.
+    let dispatch = invincible::dispatch::Dispatch::new(
+        config.remote.name(),
+        config.models.iter().map(|model| model.id.clone()).collect(),
+        config.node.dispatch_max_inflight,
+        home.clone(),
+        peers.clone(),
+        device_key.clone(),
+        config.node.settings().network.encode(),
+    );
     let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
     let receipt_public = receipt_key.public();
     let speech = invincible::synth::from_config(&config.speech, &home);
@@ -1160,7 +1205,8 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         .with_media(speech, images)
         .with_receipt_key(&config.remote.name(), receipt_key)
         .with_audit(invincible::audit::AuditLog::new(&home))
-        .with_agent(&config.agent.url);
+        .with_agent(&config.agent.url)
+        .with_dispatch(dispatch);
     if config.remote.enabled() {
         let mut pairing = Pairing::new(
             StaticKey::load_or_create(&home.join("node.key"))?,
@@ -1184,6 +1230,8 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             device_key,
             runs,
             shard: config.cluster.serve,
+            models: config.models.iter().map(|model| model.id.clone()).collect(),
+            dispatch_max_inflight: config.node.dispatch_max_inflight,
         });
     }
     let state = Arc::new(state);
@@ -1538,6 +1586,72 @@ fn cluster_text(status: &serde_json::Value) -> String {
         }
     }
     out
+}
+
+/// `invincible dispatch status` as text: one row per candidate node, then the choice.
+fn dispatch_text(status: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let head = status["name"].as_str().unwrap_or("this node");
+    let model = status["model"].as_str();
+    let _ = writeln!(
+        out,
+        "{}",
+        brand::ok(&format!("{} dispatches {}", head, model.map_or_else(|| "any model".to_owned(), brand::bold)))
+    );
+    let chosen = status["choice"]["name"].as_str();
+    let mut rows = vec![vec![
+        brand::ash("node"),
+        brand::ash("models"),
+        brand::ash("in flight"),
+        brand::ash("tg/s"),
+        brand::ash("rtt"),
+        brand::ash("state"),
+    ]];
+    for node in status["nodes"].as_array().into_iter().flatten() {
+        let models: Vec<&str> = node["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str()).collect();
+        let models = if models.is_empty() { brand::ash("—") } else { models.join(",") };
+        let tps = node["tg_tps"].as_f64().map_or_else(|| brand::ash("—"), |tps| format!("{tps:.1}"));
+        let rtt = node["rtt_ms"].as_f64().map_or_else(
+            || brand::ash("—"),
+            |ms| if ms >= 1000.0 { format!("{:.1} s", ms / 1000.0) } else { format!("{ms:.1} ms") },
+        );
+        let state = match node["note"].as_str() {
+            Some(note) => brand::ash(note),
+            None if chosen == node["name"].as_str() => brand::ok("answers"),
+            None => "could answer".to_owned(),
+        };
+        rows.push(vec![
+            node["name"].as_str().unwrap_or("?").to_owned(),
+            models,
+            format!("{}/{}", node["inflight"].as_u64().unwrap_or(0), node["max_inflight"].as_u64().unwrap_or(0)),
+            tps,
+            rtt,
+            state,
+        ]);
+    }
+    out.push_str(&brand::table(&rows));
+    let _ = writeln!(
+        out,
+        "\n{}",
+        match status["choice"]["action"].as_str() {
+            Some("run") => format!("choice: run on {}", brand::bold(chosen.unwrap_or("?"))),
+            Some("queue") => brand::warn("choice: queue: every eligible node is at capacity"),
+            _ => brand::fail("choice: no capacity: no node can take this request"),
+        }
+    );
+    out
+}
+
+/// A query value: letters, digits and `-._~` as they are, everything else percent-encoded.
+fn query_value(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// Ctrl-C, or SIGTERM: what launchd, systemd and `kill` send to stop a service. Both shut down

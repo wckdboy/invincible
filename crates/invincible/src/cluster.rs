@@ -148,6 +148,10 @@ pub struct Capabilities {
     /// dispatcher must read as "unknown", never as "unlimited".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatch: Option<Dispatch>,
+    /// The model ids this node serves, for a dispatcher (spec/dispatch.md). A request may only go
+    /// to a node that names its model; a node too old to list them names none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 /// What a node offers a dispatcher: how many requests it will run at once, and how many wait.
@@ -552,6 +556,10 @@ pub struct ClusterState {
     pub runs: Vec<Arc<ClusterRun>>,
     /// Whether this node serves as a shard.
     pub shard: bool,
+    /// The model ids this node serves, and how many dispatched requests it will run at once
+    /// (spec/dispatch.md, `[node] dispatch_max_inflight`).
+    pub models: Vec<String>,
+    pub dispatch_max_inflight: u64,
 }
 
 impl ClusterState {
@@ -568,7 +576,8 @@ impl ClusterState {
             hardware: crate::tune::hardware_now(),
             // One request at a time unless the node is configured otherwise; a shard advertises
             // nothing, because its capacity is spoken for by the model it splits.
-            dispatch: (!self.shard).then_some(Dispatch { max_inflight: 1, queue: 0 }),
+            dispatch: (!self.shard).then_some(Dispatch { max_inflight: self.dispatch_max_inflight, queue: 0 }),
+            models: self.models.clone(),
         }
     }
 

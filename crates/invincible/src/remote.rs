@@ -649,6 +649,22 @@ async fn open(
     Ok((tcp, transport))
 }
 
+/// One encrypted session to a paired node, carrying plain HTTP/1.1: a sender for requests on it.
+/// The session's pipe and connection task live as long as the sender does.
+async fn http_over(
+    addrs: &[String],
+    node_key: &[u8],
+    device: &StaticKey,
+) -> Result<hyper::client::conn::http1::SendRequest<axum::body::Body>, String> {
+    let (tcp, transport) = connect(addrs, node_key, device).await?;
+    let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
+    tokio::spawn(async move { pipe(tcp, transport, theirs, || true).await });
+    let (sender, connection) =
+        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(ours)).await.map_err(|e| e.to_string())?;
+    tokio::spawn(connection);
+    Ok(sender)
+}
+
 /// `GET [path]` on a paired node's API, through one encrypted session; the answer's JSON.
 pub async fn get_json(
     addrs: &[String],
@@ -656,12 +672,7 @@ pub async fn get_json(
     device: &StaticKey,
     path: &str,
 ) -> Result<serde_json::Value, String> {
-    let (tcp, transport) = connect(addrs, node_key, device).await?;
-    let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
-    tokio::spawn(async move { pipe(tcp, transport, theirs, || true).await });
-    let (mut sender, connection) =
-        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(ours)).await.map_err(|e| e.to_string())?;
-    tokio::spawn(connection);
+    let mut sender = http_over(addrs, node_key, device).await?;
     let request = axum::http::Request::get(path)
         .header(axum::http::header::HOST, "node")
         .body(axum::body::Body::empty())
@@ -676,6 +687,33 @@ pub async fn get_json(
     serde_json::from_slice(&body).map_err(|e| format!("{path}: {e}"))
 }
 
+/// The largest answer one dispatched request carries back (a non-streaming completion).
+const MAX_ANSWER: usize = 32 << 20;
+
+/// `POST [path]` with [body] on a paired node's API, through one encrypted session: the answer's
+/// status and bytes. An HTTP status, whatever it is, is the node's answer; no session or no
+/// answer at all is an error (the caller may try another node).
+pub async fn post(
+    addrs: &[String],
+    node_key: &[u8],
+    device: &StaticKey,
+    path: &str,
+    body: Vec<u8>,
+) -> Result<(u16, Vec<u8>), String> {
+    let mut sender = http_over(addrs, node_key, device).await?;
+    let request = axum::http::Request::post(path)
+        .header(axum::http::header::HOST, "node")
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(body))
+        .map_err(|e| e.to_string())?;
+    let response = sender.send_request(request).await.map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(axum::body::Body::new(response.into_body()), MAX_ANSWER)
+        .await
+        .map_err(|e| format!("{path}: {e}"))?;
+    Ok((status, bytes.to_vec()))
+}
+
 /// Times a link to a paired node: [rounds] small posts for the median round trip, then one
 /// [bulk]-byte post for the throughput (the round trip subtracted). One encrypted session carries
 /// them all, the way a shard link carries a stream of tokens.
@@ -686,12 +724,7 @@ pub async fn meter_link(
     rounds: usize,
     bulk: usize,
 ) -> Result<(f64, f64), String> {
-    let (tcp, transport) = connect(addrs, node_key, device).await?;
-    let (ours, theirs) = tokio::io::duplex(MAX_FRAME);
-    tokio::spawn(async move { pipe(tcp, transport, theirs, || true).await });
-    let (mut sender, connection) =
-        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(ours)).await.map_err(|e| e.to_string())?;
-    tokio::spawn(connection);
+    let mut sender = http_over(addrs, node_key, device).await?;
 
     let mut rtts = Vec::new();
     for _ in 0..rounds.clamp(1, 32) {
