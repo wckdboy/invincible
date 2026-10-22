@@ -350,6 +350,13 @@ def main() -> int:
                 f"  api {inner.get('api')}, {tokens.get('output', '?')} tokens, caller {caller}, "
                 f"egress {inner.get('egress')}"
             )
+            worker = inner.get("dispatch") or {}
+            if subject["by"] != head_name:
+                if worker:
+                    act.say(f"  the signed receipt names the worker: {worker.get('node')} (via {worker.get('via')})")
+                else:
+                    act.say("  NO WORKER INSIDE THE SIGNED RECEIPT: a client cannot tell which machine answered")
+                    broke = True
             head_key = (api_get(head_name, "/v1/node") or {}).get("receipt_key") or ""
             if not args.verify_bin:
                 code, out = ssh(args.head_host, args.ssh_key, f"/root/.local/bin/invincible receipt verify {subject['id']} 2>&1")
