@@ -8,7 +8,7 @@ only when you allow it, and a signed receipt for every call. It ships with **Aut
 that works through it.
 
 [Install](#install-vps-or-desktop) · [Code with Autobot](#code-with-autobot) ·
-[The agent](#the-autobot-agent) · [Specifications](spec/) · [Releases](https://github.com/wckdboy/invincible/releases) · [Brand](BRAND.md)
+[The agent](#the-autobot-agent) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md) · [Specifications](spec/) · [Releases](https://github.com/wckdboy/invincible/releases) · [Brand](BRAND.md)
 
 ```sh
 curl -fsSL https://invincible.sh/install.sh | sh
@@ -131,6 +131,11 @@ A privacy fix starts as a spec change with a new vector, and neither side is don
 There are no accounts, no passwords and no third-party relay.
 
 ## Architecture (proposed)
+
+The target shape of the node, plane by plane, is [ARCHITECTURE.md](ARCHITECTURE.md): every kind
+of model as a managed engine, the node tuning itself, the cluster of the machines you own,
+decentralized fine-tuning, and the four properties it all serves. The plan with exit criteria is
+[ROADMAP.md](ROADMAP.md). The short form:
 
 ```
  Autobot (Android / iOS)     Autobot Agent (autobot)        other tools (any OpenAI / Anthropic client)
