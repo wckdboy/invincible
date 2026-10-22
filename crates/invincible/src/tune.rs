@@ -176,21 +176,32 @@ pub fn record(home: &Path, model: &str, hardware: &str, profile: Profile) -> Res
     Ok(set)
 }
 
+/// One node's link, as measured from this machine, and when it was measured.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MeasuredLink {
+    #[serde(flatten)]
+    pub link: invincible_policy::LinkSpeed,
+    /// RFC 3339. Files written before freshness was per measurement have no timestamp on their
+    /// entries: that age is unknown, so the entry is treated as stale, never as fresh.
+    #[serde(default)]
+    pub at: String,
+}
+
 /// What the links to paired nodes cost, measured from this machine.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Links {
     pub hardware: String,
-    pub at: String,
     #[serde(default)]
-    pub links: Vec<invincible_policy::LinkSpeed>,
+    pub links: Vec<MeasuredLink>,
 }
 
 pub fn links_path(home: &Path) -> PathBuf {
     dir(home).join("links.json")
 }
 
-/// The measured links, if they were measured on this machine and are younger than [max_age_hours].
-/// A link's speed changes with the room, the radio and the cable, so an old number is not used.
+/// The measured links, each one only if it was measured on this machine and is younger than
+/// [max_age_hours]. A link's speed changes with the room, the radio and the cable, so an old
+/// number is not used — and metering one peer must not freshen another's measurement.
 pub fn load_links(home: &Path, max_age_hours: i64) -> Vec<invincible_policy::LinkSpeed> {
     let Ok(text) = std::fs::read_to_string(links_path(home)) else {
         return Vec::new();
@@ -201,28 +212,29 @@ pub fn load_links(home: &Path, max_age_hours: i64) -> Vec<invincible_policy::Lin
     if stored.hardware != hardware_now() {
         return Vec::new();
     }
-    let Ok(at) = chrono::DateTime::parse_from_rfc3339(&stored.at) else {
-        return Vec::new();
-    };
-    let age = Utc::now().signed_duration_since(at.with_timezone(&Utc));
-    if age.num_hours() >= max_age_hours {
-        return Vec::new();
-    }
-    stored.links
+    stored.links.into_iter().filter(|l| fresh(&l.at, max_age_hours)).map(|l| l.link).collect()
 }
 
-/// Keep one link measurement, replacing the one for that node.
+/// Whether a measurement taken at [at] (RFC 3339) is younger than [max_age_hours]. An entry with
+/// no timestamp predates per-measurement freshness: its age is unknown, so it is not used.
+fn fresh(at: &str, max_age_hours: i64) -> bool {
+    chrono::DateTime::parse_from_rfc3339(at)
+        .is_ok_and(|at| Utc::now().signed_duration_since(at.with_timezone(&Utc)).num_hours() < max_age_hours)
+}
+
+/// Keep one link measurement, replacing the one for that node and leaving every other node's
+/// timestamp as it was.
 pub fn record_link(home: &Path, link: invincible_policy::LinkSpeed) -> Result<(), String> {
     let hardware = hardware_now();
     let mut stored =
         match std::fs::read_to_string(links_path(home)).ok().and_then(|t| serde_json::from_str::<Links>(&t).ok()) {
             Some(old) if old.hardware == hardware => old,
-            _ => Links { hardware, at: now(), links: Vec::new() },
+            _ => Links { hardware, links: Vec::new() },
         };
-    stored.at = now();
-    match stored.links.iter_mut().find(|l| l.node == link.node) {
-        Some(existing) => *existing = link,
-        None => stored.links.push(link),
+    let entry = MeasuredLink { link, at: now() };
+    match stored.links.iter_mut().find(|l| l.link.node == entry.link.node) {
+        Some(existing) => *existing = entry,
+        None => stored.links.push(entry),
     }
     std::fs::create_dir_all(dir(home)).map_err(|e| format!("{}: {e}", dir(home).display()))?;
     let text = serde_json::to_string_pretty(&stored).map_err(|e| e.to_string())?;
@@ -365,19 +377,49 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_or_foreign_link_measurement_is_not_used() {
-        let home = temp_dir("links-stale");
+    fn metering_one_peer_does_not_freshen_another() {
+        let home = temp_dir("links-per-link");
+        let path = links_path(&home);
         record_link(&home, invincible_policy::LinkSpeed { node: "mini".into(), rtt_ms: 0.4, mib_s: 110.0 }).unwrap();
-        assert_eq!(load_links(&home, 1).len(), 1);
+        // Two hours ago this machine metered mini. Then it metered box, which must not make the
+        // mini number look new: freshness belongs to the measurement, not to the file.
+        let two_hours_ago = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let mut stored: Links = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        stored.links[0].at = two_hours_ago;
+        std::fs::write(&path, serde_json::to_string(&stored).unwrap()).unwrap();
+        record_link(&home, invincible_policy::LinkSpeed { node: "box".into(), rtt_ms: 0.2, mib_s: 900.0 }).unwrap();
 
+        let links = load_links(&home, 1);
+        assert_eq!(links.len(), 1, "the hour-old measurement is not this hour's: {links:?}");
+        assert_eq!(links[0].node, "box");
+        // A day's grace takes both: the old one is old, not gone.
+        assert_eq!(load_links(&home, 24).len(), 2);
+    }
+
+    #[test]
+    fn a_link_file_with_no_per_entry_timestamp_loads_and_is_stale() {
+        let home = temp_dir("links-legacy");
+        // The shape written before freshness was per measurement: one `at` for the whole file.
+        let legacy = format!(
+            r#"{{"hardware": {:?}, "at": {:?}, "links": [{{"node": "mini", "rtt_ms": 0.4, "mib_s": 110.0}}]}}"#,
+            hardware_now(),
+            now()
+        );
+        std::fs::create_dir_all(dir(&home)).unwrap();
+        std::fs::write(links_path(&home), legacy.clone()).unwrap();
+
+        let loaded: Links = serde_json::from_str(&legacy).expect("an old file still loads");
+        assert_eq!(loaded.links.len(), 1);
+        assert_eq!(loaded.links[0].at, "", "no timestamp was recorded for this entry");
+        assert!(load_links(&home, 24).is_empty(), "age unknown: not used, however high the ceiling");
+    }
+
+    #[test]
+    fn a_measurement_from_another_machine_is_not_used() {
+        let home = temp_dir("links-hardware");
+        record_link(&home, invincible_policy::LinkSpeed { node: "mini".into(), rtt_ms: 0.4, mib_s: 110.0 }).unwrap();
         let path = links_path(&home);
         let mut stored: Links = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        stored.at = "2020-01-01T00:00:00Z".into();
-        std::fs::write(&path, serde_json::to_string(&stored).unwrap()).unwrap();
-        assert!(load_links(&home, 1).is_empty(), "an hour-old link is not this hour's link");
-
-        let mut stored: Links = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        stored.at = now();
         stored.hardware = "some other machine".into();
         std::fs::write(&path, serde_json::to_string(&stored).unwrap()).unwrap();
         assert!(load_links(&home, 24).is_empty(), "another machine's numbers say nothing about this one");

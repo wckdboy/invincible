@@ -159,7 +159,8 @@ Vectors: `vectors/cluster.json`, the `link` cases.
 - `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
   `{"bytes": n}` for an `n`-byte body and nothing else. A head times a link with it — five small
   posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
-  `$INVINCIBLE_HOME/tune/links.json`, behind the same hardware tag and an hour's freshness. A link
+  `$INVINCIBLE_HOME/tune/links.json`, each measurement timestamped on its own, behind the same
+  hardware tag and an hour's freshness: metering one peer does not refresh another's number. A link
   that cannot be measured leaves the plan without a prediction.
 - `tg_tps`: a device's generation rate for one model, alone on that device, tokens/s, from
   `invincible tune bench <model> --device <name>` (llama-bench, one repetition). It is not a
