@@ -8,7 +8,7 @@ only when you allow it, and a signed receipt for every call. It ships with **Aut
 that works through it.
 
 [Install](#install-vps-or-desktop) · [Code with Autobot](#code-with-autobot) ·
-[The agent](#the-autobot-agent) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md) · [Specifications](spec/) · [Releases](https://github.com/wckdboy/invincible/releases) · [Brand](BRAND.md)
+[The agent](#the-autobot-agent) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md) · [Specifications](spec/) · [Releases](https://github.com/wckdboy/invincible/releases) · [Security](SECURITY.md) · [Brand](BRAND.md)
 
 ```sh
 curl -fsSL https://invincible.sh/install.sh | sh
@@ -31,9 +31,9 @@ Early, and used daily. What is built, and what is not yet:
 | Discovery | Signed, expiring descriptors published to seeds and mDNS, so a node is found without a pasted code — and still only usable after pairing ([spec/discovery.md](spec/discovery.md)): implemented, unaudited |
 | Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
-| Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
-| Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
-| Evals | 50 tasks from real code and 26 agent tasks, on local models and a frontier one (DeepSeek V3): 30/50 against 45/50 on the code tasks; every run kept, so the gap is followed over time |
+| Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts (since [Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0); the latest is [1.14.0](https://github.com/wckdboy/autobot/releases/tag/v1.14.0)) |
+| Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come; how to report a vulnerability: [SECURITY.md](SECURITY.md) |
+| Evals | 50 tasks from real code and 26 agent tasks, on local models and a frontier one (DeepSeek V3): 30/50 against 45/50 on the code tasks, which are single-turn code Q&A (one question about an excerpt, one answer checked by rule); every run kept, so the gap is followed over time |
 
 Work is tracked in Plane (project **INV**). Invincible and Autobot are made by
 [Sovware](https://sovware.io).
@@ -67,20 +67,25 @@ middle tier**, and later the regional one.
 
 ## What a node does
 
-1. **Serves open models.** It pulls open weights, verifies them by hash, picks an engine for the
-   hardware (llama.cpp, MLX, vLLM / SGLang) and serves them. One command per model.
+1. **Serves open models.** It pulls open weights, verifies them by hash and serves them with
+   llama.cpp (the installer picks its Metal, CUDA or CPU build). One command per model. MLX on
+   Apple silicon and vLLM / SGLang on NVIDIA, as faster engines behind the same interface, are
+   planned ([ROADMAP.md](ROADMAP.md), milestone 2).
 2. **Speaks the standard APIs.** OpenAI-compatible and Anthropic-compatible endpoints, so any tool
    works by changing one URL. Autobot gets a richer native protocol (below).
 3. **Routes by policy.** Rules decide where each request runs: "tagged `private` never leaves
-   hardware I own", "planning to frontier, bulk edits local", "if the cloud fails or is cut off,
-   fall back to local". The defaults are local.
+   hardware I own", "ask me before anything leaves", "if the cloud fails or is cut off, fall back
+   to local" ([spec/routing.md](spec/routing.md)). The defaults are local. Rules by kind of work
+   ("planning to frontier, bulk edits local") are not built yet.
 4. **Runs agents that never sleep.** Headless agent sessions with no battery, no background-task
    limit and the whole GPU: long recipes, overnight jobs, agents that work while the phone is off.
-5. **Measures the gap.** An eval harness replays your real tasks against every model on every tier
-   and shows which ones are good enough for which job. The scores drive routing; "how close is open
-   to frontier" becomes a number you track instead of a feeling.
-6. **Keeps the records you own.** Every request, route, model, token count and cost, in an
-   encrypted local log. Nothing is reported anywhere.
+5. **Measures the gap.** An eval harness runs your own tasks against the models you name, local
+   and frontier, keeps every run and shows which ones are good enough for which job; "how close is
+   open to frontier" becomes a number you track instead of a feeling. The scores do not drive
+   routing (not built yet): today the route follows your rules.
+6. **Keeps the records you own.** Every request's route, model and token counts, in a signed
+   receipt and a hash-chained local log only you can read (mode 0600). Cost per request and
+   encryption at rest are planned. Nothing is reported anywhere.
 
 ### Not in v1
 
@@ -96,13 +101,13 @@ Invincible is built for Autobot first, and shares its rules instead of re-implem
 |---|---|
 | Providers: presets with API keys (`ProviderPresets`) | A new **"My node"** provider kind, added by **pairing** (QR code, Noise handshake), never an API key |
 | Cascade: phone → cloud (`CascadePolicy`) | Phone → **node** → cloud. "Never" means "never beyond hardware I own", and the node counts as owned |
-| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN, WireGuard / Tailscale or a Tor onion service; its requests appear in the phone's audit log, and the node's own egress log is viewable from the phone |
+| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN or WireGuard / Tailscale (a Tor onion service is not built yet); its requests appear in the phone's audit log, and the node's own log is readable from a phone granted `audit` |
 | Data policy per model (`ModelDataPolicy`) | Node models read as **owned · zero retention**, and the claim is checkable: it's your machine |
-| Redaction before cloud calls | Phone → node needs no redaction (you own both ends). Node → cloud passes the same redaction gateway, running a larger detection model than a phone can |
-| Receipts per answer | The node signs a receipt per request (tier, model, engine, tokens, whether anything left the node); Autobot merges it into its own receipt |
+| Redaction before cloud calls | Phone → node needs no redaction (you own both ends). Node → cloud passes the same redaction, the phone's rules ported pattern for pattern ([spec/redaction.md](spec/redaction.md)); a larger detection model than a phone can run is not built |
+| Receipts per answer | The node signs a receipt per request (tier, model, tokens, whether anything left the node); Autobot merges it into its own receipt |
 | Recipes: on-device only, 8-minute limit | Recipes can be **handed to the node**: always on, no time limit, results delivered to the phone |
-| Private vault (on-device RAG) | The vault can sync end-to-end encrypted to the node for larger indexes and faster embedding; the index still never leaves hardware you own |
-| `:agent:core` (Kotlin Multiplatform, JVM + iOS) | The **Autobot Agent** (`autobot`, Rust) runs next to the gateway with the same semantics (session log, tool loop, fail-closed approvals); next, the app drives it through the paired gateway |
+| Private vault (on-device RAG) | Planned: the vault syncs end-to-end encrypted to the node for larger indexes and faster embedding (it needs `/v1/embeddings`, [ROADMAP.md](ROADMAP.md) milestone 1); the index still never leaves hardware you own |
+| `:agent:core` (Kotlin Multiplatform, JVM + iOS) | The **Autobot Agent** (`autobot`, Rust) runs next to the gateway with the same semantics (session log, tool loop, fail-closed approvals), and the app drives it through the paired gateway |
 
 ### One set of rules, two languages
 
@@ -118,9 +123,11 @@ truth for everything both sides must agree on:
   Tor or SOCKS5; loopback always direct, so a local backend is reached even behind Tor).
 - **Conformance vectors:** input → expected output cases in plain JSON. Invincible's Rust tests and
   Autobot's Kotlin tests both run them (Autobot copies them in with `scripts/sync-invincible-spec.sh`,
-  which records the commit they came from), so a rule change that only lands on one side fails CI on
-  the other. Autobot runs the pairing, Noise, receipt, redaction and egress vectors; routing is decided on
-  the node alone (the app sends node requests to it), so only Invincible runs those.
+  which records the commit they came from), so a rule change that only lands on one side fails the
+  other's tests once the copy is synced; until then the app's copy is as new as its last sync.
+  Autobot runs the pairing, Noise, receipt, redaction and egress vectors; routing is decided on the
+  node alone (the app sends node requests to it), and the cluster's rules hold between nodes, so
+  only Invincible runs those ([spec/README.md](spec/README.md#conformance-vectors)).
 
 A privacy fix starts as a spec change with a new vector, and neither side is done until both pass it.
 
@@ -153,15 +160,17 @@ decentralized fine-tuning, and the four properties it all serves. The plan with 
 ```
 
 - **Control plane:** Rust, a single static binary (`invincible`). It follows `spec/` and is checked
-  against the same conformance vectors as Autobot.
+  against the conformance vectors it shares with Autobot.
 - **Engines:** separate processes that the control plane supervises, never linked in. A crashing
   engine cannot take the node down, and engines can be swapped freely.
 - **Hardware:** local-grade Apple silicon and NVIDIA machines. llama.cpp is the v0 engine on both
   (Metal on Apple silicon, CUDA on NVIDIA), so one engine and one model format cover every node.
-  MLX (Apple) and vLLM (NVIDIA) follow as optional faster engines behind the same interface.
-- **Storage:** encrypted at rest; keys in the OS keychain or a TPM / Secure Enclave where present.
+  MLX (Apple) and vLLM (NVIDIA) are planned as optional faster engines behind the same interface.
+- **Storage:** plain files in `~/.invincible` and `~/.autobot`; keys, tokens and the audit log are
+  files only you can read (mode 0600). Encryption at rest, with the key in the OS keychain or a
+  TPM / Secure Enclave, is planned (INV-26).
 - **Network:** listens on loopback and paired interfaces only; nothing is exposed to the open
-  internet by default; optional Tor onion service for reaching home from anywhere.
+  internet by default. A Tor onion service for reaching home from anywhere is not built yet.
 
 ## Install (VPS or desktop)
 
@@ -479,12 +488,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   a command runs without a terminal (a password prompt fails at once) and, when it hangs or the
   agent stops, is stopped with what it printed, and what it started goes with it.
 - **Scripts that use the tools:** `execute_code` runs a short Python 3 (or `sh`) script, asked
-  for like a command with its code shown and run where commands run (sandboxed when confined,
-  in the container, over SSH). In it, `search`, `read_file`, `find_files`, `list_dir`,
-  `search_sessions`, `read_skill` and `web_fetch` are functions, so twenty searches and reads
-  cost one step and only what the script prints comes back. They talk over the script's own
-  stdin and stdout; reads outside the working directory are refused, a fetch is asked for like
-  any fetch, at most 200 calls per script.
+  for like a command with its code shown and run where commands run (write-confined when the
+  sandbox applies, in the container, over SSH). In it, `search`, `read_file`, `find_files`,
+  `list_dir`, `search_sessions`, `read_skill` and `web_fetch` are functions, so twenty searches
+  and reads cost one step and only what the script prints comes back. They talk over the
+  script's own stdin and stdout; reads outside the working directory are refused, a fetch is
+  asked for like any fetch, at most 200 calls per script.
 - **A browser:** where Chrome, Chromium, Edge or Brave is installed (or `AUTOBOT_BROWSER` names
   one), the `browser` tool drives it headless over the DevTools Protocol, for pages that need
   scripts, a login or a form, and for a dev server: `navigate`, `text`, `snapshot` (what can be
@@ -521,10 +530,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
-- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes) run
-  sandboxed: they read what you can, but write only in the working directory and temporary
-  directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users
-  may need to install). Without a sandbox they are refused, not run unconfined.
+- **Sandbox (write confinement):** commands with nobody watching (scheduled tasks, board work,
+  phone recipes) run write-confined: a command's own writes go only to its working directory and
+  temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh`
+  users may need to install). That is the whole boundary today. Reads, the network and the
+  programs the command can talk to are not restricted yet: it can read any file you can (keys and
+  tokens included), reach any host, and have a program outside the sandbox write for it
+  (`systemd-run --user` or `launchctl`, D-Bus, Docker's socket, the node's and agent's local
+  APIs, any other socket). Without a sandbox they are refused, not run unconfined.
   `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
@@ -556,12 +569,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
 - **Heartbeat:** put a checklist in `~/.autobot/HEARTBEAT.md` ("is the disk over 90%?", "did
   last night's backup run?") and every 30 minutes (`[agent] heartbeat`, or `off`) the agent works
-  through it, unattended and sandboxed, and messages you on Telegram only when something needs
-  you; a quiet check stays quiet.
+  through it, unattended and write-confined, and messages you on Telegram only when something
+  needs you; a quiet check stays quiet.
 - **Trajectories:** with `[agent] trajectories = true`, every finished turn is kept as the model
   saw it (system prompt, tool list, calls, results, answer) in `~/.autobot/trajectories`, as
-  fine-tuning data for a local model; `autobot trajectories` counts them and exports them
-  (`--clean`, `--model`, `--since`, `--agent`; `--format openai` or `sharegpt`).
+  fine-tuning data for a local model (a frontier model's turns are
+  [pending a licence gate](#from-an-evals-runs-to-training-data-pending-a-licence-gate));
+  `autobot trajectories` counts them and exports them (`--clean`, `--model`, `--since`,
+  `--agent`; `--format openai` or `sharegpt`).
 - **Fork a conversation:** `POST …/sessions/{id}/fork` starts a new one as the old one was, up to
   a point, to try another direction without losing the first.
 - **Steer while it works:** a message you send while a turn runs (Telegram, or the app with
@@ -777,7 +792,8 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
   device granted the `agent` capability can therefore start turns, watch their events (tool runs,
   receipts, approval questions, the answer) and answer approvals, all inside its Noise session.
-  Granting it is explicit — `invincible pair --capabilities agent`, or `PATCH
+  Granting it is explicit — `invincible pair --capabilities shard,agent` (the list is the whole
+  set, so keep `shard` for chat), or `PATCH
   /v1/cluster/nodes/<name>` on the device already paired — because the proxy speaks with the
   node's own token: a device granted nothing reaches a 404 there, exactly as for a route that does
   not exist. A turn may carry up to four
@@ -1101,7 +1117,7 @@ advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, �
 
 ```sh
 invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
-invincible pair --capabilities agent,audit   # …pre-granting those to the device that joins
+invincible pair --capabilities shard,agent,audit   # …granting exactly these to the device that joins
 invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
 invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
                                      # (with that machine's token, `invincible token`: web pages cannot use it)
@@ -1233,10 +1249,12 @@ best cloud model, then and now:
 ```
 projects (50 tasks, 3f9a1c2b7d01)
   2026-10-20 21:00  qwen3.5-4b [node] 30/50 · deepseek [cloud] 45/50  gap +30 points (qwen3.5-4b → deepseek)
-``` Thinking models are asked
-to answer directly unless you pass `--thinking` (then they get an 8192-token budget), and an
-answer that runs out of tokens says so instead of counting as wrong. Cloud models go through the
-gateway like any request: redacted, receipted, and only with `--confirm`.
+```
+
+Thinking models are asked to answer directly unless you pass `--thinking` (then they get an
+8192-token budget), and an answer that runs out of tokens says so instead of counting as wrong.
+Cloud models go through the gateway like any request: redacted, receipted, and only with
+`--confirm`.
 
 [`evals/seed.jsonl`](evals/seed.jsonl) has 40 tasks with one right answer each (extraction to
 JSON, arithmetic and units, CAD and engineering, Swift / Kotlin / Rust / shell, following
@@ -1252,6 +1270,8 @@ instructions, not making things up). On a MacBook (M-series, Metal), October 202
 Omnie and Nightfall: each carries a real excerpt (Kotlin, Swift, TypeScript, C++, docs) and asks
 what it returns, which line is wrong, for one line of code, a JSON extraction, or the kind of unit
 and geometry arithmetic Nightfall does. Every expected answer was checked by running the code.
+These are single-turn code Q&A: one question, one answer, no tools; the agent tasks below are the
+multi-step ones.
 
 | model | all | Autobot | Omnie | Nightfall |
 |---|---|---|---|---|
@@ -1260,10 +1280,11 @@ and geometry arithmetic Nightfall does. Every expected answer was checked by run
 | DeepSeek V3 (`deepseek-chat`, cloud) | 45/50 | 16/17 | 15/16 | 14/17 |
 
 On the 40 seed tasks DeepSeek passes 40/40 against Qwen3.5 4B's 34/40. So a 4B model on a
-laptop is at two thirds of a frontier model on this code, and level with it on extraction,
-shell and instructions; the gap is in multi-step reading and arithmetic. Each of DeepSeek's 90
-requests went through the gateway like any other: confirmed, redacted, receipted, and listed by
-`invincible audit --summary` (62 KB sent to `api.deepseek.com` for both suites).
+laptop is at two thirds of a frontier model on single-turn questions about this code, and level
+with it on extraction, shell and instructions; the gap is in multi-step reading and arithmetic.
+Each of DeepSeek's 90 requests went through the gateway like any other: confirmed, redacted,
+receipted, and listed by `invincible audit --summary` (62 KB sent to `api.deepseek.com` for both
+suites).
 
 The 4B model's misses are real ones, for example a glob whose `**/` needs a slash, a module
 resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254.
@@ -1271,8 +1292,8 @@ resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254.
 ### Agent evals: whole tasks, not single answers
 
 `autobot eval` runs agent tasks for real: each in a fresh directory with its files, the agent
-working it with its tools (commands sandboxed), then checks on the files it left, the task's own
-tests, the tools it called and its answer.
+working it with its tools (commands write-confined), then checks on the files it left, the
+task's own tests, the tools it called and its answer.
 
 ```sh
 autobot eval evals/agent.jsonl --model qwen3.5-4b --model deepseek --cloud
@@ -1297,10 +1318,11 @@ errors in a log, convert INI to JSON, join two CSVs, implement a function to a s
 numbers. The 4B model's two misses are real: a nested `.tmp` file left behind, and line numbers
 off by one.
 
-### From a frontier model's work to a local model's training data
+### From an eval's runs to training data (pending a licence gate)
 
-`--trajectories FILE` keeps an eval's passing runs, in the shape `autobot trajectories` exports:
-let a frontier model do the tasks once, keep what passed, and fine-tune the local model on it.
+`--trajectories FILE` keeps an eval's passing runs, in the shape `autobot trajectories` exports,
+ready for a trainer that reads OpenAI's chat format or ShareGPT's with Hermes-style `<tool_call>`
+tags.
 
 ```sh
 autobot eval evals/agent-hard.jsonl --model deepseek --cloud --trajectories runs.jsonl
@@ -1308,8 +1330,13 @@ autobot trajectories --from runs.jsonl --clean --format sharegpt --out train.jso
 ```
 
 DeepSeek's runs of both suites gave 26 clean trajectories (26 of 26 passed), 5 to 13 messages
-each, ready for a trainer that reads OpenAI's chat format or ShareGPT's with Hermes-style
-`<tool_call>` tags.
+each.
+
+**Fine-tuning a local model on a frontier model's runs is pending a licence gate**, which is not
+built yet: a provider's terms can forbid using its outputs to train another model, so the gate
+is to check each model's terms before its runs become training data. Until then the export is
+only an export: nothing in Invincible trains on it (`invincible train` is planned too), and
+whether a model's runs may train another is for that model's terms to say.
 
 ## Repository
 
@@ -1320,6 +1347,7 @@ each, ready for a trainer that reads OpenAI's chat format or ShareGPT's with Her
 | `crates/invincible` | Invincible Gateway (the node): config, engine supervisor, local API, pairing and remote access, services, updates, and the `invincible` command |
 | `crates/autobot` | The Autobot Agent: agent loop, tools, approvals, sessions, Telegram, setup, doctor, and the `autobot` command |
 | [`install.sh`](install.sh) | The installer for both; [`tests/install/`](tests/install/) runs it against a fake signed release |
+| [`SECURITY.md`](SECURITY.md) | How to report a vulnerability, what is in scope, and the release-signing key |
 | [`evals/`](evals/) | Task files for `invincible eval` |
 | [`bench/`](bench/) | `bench/run.sh`: start-up, per-turn and gateway latency, memory and binary sizes, on stand-ins |
 

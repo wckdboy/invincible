@@ -22,7 +22,7 @@ What ships today and is being finished.
 | | Item | Plane |
 |---|---|---|
 | ✅ | Gateway, routing, redaction, receipts, audit, pairing, always-on, bots, channels, evals, backups, alerts | shipped through v0.0.21 |
-| 🔶 | Cluster phase 1: one model split across two paired nodes, on the `cluster` branch, implemented and measured; left: clean numbers on a quiet machine and review | INV-58, INV-59 |
+| 🔶 | Cluster phase 1: one model split across two paired nodes, merged to main (edge), off unless `[cluster]` and a model's `cluster` list turn it on, measured; left: clean numbers on a quiet machine and review | INV-58, INV-59 |
 | 🔶 | Windows: builds, Task Scheduler services, `install.ps1`, CI on windows-latest (PR #14); left: the full test run, release builds, ACLs, a real install | INV-50 |
 | ✅ | `invincible doctor`: every subsystem, with what to do about each, `✗` exits 1 | made plain |
 | ⬜ | Independent security review of pairing and remote access | INV-21 |
@@ -95,8 +95,8 @@ same result and less wall time.
 | | Item | Plane |
 |---|---|---|
 | ⬜ | Cluster phase 5: tensor parallel over 10 GbE and opt-in RDMA, owned machines only | INV-63 |
-| ⬜ | Cluster phase 6: phones as shards (charging, Wi-Fi, cool) | INV-64 |
-| ⬜ | T3: federated LoRA with phones, data stays on the device | INV-67 |
+| ⬜ | Cluster phase 6: phones as shards (charging, Wi-Fi, cool). **Deferred:** phones and tablets are clients, not nodes ([ARCHITECTURE.md](ARCHITECTURE.md) section 4) | INV-64 |
+| ⬜ | T3: federated LoRA, data stays on the device. **Deferred** with phones as participants, for the same reason | INV-67 |
 | ⬜ | T4: pipeline-parallel training across machines, DeMo compression | INV-68 |
 | ⬜ | The written threat model, with the independent review's findings | security program |
 | ⬜ | A fleet config for many machines, with the keys kept out of it | made plain |

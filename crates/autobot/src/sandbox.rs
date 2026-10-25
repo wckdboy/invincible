@@ -1,7 +1,10 @@
-//! Commands with nobody watching (scheduled tasks, board work, phone recipes) run confined:
-//! they can read what the user can, but write only in the working directory and temporary
-//! directories. The allowlist says which commands may run; the sandbox bounds what an allowed
-//! command can do (an allowlisted `git` cannot rewrite `~/.zshrc`).
+//! Commands with nobody watching (scheduled tasks, board work, phone recipes) run write-confined:
+//! a command's own writes go only to the working directory and temporary directories. Reads, the
+//! network and the programs it can talk to are not restricted yet: it can read what the user can,
+//! reach any host, and have a program outside the sandbox write for it (`systemd-run --user`,
+//! `launchctl`, D-Bus, the node's and agent's local APIs, any socket). The allowlist says which
+//! commands may run; the sandbox bounds what an allowed command can write itself (an allowlisted
+//! `git` cannot rewrite `~/.zshrc`).
 //!
 //! macOS: `sandbox-exec` with a write-deny profile. Linux: `bwrap` (bubblewrap) with the system
 //! read-only and the working directory writable. Where neither is available, a confined
@@ -22,7 +25,7 @@ pub enum Mode {
     Always,
 }
 
-/// The command that runs [shell] (`sh -c`) in [workdir], confined to writing there.
+/// The command that runs [shell] (`sh -c`) in [workdir], its own writes confined there.
 pub fn command(shell: &str, workdir: &Path) -> Result<tokio::process::Command, String> {
     let workdir = workdir.canonicalize().map_err(|e| format!("{}: {e}", workdir.display()))?;
     let dir = workdir.to_str().ok_or("the working directory's path is not UTF-8")?;
@@ -48,7 +51,7 @@ pub fn command(shell: &str, workdir: &Path) -> Result<tokio::process::Command, S
     }
     if cfg!(target_os = "linux") {
         let bwrap = crate::find_on_path("bwrap")
-            .ok_or("unattended commands run sandboxed and bubblewrap (bwrap) is not installed; install it, or set [agent] sandbox = \"off\"")?;
+            .ok_or("unattended commands run write-confined and bubblewrap (bwrap) is not installed; install it, or set [agent] sandbox = \"off\"")?;
         let mut command = tokio::process::Command::new(bwrap);
         command
             .args(["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"])

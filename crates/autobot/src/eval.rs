@@ -1,5 +1,5 @@
 //! `autobot eval`: agent tasks run for real, checked by rule. Each task gets a fresh working
-//! directory with its files, the agent works it with its tools (commands sandboxed, approvals
+//! directory with its files, the agent works it with its tools (commands write-confined, approvals
 //! answered yes: the directory is a throwaway), and checks look at the files it left and its
 //! answer. The same tasks run on any model the gateway serves, so a local model's agent work is
 //! compared with a frontier model's, on this machine. `--trajectories FILE` keeps the passing
@@ -115,7 +115,8 @@ pub fn parse(text: &str) -> Result<Vec<Task>, String> {
     Ok(tasks)
 }
 
-/// Says yes to everything: the working directory is a throwaway and commands are sandboxed.
+/// Says yes to everything: the working directory is a throwaway and commands' own writes go only
+/// there (reads, the network and the programs a command talks to are not confined).
 struct Yes;
 
 impl Approver for Yes {

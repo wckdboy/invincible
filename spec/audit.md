@@ -13,8 +13,9 @@ The Autobot Agent keeps a second log, of its actions ([below](#the-agents-action
 `$INVINCIBLE_HOME/audit.jsonl`, mode 0600, one JSON object per line, oldest first. Past 16 MiB it
 is renamed `audit.1.jsonl` (replacing an older one) and a new file continues the chain. There is no
 telemetry: the log is read on the node, by `GET /v1/audit` on loopback with the token. A paired
-device cannot read it (spec/pairing.md, Transport): it holds every caller's model, decision,
-tokens, egress hosts and the cluster's topology, and it is not a device route.
+device reads it only when the operator granted it `audit` ([pairing.md](pairing.md),
+Capabilities): it holds every caller's model, decision, tokens, egress hosts and the cluster's
+topology, so no device has it by default.
 
 ## An entry
 

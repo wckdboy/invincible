@@ -7,14 +7,16 @@ node and how today's code grows into it. The plan, with exit criteria, is [ROADM
 The rules both Invincible and Autobot must agree on are normative in [spec/](spec/) and pinned
 by conformance vectors; this document is not normative, and where the two differ the spec wins.
 
-**Reading the states.** *Shipping* is in a release. *Branch* is implemented on a branch and not
-yet released. *Planned* is designed here and nowhere else yet.
+**Reading the states.** *Shipping* is in a stable release. *Edge* is on main and in the edge
+builds, not yet in a stable release. *Branch* is implemented on a branch and not yet merged.
+*Planned* is designed here and nowhere else yet. *Deferred* is designed but set aside, with the
+reason given.
 
 ## The one picture
 
 ```
  clients ───────────────────────────────────────────────────────────────────────────────────
-  Autobot (phone, terminal, Zed)   Niobium and other apps   any OpenAI / Anthropic client
+  Autobot (phone, terminal, Zed)   other apps (planned)     any OpenAI / Anthropic client
         │ Noise session                  │ Noise or token          │ HTTPS + local token
         └──────────────────────┬─────────┴──────────────────────────┘
  control plane ─────────────────┴─────────────────────────── invincible (Rust, one static binary)
@@ -41,7 +43,7 @@ decision. Its modules today, and what they become:
 | `server` | OpenAI and Anthropic APIs: `/v1/models`, `/v1/chat/completions`, `/v1/messages`, `/v1/audio/speech`, `/v1/images/generations`, receipts, audit, node info, the agent passthrough | adds `/v1/embeddings`, `/v1/audio/transcriptions`, `/v1/video/generations`, `/v1/cluster`, `/v1/train`, `/v1/tune`; the same shapes for every modality, so a client changes one URL |
 | `engine` | one kind, `llama-server`, supervised with restart | one contract for every engine kind (section 2) |
 | `models` | GGUF by source (`hf:`, URL, path), hash-verified, a memory fit rule, `model add` | a catalog per modality (text, speech, image, video, embedding, adapter), each entry with its engine, format, licence and the measured numbers from `tune` |
-| `invincible-policy` | routing, egress, network mode; vectors shared with Autobot | adds cluster links and partitioning (branch), tune profiles, training receipts |
+| `invincible-policy` | routing, egress, network mode; vectors shared with Autobot | adds cluster links and partitioning (edge), tune profiles, training receipts |
 | `redact`, `receipts`, `audit` | personal data replaced before the cloud; a signed receipt per request; a hash-chained log | unchanged in kind; receipts gain the nodes, engines and adapters that took part |
 | `devices`, `remote`, `relay` | Noise pairing, sessions, the encrypted pipe carrying HTTP | the same pipe carries shard links (mode `0x03`) and, later, training sync |
 | `eval` | `invincible eval`: your tasks against local and frontier models, every run kept | the gate for `tune` (a setting that is faster but worse does not win) and for `train` (an adapter that does not beat its base is not served) |
@@ -97,8 +99,11 @@ machine.
 Running a model well is the weekend of glue the node exists to remove: which quantization, how
 many layers on the GPU, how much context, which batch size, flash attention or not, which KV cache
 type, whether a draft model helps. Today the node has a memory fit rule (`models::memory_budget`,
-`needed`), `--list-devices`, and benchmarks that run on demand. The target is a profile per machine
-that the node measures, stores and uses. State: planned (the fit rule and the benchmarks ship).
+`needed`), `--list-devices`, and benchmarks that run on demand; on edge, `invincible tune probe`
+reports the machine and its engines, and `invincible tune bench <model>` keeps `llama-bench`'s
+numbers in `$INVINCIBLE_HOME/tune/`, which the cluster's planner reads. The target is a profile
+per machine that the node measures, stores and uses. State: the probe and the bench on edge; the
+search, the profile and the choice planned.
 
 **Probe** (`invincible tune probe`): CPU, memory, every accelerator with its own memory, the
 engine builds present (Metal, CUDA, ROCm, Vulkan, RPC), disk and its read speed, the links to each
@@ -121,8 +126,9 @@ cluster spec) and placement (which node runs a model whole).
 
 ## 4. Cluster plane: many nodes, one model
 
-Designed in [spec/cluster.md](spec/cluster.md) on the `cluster` branch; phase 1 is implemented
-there, unaudited. The short form, so this document stands on its own:
+Designed in [spec/cluster.md](spec/cluster.md); phase 1 is on main (edge), unaudited, and off
+unless `[cluster]` and a model's `cluster` list turn it on. The short form, so this document
+stands on its own:
 
 - **Only paired devices**, and shards name the heads that may run work on them. llama.cpp's RPC
   server (no authentication, no encryption) listens on loopback only; the only way in from another
@@ -136,9 +142,12 @@ there, unaudited. The short form, so this document stands on its own:
   data policy `owned`, so private requests may run on it.
 - **Failure** ends the answer with an error event, replans over the devices that remain, and the
   router uses something else meanwhile.
-- **Phases**: 1 two paired nodes (branch) · 2 real machines: mDNS, calibration, speed-aware plans,
+- **Phases**: 1 two paired nodes (edge) · 2 real machines: mDNS, calibration, speed-aware plans,
   local weights · 3 resilience · 4 placement · 5 wired fast paths (tensor parallel over 10 GbE and
-  RDMA, owned machines only) · 6 phones as shards (charging, Wi-Fi, cool).
+  RDMA, owned machines only) · 6 phones as shards (charging, Wi-Fi, cool): **deferred**, because
+  phones and tablets pair as clients, never as heads or shards. iOS does not let an app start a
+  child process at all, and on Android a phone would be a node only while awake, plugged in and
+  cool; serving them would need an engine linked in, against the rule that engines are processes.
 
 What Invincible takes from the field: exo's memory-weighted allocation and "the smallest set of
 devices that holds it"; llama.cpp RPC as the phase 1 engine; Petals' replay-on-failure; MLX's
@@ -154,13 +163,15 @@ all of it planned.
 |---|---|---|---|
 | T1 | `invincible train`: LoRA on one device, datasets in `$INVINCIBLE_HOME/datasets` with manifests (hash, source, redaction state), adapters served under a new id after an eval run against the base, signed training receipts (base, dataset hash, devices, result hash) | `mlx_lm.lora` (Apple silicon), PEFT (CUDA), launched as engines | none |
 | T2 | data-parallel LoRA across the machines you own | the same | DiLoCo-style: many local steps, an outer step on the averaged change; a slow or absent worker does not stall the run |
-| T3 | federated LoRA with phones: each phone trains on its own data and sends only the adapter update; the data stays on the device | Autobot's on-device engines | adapter averaging over the paired session |
+| T3 | federated LoRA with phones: each phone trains on its own data and sends only the adapter update; the data stays on the device. **Deferred**: phones are clients (section 4); a laptop that sleeps could take the phone's place | Autobot's on-device engines | adapter averaging over the paired session |
 | T4 | larger runs: pipeline-parallel training across machines | PyTorch, MLX distributed | DeMo compression on slow links |
 
-The feed exists today: `invincible eval` keeps every frontier and local run, so a frontier
-model's work on your tasks is a local model's training set in waiting, redacted the same way the
-cloud request was. The eval gate decides whether an adapter ships: an adapter that does not beat
-its base on your tasks is kept with its numbers and not served.
+The runs exist today: `invincible eval` keeps every frontier and local run, and `autobot eval
+--trajectories` exports the passing ones in a trainer's format. Training a local model on a
+frontier model's runs is **pending a licence gate**, which is not built: a provider's terms can
+forbid using its outputs to train another model, so the gate is to check each model's terms
+before its runs become training data. The eval gate decides whether an adapter ships: an adapter
+that does not beat its base on your tasks is kept with its numbers and not served.
 
 ## 6. Platforms
 
@@ -170,7 +181,7 @@ its base on your tasks is kept with its numbers and not served.
 | Linux (x86_64, arm64) | shipping: static binary, systemd, CUDA, ROCm, Vulkan, CPU |
 | Windows (x86_64, arm64) | branch (PR #14): PowerShell where `sh -c` was, Task Scheduler services, ACLs where files were 0600, `install.ps1`, CI on windows-latest |
 | Packages | planned: Homebrew formulas, `.deb` and `.rpm`, signed MSIX and winget, an Intel Mac build |
-| Phones | through Autobot: paired devices, later shards and federated trainers |
+| Phones | through Autobot: paired devices that drive a node, as clients; shards and federated trainers deferred (section 4) |
 
 One engine and one model format on every platform is why llama.cpp stays the universal engine
 even when faster ones exist for one vendor.
@@ -182,8 +193,8 @@ These are the four properties the rest serves. Each has a mechanism today and a 
 | Property | Mechanism | Measured by |
 |---|---|---|
 | Security | Noise pairing with pinned keys; engines and RPC on loopback only; redaction before the cloud; signed receipts; a hash-chained audit log; reproducible, attested releases signed with a pinned key; `cargo deny` on licences and advisories; secrets in the OS keychain or TPM / Secure Enclave (planned) | the conformance vectors; the internal review (done); the independent review of pairing and remote access (planned, INV-21); a written threat model (planned) |
-| Speed | the fastest engine build the machine has; `tune` (planned); speculative decoding (planned); micro-batched prefill and speed-aware partitioning in the cluster (planned) | `bench/run.sh` every night, every run kept; tokens per second and time to first token in every receipt |
-| Anonymity | offline by default; Tor and SOCKS5 as routes with the kill switch as a shared, tested rule; no accounts, no telemetry; an onion service to reach home | the egress vectors; the audit log showing nothing left |
+| Speed | the fastest engine build the machine has; `tune probe` and `tune bench` (edge), the tuned profile (planned); speculative decoding (planned); micro-batched prefill and speed-aware partitioning in the cluster (planned) | `bench/run.sh` every night, its numbers in that CI run's summary; tokens per second and time to first token in every receipt (planned) |
+| Anonymity | offline by default; Tor and SOCKS5 as routes with the kill switch as a shared, tested rule; no accounts, no telemetry; an onion service to reach home (not built) | the egress vectors; the audit log showing nothing left |
 | Stability | always on under launchd, systemd or Task Scheduler; health checks; self-update from signed releases; one-file backups with checksums; stopping leaves nothing running; alerts to your chat | the ten-minute soak test every night; the restart counters in the service status |
 
 The threat model, written down (planned, with the independent review): who the attacker is (a
@@ -200,8 +211,8 @@ it cannot, it says so. The commands, today and planned:
 | Serve a model | `invincible model add hf:…`, `invincible serve` | `invincible model add --auto` picks engine and settings from the tune profile |
 | Know what it costs you | `invincible receipts`, `/v1/receipts/{id}`, the audit log | a `cost` line per receipt in tokens, seconds and, for the cloud, money |
 | Measure before believing | `invincible eval` | the gate wired into `tune` and `train` |
-| Find out what is wrong | `autobot doctor` | `invincible doctor` for the node: engines, devices, links, services, with what to do about each |
-| Run a model bigger than one box | branch: `invincible join`, `invincible cluster status` | `invincible cluster plan <model>` shows the split and the expected speed before it runs |
+| Find out what is wrong | `autobot doctor`; `invincible doctor` (edge) for the node: engines, devices, links, services, with what to do about each | none |
+| Run a model bigger than one box | `invincible join`; on edge, `invincible cluster status` | `invincible cluster plan <model>` shows the split and the expected speed before it runs |
 | Teach it your work | the eval history | `invincible train`, `invincible adapters` |
 | Understand a decision | reason codes in receipts | `invincible explain <receipt>`: why this route, this engine, these nodes, in sentences |
 | Deploy at scale | one static binary, `install.sh`, `invincible update` | packages; a config a fleet can share with the keys kept out |
@@ -214,5 +225,5 @@ the site shows the same status table the README does.
 - Strangers' compute. A region tier of other people's nodes needs verification, payment and
   privacy against the operator; it is a separate design and the open question in the README.
 - Pretraining from scratch. Fine-tuning and continued training of open models are in scope.
-- A chat UI. Autobot and Niobium are the clients.
+- A chat UI. Autobot is the client; other apps, Niobium among them, are planned.
 - Identity systems and accounts. Pairing is the identity.
