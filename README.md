@@ -269,8 +269,10 @@ the release key, which lives only as a GitHub secret; the installer and `invinci
 its public key and refuse anything else, then check the archive against the list. With a
 signed-in GitHub CLI the installer also checks the archive's Sigstore build attestation. Releases
 are built by [`release.yml`](.github/workflows/release.yml): a `v*` tag publishes stable, every
-green push to main refreshes the `edge` prerelease. The Linux builds are reproducible: the
-workflow builds the x86_64 archive again on another machine and publishes only if the bytes match
+green push to main refreshes the `edge` prerelease. Every action the workflows run is pinned to a
+commit (the version in a comment beside it), so a tag moved upstream changes nothing. The Linux
+builds are reproducible: the workflow builds the x86_64 archive again on another machine and
+publishes only if the bytes match
 (to check one yourself, build the commit from `/tmp/invincible-src` with the flags in
 `release.yml`). By hand:
 

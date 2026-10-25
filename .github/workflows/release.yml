@@ -50,7 +50,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       build_version: ${{ steps.meta.outputs.build_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - id: meta
@@ -100,10 +100,10 @@ jobs:
       # Empty for stable: the binaries say the workspace version.
       INVINCIBLE_BUILD_VERSION: ${{ needs.meta.outputs.build_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.meta.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@1.91
+      - uses: dtolnay/rust-toolchain@8632757d5a758c452f724e9d837848c694a7bb48 # 1.91.1
         with:
           targets: ${{ matrix.target }}
       # In the checkout, so it goes to the toolchain rust-toolchain.toml picks.
@@ -137,10 +137,10 @@ jobs:
           # They say the version they are released as.
           test "$("$dir/invincible" --version)" = "invincible $VERSION"
           test "$("$dir/autobot" --version)" = "autobot $VERSION"
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: invincible-${{ matrix.platform }}.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: invincible-${{ matrix.platform }}
           path: invincible-${{ matrix.platform }}.tar.gz
@@ -153,11 +153,11 @@ jobs:
     env:
       INVINCIBLE_BUILD_VERSION: ${{ needs.meta.outputs.build_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.meta.outputs.sha }}
           path: elsewhere/invincible
-      - uses: dtolnay/rust-toolchain@1.91
+      - uses: dtolnay/rust-toolchain@8632757d5a758c452f724e9d837848c694a7bb48 # 1.91.1
       # Inside the checkout: rust-toolchain.toml picks the toolchain the target must be added to.
       - working-directory: elsewhere/invincible
         run: |
@@ -176,7 +176,7 @@ jobs:
           cp target/x86_64-unknown-linux-musl/release/invincible target/x86_64-unknown-linux-musl/release/autobot README.md LICENSE "$dir"/
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - "$dir" | gzip -n > "$GITHUB_WORKSPACE/rebuilt.tar.gz"
           mkdir -p "$GITHUB_WORKSPACE/rebuilt" && cp "$dir"/invincible "$dir"/autobot "$GITHUB_WORKSPACE/rebuilt/"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: invincible-linux-x64
       - run: |
@@ -204,7 +204,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           merge-multiple: true
       # VERSION says what the release is, so an install that is up to date downloads nothing more;
@@ -245,7 +245,7 @@ jobs:
           gh release upload edge --repo "$REPO" --clobber invincible-*.tar.gz VERSION
           gh release upload edge --repo "$REPO" --clobber SHA256SUMS SHA256SUMS.sig
       - if: needs.meta.outputs.channel == 'check'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: SHA256SUMS
           path: |
