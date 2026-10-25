@@ -27,14 +27,37 @@ Early, and used daily. What is built, and what is not yet:
 | --- | --- |
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
-| Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
+| Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)) and reach only what they were granted (`shard`, `agent`, `audit`): implemented, **not yet independently reviewed**. Until 0.0.21 a paired device reached the whole API: see [Security](#security) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
-| Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
+| Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)); since 0.0.22 the phone needs the `agent` and `audit` grants for that (`invincible devices grant <phone> shard,agent,audit`) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code and 26 agent tasks, on local models and a frontier one (DeepSeek V3): 30/50 against 45/50 on the code tasks; every run kept, so the gap is followed over time |
 
 Work is tracked in Plane (project **INV**). Invincible and Autobot are made by
 [Sovware](https://sovware.io).
+
+## Security
+
+**0.0.22 is a security release; update every node** (`invincible update`). From 0.0.1 through
+0.0.21 a paired device reached the node's whole API through its session, not only chat: the
+Autobot Agent (`/v1/agent`, which runs with the node's own token, so shell tools and schedules on
+the node, and the cloud models the agent may use), every caller's audit log (from 0.0.3),
+`/v1/messages` (the node's own models), and from 0.0.15 speech and images, which use cloud
+backends when configured. Anyone holding a paired device (a friend's phone, a lost one, a lab peer)
+could act as the operator, short of the admin endpoints. 0.0.22 gives each device only the
+capabilities you grant ([Pairing other machines](#pairing-other-machines)); a device paired before
+it keeps chat (`shard`) alone. Chat follows the node's routing rules, so unless `egress = "never"`
+a `shard` device can still use your cloud models and confirm a cloud run itself
+(`invincible-confirmed: 1`); a separate `cloud` capability is planned. After updating:
+
+```sh
+invincible devices                                  # every paired device, and what it may reach
+invincible devices grant <phone> shard,agent,audit  # the Autobot app: chat, the agent, its own activity
+invincible devices --remove <name>                  # any device you do not recognise or no longer hold
+```
+
+Until a node is updated, unpair devices you do not trust, or keep `[remote] listen` on loopback.
+The advisory is under [Security advisories](https://github.com/wckdboy/invincible/security/advisories).
 
 ## Why
 
@@ -126,7 +149,9 @@ A privacy fix starts as a spec change with a new vector, and neither side is don
 1. `invincible pair` on the node shows a QR code (the node's static public key plus addresses).
 2. Autobot scans it; the two complete a Noise handshake and pin each other's keys.
 3. The node appears in Autobot under Providers as **My node** with its live model list.
-4. Unpairing from either side revokes the key. A panic wipe on the phone forgets the node.
+4. The phone reaches what the node granted it: chat (`shard`) unless the code or
+   `invincible devices grant` said more (`shard,agent,audit` for the agent and activity screens).
+5. Unpairing from either side revokes the key. A panic wipe on the phone forgets the node.
 
 There are no accounts, no passwords and no third-party relay.
 
@@ -252,7 +277,7 @@ secrets = false
 ```sh
 autobot              # chat in the terminal
 autobot code         # code in this directory (see "Code with Autobot")
-autobot run "task"   # one task, no questions: anything not allowlisted is refused
+autobot run "task"   # one task, no questions: anything not allowlisted is refused, commands sandboxed
 autobot doctor       # check everything, 24/7 readiness included
 ```
 
@@ -261,8 +286,10 @@ the release key, which lives only as a GitHub secret; the installer and `invinci
 its public key and refuse anything else, then check the archive against the list. With a
 signed-in GitHub CLI the installer also checks the archive's Sigstore build attestation. Releases
 are built by [`release.yml`](.github/workflows/release.yml): a `v*` tag publishes stable, every
-green push to main refreshes the `edge` prerelease. The Linux builds are reproducible: the
-workflow builds the x86_64 archive again on another machine and publishes only if the bytes match
+green push to main refreshes the `edge` prerelease. Every action the workflows run is pinned to a
+commit (the version in a comment beside it), so a tag moved upstream changes nothing. The Linux
+builds are reproducible: the workflow builds the x86_64 archive again on another machine and
+publishes only if the bytes match
 (to check one yourself, build the commit from `/tmp/invincible-src` with the flags in
 `release.yml`). By hand:
 
@@ -398,6 +425,19 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
+  Nobody watches such a run, so its commands run sandboxed like a scheduled task's (see
+  **Sandbox** below), whatever `--approvals` allows: `--approvals trust` decides which commands
+  run, the sandbox bounds what they can change. A confined command writes only in `DIR` and
+  temporary directories, so a build that writes caches in your home (`~/.cargo`, `~/.npm`)
+  fails there. On Linux without bubblewrap, commands are refused and the run says so before it
+  starts; where bubblewrap cannot make its namespaces (some containers), each command fails
+  with bubblewrap's error. Either way nothing runs unconfined: install it
+  (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine you can
+  throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack
+  bubblewrap or the namespaces it needs and are themselves the boundary. It is a flag for one
+  run, not a setting, so the workflow file shows it; the run prints it on standard error before
+  it starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks
+  and the board stay confined.
 
 ### In your editor: Zed and other ACP editors
 
@@ -513,11 +553,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
-- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes) run
-  sandboxed: they read what you can, but write only in the working directory and temporary
-  directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users
-  may need to install). Without a sandbox they are refused, not run unconfined.
-  `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off.
+- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes, hooks,
+  the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
+  working directory and temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e.
+  bubblewrap, which `install.sh` users may need to install). Without a sandbox they are
+  refused, not run unconfined. `[agent] sandbox = "always"` confines interactive turns too;
+  `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run. Commands in
+  `[agent.docker]` or over `[agent.ssh]` run there instead. The sandbox does not limit reads or
+  the network.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands
@@ -731,8 +774,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Receipts:** each model call shows its model, tier and receipt id.
 - **Action log:** every command, file write, outside read and cloud send the agent asked for, whether
   it ran, and who decided (the rules, an "always" earlier in the session, or you on the CLI, the
-  app or Telegram), in `~/.autobot/actions.jsonl`. `autobot actions` shows it; the app reads it
-  through the agent API.
+  app or Telegram), in `~/.autobot/actions.jsonl`; for a command that ran, where and how confined
+  (`bwrap` or `sandbox-exec`, `off`, `container`, `ssh`). `autobot actions` shows it; the app
+  reads it through the agent API.
 - **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
   no public address. Strangers get a one-time code, and nobody gets in until you run
   `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
@@ -767,11 +811,16 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `[approvals]` says yes ahead of time.
 - **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
-  device can therefore start turns, watch their events (tool runs, receipts, approval questions,
-  the answer) and answer approvals, all inside its Noise session. A turn may carry up to four
+  device granted the `agent` capability can therefore start turns, watch their events (tool runs,
+  receipts, approval questions, the answer) and answer approvals, all inside its Noise session.
+  Granting it is explicit — `invincible pair --capabilities shard,agent` (the list is the whole
+  set, so keep `shard` for chat), or `invincible devices grant <name> shard,agent` for a device
+  already paired — because the proxy speaks with the node's own token: the agent's tools, its
+  schedules on this machine and the cloud models it may use are that device's too. A device not
+  granted it reaches a 404 there, exactly as for a route that does not exist. A turn may carry up to four
   images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
   that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
-  agent is reachable only from this machine and from devices you paired.
+  agent is reachable from this machine, and over a device session only where you granted it.
 
 ## Bots and channels
 
@@ -1054,8 +1103,8 @@ invincible audit --since 7d --summary   # totals per model, and every host anyth
 invincible audit --verify           # check the chain and every receipt's signature
 ```
 
-Paired devices read the same log with `GET /v1/audit`. There is no telemetry: nothing about your
-requests leaves the node unless you send it.
+A paired device granted `audit` reads its own entries in the same log with `GET /v1/audit`, and
+no one else's. There is no telemetry: nothing about your requests leaves the node unless you send it.
 
 ### Pairing other machines
 
@@ -1071,10 +1120,11 @@ advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, �
 
 ```sh
 invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
+invincible pair --capabilities shard,agent,audit   # …granting exactly these to the device that joins
 invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
 invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
                                      # (with that machine's token, `invincible token`: web pages cannot use it)
-invincible devices                   # on the node: who is paired
+invincible devices                   # on the node: who is paired, and what each may reach
 invincible devices --remove laptop   # unpair: refused at the next handshake or frame
 ```
 
@@ -1082,8 +1132,34 @@ On macOS with the application firewall on, the first remote connection can wait 
 incoming connections?" prompt for `invincible` (or `System Settings › Network › Firewall`): allow it,
 or pairing hangs until it times out.
 
-Paired devices reach the inference API with no token (their key authenticates them) and never the
-admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer is in
+Every paired device holds a set of capabilities, recorded when it pairs
+([spec/pairing.md](spec/pairing.md), Capabilities), and reaches nothing outside it:
+
+| Capability | What the device reaches |
+|---|---|
+| `shard` | Chat: `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>` and `/v1/node`. The default, and the least. Chat follows the node's routing rules: unless `egress = "never"`, a `shard` device can use your cloud models and confirm a cloud run itself (`invincible-confirmed: 1`). A separate `cloud` capability is planned. |
+| `agent` | `/v1/agent`: the Autobot Agent on the node, which runs with the node's own token — turns with its tools, approvals and schedules on this machine, and cloud models the agent may use. |
+| `audit` | `GET /v1/audit`: that device's own entries in the audit log, no one else's. |
+
+No token is involved (the device's key authenticates it). A route the device was not granted, and
+every operator route (`/v1/admin/*`, `/v1/fetch`, `/v1/messages`, speech, images), answers exactly
+as a path that does not exist, so a device cannot even learn it is there. `--capabilities` names
+the whole set, not an addition to `shard`: the Autobot app's chat, agent and activity screens need
+`--capabilities shard,agent,audit`. Grant or revoke on the node, from the device's next request,
+with no re-pairing; the list again is the whole set:
+
+```sh
+invincible devices                              # who is paired, and what each may reach
+invincible devices grant phone shard,agent,audit   # what the Autobot app needs
+invincible devices grant laptop shard           # back to chat only
+```
+
+A device paired before 0.0.22 is read as `shard` only (until 0.0.21 it reached the whole API; see
+the [0.0.22 advisory](#security)). Each route takes only the body it needs (32 MiB for a chat
+completion), and the node holds at most `[node] max_buffered_bytes` of device request bodies at
+once — 256 MiB unless set, refusing with 503 and `Retry-After: 2` past it instead of running itself
+out of memory ([spec/pairing.md](spec/pairing.md), Limits). Autobot
+pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.

@@ -96,7 +96,10 @@ fn transcript(name: &str, pattern: &str, prologue: &[u8], psk: Option<&str>, pay
 fn noise_transcripts_match_the_spec() {
     let request = b"GET /v1/models HTTP/1.1\r\nhost: node\r\n\r\n";
     let answer = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}";
-    let pair_reply = br#"{"device":"phone","node":"studio","receipts":"key"}"#;
+    // The pairing reply carries the capability set the code granted (spec/pairing.md,
+    // Capabilities) — `["shard"]` for a code with no other grant. A reply without the field comes
+    // from a node before 0.0.22, which gave a paired device its whole API.
+    let pair_reply = br#"{"capabilities":["shard"],"device":"phone","node":"studio","receipts":"key"}"#;
     let file = json!({
         "spec": "noise",
         "version": 0,

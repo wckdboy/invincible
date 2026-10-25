@@ -20,14 +20,38 @@ const ROTATE_AT: u64 = 16 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Caller {
     Local,
-    Device(String),
+    /// A paired device: the name it is listed under, its pinned static key (base64url), and the
+    /// fingerprint people compare ([crate::devices::fingerprint]). The key is the identity; the
+    /// name is a label the owner can change.
+    Device {
+        name: String,
+        key: String,
+        fingerprint: String,
+    },
 }
 
 impl Caller {
+    /// A paired device, from its static public key as the session handshake gave it.
+    pub fn device(name: &str, key: &[u8]) -> Self {
+        Self::Device {
+            name: name.to_owned(),
+            key: base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, key),
+            fingerprint: crate::devices::fingerprint(key),
+        }
+    }
+
     pub fn code(&self) -> String {
         match self {
             Self::Local => "local".to_owned(),
-            Self::Device(name) => format!("device:{name}"),
+            Self::Device { name, .. } => format!("device:{name}"),
+        }
+    }
+
+    /// A device's pinned key (base64url); `None` for the operator's own API.
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            Self::Local => None,
+            Self::Device { key, .. } => Some(key),
         }
     }
 }
@@ -85,6 +109,11 @@ impl AuditLog {
         if let Some(client) = client {
             entry["client"] = json!(client);
         }
+        // The device's pinned key, not its name: the name is a label a later device may take, and
+        // the key is what a device's own read of the log is filtered by ([AuditLog::read_where]).
+        if let Caller::Device { key, .. } = caller {
+            entry["caller_key"] = json!(key);
+        }
         let line = entry.to_string();
         crate::fsutil::append_private(&self.path, &line)?;
         *last = Some(hash(&line));
@@ -103,11 +132,18 @@ impl AuditLog {
 
     /// Entries at or after [since] (unix seconds), newest last, at most [limit] (the newest ones).
     pub fn read(&self, since: u64, limit: usize) -> Vec<Value> {
+        self.read_where(since, limit, |_| true)
+    }
+
+    /// [AuditLog::read], of the entries [keep] accepts: the newest [limit] of those, so a filter
+    /// never comes back short because other callers' entries were newer.
+    pub fn read_where(&self, since: u64, limit: usize, keep: impl Fn(&Value) -> bool) -> Vec<Value> {
         let entries: Vec<Value> = self
             .lines()
             .iter()
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter(|e| e["at"].as_u64().unwrap_or(0) >= since)
+            .filter(|e| keep(e))
             .collect();
         let skip = entries.len().saturating_sub(limit);
         entries.into_iter().skip(skip).collect()
@@ -216,7 +252,7 @@ mod tests {
         let log = AuditLog::new(&home);
         assert_eq!(log.verify(&key.public()), Ok(0));
         log.append(&Caller::Local, Some("autobot-agent"), "chat", &receipt(&key, "a1", "qwen", json!([]))).unwrap();
-        log.append(&Caller::Device("phone".into()), None, "chat", &receipt(&key, "a2", "qwen", json!([]))).unwrap();
+        log.append(&Caller::device("phone", &[7; 32]), None, "chat", &receipt(&key, "a2", "qwen", json!([]))).unwrap();
         // A fresh handle (a restarted node) continues the chain from the file.
         let log = AuditLog::new(&home);
         let egress =
@@ -226,6 +262,13 @@ mod tests {
         let entries = log.read(0, 2);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["caller"], "device:phone");
+        // A device's entry carries the key it was pinned with; the operator's carries none.
+        assert_eq!(entries[0]["caller_key"], Caller::device("phone", &[7; 32]).key().unwrap());
+        assert!(entries[1].get("caller_key").is_none());
+        // Filtered, the newest entries are the filter's, not whatever was newest overall.
+        let mine = log.read_where(0, 1, |e| e["caller"] == "device:phone");
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0]["receipt"]["receipt"]["request_id"], "a2");
         assert_eq!(entries[1]["receipt"]["receipt"]["request_id"], "a3");
         assert_eq!(log.read(0, 10)[0]["client"], "autobot-agent");
         assert_eq!(log.find("a2").unwrap()["receipt"]["request_id"], "a2");

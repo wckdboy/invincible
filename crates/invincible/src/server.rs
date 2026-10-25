@@ -8,19 +8,23 @@
 //! - `invincible-confirmed: 1` — the user approved a cloud run (the answer to an `ask`).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::body::{Body, Bytes};
-use axum::extract::{DefaultBodyLimit, Path, Request as HttpRequest, State};
+use axum::extract::{FromRequest, Path, Request as HttpRequest, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, delete, get, post};
+use axum::routing::{MethodRouter, any, get, patch, post};
 use axum::{Extension, Json, Router};
+use bytes::BytesMut;
+use futures_util::StreamExt;
 use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reason, Request, RouteInput, Tier, decide};
 use serde_json::{Value, json};
 
 use crate::audit::{AuditLog, Caller};
 use crate::cloud::{CloudError, CloudModel};
+use crate::devices::{Capabilities as DeviceCapabilities, Capability};
 use crate::engine::Engine;
 use crate::receipts::{Attempt, Draft, ReceiptKey, ReceiptStore};
 use crate::remote::{CODE_LIFETIME, Pairing};
@@ -30,8 +34,27 @@ pub const DECISION_HEADER: &str = "invincible-decision";
 pub const CALLER_HEADER: &str = "invincible-caller";
 /// Names the program sending a request (`autobot-agent`), for the audit log.
 pub const CLIENT_HEADER: &str = "invincible-client";
-/// The largest inference request taken: room for a conversation with several images (a
-/// downscaled screenshot is a few hundred KiB in base64; providers take up to 20 MB each).
+/// The largest body a route takes, per route, because what a route needs is what it should take:
+/// one number copied across the API is memory a caller can ask the node for.
+///
+/// | route | limit | why |
+/// |---|---|---|
+/// | `/v1/chat/completions` | [`MAX_REQUEST`] | a conversation's text plus its images |
+/// | `/v1/messages` | [`MAX_REQUEST`] | the same conversation, Anthropic's shape |
+/// | `/v1/agent` | `AGENT_TURN_BODY` (turns), 1 MiB (everything else) | the agent's own caps |
+///
+/// On the device listener a limit is only ever reached by a device the operator admitted: the
+/// capability gate runs first ([`device_app`]), so an unauthorised device gets the fallback's 404
+/// and never learns a number from here.
+///
+/// The chat number is **not** a context window. A conversation's text is bounded by the model's
+/// context — 128k tokens is ~512 KiB at four characters a token (`estimate_tokens`) — but its
+/// images are not: they travel as base64 `data:` URLs (a third larger than the bytes they carry),
+/// `estimate_tokens` charges 1_600 tokens an image whatever its size, and a provider takes up to
+/// 20 MB an image. So the byte limit is what bounds an image and 32 MiB is room for a few of them
+/// (the README says "a request may be up to 32 MiB"). It is also the operator's documented number,
+/// so the device listener cannot hold it lower without refusing a request the operator's own API
+/// accepted.
 pub const MAX_REQUEST: usize = 32 * 1024 * 1024;
 /// The largest agent turn passed through: its text and a few images in base64 (the agent takes
 /// four of 10 MiB at most).
@@ -57,6 +80,10 @@ pub struct AppState {
     /// Speech and image backends ([crate::synth]).
     pub speech: Vec<crate::synth::Backend>,
     pub images: Vec<crate::synth::Backend>,
+    /// What the device listener will hold of request bodies at once (`[node]
+    /// max_buffered_bytes`, spec/pairing.md, Limits). The operator's own loopback requests are
+    /// not counted: the ceiling is for the callers the node does not sit behind.
+    pub buffered: Arc<Budget>,
 }
 
 impl AppState {
@@ -84,7 +111,15 @@ impl AppState {
             agent_url: "http://127.0.0.1:7792".to_owned(),
             speech: Vec::new(),
             images: Vec::new(),
+            buffered: Arc::new(Budget::new(crate::config::DEFAULT_MAX_BUFFERED_BYTES)),
         }
+    }
+
+    /// How many bytes of device request bodies this node holds at once (`[node]
+    /// max_buffered_bytes`): the ceiling the device listener admits requests against.
+    pub fn with_max_buffered_bytes(mut self, bytes: u64) -> Self {
+        self.buffered = Arc::new(Budget::new(bytes));
+        self
     }
 
     /// With speech and image backends ([crate::synth]).
@@ -146,12 +181,202 @@ impl AppState {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// What a request may cost the node
+
+/// Bytes of request bodies held at once: `[node] max_buffered_bytes` (spec/pairing.md, Limits).
+///
+/// Per-request limits alone are not a bound on memory. A paired device holds up to 32 sessions
+/// (`remote::MAX_SESSIONS_PER_DEVICE`) and could open one body of [`MAX_REQUEST`] on each — 1 GiB
+/// on a 4 GB box — and the allocator, not the limit, would decide what happens next. So the
+/// device listener reserves a request's declared size here *before* it reads a byte of it, and
+/// gives it back when the request is answered: past the ceiling, a request is refused with 503
+/// and a retry hint instead of being accepted and taking the node down with it.
+#[derive(Debug)]
+pub struct Budget {
+    ceiling: u64,
+    held: AtomicU64,
+}
+
+impl Budget {
+    pub fn new(ceiling: u64) -> Self {
+        Self { ceiling, held: AtomicU64::new(0) }
+    }
+
+    /// The ceiling in bytes (`[node] max_buffered_bytes`).
+    pub fn ceiling(&self) -> u64 {
+        self.ceiling
+    }
+
+    /// Bytes reserved now, across every request in flight.
+    pub fn held(&self) -> u64 {
+        self.held.load(Ordering::Acquire)
+    }
+
+    /// Room for [bytes] more, or `None` when that would pass the ceiling. What was reserved is
+    /// given back when the returned reservation drops.
+    pub fn reserve(self: &Arc<Self>, bytes: u64) -> Option<Reservation> {
+        let mut held = self.held.load(Ordering::Acquire);
+        loop {
+            let after = held.checked_add(bytes)?;
+            if after > self.ceiling {
+                return None;
+            }
+            match self.held.compare_exchange_weak(held, after, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(Reservation { budget: self.clone(), bytes }),
+                Err(current) => held = current,
+            }
+        }
+    }
+}
+
+/// Bytes a request is holding in a [`Budget`]; given back when dropped.
+#[derive(Debug)]
+pub struct Reservation {
+    budget: Arc<Budget>,
+    bytes: u64,
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        self.budget.held.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
+
+/// The body limit of the route a request is on, put there by the router
+/// (`Extension(BodyLimit(..))` on each route) and read by [`Bounded`].
+#[derive(Clone, Copy, Debug)]
+pub struct BodyLimit(pub usize);
+
+/// A request body, read up to the limit its route declares: over it, a 413 whose message names
+/// the number, so an operator who hits it can see what the route takes.
+#[derive(Debug)]
+pub struct Bounded(pub Bytes);
+
+impl std::ops::Deref for Bounded {
+    type Target = Bytes;
+
+    fn deref(&self) -> &Bytes {
+        &self.0
+    }
+}
+
+/// Why a body was not read: over the route's limit, or cut short.
+#[derive(Debug)]
+pub enum Refusal {
+    /// Over the route's limit, which this names in bytes.
+    TooLarge(usize),
+    /// The client stopped sending, or sent something that was not the body it declared.
+    Unreadable,
+}
+
+impl IntoResponse for Refusal {
+    fn into_response(self) -> Response {
+        match self {
+            Self::TooLarge(limit) => too_large(limit),
+            Self::Unreadable => error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "the body could not be read (it ended early, or was not what its Content-Length said)",
+            ),
+        }
+    }
+}
+
+impl<S: Send + Sync> FromRequest<S> for Bounded {
+    type Rejection = Refusal;
+
+    async fn from_request(request: HttpRequest, _state: &S) -> Result<Self, Self::Rejection> {
+        let limit = request.extensions().get::<BodyLimit>().map_or(MAX_REQUEST, |limit| limit.0);
+        let declared = content_length(request.headers()).unwrap_or(0);
+        // A body that says how big it is, and says more than the route takes, is refused before
+        // a byte of it is kept: what it sends is read and dropped, so the client gets the refusal
+        // rather than a connection torn down mid-body.
+        if declared > limit as u64 {
+            drain(request.into_body(), limit);
+            return Err(Refusal::TooLarge(limit));
+        }
+        read_limited(request.into_body(), limit, declared).await.map(Self)
+    }
+}
+
+/// Reads [body] to its end, keeping it, up to [limit] bytes: the limit applies while reading too,
+/// so a body that lied about its length (or came without one) cannot buffer more than the route
+/// takes. [declared] is what the request said it would send, so the buffer is allocated once.
+async fn read_limited(body: Body, limit: usize, declared: u64) -> Result<Bytes, Refusal> {
+    let capacity = usize::try_from(declared).unwrap_or(limit).min(limit);
+    let mut bytes = BytesMut::with_capacity(capacity);
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| Refusal::Unreadable)?;
+        if bytes.len() + chunk.len() > limit {
+            return Err(Refusal::TooLarge(limit));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes.freeze())
+}
+
+/// The length a request declares, if any: `Content-Length` as a number, or `None` for a body
+/// that arrives in chunks (an unreadable one counts as none, and is bounded by the route).
+fn content_length(headers: &HeaderMap) -> Option<u64> {
+    headers.get(header::CONTENT_LENGTH)?.to_str().ok()?.trim().parse().ok()
+}
+
+/// 413: the body is over the route's limit, and the message says which.
+fn too_large(limit: usize) -> Response {
+    error(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "payload_too_large",
+        &format!("the body is over this route's limit of {limit} bytes ({} MiB)", limit >> 20),
+    )
+}
+
+/// 503: the node is at its ceiling for held request bodies, with a hint that it is worth retrying.
+fn out_of_room(held: u64, ceiling: u64) -> Response {
+    let mut response = error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "buffered_out_of_room",
+        &format!(
+            "the node is holding {held} of its {ceiling} bytes of device request bodies ([node] max_buffered_bytes); retry in a moment"
+        ),
+    );
+    response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("2"));
+    response
+}
+
+/// Admission control for a device route that buffers its body: reserve what the request can hold
+/// before reading it, and give it back when the request is answered.
+///
+/// What it can hold is its `Content-Length` (hyper holds a fixed-length body to it) or, for a body
+/// that declares none, the route's limit — the most it could ever buffer. That limit is read from
+/// the route's own [`BodyLimit`], the same extension [`Bounded`] reads, so a route's number is
+/// written once, in the router, and neither this check nor [`Bounded`] restates it.
+async fn admit(State(budget): State<Arc<Budget>>, request: HttpRequest, next: Next) -> Response {
+    let limit = request.extensions().get::<BodyLimit>().map_or(MAX_REQUEST, |limit| limit.0);
+    let holding = content_length(request.headers()).unwrap_or(limit as u64);
+    let Some(_room) = budget.reserve(holding) else {
+        tracing::debug!(
+            held = budget.held(),
+            ceiling = budget.ceiling(),
+            "device body ceiling reached; refusing without holding a byte of it"
+        );
+        // Nothing of the body is kept; it is read and dropped so the client gets the 503.
+        drain(request.into_body(), limit);
+        return out_of_room(budget.held(), budget.ceiling());
+    };
+    next.run(request).await
+}
+
 /// The inference API, the same for every caller.
+///
+/// Each route that buffers a body declares its own limit ([`MAX_REQUEST`] and the table there);
+/// the loopback listener is not admitted against [`Budget`], which is the device listener's.
 fn api() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/models", get(models))
-        .route("/v1/chat/completions", post(chat_completions).layer(DefaultBodyLimit::max(MAX_REQUEST)))
-        .route("/v1/messages", post(messages).layer(DefaultBodyLimit::max(MAX_REQUEST)))
+        .route("/v1/chat/completions", post(chat_completions).layer(Extension(BodyLimit(MAX_REQUEST))))
+        .route("/v1/messages", post(messages).layer(Extension(BodyLimit(MAX_REQUEST))))
         .route("/v1/audio/speech", post(crate::synth::speech))
         .route("/v1/images/generations", post(crate::synth::images))
         .route("/v1/receipts/{id}", get(receipt))
@@ -191,9 +416,13 @@ async fn agent(
     // A turn may carry images (the agent caps them itself); anything else is small.
     let turn = path.split('?').next().is_some_and(|p| p.ends_with("/turns"));
     let limit = if turn { AGENT_TURN_BODY } else { 1 << 20 };
-    let body = match axum::body::to_bytes(request.into_body(), limit).await {
+    let declared = content_length(request.headers()).unwrap_or(0);
+    if declared > limit as u64 {
+        return too_large(limit);
+    }
+    let body = match read_limited(request.into_body(), limit, declared).await {
         Ok(body) => body,
-        Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error", "the body is too large"),
+        Err(refusal) => return refusal.into_response(),
     };
     let mut forward =
         state.client.request(method, format!("{}{path}", state.agent_url)).bearer_auth(&state.token).body(body);
@@ -249,15 +478,27 @@ struct AuditQuery {
 }
 
 /// The newest audit entries (at most 500), oldest first, with totals over them.
+///
+/// The operator reads every caller's. A paired device (granted `audit`) reads only its own: the
+/// entries that carry the key it was pinned with, so neither another device's records nor the
+/// operator's, nor those of an earlier device that went by the same name, and none written before
+/// entries carried the key (spec/audit.md, Reading it).
 async fn audit(
     State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
     axum::extract::Query(q): axum::extract::Query<AuditQuery>,
 ) -> Response {
     let Some(log) = state.audit.clone() else {
         return Json(json!({ "entries": [], "summary": crate::audit::summary(&[]), "kept": false })).into_response();
     };
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
-    let entries = tokio::task::spawn_blocking(move || log.read(q.since, limit)).await.unwrap_or_default();
+    let device = caller.and_then(|Extension(caller)| caller.key().map(str::to_owned));
+    let entries = tokio::task::spawn_blocking(move || match device {
+        Some(key) => log.read_where(q.since, limit, |entry| entry["caller_key"].as_str() == Some(key.as_str())),
+        None => log.read(q.since, limit),
+    })
+    .await
+    .unwrap_or_default();
     let summary = crate::audit::summary(&entries);
     Json(json!({ "entries": entries, "summary": summary, "kept": true })).into_response()
 }
@@ -273,6 +514,35 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
     }))
 }
 
+/// Reads and drops what a refused request is still sending (up to [limit] bytes, the most its
+/// route takes), in the background, so the refusal is written without waiting for the upload.
+///
+/// This is not politeness: an HTTP/1.1 request whose body is dropped mid-flight loses its
+/// connection, and a client (or `invincible tunnel`, which relays a device session) then sees a
+/// broken pipe instead of the 413 or 503 the node meant to send. The bytes are counted and
+/// discarded — a chunk at a time, nothing kept — so the node's memory is untouched either way.
+fn drain(body: Body, limit: usize) {
+    tokio::spawn(async move {
+        let _ = discard(body, limit).await;
+    });
+}
+
+/// Reads [body] to its end without keeping it, returning how many bytes arrived. Over [limit], or
+/// cut short, the read stops there.
+async fn discard(body: Body, limit: usize) -> Result<usize, Refusal> {
+    let mut received = 0usize;
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| Refusal::Unreadable)?;
+        received = received.saturating_add(chunk.len());
+        if received > limit {
+            return Err(Refusal::TooLarge(limit));
+        }
+        drop(chunk);
+    }
+    Ok(received)
+}
+
 /// `GET /healthz`: unauthenticated, and says only that the node answers and its version (for the
 /// watchdog, the installer and monitoring).
 pub async fn healthz() -> Json<Value> {
@@ -286,7 +556,8 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/fetch", post(fetch))
         .route("/v1/admin/pairing", post(start_pairing))
         .route("/v1/admin/devices", get(list_devices))
-        .route("/v1/admin/devices/{name}", delete(remove_device));
+        // `PATCH` sets what a device may reach (spec/pairing.md, Capabilities); `DELETE` unpairs.
+        .route("/v1/admin/devices/{name}", patch(grant_device).delete(remove_device));
     let guarded = api().merge(admin).route_layer(middleware::from_fn_with_state(state.clone(), require_token));
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
@@ -295,10 +566,129 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// What paired devices reach through their encrypted session: the API only. They are
-/// authenticated by their pinned key, so no token, and they cannot administer the node.
+/// What a device request is admitted by: the route's capability, and the set that device was
+/// granted at pairing (spec/pairing.md, Capabilities).
+///
+/// One table, one place. Every device route is here or nowhere; `None` means the device API does
+/// not mount the path at all, so the router's fallback answers — the same 404 for a path that
+/// never existed. A path whose capability the device does not hold is answered by
+/// [`require_capability`] with exactly that 404, so a grant is invisible from outside until it
+/// is held, and a revocation is invisible after it.
+fn capability_for(path: &str) -> Option<Capability> {
+    let path = path.split('?').next().unwrap_or_default();
+    match path {
+        // What the app's chat needs of this node: the models, a turn, and the node itself.
+        "/v1/models" | "/v1/chat/completions" | "/v1/node" => Some(Capability::Shard),
+        "/v1/audit" => Some(Capability::Audit),
+        "/v1/agent" => Some(Capability::Agent),
+        path if path.starts_with("/v1/agent/") => Some(Capability::Agent),
+        path if path.starts_with("/v1/receipts/") => Some(Capability::Shard),
+        _ => None,
+    }
+}
+
+/// The device API's one gate: a request is admitted only when the capability its route needs is
+/// in the set the device was granted at pairing.
+///
+/// A device that lacks it gets the router's fallback answer, byte for byte (status, body and
+/// headers), including its `content-type`: `404` with `{"error":{"message":"no such endpoint",
+/// "type":"not_found","code":"not_found"}}`. Deliberately not a 403 — a 403 would map which
+/// routes exist, and to whom.
+async fn require_capability(
+    State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
+    request: HttpRequest,
+    next: Next,
+) -> Response {
+    let Some(needed) = capability_for(request.uri().path()) else {
+        // Not a route of the device API: the fallback answers, as for any path.
+        return next.run(request).await;
+    };
+    let granted = match caller {
+        Some(Extension(Caller::Device { key, .. })) => {
+            state.pairing.as_ref().and_then(|pairing| pairing.devices.capabilities_of(&key))
+        }
+        // No device session behind this request (a bare `device_app` in a test, say): nothing is
+        // granted. In service the session always says who is asking.
+        _ => None,
+    };
+    match granted {
+        Some(capabilities) if capabilities.contains(needed) => next.run(request).await,
+        _ => error(StatusCode::NOT_FOUND, "not_found", "no such endpoint"),
+    }
+}
+
+/// A device route that buffers its body, with the two checks such a route takes, in the order they
+/// run: the route's limit outside (so the number is in the extensions when [`admit`] reads it, and
+/// is written here once), admission against the node's ceiling inside (so the reservation is made
+/// before a byte of the body is read).
+fn admitted(route: MethodRouter<Arc<AppState>>, budget: Arc<Budget>, limit: usize) -> MethodRouter<Arc<AppState>> {
+    // The error type is named because `Extension` never fails, and two layers where one cannot fail
+    // is a shape the compiler will not guess.
+    route
+        .layer::<_, std::convert::Infallible>(middleware::from_fn_with_state(budget, admit))
+        .layer(Extension(BodyLimit(limit)))
+}
+
+/// What paired devices reach through their encrypted session: an allowlist, not the API, and per
+/// device — each route needs a capability recorded for that device at pairing
+/// (spec/pairing.md, Capabilities).
+///
+/// A paired device is authenticated by its pinned key, not by the node's token, and it is not the
+/// operator: a phone, say. It gets the inference its app runs and the node's own description —
+/// the four routes `spec/pairing.md` (Transport) documents — and only `/v1/agent` and `/v1/audit`
+/// when the operator granted them. Every other path is a 404 from the fallback below, which is
+/// also what a path that does not exist gets, and so is a route the device lacks the capability
+/// for: a device cannot tell an operator route from no route at all, nor which grants another
+/// device holds.
+///
+/// Deliberately absent from every set (each would be operator-equivalent beyond a capability):
+/// - `/v1/messages`, `/v1/audio/speech`, `/v1/images/generations` — inference the device protocol
+///   does not document.
+/// - `/v1/fetch`, `/v1/admin/*` — outbound fetch and administration.
+fn device_api(budget: Arc<Budget>) -> Router<Arc<AppState>> {
+    Router::new()
+        // The app: which models it may ask for, one turn, and the receipt for it. It buffers a
+        // body, so it is admitted against the node's ceiling: 32 sessions could each hold
+        // `MAX_REQUEST` otherwise (`[node] max_buffered_bytes`).
+        .route("/v1/chat/completions", admitted(post(chat_completions), budget, MAX_REQUEST))
+        .route("/v1/models", get(models))
+        .route("/v1/receipts/{id}", get(receipt))
+        // What this node is.
+        .route("/v1/node", get(node_info))
+        // Granted by capability, never by the router: the Autobot proxy (which runs with this
+        // node's own token) and the audit log, which a device reads only its own entries of. They
+        // are mounted here so that [`require_capability`] — not the router's fallback — is what
+        // answers a device the operator did not grant them, with the fallback's own 404.
+        .route("/v1/agent", any(agent))
+        .route("/v1/agent/{*rest}", any(agent))
+        .route("/v1/audit", get(audit))
+        .fallback(|| async { error(StatusCode::NOT_FOUND, "not_found", "no such endpoint") })
+}
+
+/// What a paired device reaches: the capability gate, then each route's own admission and limit.
+///
+/// The order is the property, not an implementation detail:
+///
+/// 1. **Capability** ([`require_capability`], the outer `route_layer`): a device the operator did
+///    not grant the route's capability gets the fallback's 404 and nothing else runs — it never
+///    reaches the budget, never reads a byte of its body, and cannot tell this route from one the
+///    node does not have.
+/// 2. **Budget** ([`admit`], on each route that buffers a body): what the body can hold is
+///    reserved against `[node] max_buffered_bytes` before it is read; past the ceiling it is 503
+///    with `Retry-After`.
+/// 3. **Size** ([`Bounded`], under the route's [`BodyLimit`]): the body is read up to its route's
+///    limit; over it, 413 naming the number.
+///
+/// Capability first is what keeps the other two from being observable to a device that may not be
+/// here at all: 413 and 503 are statements about this node's configuration, and only a device the
+/// operator admitted may learn them — or make the node spend a byte on its behalf. Budget before
+/// size because the ceiling is the bound on memory: a body refused for its size must never have
+/// been reserved.
 pub fn device_app(state: Arc<AppState>) -> Router {
-    api().with_state(state)
+    let gate = middleware::from_fn_with_state(state.clone(), require_capability);
+    let budget = state.buffered.clone();
+    device_api(budget).route_layer(gate).with_state(state)
 }
 
 /// `POST /v1/fetch {"url"}`: a web page through the node's network policy, receipted
@@ -349,7 +739,10 @@ async fn fetch(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(body
     )
 }
 
-async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
+/// `POST /v1/admin/pairing`: opens a pairing code. Body optional; `{"capabilities": [...]}`
+/// pre-grants the device that consumes it (spec/pairing.md, Capabilities), and without it the
+/// code grants `shard` only — which the answer says, so the default is visible where the code is.
+async fn start_pairing(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
     let Some(pairing) = &state.pairing else {
         return error(
             StatusCode::CONFLICT,
@@ -357,12 +750,24 @@ async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
             "remote access is off: set [remote] listen in the config",
         );
     };
-    match pairing.start() {
+    let body = match json_body(&body) {
+        Ok(body) => body,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
+    };
+    let capabilities = match body.get("capabilities") {
+        Some(value) => match DeviceCapabilities::from_json(value) {
+            Ok(capabilities) => capabilities,
+            Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_capabilities", &message),
+        },
+        None => DeviceCapabilities::shard(),
+    };
+    match pairing.start_granting(CODE_LIFETIME, capabilities.clone()) {
         Ok(code) => Json(json!({
             "code": code.encode(),
             "node": pairing.name,
             "fingerprint": crate::devices::fingerprint(&pairing.key.public),
             "expires_in": CODE_LIFETIME.as_secs(),
+            "capabilities": capabilities.codes(),
         }))
         .into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
@@ -370,8 +775,65 @@ async fn start_pairing(State(state): State<Arc<AppState>>) -> Response {
 }
 
 async fn list_devices(State(state): State<Arc<AppState>>) -> Json<Value> {
+    // Each device with what it may reach (spec/pairing.md, Capabilities): the operator's view of
+    // the grants, and how one checks what a device holds before revoking it.
     let devices = state.pairing.as_ref().map(|p| p.devices.list()).unwrap_or_default();
     Json(json!({ "devices": devices }))
+}
+
+/// A body that may be left out: `{}` when there is none.
+fn json_body(body: &Bytes) -> Result<Value, &'static str> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(json!({}));
+    }
+    serde_json::from_slice(body).map_err(|_| "the body is not JSON")
+}
+
+/// `PATCH /v1/admin/devices/{name} {"capabilities": ["shard", "agent"]}`: grants the paired device
+/// called {name} exactly that set (spec/pairing.md, Capabilities), so a grant and a revocation are
+/// the same write. Enforced from the next request: the device gate reads `devices.json`'s list on
+/// every request, so no re-pairing is involved. The answer names the set before and after, and
+/// whether it changed.
+async fn grant_device(State(state): State<Arc<AppState>>, Path(name): Path<String>, body: Bytes) -> Response {
+    let body = match json_body(&body) {
+        Ok(body) => body,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
+    };
+    let Some(value) = body.get("capabilities") else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            &format!("the body is {{\"capabilities\": [...]}}, of {}", DeviceCapabilities::known()),
+        );
+    };
+    let capabilities = match DeviceCapabilities::from_json(value) {
+        Ok(capabilities) => capabilities,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_capabilities", &message),
+    };
+    let Some(pairing) = state.pairing.clone() else {
+        return error(StatusCode::NOT_FOUND, "not_found", "no such device");
+    };
+    let was = pairing.devices.named(&name).map(|device| device.capabilities);
+    let device = match pairing.devices.set_capabilities(&name, capabilities) {
+        Ok(Some(device)) => device,
+        Ok(None) => {
+            return error(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                &format!("no paired device \"{name}\" (`invincible devices` lists them)"),
+            );
+        }
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    tracing::info!(device = %name, capabilities = ?device.capabilities.codes(), "device capabilities set");
+    let changed = was.as_ref() != Some(&device.capabilities);
+    Json(json!({
+        "device": device.name,
+        "capabilities": device.capabilities.codes(),
+        "was": was.map(|was| was.codes()),
+        "changed": changed,
+    }))
+    .into_response()
 }
 
 async fn remove_device(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
@@ -457,7 +919,7 @@ async fn chat_completions(
     state: State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Bounded,
 ) -> Response {
     infer(state, caller, headers, body, Api::Chat).await
 }
@@ -466,7 +928,7 @@ async fn messages(
     state: State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Bounded,
 ) -> Response {
     infer(state, caller, headers, body, Api::Messages).await
 }
@@ -475,7 +937,7 @@ async fn infer(
     State(state): State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Bounded,
     api: Api,
 ) -> Response {
     let Ok(parsed) = serde_json::from_slice::<Value>(&body) else {
@@ -531,7 +993,7 @@ async fn infer(
                     state.engines.iter().find(|e| Some(&e.id) == decision.model.as_ref()).expect("decided model");
                 draft.data_policy = Some("owned".to_owned());
                 let streaming = parsed.get("stream").and_then(Value::as_bool) == Some(true);
-                forward(&state.client, engine, api.path(), body.clone(), streaming).await
+                forward(&state.client, engine, api.path(), body.0.clone(), streaming).await
             }
             (Action::Run, _) => {
                 let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
@@ -680,6 +1142,40 @@ pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
 mod tests {
     use super::estimate_tokens;
     use serde_json::json;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn a_refused_body_is_read_and_dropped_not_kept() {
+        // What `drain` does with a body it refused: read a chunk at a time, counted, nothing kept.
+        let body = axum::body::Body::from(vec![7u8; 4096]);
+        assert_eq!(super::discard(body, 1 << 20).await.unwrap(), 4096);
+        assert_eq!(super::discard(axum::body::Body::empty(), 1 << 20).await.unwrap(), 0);
+        // Over the limit the read stops there, with the number that names it.
+        let over = axum::body::Body::from(vec![0u8; 8192]);
+        match super::discard(over, 4096).await {
+            Err(super::Refusal::TooLarge(limit)) => assert_eq!(limit, 4096),
+            other => panic!("a body over the limit is refused, not read: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_body_budget_refuses_past_the_ceiling_and_gives_it_back() {
+        let budget = Arc::new(super::Budget::new(10));
+        let first = budget.reserve(6).expect("room for six");
+        assert_eq!(budget.held(), 6);
+        assert!(budget.reserve(5).is_none(), "eleven would pass ten");
+        let second = budget.reserve(4).expect("exactly ten");
+        assert_eq!(budget.held(), 10);
+        assert!(budget.reserve(1).is_none(), "a full budget has no room");
+        drop(first);
+        assert_eq!(budget.held(), 4, "a finished request gives its bytes back");
+        drop(second);
+        assert_eq!(budget.held(), 0);
+        // A size that overflows the counter is refused, not wrapped into room.
+        assert!(budget.reserve(u64::MAX).is_none());
+        assert!(budget.reserve(u64::MAX).is_none());
+        assert_eq!(budget.held(), 0);
+    }
 
     #[test]
     fn the_agent_proxy_passes_plain_agent_paths_only() {

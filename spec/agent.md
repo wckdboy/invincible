@@ -2,14 +2,25 @@
 
 The Autobot Agent (`autobot serve`) answers on loopback (default `127.0.0.1:7792`). Invincible
 Gateway passes every request under `/v1/agent` through to it, for local clients with the gateway's
-token and for paired devices over their Noise session. A paired phone can therefore start agent
-turns on the owner's machine, watch them and answer approvals, with nothing exposed beyond what
-pairing already exposes.
+token, and for a paired device only when the node granted that device the `agent` capability
+(spec/pairing.md, Capabilities) — never by default.
+
+The reason it is a capability and not a route every device has: the proxy carries the node's own
+bearer token, so a device that can call it takes agent turns with the node's tools, writes
+schedules on the node and spends its cloud models — operator-equivalent, not what pairing grants.
+A device without the capability is answered exactly as a path that does not exist (404, same body),
+so it cannot even learn the route is there. Granting is the operator's: `invincible pair
+--capabilities shard,agent` (`POST /v1/admin/pairing {"capabilities": ["shard", "agent"]}`)
+pre-grants a code, `invincible devices grant <name> shard,agent` (`PATCH /v1/admin/devices/{name}
+{"capabilities": [...]}`) grants or revokes a device already paired, and `invincible devices`
+(`GET /v1/admin/devices`) shows what each holds. A device cannot widen its own set: the pairing
+hello is not an input, and the device API has no route that changes it. Until 0.0.21 every paired
+device reached this proxy; a device paired then holds `shard` alone after the upgrade.
 
 The agent accepts only requests that carry the gateway's token (`Authorization: Bearer <token>`,
-the file `$INVINCIBLE_HOME/token`). The gateway adds it when it passes a device's request through,
-with `invincible-caller: device:<name>` (or `local`) saying who is asking; only the gateway can set
-it, since only it has the token.
+the file `$INVINCIBLE_HOME/token`). The gateway adds it when it passes a request through,
+with `invincible-caller: local` or `invincible-caller: device:<name>` saying who is asking (the
+agent uses it for a recipe's origin).
 If the agent is not running, the gateway answers `503` with error type `agent_unavailable`.
 
 One path needs no token: `GET /healthz` on the agent's own address (not under `/v1/agent`, so not
@@ -48,7 +59,7 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/schedules/{id}/runs?after=` | | `{"runs": [{"at", "finished", "ok", "result", "receipts", "trigger"}]}`: finished runs that started after `after` (Unix seconds), oldest first; the newest 100 are kept |
 | `GET /v1/agent/board` | | `{"tasks": [{"id", "plan", "agent", "goal", "context", "depends_on", "status", "result", "question", "answers", "receipts", "origin", "notify", "created", "updated"}]}`: the team board; `status` is `todo`, `running`, `blocked` (waiting for the owner's answer to `question`), `done` or `failed` |
 | `POST /v1/agent/board/{id}/answer` | `{"text": "…"}` | `{"ok": true}`: a blocked task runs again with the answer; `404` when it is not waiting |
-| `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by", "bot"}]}`: the action log ([audit.md](audit.md)), newest `limit` (default 100, at most 500), oldest first |
+| `GET /v1/agent/actions?since=&limit=` | | `{"actions": [{"at", "session", "kind", "action", "ran", "by", "sandbox", "bot"}]}`: the action log ([audit.md](audit.md); `sandbox` on commands that ran), newest `limit` (default 100, at most 500), oldest first |
 | `GET /v1/agent/memory` | | `{"facts": [{"id", "at", "text"}]}`: what the agent remembered (`remember`) |
 | `DELETE /v1/agent/memory/{id}` | | `{"ok": true}`, or `404` |
 | `GET /v1/agent/skills` | | `{"skills": [{"name", "description", "allowed_tools", "files"}], "proposed": [{"name", "description", "text", "improves", "diff"}]}`: the owner's skills in `$AUTOBOT_HOME/skills` (`files`: a skill directory's supporting files; `allowed_tools`: its front matter's, shown, never granted), and those the agent proposed (`create_skill`, or `improve_skill`: then `improves` is true and `diff` what it changes), which it does not use until accepted |
@@ -190,8 +201,8 @@ No `tools` means every tool, as for schedules made here; a schedule from a devic
 at most `every 366d`. The phone sends its schedule in UTC
 (`CRON_TZ=UTC 0 5 * * *` for 07:00 at UTC+2), so it runs at the phone's time wherever the
 machine is, and sends it again when its UTC offset changes. The schedule records its `origin`
-(`device:<name>`, from `invincible-caller`). Posting it again with the same `id` replaces it and
-keeps its creation time; `enabled: false` keeps it without running it. The phone collects results
+(`device:<name>`, from `invincible-caller`, for a device granted `agent`). Posting it again with the same `id` replaces it and keeps its creation
+time; `enabled: false` keeps it without running it. The phone collects results
 with `GET …/runs?after=<last run it has>`, so nothing is lost while it is away.
 
 On this machine, `[agent] tools` keeps a bot to some groups and `[agent] disabled_tools` turns

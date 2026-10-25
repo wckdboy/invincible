@@ -12,7 +12,9 @@ The Autobot Agent keeps a second log, of its actions ([below](#the-agents-action
 
 `$INVINCIBLE_HOME/audit.jsonl`, mode 0600, one JSON object per line, oldest first. Past 16 MiB it
 is renamed `audit.1.jsonl` (replacing an older one) and a new file continues the chain. There is no
-telemetry: the log is only ever read on the node, or by a paired device that asks for it.
+telemetry: the log is read on the node, by `GET /v1/audit` on loopback with the token, and by a
+paired device granted `audit` (spec/pairing.md, Capabilities), which reads its own entries only:
+the log holds every caller's model, decision, tokens and egress hosts.
 
 ## An entry
 
@@ -23,7 +25,8 @@ telemetry: the log is only ever read on the node, or by a paired device that ask
   "client": "autobot-agent",
   "api": "chat",
   "prev": "3f1c…",
-  "receipt": { "receipt": { … }, "signature": "…" }
+  "receipt": { "receipt": { … }, "signature": "…" },
+  "caller_key": "q6ur…"
 }
 ```
 
@@ -35,6 +38,7 @@ telemetry: the log is only ever read on the node, or by a paired device that ask
 | `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
 | `prev` | always | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
+| `caller_key` | a device's request, since 0.0.22 | The static key (base64url) the device was pinned with. The name in `caller` is a label a later device may take; this is the identity a device's own read of the log is filtered by. Not signed, like `caller` |
 
 Requests the router asked about or refused are logged too: their receipt's decision says so.
 
@@ -69,8 +73,13 @@ paired device (so a later rewrite shows) is a planned addition.
   left). `--since 24h`, `--limit N`, `--summary` (totals per model and per host reached), `--json`.
 - `GET /v1/audit?since=<unix seconds>&limit=<n>` on the loopback API (behind the token) and the
   device API: `{"entries": [...], "summary": {...}, "kept": true}`. The newest `limit` entries at or
-  after `since` (default 100, at most 500), oldest first. Every paired device can read every entry:
-  pairing is for the owner's own devices.
+  after `since` (default 100, at most 500), oldest first. On a device session this needs the
+  `audit` capability (spec/pairing.md, Capabilities), and a device without it is answered as though
+  the route did not exist. A device that holds it reads **its own entries only**: those whose
+  `caller_key` is the key it was pinned with. Not the operator's, not another device's, not those
+  of an earlier device that went by the same name, and none written before entries carried the key
+  (0.0.21 and earlier). `limit` and `summary` count those entries alone. The operator's read, on
+  loopback, is every caller's.
 
 `summary` is:
 
@@ -92,10 +101,26 @@ a read outside the working directory, sending a turn to a cloud model), in
 `$AUTOBOT_HOME/actions.jsonl` (mode 0600, rotated at 8 MiB to `actions.1.jsonl`):
 
 ```json
-{"at": 1792400000, "session": "phone-1", "kind": "command", "action": "run: ls -la", "ran": true, "by": "app"}
+{"at": 1792400000, "session": "phone-1", "kind": "command", "action": "run: ls -la", "ran": true, "by": "app", "sandbox": "off"}
 ```
 
 `by` says who decided: `policy` (the approval rules allowed or refused it), `grant` (the owner said
 "always" earlier in the session), or the channel the owner answered on (`cli`, `app`, `telegram`).
-A scheduled run has no one to ask: `unattended`. Read it with `autobot actions` or
-`GET /v1/agent/actions?since=&limit=` ([agent.md](agent.md)).
+A run with no one to ask (a schedule, `autobot run`): `unattended`. Read it with `autobot actions`
+or `GET /v1/agent/actions?since=&limit=` ([agent.md](agent.md)).
+
+`sandbox`, on a command that ran, says where it ran and how it was confined:
+
+| Value | The command ran |
+|---|---|
+| `bwrap` (Linux), `sandbox-exec` (macOS) | on this machine, able to write only in the working directory and temporary directories |
+| `off` | on this machine, unconfined |
+| `container` | in the `[agent.docker]` container |
+| `ssh` | on the `[agent.ssh]` machine |
+
+Commands with nobody watching (schedules, board work, recipes, hooks, the heartbeat,
+`autobot run`) are confined unless `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned
+that off, so `off` on one of them is that choice on record; interactive turns are unconfined
+unless `[agent] sandbox = "always"`. `bwrap` or `sandbox-exec` says the command was confined, not
+that it succeeded: where bubblewrap is missing or cannot run, it is refused or fails as it
+starts. The field is absent on other kinds and on entries written before it was recorded.

@@ -37,14 +37,21 @@ enum Command {
     Pair {
         #[arg(long)]
         config: Option<PathBuf>,
+        /// What the device that joins with this code may reach: any of `shard`, `agent`, `audit`,
+        /// comma-separated. The list is the whole set, so keep `shard` for chat
+        /// (`shard,agent,audit` for the Autobot app) [default: shard, the least].
+        #[arg(long, value_delimiter = ',')]
+        capabilities: Vec<String>,
     },
-    /// List the paired devices, or unpair one.
+    /// List the paired devices and what each may reach, unpair one, or grant one a set.
     Devices {
-        #[arg(long)]
+        #[arg(long, global = true)]
         config: Option<PathBuf>,
         /// Unpair the device with this name.
         #[arg(long)]
         remove: Option<String>,
+        #[command(subcommand)]
+        action: Option<DevicesAction>,
     },
     /// Pair this machine, as a device, with a node, using the code the node showed.
     Join {
@@ -156,6 +163,21 @@ enum Command {
         /// The daily job: updates only when [update] auto is on.
         #[arg(long, hide = true)]
         scheduled: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DevicesAction {
+    /// Set exactly what a paired device may reach, from its next request on, with no re-pairing:
+    /// `invincible devices grant phone shard,agent,audit`. The list is the whole set, so a code
+    /// left out is revoked.
+    Grant {
+        /// The device, by the name `invincible devices` lists.
+        name: String,
+        /// Any of `shard` (chat: models, completions, receipts, node), `agent` (the Autobot Agent,
+        /// which runs with this node's token) and `audit` (its own audit entries), comma-separated.
+        #[arg(value_delimiter = ',', required = true)]
+        capabilities: Vec<String>,
     },
 }
 
@@ -479,21 +501,56 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("{}", token::load_or_create(&config::home()?.join("token"))?);
             Ok(())
         }
-        Command::Pair { config } => {
-            let reply = admin(config, reqwest::Method::POST, "/v1/admin/pairing")?;
+        Command::Pair { config, capabilities } => {
+            // The set the code carries (spec/pairing.md, Capabilities): named here, it is the
+            // operator's grant; left out, the code grants `shard` only.
+            let capabilities: Vec<&str> = capabilities.iter().map(|c| c.trim()).filter(|c| !c.is_empty()).collect();
+            let body =
+                if capabilities.is_empty() { None } else { Some(serde_json::json!({ "capabilities": capabilities })) };
+            let reply = admin_with(config, reqwest::Method::POST, "/v1/admin/pairing", body)?;
             let code = reply["code"].as_str().ok_or("the node sent no code")?;
             let qr = qrcode::QrCode::new(code.as_bytes()).map_err(|e| e.to_string())?;
             println!("{}", qr.render::<qrcode::render::unicode::Dense1x2>().quiet_zone(true).build());
             println!("{code}\n");
+            let reaches = reply["capabilities"]
+                .as_array()
+                .map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+                .unwrap_or_else(|| "shard".to_owned());
             println!(
                 "Node \"{}\", key {}. The code works once, for {} minutes.",
                 reply["node"].as_str().unwrap_or("?"),
                 reply["fingerprint"].as_str().unwrap_or("?"),
                 reply["expires_in"].as_u64().unwrap_or(0) / 60
             );
+            println!("The device that joins reaches: {reaches}.");
             Ok(())
         }
-        Command::Devices { config, remove } => {
+        Command::Devices { remove: Some(_), action: Some(_), .. } => {
+            Err("`--remove` unpairs a device on its own; run it without `grant`".to_owned())
+        }
+        Command::Devices { config, remove: None, action: Some(DevicesAction::Grant { name, capabilities }) } => {
+            let capabilities: Vec<&str> = capabilities.iter().map(|c| c.trim()).filter(|c| !c.is_empty()).collect();
+            let reply = admin_with(
+                config,
+                reqwest::Method::PATCH,
+                &format!("/v1/admin/devices/{name}"),
+                Some(serde_json::json!({ "capabilities": capabilities })),
+            )?;
+            let set = |value: &serde_json::Value| {
+                value.as_array().map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+            };
+            println!(
+                "{}",
+                brand::ok(&format!(
+                    "{} now reaches: {} (was: {})",
+                    reply["device"].as_str().unwrap_or(&name),
+                    set(&reply["capabilities"]).unwrap_or_default(),
+                    set(&reply["was"]).unwrap_or_else(|| "?".to_owned())
+                ))
+            );
+            Ok(())
+        }
+        Command::Devices { config, remove, action: None } => {
             if let Some(name) = remove {
                 admin(config, reqwest::Method::DELETE, &format!("/v1/admin/devices/{name}"))?;
                 println!("unpaired {name}");
@@ -514,6 +571,12 @@ fn run(cli: Cli) -> Result<(), String> {
                     vec![
                         device["name"].as_str().unwrap_or("?").to_owned(),
                         brand::ash(&key.map(|k| fingerprint(&k)).unwrap_or_default()),
+                        // What it may reach (spec/pairing.md, Capabilities): a set of one (`shard`)
+                        // unless you granted more.
+                        device["capabilities"]
+                            .as_array()
+                            .map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+                            .unwrap_or_else(|| "shard".to_owned()),
                     ]
                 })
                 .collect();
@@ -544,6 +607,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 fingerprint(&code.node_key),
                 paired.device
             );
+            // What the node granted this machine (spec/pairing.md, Capabilities): the least unless
+            // it was granted more, which the node's operator changes there.
+            match &paired.capabilities {
+                Some(granted) if granted.codes().is_empty() => {
+                    println!("it grants this machine nothing this version of invincible can name")
+                }
+                Some(granted) => println!("it grants this machine: {}", granted.codes().join(", ")),
+                None => println!(
+                    "it named no capabilities: a node before 0.0.22, which gives a paired device its whole API"
+                ),
+            }
             Ok(())
         }
         Command::Tunnel { node, listen } => {
@@ -936,6 +1010,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let speech = invincible::synth::from_config(&config.speech, &home);
     let images = invincible::synth::from_config(&config.images, &home);
     let mut state = AppState::new(engines, config.node.settings(), token)
+        .with_max_buffered_bytes(config.node.max_buffered_bytes)
         .with_cloud(cloud)
         .with_media(speech, images)
         .with_receipt_key(&config.remote.name(), receipt_key)
@@ -1196,19 +1271,30 @@ fn audit_line(entry: &serde_json::Value) -> String {
 
 /// Calls the running node's admin API on loopback, with the local token.
 fn admin(config: Option<PathBuf>, method: reqwest::Method, path: &str) -> Result<serde_json::Value, String> {
+    admin_with(config, method, path, None)
+}
+
+/// [admin], with a JSON body when the route takes one.
+fn admin_with(
+    config: Option<PathBuf>,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let home = config::home()?;
     let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
     let token = token::load_or_create(&home.join("token"))?;
     let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
     runtime.block_on(async {
-        let response = invincible::egress::local()
+        let mut request = invincible::egress::local()
             .build()
             .map_err(|e| e.to_string())?
             .request(method, format!("http://{}{path}", config.listen))
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
+            .bearer_auth(token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request.send().await.map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
         let status = response.status();
         let body: serde_json::Value = response.json().await.unwrap_or_default();
         if !status.is_success() {

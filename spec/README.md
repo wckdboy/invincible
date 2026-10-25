@@ -11,7 +11,7 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 | [redaction.md](redaction.md) | **v0, normative** | What is replaced before a request leaves for the cloud, and how it is restored |
 | [receipts.md](receipts.md) | **v0, normative** | The signed receipt for every request: where it ran, what left the node; vectors from an independent Ed25519 |
 | [audit.md](audit.md) | **v0, implemented** | The node's hash-chained log of every request, and the agent's log of its actions |
-| [agent.md](agent.md) | **v0, implemented** | The Autobot Agent's API, which the gateway passes through to paired devices |
+| [agent.md](agent.md) | **v0, implemented** | The Autobot Agent's API, which the gateway passes through to paired devices granted `agent` |
 | [evals.md](evals.md) | **v0, implemented** | Task files for `invincible eval`, and the rule-based checks |
 
 ## Conformance vectors
