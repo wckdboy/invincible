@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use invincible::devices::{Devices, KnownNode, StaticKey};
@@ -169,20 +169,24 @@ async fn head(fakes: &[&Fake]) -> Head {
             capabilities: Default::default(),
         });
     }
-    // This machine's engine, on loopback, answering like llama-server would.
+    // This machine's engine, on loopback, answering like llama-server would: only with its key.
     let engine_asked = Arc::new(AtomicU64::new(0));
     let count = engine_asked.clone();
     let engine = Router::new().route(
         "/v1/chat/completions",
-        post(move |_: Bytes| {
+        post(move |headers: HeaderMap, _: Bytes| {
             let count = count.clone();
             async move {
+                if headers.get("authorization").is_none_or(|v| v != "Bearer engine-key") {
+                    return (StatusCode::UNAUTHORIZED, "Invalid API Key").into_response();
+                }
                 count.fetch_add(1, Ordering::SeqCst);
                 axum::Json(json!({
                     "model": "qwen3-4b",
                     "choices": [{ "message": { "role": "assistant", "content": "from studio" } }],
                     "usage": { "prompt_tokens": 5, "completion_tokens": 2 },
                 }))
+                .into_response()
             }
         }),
     );
@@ -192,7 +196,7 @@ async fn head(fakes: &[&Fake]) -> Head {
 
     let settings = NodeSettings { network: NetworkMode::Offline, egress: Egress::Never };
     let state = AppState::new(
-        vec![Engine::attached("qwen3-4b", &format!("http://{engine_addr}"), None, true)],
+        vec![Engine::attached("qwen3-4b", &format!("http://{engine_addr}"), None, true).with_key("engine-key")],
         settings,
         "token".into(),
     )

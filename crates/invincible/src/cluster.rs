@@ -69,9 +69,16 @@ pub fn parse_devices(text: &str) -> Vec<Device> {
         .collect()
 }
 
+/// What [program] prints, run with an engine's environment ([crate::engine::inherited_env]): the
+/// devices it reports are then the ones the engine will see.
 async fn output(program: &Path, args: &[&str]) -> Option<String> {
-    let run =
-        tokio::process::Command::new(program).args(args).stdin(std::process::Stdio::null()).kill_on_drop(true).output();
+    let run = tokio::process::Command::new(program)
+        .args(args)
+        .env_clear()
+        .envs(crate::engine::inherited_env())
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
     let out = tokio::time::timeout(Duration::from_secs(30), run).await.ok()?.ok()?;
     Some(format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
 }
@@ -162,7 +169,8 @@ pub struct Dispatch {
     pub queue: u64,
 }
 
-/// `ggml-rpc-server` on loopback [port] only, caching the weights heads send in [cache].
+/// `ggml-rpc-server` on loopback [port] only, caching the weights heads send in [cache]. It takes
+/// no key (llama.cpp's RPC protocol has none): only shard links reach it.
 pub fn rpc_launch(program: &Path, port: u16, cache: Option<&Path>, logs: &Path) -> Launch {
     let mut args = vec!["--host".to_owned(), "127.0.0.1".to_owned(), "--port".to_owned(), port.to_string()];
     let mut env = Vec::new();

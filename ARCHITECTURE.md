@@ -52,7 +52,8 @@ Invariants the control plane keeps, whatever grows around it:
 
 - **Local is the default.** Every request runs on hardware you own unless the route says otherwise.
 - **Nothing is exposed.** Listens on loopback and paired interfaces; engines on loopback only; no
-  port of an engine is ever reachable from another machine except through a Noise session.
+  port of an engine is ever reachable from another machine except through a Noise session, and
+  an engine answers only requests that carry the key the node gave it.
 - **Codes, never content.** Receipts, audit lines, reasons and errors carry stable codes, not
   prompt text.
 - **Fail closed.** An unknown mode is offline, an unknown policy is never, an unknown tier is
@@ -69,7 +70,7 @@ kill. It is never linked in. Today there is one kind; the target is one contract
 | Part | What the node asks of an engine |
 |---|---|
 | Manifest | modalities (text, speech-in, speech-out, image, video, embedding, train), formats (GGUF, safetensors, Core ML, ONNX), devices it can use, the API shape it speaks |
-| Launch | a command line from the model entry and the tune profile; a loopback port the node chose; the node's own working directory and cache |
+| Launch | a command line from the model entry and the tune profile; a loopback port the node chose; the node's own working directory and cache; a random key of its own, in the environment and never on the command line, that every request but the health probe must carry (today: `LLAMA_API_KEY`); a clean environment, only what the runtime needs (`PATH`, `HOME`, temporary directory, locale, library paths, GPU runtime and ggml variables), never a secret or a `LLAMA_*` setting the node did not choose |
 | Health | a readiness probe, a liveness probe, a bounded silence rule (an engine that sends nothing for too long is hung, and the answer ends with an error the client can tell from a cut connection) |
 | Supervision | restart with back-off, crash counted, the model marked unavailable after too many; stopping leaves nothing running |
 | Metrics | tokens or frames per second, time to first token, memory, per request; written to the receipt and the tune store |
@@ -181,7 +182,7 @@ These are the four properties the rest serves. Each has a mechanism today and a 
 
 | Property | Mechanism | Measured by |
 |---|---|---|
-| Security | Noise pairing with pinned keys; engines and RPC on loopback only; redaction before the cloud; signed receipts; a hash-chained audit log; reproducible, attested releases signed with a pinned key; `cargo deny` on licences and advisories; secrets in the OS keychain or TPM / Secure Enclave (planned) | the conformance vectors; the internal review (done); the independent review of pairing and remote access (planned, INV-21); a written threat model (planned) |
+| Security | Noise pairing with pinned keys; engines and RPC on loopback only, each engine keyed and started with a clean environment; redaction before the cloud; signed receipts; a hash-chained audit log; reproducible, attested releases signed with a pinned key; `cargo deny` on licences and advisories; secrets in the OS keychain or TPM / Secure Enclave (planned) | the conformance vectors; the internal review (done); the independent review of pairing and remote access (planned, INV-21); a written threat model (planned) |
 | Speed | the fastest engine build the machine has; `tune` (planned); speculative decoding (planned); micro-batched prefill and speed-aware partitioning in the cluster (planned) | `bench/run.sh` every night, every run kept; tokens per second and time to first token in every receipt |
 | Anonymity | offline by default; Tor and SOCKS5 as routes with the kill switch as a shared, tested rule; no accounts, no telemetry; an onion service to reach home | the egress vectors; the audit log showing nothing left |
 | Stability | always on under launchd, systemd or Task Scheduler; health checks; self-update from signed releases; one-file backups with checksums; stopping leaves nothing running; alerts to your chat | the ten-minute soak test every night; the restart counters in the service status |

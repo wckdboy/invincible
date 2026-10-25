@@ -84,16 +84,22 @@ fn stalled_event(silence: Duration) -> Bytes {
     error_event(504, "timeout_error", "engine_stalled", &stalled(silence))
 }
 
-/// POSTs [body] to [url] (an engine on this machine) and answers with what it answers.
+/// POSTs [body] to [url] (an engine on this machine, which requires [key] when it has one) and
+/// answers with what it answers.
 pub async fn engine(
     client: &reqwest::Client,
     url: &str,
+    key: Option<&str>,
     body: Bytes,
     streaming: bool,
     every: Duration,
     silence: Duration,
 ) -> Response {
-    let send = client.post(url).header(header::CONTENT_TYPE, "application/json").body(body).send();
+    let mut request = client.post(url).header(header::CONTENT_TYPE, "application/json").body(body);
+    if let Some(key) = key {
+        request = request.bearer_auth(key);
+    }
+    let send = request.send();
     let mut send = Box::pin(send);
     let unreachable = |e: reqwest::Error| {
         tracing::warn!(%url, "engine unreachable: {e}");
@@ -292,7 +298,8 @@ mod tests {
 
     async fn relayed(url: &str, streaming: bool, every: Duration, silence: Duration) -> (StatusCode, String) {
         let response =
-            super::engine(&reqwest::Client::new(), url, Bytes::from_static(b"{}"), streaming, every, silence).await;
+            super::engine(&reqwest::Client::new(), url, None, Bytes::from_static(b"{}"), streaming, every, silence)
+                .await;
         let status = response.status();
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap_or_default();
         (status, String::from_utf8_lossy(&bytes).into_owned())

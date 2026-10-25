@@ -1185,9 +1185,12 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let mut runs = Vec::new();
     for model in &config.models {
         let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
+        // Its own key: the engine answers the node, not whatever else on the machine finds its port.
+        let key = engine::new_key()?;
         let mut engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
-            .with_vision(model.vision(&config.engine));
-        let launch = Launch::llama_server(&config.engine, model, port, &logs);
+            .with_vision(model.vision(&config.engine))
+            .with_key(&key);
+        let launch = Launch::llama_server(&config.engine, model, port, &key, &logs);
         if model.cluster.is_empty() {
             supervisors.push(engine::supervise(engine.clone(), launch));
         } else {

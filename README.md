@@ -960,6 +960,23 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
   is the whole answer's limit).
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff, and stopping the node stops its engines.
+- An engine answers the node and nothing else on the machine. Each gets its own random key when
+  the node starts, in llama-server's `LLAMA_API_KEY` (its environment, not its command line, so
+  `ps` does not show it), and the node sends it with every request. Anything else that finds an
+  engine's loopback port (another user, a web page, a script) gets a 401, not an answer that skips
+  the receipts, redaction and audit; `/health` stays open, as llama-server keeps it. A process
+  running as your own user can still read an engine's environment, and so its key; confining
+  engines is planned.
+- An engine starts with a clean environment: `PATH`, `HOME`, the temporary directory, the locale,
+  the library paths, and the GPU runtimes' and ggml's own variables (`CUDA_*`, `HIP_*`, `ROCR_*`,
+  `HSA_*`, `ROCM_*`, `VK_*`, `ONEAPI_*`, `SYCL_*`, `ZE_*`, `ZES_*`, `GGML_*`), never a name with
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL` in it. Provider keys and `LLAMA_*`
+  variables stay with the node: llama.cpp reads `LLAMA_ARG_*` as flags (`LLAMA_ARG_TOOLS` and
+  `LLAMA_ARG_AGENT` turn on its file and shell tools), so llama-server options go in
+  `[engine] extra_args` instead. The same holds for `ggml-rpc-server`, `llama-bench` and the
+  device probes. A server you run yourself and name in `[[cloud]]`, `[[speech]]` or `[[images]]`
+  is not one of the node's engines: it gets the key you configure for it, and its port is as open
+  as you leave it.
 - Images (OpenAI `image_url` parts, Messages `image` blocks) pass through to the model as they
   came; a request may be up to 32 MiB. A local model sees images when it has its multimodal
   projector: `mmproj = "/models/mmproj-….gguf"` in its `[[models]]` entry (passed to

@@ -883,16 +883,15 @@ async fn slow_engine_behind_the_relay(think: Duration, every: Duration) -> Strin
     let engine_url = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, engine).await.unwrap() });
     let client = reqwest::Client::new();
-    let node =
-        axum::Router::new().route(
-            "/v1/chat/completions",
-            axum::routing::post(move |body: axum::body::Bytes| {
-                let (client, engine_url) = (client.clone(), engine_url.clone());
-                async move {
-                    invincible::relay::engine(&client, &engine_url, body, true, every, Duration::from_secs(60)).await
-                }
-            }),
-        );
+    let node = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |body: axum::body::Bytes| {
+            let (client, engine_url) = (client.clone(), engine_url.clone());
+            async move {
+                invincible::relay::engine(&client, &engine_url, None, body, true, every, Duration::from_secs(60)).await
+            }
+        }),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, node).await.unwrap() });
@@ -959,7 +958,7 @@ async fn too_long_after_the_stream_began_is_still_made_smaller() {
             let (client, engine_url) = (client.clone(), engine_url.clone());
             async move {
                 let every = Duration::from_millis(100);
-                invincible::relay::engine(&client, &engine_url, body, true, every, Duration::from_secs(60)).await
+                invincible::relay::engine(&client, &engine_url, None, body, true, every, Duration::from_secs(60)).await
             }
         }),
     );
