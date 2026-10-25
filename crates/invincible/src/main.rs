@@ -1257,7 +1257,8 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
                 invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, None, c.context, policy).disabled()
             }
         }
-        .with_vision(c.vision);
+        .with_vision(c.vision)
+        .with_include_usage(c.include_usage);
         cloud.push(model);
     }
     if !config.cloud.is_empty() && config.node.settings().network.is_offline() {

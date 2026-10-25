@@ -7,7 +7,7 @@
 //! matching picks the same core a backtracking engine with look-around would.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use regex::{Regex, RegexBuilder};
 use serde_json::Value;
@@ -705,6 +705,17 @@ fn bounded(text: &str, start: usize, end: usize) -> bool {
     !before.is_alphanumeric() && before != '_' && !after.is_alphanumeric() && after != '_'
 }
 
+/// [value] as it is written inside a JSON string (a line break as `\n`).
+fn json_escape(value: &str) -> String {
+    let quoted = Value::String(value.to_owned()).to_string();
+    quoted[1..quoted.len() - 1].to_owned()
+}
+
+/// [e]'s forms as written inside a JSON string, where that differs from the form.
+fn escaped_forms(e: &Entry) -> Vec<String> {
+    e.forms.iter().map(|f| json_escape(f)).filter(|f| !e.forms.contains(f)).collect()
+}
+
 fn percent_encode(value: &str) -> String {
     value
         .bytes()
@@ -857,19 +868,44 @@ impl Vault {
         for (open, tag, n) in &literals {
             self.literal(open, tag, n);
         }
+        // What is detected inside a known value written escaped (`12a,\n10115 Berlin`) is part of
+        // that value, not a new one.
+        let escaped = self.escaped_hits(text);
         for span in spans {
-            self.register(span.kind, &text[span.start..span.end]);
+            if !escaped.iter().any(|&(start, end)| start <= span.start && span.end <= end) {
+                self.register(span.kind, &text[span.start..span.end]);
+            }
         }
         self.replace(text)
     }
 
-    /// Replaces every occurrence of a known value (longest first, no overlaps).
+    /// Where a known value is written escaped for a JSON string, and differently from how it was
+    /// found (a value with a line break or a quote, echoed in JSON).
+    fn escaped_hits(&self, text: &str) -> Vec<(usize, usize)> {
+        if !text.contains('\\') {
+            return Vec::new();
+        }
+        let mut hits = Vec::new();
+        for (_, e) in &self.entries {
+            for form in escaped_forms(e) {
+                let found = text.match_indices(form.as_str()).map(|(at, f)| (at, at + f.len()));
+                hits.extend(found.filter(|&(start, end)| bounded(text, start, end)));
+            }
+        }
+        hits
+    }
+
+    /// Replaces every occurrence of a known value (longest first, no overlaps), also where it is
+    /// written escaped for a JSON string (a tool result, tool-call arguments).
     fn replace(&mut self, text: &str) -> String {
         let guards = Guards::new(text);
         let mut lower: Option<String> = None;
         let mut hits: Vec<(usize, usize, usize)> = Vec::new();
+        // An escaped form that differs has a backslash.
+        let json = text.contains('\\');
         for (i, (_, e)) in self.entries.iter().enumerate() {
-            for form in &e.forms {
+            let escaped = if json { escaped_forms(e) } else { Vec::new() };
+            for form in e.forms.iter().chain(&escaped) {
                 let found: Vec<(usize, usize)> = if e.kind == Kind::Email && form.is_ascii() {
                     // Any case: ASCII lowercasing keeps every byte where it was, so the offsets
                     // hold in [text] (no pattern compiled for each address and each text).
@@ -936,6 +972,16 @@ impl Vault {
 
     /// [text] with this vault's placeholders turned back into their values (unknown ones stay).
     pub fn restore(&self, text: &str) -> String {
+        self.restore_in(text, false)
+    }
+
+    /// [Vault::restore] for JSON text (tool-call arguments): values come back escaped for a JSON
+    /// string, so a value with a line break leaves the arguments valid JSON.
+    pub fn restore_json(&self, text: &str) -> String {
+        self.restore_in(text, true)
+    }
+
+    fn restore_in(&self, text: &str, json: bool) -> String {
         if self.by_placeholder.is_empty() || (!text.contains('[') && !text.contains('%')) {
             return text.to_owned();
         }
@@ -943,6 +989,7 @@ impl Vault {
             .replace_all(text, |caps: &regex::Captures| {
                 let bracket = format!("[{}_{}]", &caps[2], &caps[3]);
                 match self.by_placeholder.get(&bracket) {
+                    Some(&i) if &caps[1] == "[" && json => json_escape(&self.entries[i].1.value),
                     Some(&i) if &caps[1] == "[" => self.entries[i].1.value.clone(),
                     Some(&i) => percent_encode(&self.entries[i].1.value),
                     None => caps[0].to_owned(),
@@ -970,34 +1017,88 @@ impl Vault {
 // ---------------------------------------------------------------------------------------------
 // Requests and answers
 
-/// The texts of a chat completion request that redaction covers, in order.
+/// The texts of a chat completion request that redaction covers, in order. What stays the same for
+/// a whole conversation (the `user` field, the tools) comes first, so its placeholders keep their
+/// numbers as the conversation grows.
 fn request_texts(body: &mut Value) -> Vec<&mut String> {
-    let mut texts = Vec::new();
-    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else { return texts };
-    for message in messages {
-        let Some(message) = message.as_object_mut() else { continue };
-        for (field, value) in message.iter_mut() {
-            match (field.as_str(), value) {
-                ("tool_calls", Value::Array(calls)) => {
-                    for call in calls {
-                        if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
-                            texts.push(args);
-                        }
+    let (mut user, mut tools, mut messages) = (Vec::new(), Vec::new(), Vec::new());
+    let Some(body) = body.as_object_mut() else { return messages };
+    for (field, value) in body.iter_mut() {
+        match (field.as_str(), value) {
+            ("user", Value::String(s)) => user.push(s),
+            ("tools", Value::Array(list)) => {
+                for tool in list {
+                    if let Some(function) = tool.get_mut("function") {
+                        descriptions(function, &mut tools);
                     }
                 }
-                ("content", Value::String(s)) => texts.push(s),
-                ("content", Value::Array(parts)) => {
-                    for part in parts {
-                        if let Some(Value::String(s)) = part.get_mut("text") {
-                            texts.push(s);
-                        }
-                    }
-                }
-                _ => {}
             }
+            ("messages", Value::Array(list)) => {
+                for message in list {
+                    message_texts(message, &mut messages);
+                }
+            }
+            _ => {}
         }
     }
-    texts
+    user.extend(tools);
+    user.extend(messages);
+    user
+}
+
+/// Every string `description` in a tool's function: its own, and its parameters' at any depth (a
+/// property that is itself called `description` is a schema, not a string, and is looked into).
+fn descriptions<'a>(value: &'a mut Value, out: &mut Vec<&'a mut String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map.iter_mut() {
+                match value {
+                    Value::String(s) => {
+                        if key == "description" {
+                            out.push(s);
+                        }
+                    }
+                    other => descriptions(other, out),
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                descriptions(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A message's texts: its content, its reasoning (`reasoning_content`, `reasoning`), then its tool
+/// calls' arguments.
+fn message_texts<'a>(message: &'a mut Value, out: &mut Vec<&'a mut String>) {
+    let Some(message) = message.as_object_mut() else { return };
+    let (mut reasoning, mut calls) = (Vec::new(), Vec::new());
+    for (field, value) in message.iter_mut() {
+        match (field.as_str(), value) {
+            ("content", Value::String(s)) => out.push(s),
+            ("content", Value::Array(parts)) => {
+                for part in parts {
+                    if let Some(Value::String(s)) = part.get_mut("text") {
+                        out.push(s);
+                    }
+                }
+            }
+            ("reasoning_content" | "reasoning", Value::String(s)) => reasoning.push(s),
+            ("tool_calls", Value::Array(list)) => {
+                for call in list {
+                    if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
+                        calls.push(args);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out.extend(reasoning);
+    out.extend(calls);
 }
 
 /// Redacts a chat completion request in place; the vault restores the answer.
@@ -1009,29 +1110,52 @@ pub fn redact_request(body: &mut Value) -> Vault {
     vault
 }
 
-/// Restores a whole (non-streamed) chat completion response in place.
+/// The fields of a message, or of a streamed delta, that carry text: the answer and its reasoning.
+const TEXT_FIELDS: [&str; 3] = ["content", "reasoning_content", "reasoning"];
+
+/// Restores a whole (non-streamed) chat completion response in place: each message's text, its
+/// reasoning and its tool calls' arguments.
 pub fn restore_response(vault: &Vault, body: &mut Value) {
     let Some(choices) = body.get_mut("choices").and_then(Value::as_array_mut) else { return };
     for choice in choices {
-        if let Some(Value::String(s)) = choice.pointer_mut("/message/content") {
-            *s = vault.restore(s);
-        }
-        if let Some(calls) = choice.pointer_mut("/message/tool_calls").and_then(Value::as_array_mut) {
-            for call in calls {
-                if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
-                    *args = vault.restore(args);
+        let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else { continue };
+        for (field, value) in message.iter_mut() {
+            match (field.as_str(), value) {
+                (field, Value::String(s)) if TEXT_FIELDS.contains(&field) => *s = vault.restore(s),
+                ("tool_calls", Value::Array(calls)) => {
+                    for call in calls {
+                        if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
+                            *args = vault.restore_json(args);
+                        }
+                    }
                 }
+                _ => {}
             }
         }
     }
 }
 
-/// Restores streamed (SSE) chat completion chunks. A placeholder split across chunks is held back
-/// until it is whole or its choice finishes.
+/// A text a streamed answer sends in pieces: one of a choice's [TEXT_FIELDS], or the arguments of
+/// one of its tool calls (by the call's index).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Channel {
+    Text(&'static str),
+    Arguments(u64),
+}
+
+/// Restores streamed (SSE) chat completion chunks: the text, the reasoning and the tool calls'
+/// arguments. A placeholder split across chunks is held back until it is whole or its choice
+/// finishes.
 pub struct StreamRestorer {
     vault: Vault,
     line: Vec<u8>,
-    carry: BTreeMap<u64, String>,
+    /// What is held back, per choice index and channel.
+    carry: BTreeMap<(u64, Channel), String>,
+    /// Where the usage of a usage-only chunk goes instead of to the client
+    /// ([StreamRestorer::withholding_usage]).
+    usage: Option<Arc<Mutex<Option<Value>>>>,
+    /// Set after a chunk was kept back: the blank line that ended its event goes too.
+    drop_blank: bool,
 }
 
 /// The longest tail of [text] that could still grow into a placeholder (`[`, `[EMA`, `[EMAIL_1`).
@@ -1046,9 +1170,26 @@ fn open_tail(text: &str) -> usize {
     if could_grow { text.len() - i } else { 0 }
 }
 
+/// [choice]'s delta, made when it has none.
+fn delta_of(choice: &mut serde_json::Map<String, Value>) -> Option<&mut serde_json::Map<String, Value>> {
+    let delta = choice.entry("delta").or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if delta.is_null() {
+        *delta = Value::Object(serde_json::Map::new());
+    }
+    delta.as_object_mut()
+}
+
 impl StreamRestorer {
     pub fn new(vault: Vault) -> Self {
-        Self { vault, line: Vec::new(), carry: BTreeMap::new() }
+        Self { vault, line: Vec::new(), carry: BTreeMap::new(), usage: None, drop_blank: false }
+    }
+
+    /// Also keeps back a chunk that carries only usage (`"choices": []`): the node asked the
+    /// provider for it and the client did not. Its `usage` goes to [into], and the other chunks
+    /// lose the `"usage": null` that asking added.
+    pub fn withholding_usage(mut self, into: Arc<Mutex<Option<Value>>>) -> Self {
+        self.usage = Some(into);
+        self
     }
 
     /// Feeds bytes from the upstream stream; returns the bytes to send on.
@@ -1077,16 +1218,45 @@ impl StreamRestorer {
 
     fn flush_all(&mut self) -> Vec<u8> {
         let mut out = Vec::new();
-        for (index, text) in std::mem::take(&mut self.carry) {
-            if !text.is_empty() {
-                let chunk = serde_json::json!({ "choices": [{ "index": index, "delta": { "content": self.vault.restore(&text) } }] });
-                out.extend(format!("data: {chunk}\n\n").into_bytes());
+        for ((index, channel), text) in std::mem::take(&mut self.carry) {
+            if text.is_empty() {
+                continue;
             }
+            let delta = match channel {
+                Channel::Text(field) => {
+                    serde_json::Map::from_iter([(field.to_owned(), Value::String(self.vault.restore(&text)))]).into()
+                }
+                Channel::Arguments(call) => serde_json::json!({ "tool_calls": [
+                    { "index": call, "function": { "arguments": self.vault.restore_json(&text) } }
+                ] }),
+            };
+            let chunk = serde_json::json!({ "choices": [{ "index": index, "delta": delta }] });
+            out.extend(format!("data: {chunk}\n\n").into_bytes());
         }
         out
     }
 
+    /// The next piece of [channel] to send on: [piece] (if this chunk has one) after what was held
+    /// back of it, restored, with a tail that may still become a placeholder held back unless the
+    /// choice has [finished].
+    fn pass(&mut self, choice: u64, channel: Channel, piece: Option<&str>, finished: bool) -> String {
+        let mut text = self.carry.remove(&(choice, channel)).unwrap_or_default();
+        text.push_str(piece.unwrap_or_default());
+        let keep = if finished { 0 } else { open_tail(&text) };
+        let (send, hold) = text.split_at(text.len() - keep);
+        if !hold.is_empty() {
+            self.carry.insert((choice, channel), hold.to_owned());
+        }
+        match channel {
+            Channel::Text(_) => self.vault.restore(send),
+            Channel::Arguments(_) => self.vault.restore_json(send),
+        }
+    }
+
     fn line_out(&mut self, line: &[u8]) -> Vec<u8> {
+        if std::mem::take(&mut self.drop_blank) && line.trim_ascii().is_empty() {
+            return Vec::new();
+        }
         let Ok(text) = std::str::from_utf8(line) else { return line.to_vec() };
         let Some(data) = text.strip_prefix("data:") else { return line.to_vec() };
         let data = data.trim();
@@ -1096,37 +1266,81 @@ impl StreamRestorer {
             return out;
         }
         let Ok(mut chunk) = serde_json::from_str::<Value>(data) else { return line.to_vec() };
+        if let Some(into) = &self.usage
+            && chunk.get("choices").and_then(Value::as_array).is_some_and(Vec::is_empty)
+            && chunk.get("usage").is_some_and(Value::is_object)
+        {
+            *into.lock().expect("usage lock") = chunk.get_mut("usage").map(Value::take);
+            self.drop_blank = true;
+            return Vec::new();
+        }
+        // With usage asked for, a provider marks every other chunk `"usage": null`.
+        if self.usage.is_some()
+            && let Some(object) = chunk.as_object_mut()
+            && object.get("usage").is_some_and(Value::is_null)
+        {
+            object.remove("usage");
+        }
         if let Some(choices) = chunk.get_mut("choices").and_then(Value::as_array_mut) {
             for choice in choices {
-                let index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
-                let finished = choice.get("finish_reason").is_some_and(|f| !f.is_null());
-                let held = self.carry.remove(&index).unwrap_or_default();
-                let delta = choice.pointer_mut("/delta/content");
-                let mut text = held;
-                if let Some(Value::String(s)) = &delta {
-                    text.push_str(s);
-                }
-                let keep = if finished { 0 } else { open_tail(&text) };
-                let (send, hold) = text.split_at(text.len() - keep);
-                if !hold.is_empty() {
-                    self.carry.insert(index, hold.to_owned());
-                }
-                let restored = self.vault.restore(send);
-                match delta {
-                    Some(slot) => *slot = Value::String(restored),
-                    None if !restored.is_empty() => {
-                        if let Some(obj) = choice.as_object_mut() {
-                            let d = obj.entry("delta").or_insert_with(|| serde_json::json!({}));
-                            if let Some(d) = d.as_object_mut() {
-                                d.insert("content".into(), Value::String(restored));
-                            }
-                        }
-                    }
-                    None => {}
-                }
+                self.restore_choice(choice);
             }
         }
         format!("data: {chunk}\n").into_bytes()
+    }
+
+    fn restore_choice(&mut self, choice: &mut Value) {
+        let index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let finished = choice.get("finish_reason").is_some_and(|f| !f.is_null());
+        let Some(choice) = choice.as_object_mut() else { return };
+        for field in TEXT_FIELDS {
+            let piece = choice.get("delta").and_then(|d| d.get(field)).and_then(Value::as_str).map(str::to_owned);
+            let restored = self.pass(index, Channel::Text(field), piece.as_deref(), finished);
+            if (piece.is_some() || !restored.is_empty())
+                && let Some(delta) = delta_of(choice)
+            {
+                delta.insert(field.to_owned(), Value::String(restored));
+            }
+        }
+        // Each call's arguments are held back on their own. A call without an index (a server
+        // that sends whole calls) is restored as it comes.
+        if let Some(calls) = choice.get_mut("delta").and_then(|d| d.get_mut("tool_calls")).and_then(Value::as_array_mut)
+        {
+            for call in calls {
+                let at = call.get("index").and_then(Value::as_u64);
+                let Some(Value::String(args)) = call.pointer_mut("/function/arguments") else { continue };
+                *args = match at {
+                    Some(at) => self.pass(index, Channel::Arguments(at), Some(args.as_str()), finished),
+                    None => self.vault.restore_json(args),
+                };
+            }
+        }
+        if !finished {
+            return;
+        }
+        // The choice is done: what is still held of calls this chunk does not continue goes with it.
+        let held: Vec<u64> = self
+            .carry
+            .keys()
+            .filter_map(|&(c, channel)| match channel {
+                Channel::Arguments(at) if c == index => Some(at),
+                _ => None,
+            })
+            .collect();
+        for at in held {
+            let restored = self.pass(index, Channel::Arguments(at), None, true);
+            if restored.is_empty() {
+                continue;
+            }
+            let Some(delta) = delta_of(choice) else { continue };
+            let calls = delta.entry("tool_calls").or_insert_with(|| Value::Array(Vec::new()));
+            if !calls.is_array() {
+                *calls = Value::Array(Vec::new());
+            }
+            if let Some(calls) = calls.as_array_mut() {
+                calls.push(serde_json::json!({ "index": at, "function": { "arguments": restored } }));
+            }
+        }
     }
 }
 
@@ -1134,6 +1348,7 @@ impl StreamRestorer {
 mod tests {
     use super::{StreamRestorer, Vault, open_tail, redact_request, restore_response};
     use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[test]
     fn every_pattern_compiles() {
@@ -1314,6 +1529,266 @@ mod tests {
             }
             out.extend(r.finish());
             assert_eq!(content_of(&out), whole);
+        });
+    }
+
+    /// The texts of a streamed answer put back together: (content, reasoning_content, reasoning,
+    /// each call's arguments by index).
+    fn channels_of(sse: &[u8]) -> (String, String, String, BTreeMap<u64, String>) {
+        let (mut content, mut reasoning_content, mut reasoning) = (String::new(), String::new(), String::new());
+        let mut calls = BTreeMap::new();
+        for data in String::from_utf8_lossy(sse).lines().filter_map(|l| l.strip_prefix("data: ")) {
+            let Ok(chunk) = serde_json::from_str::<serde_json::Value>(data) else { continue };
+            let delta = &chunk["choices"][0]["delta"];
+            content.push_str(delta["content"].as_str().unwrap_or(""));
+            reasoning_content.push_str(delta["reasoning_content"].as_str().unwrap_or(""));
+            reasoning.push_str(delta["reasoning"].as_str().unwrap_or(""));
+            for call in delta["tool_calls"].as_array().into_iter().flatten() {
+                let Some(at) = call["index"].as_u64() else { continue };
+                let args: &mut String = calls.entry(at).or_default();
+                args.push_str(call["function"]["arguments"].as_str().unwrap_or(""));
+            }
+        }
+        (content, reasoning_content, reasoning, calls)
+    }
+
+    fn sse(delta: serde_json::Value) -> String {
+        format!("data: {}\n\n", json!({ "choices": [{ "index": 0, "delta": delta }] }))
+    }
+
+    #[test]
+    fn streams_restore_tool_call_arguments_and_reasoning() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("bob@posteo.de, +44 20 7946 0958"), "[EMAIL_1], [PHONE_1]");
+        let mut restorer = StreamRestorer::new(vault);
+        let args = |at: u64, s: &str| json!({ "tool_calls": [{ "index": at, "function": { "arguments": s } }] });
+        let mut out = Vec::new();
+        for event in [
+            sse(json!({ "role": "assistant", "content": null, "reasoning_content": "mail [EM" })),
+            sse(json!({ "reasoning_content": "AIL_1] or call [PHO", "reasoning": "[PH" })),
+            sse(
+                json!({ "tool_calls": [{ "index": 0, "id": "a", "function": { "name": "mail", "arguments": "{\"to\":\"[EMAIL" } }] }),
+            ),
+            sse(
+                json!({ "tool_calls": [{ "index": 1, "id": "b", "function": { "name": "call", "arguments": "{\"n\":\"[PHONE_" } }] }),
+            ),
+            sse(args(0, "_1]\"}")),
+            sse(json!({ "reasoning_content": "NE_1]", "reasoning": "ONE_1]" })),
+            // A server that sends whole calls, without an index.
+            sse(
+                json!({ "tool_calls": [{ "id": "c", "function": { "name": "mail", "arguments": "{\"cc\":\"[EMAIL_1]\"}" } }] }),
+            ),
+        ] {
+            let sent = restorer.push(event.as_bytes());
+            assert!(!String::from_utf8_lossy(&sent).contains("[EMAIL_1]"), "{}", String::from_utf8_lossy(&sent));
+            out.extend(sent);
+        }
+        // Call 1 still holds `[PHONE_`, which can only become `[PHONE_1…`: it goes with the finish.
+        let finish = restorer.push(
+            format!("data: {}\n\n", json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] }))
+                .as_bytes(),
+        );
+        assert!(String::from_utf8_lossy(&finish).contains(r#""finish_reason":"tool_calls""#));
+        out.extend(finish);
+        out.extend(restorer.push(b"data: [DONE]\n\n"));
+        out.extend(restorer.finish());
+        let (content, reasoning_content, reasoning, calls) = channels_of(&out);
+        assert_eq!(content, "");
+        assert_eq!(reasoning_content, "mail bob@posteo.de or call +44 20 7946 0958");
+        assert_eq!(reasoning, "+44 20 7946 0958");
+        assert_eq!(calls[&0], r#"{"to":"bob@posteo.de"}"#);
+        assert_eq!(calls[&1], r#"{"n":"[PHONE_"#);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(r#""arguments":"{\"cc\":\"bob@posteo.de\"}""#), "{text}");
+        // Nothing to add to a `content` that was null: it stays null.
+        assert!(text.contains(r#""content":null"#), "{text}");
+    }
+
+    #[test]
+    fn values_with_a_line_break_stay_valid_json_in_tool_arguments() {
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin please" }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], "Ship to [ADDRESS_1] please");
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": "To [ADDRESS_1].",
+            "reasoning_content": "The address is [ADDRESS_1]",
+            "reasoning": "[ADDRESS_1]",
+            "tool_calls": [{ "function": { "name": "ship", "arguments": "{\"to\":\"[ADDRESS_1]\"}" } }]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        assert_eq!(message["content"], "To Hauptstraße 12a,\n10115 Berlin.");
+        assert_eq!(message["reasoning_content"], "The address is Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(message["reasoning"], "Hauptstraße 12a,\n10115 Berlin");
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
+        assert_eq!(parsed["to"], "Hauptstraße 12a,\n10115 Berlin");
+
+        // Sent back on the next turn as the client got it, escaped, the value is found again.
+        let mut next = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin please" },
+            { "role": "assistant", "tool_calls": [{ "function": { "name": "ship", "arguments": args } }] }
+        ] });
+        let vault = redact_request(&mut next);
+        assert_eq!(next["messages"][1]["tool_calls"][0]["function"]["arguments"], r#"{"to":"[ADDRESS_1]"}"#);
+        assert_eq!(vault.found()["ADDRESS"], 1);
+    }
+
+    #[test]
+    fn a_known_value_written_escaped_is_hidden_in_every_text() {
+        // The tool got the address escaped in its arguments, and echoes it in a JSON result.
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin please" },
+            { "role": "tool", "tool_call_id": "c1", "content": "{\"shipped_to\":\"Hauptstraße 12a,\\n10115 Berlin\"}" },
+            { "role": "user", "content": [{ "type": "text", "text": "It said \"Hauptstraße 12a,\\n10115 Berlin\"" }] }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][1]["content"], r#"{"shipped_to":"[ADDRESS_1]"}"#);
+        assert_eq!(body["messages"][2]["content"][0]["text"], r#"It said "[ADDRESS_1]""#);
+        // What detection sees inside the escaped value is part of it, not a value of its own.
+        assert_eq!(vault.found()["ADDRESS"], 1);
+        // Escaped as spec/redaction.md says.
+        assert_eq!(super::json_escape("\"\\\n\r\t\u{8}\u{c}\u{1}\u{7f}ß"), "\\\"\\\\\\n\\r\\t\\b\\f\\u0001\u{7f}ß");
+    }
+
+    #[test]
+    fn requests_redact_the_user_tools_and_reasoning_in_order() {
+        let mut body = json!({
+            "user": "dora@posteo.de",
+            "tools": [
+                { "type": "function", "function": {
+                    "name": "mail",
+                    "description": "Mails as erin@posteo.de",
+                    "parameters": { "type": "object", "properties": {
+                        "to": { "type": "string", "description": "like fred@posteo.de", "enum": ["gina@posteo.de"] },
+                        "description": { "type": "string", "description": "the property is called description" }
+                    } }
+                } },
+                { "type": "web_search", "description": "not a function: hal@posteo.de" }
+            ],
+            "messages": [
+                { "role": "assistant", "tool_calls": [{ "function": { "name": "mail", "arguments": "{\"to\":\"ivy@posteo.de\"}" } }],
+                  "reasoning": "jan@posteo.de", "reasoning_content": "kim@posteo.de", "content": "dora@posteo.de" }
+            ]
+        });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["user"], "[EMAIL_1]");
+        let function = &body["tools"][0]["function"];
+        assert_eq!(function["description"], "Mails as [EMAIL_2]");
+        assert_eq!(function["parameters"]["properties"]["to"]["description"], "like [EMAIL_3]");
+        // Only descriptions: what a parameter may be is the client's to decide.
+        assert_eq!(function["parameters"]["properties"]["to"]["enum"][0], "gina@posteo.de");
+        assert_eq!(function["parameters"]["properties"]["description"]["type"], "string");
+        assert_eq!(body["tools"][1]["description"], "not a function: hal@posteo.de");
+        let message = &body["messages"][0];
+        assert_eq!(message["content"], "[EMAIL_1]");
+        assert_eq!(message["reasoning"], "[EMAIL_4]");
+        assert_eq!(message["reasoning_content"], "[EMAIL_5]");
+        assert_eq!(message["tool_calls"][0]["function"]["arguments"], r#"{"to":"[EMAIL_6]"}"#);
+        assert_eq!(vault.found()["EMAIL"], 6);
+    }
+
+    #[test]
+    fn a_usage_chunk_is_kept_back_only_when_asked() {
+        // With usage asked for, the other chunks say `"usage": null`.
+        let events = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({ "choices": [{ "index": 0, "delta": { "content": "hi" } }], "usage": null }),
+            json!({ "choices": [], "usage": { "prompt_tokens": 5, "completion_tokens": 1 } })
+        );
+        let usage = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut kept = StreamRestorer::new(Vault::default()).withholding_usage(usage.clone());
+        let mut out = kept.push(events.as_bytes());
+        out.extend(kept.finish());
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                json!({ "choices": [{ "index": 0, "delta": { "content": "hi" } }] })
+            )
+        );
+        assert_eq!(*usage.lock().unwrap(), Some(json!({ "prompt_tokens": 5, "completion_tokens": 1 })));
+
+        let mut passed = StreamRestorer::new(Vault::default());
+        let mut out = passed.push(events.as_bytes());
+        out.extend(passed.finish());
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains(r#""prompt_tokens":5"#) && out.contains(r#""usage":null"#), "{out}");
+    }
+
+    #[test]
+    fn every_channel_restores_the_same_however_it_is_cut() {
+        crate::testgen::cases("stream restore, every channel", |g| {
+            let make = || {
+                let mut vault = Vault::default();
+                for known in ["bob@posteo.de", "call +44 20 7946 0958"] {
+                    vault.redact(known);
+                }
+                vault
+            };
+            let vault = make();
+            // Each channel's whole text, cut anywhere (placeholders too: only `[` tails are held
+            // back, so no percent-encoded ones), the pieces of the channels interleaved.
+            let pieces: Vec<&str> = PIECES.iter().copied().filter(|p| !p.contains('%')).collect();
+            let wanted: Vec<String> = (0..5).map(|_| g.assemble(&pieces, 6)).collect();
+            let mut cuts: Vec<std::collections::VecDeque<String>> = wanted
+                .iter()
+                .map(|text| {
+                    let mut cut = std::collections::VecDeque::from([String::new()]);
+                    for c in text.chars() {
+                        if g.one_in(3) {
+                            cut.push_back(String::new());
+                        }
+                        cut.back_mut().expect("one piece").push(c);
+                    }
+                    cut
+                })
+                .collect();
+            let mut sse = Vec::new();
+            loop {
+                let open: Vec<usize> = (0..5).filter(|&c| !cuts[c].is_empty()).collect();
+                if open.is_empty() {
+                    break;
+                }
+                let channel = *g.pick(&open);
+                let piece = cuts[channel].pop_front().expect("open");
+                let delta = match channel {
+                    0 => json!({ "content": piece }),
+                    1 => json!({ "reasoning_content": piece }),
+                    2 => json!({ "reasoning": piece }),
+                    at => json!({ "tool_calls": [{ "index": at - 3, "function": { "arguments": piece } }] }),
+                };
+                sse.extend(super::tests::sse(delta).bytes());
+            }
+            if g.one_in(2) {
+                sse.extend(
+                    format!(
+                        "data: {}\n\n",
+                        json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }] })
+                    )
+                    .bytes(),
+                );
+            }
+            sse.extend(b"data: [DONE]\n\n");
+            let mut r = StreamRestorer::new(make());
+            let mut out = Vec::new();
+            for part in g.split(&sse) {
+                out.extend(r.push(part));
+            }
+            out.extend(r.finish());
+            let (content, reasoning_content, reasoning, calls) = channels_of(&out);
+            assert_eq!(content, vault.restore(&wanted[0]));
+            assert_eq!(reasoning_content, vault.restore(&wanted[1]));
+            assert_eq!(reasoning, vault.restore(&wanted[2]));
+            for at in 0..2 {
+                assert_eq!(
+                    calls.get(&at).map_or("", String::as_str),
+                    vault.restore_json(&wanted[3 + at as usize]),
+                    "call {at}"
+                );
+            }
         });
     }
 

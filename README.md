@@ -1005,6 +1005,7 @@ base_url = "https://api.anthropic.com/v1"
 api_key_file = "keys/anthropic"     # relative to ~/.invincible; or api_key_env = "ANTHROPIC_API_KEY"
 context = 200000
 data_policy = "retention:30"        # what the provider does with prompts
+# include_usage = true              # streams ask for token usage (default: the presets that take it)
 ```
 
 - The cloud is used only as [spec/routing.md](spec/routing.md) allows: never for
@@ -1012,9 +1013,16 @@ data_policy = "retention:30"        # what the provider does with prompts
   that train on prompts) answer 409 until the request is sent again with `invincible-confirmed: 1`.
 - Before a request leaves, names, emails, phone numbers, street addresses, card numbers, IBANs and
   account numbers become placeholders (`[PERSON_1]`, `[EMAIL_1]`), with the same rules as Autobot
-  ([spec/redaction.md](spec/redaction.md)); later mentions of a known value are hidden too. The
-  answer gets the real values back, streams included, and the `invincible-redacted` header counts
-  what was hidden.
+  ([spec/redaction.md](spec/redaction.md)): in the messages, the model's earlier reasoning and tool
+  calls, the tools' descriptions and the `user` field. Later mentions of a known value are hidden
+  too, also where a tool result or tool call writes it escaped as JSON. The answer gets the real
+  values back in its text, its reasoning and its tool calls' arguments, streams included, and the
+  `invincible-redacted` header counts what was hidden.
+- A streamed request to OpenAI, Anthropic or DeepSeek asks for its token usage
+  (`stream_options.include_usage`) when the client sets no `stream_options`, so the receipt counts
+  the tokens; that extra chunk is kept from a client that did not ask for it. OpenRouter reports
+  usage unasked. Another endpoint gets the field only with `include_usage = true` in its
+  `[[cloud]]` (some APIs refuse fields they do not know); `false` turns it off for a preset.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
 

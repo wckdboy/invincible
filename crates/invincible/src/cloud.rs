@@ -1,6 +1,7 @@
 //! Cloud backends: OpenAI-compatible chat completion endpoints (OpenAI, Anthropic's compatibility
 //! endpoint, DeepSeek, OpenRouter, …). Every request is redacted before it leaves
-//! (spec/redaction.md) and restored when it comes back. A backend that fails is marked down for a
+//! (spec/redaction.md) and restored when it comes back. A streamed request asks for its token
+//! usage, for the receipt, where the API takes that. A backend that fails is marked down for a
 //! while, and the router sends its requests elsewhere (spec/routing.md, `cloud-down`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,6 +33,10 @@ pub struct CloudModel {
     pub data_policy: DataPolicy,
     /// Whether it takes images (None: not known).
     pub vision: Option<bool>,
+    /// Whether a streamed request asks for its token usage (`stream_options.include_usage`).
+    /// Unset in the config: where the API is a preset's that takes it ([Preset::include_usage]);
+    /// another API may refuse a field it does not know.
+    pub include_usage: bool,
     /// Unusable for good (no key): never healthy.
     pub disabled: bool,
     down_until: Mutex<Option<Instant>>,
@@ -54,6 +59,7 @@ impl CloudModel {
             context,
             data_policy,
             vision: guess_vision(upstream_model),
+            include_usage: takes_usage(base_url),
             disabled: false,
             down_until: Mutex::new(None),
         }
@@ -63,6 +69,14 @@ impl CloudModel {
     pub fn with_vision(mut self, vision: Option<bool>) -> Self {
         if vision.is_some() {
             self.vision = vision;
+        }
+        self
+    }
+
+    /// The same model, asking for usage or not as configured (None keeps the preset's answer).
+    pub fn with_include_usage(mut self, include_usage: Option<bool>) -> Self {
+        if let Some(include_usage) = include_usage {
+            self.include_usage = include_usage;
         }
         self
     }
@@ -132,29 +146,49 @@ impl CloudModel {
     }
 }
 
-/// The request [forward] sends to [model]: redacted, with the provider's model name, serialised;
-/// and the vault that restores the answer.
-pub fn prepare(model: &CloudModel, mut body: Value) -> (Vec<u8>, Vault) {
+/// A request made ready for a cloud model by [prepare].
+pub struct Prepared {
+    /// What is sent: redacted, with the provider's model name, serialised.
+    pub body: Vec<u8>,
+    /// Restores the answer.
+    pub vault: Vault,
+    /// The node asked for the stream's token usage and the client did not: the chunk that carries
+    /// it is for the receipt, not for the client.
+    pub usage_for_receipt: bool,
+}
+
+/// The request [forward] sends to [model], and the vault that restores the answer.
+pub fn prepare(model: &CloudModel, mut body: Value) -> Prepared {
     let vault = redact_request(&mut body);
     body["model"] = Value::String(model.upstream_model.clone());
-    // llama.cpp's template switches (thinking on or off) mean nothing to a cloud API, which may refuse them.
+    let mut usage_for_receipt = false;
     if let Some(object) = body.as_object_mut() {
+        // llama.cpp's template switches (thinking on or off) mean nothing to a cloud API, which may refuse them.
         object.remove("chat_template_kwargs");
+        // A stream reports its tokens only when asked to. Options the client set are its own.
+        if model.include_usage
+            && object.get("stream") == Some(&Value::Bool(true))
+            && object.get("stream_options").is_none_or(Value::is_null)
+        {
+            object.insert("stream_options".into(), serde_json::json!({ "include_usage": true }));
+            usage_for_receipt = true;
+        }
     }
-    (serde_json::to_vec(&body).expect("JSON serialises"), vault)
+    Prepared { body: serde_json::to_vec(&body).expect("JSON serialises"), vault, usage_for_receipt }
 }
 
 /// Sends a [prepare]d request to [model] and returns the restored answer ([streaming]: the
 /// request asked for a stream, so the client is not parsed again here). Bytes received from the
-/// provider are added to [received].
+/// provider are added to [received]; the usage the node asked for goes to [usage].
 pub async fn forward(
     client: &reqwest::Client,
     model: &CloudModel,
-    body: Vec<u8>,
-    vault: Vault,
+    request: Prepared,
     received: Arc<AtomicU64>,
+    usage: Arc<Mutex<Option<Value>>>,
     streaming: bool,
 ) -> Result<Response, CloudError> {
+    let Prepared { body, vault, usage_for_receipt } = request;
     let mut request = client
         .post(format!("{}/chat/completions", model.base_url))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -180,7 +214,10 @@ pub async fn forward(
 
     let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
     let mut response = if streaming && status.is_success() {
-        let restorer = StreamRestorer::new(vault);
+        let mut restorer = StreamRestorer::new(vault);
+        if usage_for_receipt {
+            restorer = restorer.withholding_usage(usage);
+        }
         let stream = kept_alive(upstream, restorer, received, crate::relay::KEEP_ALIVE, crate::egress::SILENCE);
         Response::new(Body::from_stream(stream))
     } else {
@@ -220,6 +257,9 @@ pub struct Preset {
     pub model: Option<&'static str>,
     pub context: Option<u64>,
     pub data_policy: &'static str,
+    /// Whether its API takes `stream_options.include_usage` and needs it to report a stream's
+    /// tokens.
+    pub include_usage: bool,
 }
 
 pub const PRESETS: &[Preset] = &[
@@ -229,6 +269,7 @@ pub const PRESETS: &[Preset] = &[
         model: Some("deepseek-chat"),
         context: Some(64_000),
         data_policy: "trains",
+        include_usage: true,
     },
     Preset {
         name: "anthropic",
@@ -236,6 +277,7 @@ pub const PRESETS: &[Preset] = &[
         model: Some("claude-sonnet-5-5"),
         context: Some(200_000),
         data_policy: "retention:30",
+        include_usage: true,
     },
     Preset {
         name: "openai",
@@ -243,6 +285,7 @@ pub const PRESETS: &[Preset] = &[
         model: None,
         context: Some(128_000),
         data_policy: "retention:30",
+        include_usage: true,
     },
     Preset {
         name: "openrouter",
@@ -250,11 +293,20 @@ pub const PRESETS: &[Preset] = &[
         model: None,
         context: None,
         data_policy: "unknown",
+        // It reports a stream's usage unasked.
+        include_usage: false,
     },
 ];
 
 pub fn preset(name: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|p| p.name == name)
+}
+
+/// Whether [base_url] is the API of a preset that takes `stream_options.include_usage`.
+fn takes_usage(base_url: &str) -> bool {
+    let host = |url: &str| reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned));
+    let Some(host_of) = host(base_url) else { return false };
+    PRESETS.iter().any(|p| p.include_usage && host(p.base_url).as_deref() == Some(host_of.as_str()))
 }
 
 /// A `[[cloud]]` entry to add to the config.
@@ -495,5 +547,54 @@ mod config_tests {
         assert!(!remove_from_config(&config, "claude").unwrap());
         assert!(crate::config::Config::parse(&std::fs::read_to_string(&config).unwrap()).unwrap().cloud.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod prepare_tests {
+    use super::{CloudModel, prepare};
+    use invincible_policy::DataPolicy;
+    use serde_json::{Value, json};
+
+    fn model(base_url: &str) -> CloudModel {
+        CloudModel::new("m", "m", base_url, None, None, DataPolicy::Unknown)
+    }
+
+    /// What [prepare] sends, and whether the usage it asked for is for the receipt.
+    fn sent(model: &CloudModel, body: Value) -> (Value, bool) {
+        let prepared = prepare(model, body);
+        (serde_json::from_slice(&prepared.body).unwrap(), prepared.usage_for_receipt)
+    }
+
+    #[test]
+    fn a_stream_asks_for_usage_where_the_api_takes_it() {
+        let stream = json!({ "model": "m", "stream": true, "messages": [] });
+        for url in ["https://api.openai.com/v1", "https://api.anthropic.com/v1/", "https://api.deepseek.com/v1"] {
+            assert_eq!(
+                sent(&model(url), stream.clone()),
+                (
+                    json!({ "model": "m", "stream": true, "messages": [], "stream_options": { "include_usage": true } }),
+                    true
+                ),
+                "{url}"
+            );
+        }
+        // OpenRouter reports usage unasked; an API the node does not know may refuse the field.
+        for url in ["https://openrouter.ai/api/v1", "https://api.mistral.ai/v1", "http://127.0.0.1:8080/v1"] {
+            assert_eq!(sent(&model(url), stream.clone()), (stream.clone(), false), "{url}");
+        }
+        // The config decides over the preset.
+        let (body, for_receipt) =
+            sent(&model("https://api.mistral.ai/v1").with_include_usage(Some(true)), stream.clone());
+        assert_eq!((&body["stream_options"], for_receipt), (&json!({ "include_usage": true }), true));
+        let (body, for_receipt) =
+            sent(&model("https://api.openai.com/v1").with_include_usage(Some(false)), stream.clone());
+        assert_eq!((body.get("stream_options"), for_receipt), (None, false));
+        // Not a stream, or options of the client's own: left as they are.
+        let openai = model("https://api.openai.com/v1");
+        let whole = json!({ "model": "m", "messages": [] });
+        assert_eq!(sent(&openai, whole.clone()), (whole, false));
+        let own = json!({ "model": "m", "stream": true, "stream_options": { "include_usage": false }, "messages": [] });
+        assert_eq!(sent(&openai, own.clone()), (own, false));
     }
 }

@@ -55,8 +55,18 @@ Ties go to the longer span, then the earlier one.
 
 ## Placeholders
 
-A request gets one vault, and its texts are redacted in order: every message's `content` (a string,
-or the `text` of each text part) and every tool call's `arguments`. For each text:
+A request gets one vault, and its texts are redacted in this order:
+
+1. the `user` field;
+2. for each tool that has a `function` (whatever its `type`), the function's `description` and
+   every string `description` in its `parameters`, at any depth (a property that is itself called
+   `description` is a schema, and is looked into);
+3. for each message, its `content` (a string, or the `text` of each text part), its reasoning
+   (`reasoning_content`, `reasoning`) and its tool calls' `arguments`.
+
+What stays the same for a whole conversation comes first, so its placeholders keep their numbers
+as the conversation grows. Nothing else is redacted: other fields (tool names, `enum` values,
+`response_format`) and images leave as they are. For each text:
 
 1. **Literal placeholders first.** Placeholder-shaped text the user wrote (`[EMAIL_3]`) raises its
    kind's counter to its number, so numbering continues after it. It stands for itself. If it
@@ -73,18 +83,32 @@ or the `text` of each text part) and every tool call's `arguments`. For each tex
    The parts of a full name (words of 3+ characters starting with a capital, not furniture words)
    become candidates. They get a placeholder only when they appear alone: `Hannah Weber` … `Weber`
    gives `[PERSON_1]` … `[PERSON_2]`.
+
+   A span that lies inside a value from an earlier text written escaped for a JSON string (see
+   step 3) is part of that value and is not registered.
 3. **Replace every occurrence of every known value**, including values first seen in earlier texts.
    A value counts only as a whole word (not inside a longer word or number). Names and addresses are
    not replaced inside code or links. Emails match case-insensitively. Numbers of 4+ digits also
-   match when written with other spacing or punctuation. Where hits overlap, the earliest and then
-   longest wins.
+   match when written with other spacing or punctuation. A value is also found where it is written
+   escaped for a JSON string, in any text: tool results and tool-call arguments are often JSON, and
+   a value given to a tool comes back that way. Escaped means as the answer's tool-call arguments
+   are restored (below): `"` as `\"`, `\` as `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, any other
+   control character as `\u00xx`, and every other character as it is (so JSON that escapes
+   non-ASCII, `ß` as `\u00df`, is not matched). Where hits overlap, the earliest and then longest
+   wins.
 
 ## Restoring
 
-In the answer, every placeholder the vault handed out is replaced with its value. A placeholder the
-vault does not know stays as it is, and a percent-encoded placeholder is restored percent-encoded. When streaming, a placeholder can be split across chunks, so a
-trailing `[` that may still become a placeholder is held back until the next chunk, or until that
-choice finishes.
+In the answer, every placeholder the vault handed out is replaced with its value: in each choice's
+`content`, `reasoning_content` and `reasoning`, and in its tool calls' `arguments`, where the value
+is escaped for a JSON string (so the arguments stay valid JSON). A placeholder the vault does not
+know stays as it is, and a percent-encoded placeholder is restored percent-encoded.
+
+When streaming, a placeholder can be split across chunks, so a trailing `[` that may still become a
+placeholder is held back until the next piece of the same text, or until that choice finishes. The
+content, each reasoning field and each tool call's arguments (by the call's `index`) are held back
+separately; what is still held of a tool call when its choice finishes is sent with the finishing
+chunk. A tool call without an `index` (a server that sends whole calls) is restored as it comes.
 
 ## Vectors
 

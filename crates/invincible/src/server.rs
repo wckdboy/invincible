@@ -1442,8 +1442,8 @@ async fn infer(
             (Action::Run, _) => {
                 let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
                 let client = state.egress.as_ref().expect("a healthy cloud model implies an egress client");
-                let (outgoing, vault) = crate::cloud::prepare(cloud, parsed.clone());
-                for (kind, n) in vault.found() {
+                let prepared = crate::cloud::prepare(cloud, parsed.clone());
+                for (kind, n) in prepared.vault.found() {
                     let seen = draft.redactions.entry(kind).or_insert(0);
                     *seen = (*seen).max(n);
                 }
@@ -1451,13 +1451,14 @@ async fn infer(
                 draft.attempts.push(Attempt {
                     route: crate::egress::route(&state.node.network, &cloud.host()),
                     host: cloud.host(),
-                    sent: outgoing.len() as u64,
+                    sent: prepared.body.len() as u64,
                     received: received.clone(),
                     ok: true,
                 });
                 draft.data_policy = Some(data_policy_code(cloud.data_policy));
                 let streaming = parsed.get("stream").and_then(Value::as_bool) == Some(true);
-                match crate::cloud::forward(client, cloud, outgoing, vault, received, streaming).await {
+                let usage = draft.withheld_usage.clone();
+                match crate::cloud::forward(client, cloud, prepared, received, usage, streaming).await {
                     Ok(response) => response,
                     Err(CloudError::Failover(why)) => {
                         tracing::warn!(model = %cloud.id, "cloud backend failed ({why}); routing again");

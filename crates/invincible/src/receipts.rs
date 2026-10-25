@@ -486,6 +486,9 @@ pub struct Draft {
     answer_bytes: u64,
     /// Whether the answer's body ended on its own, rather than the client going away mid-stream.
     complete: bool,
+    /// The usage a streamed cloud answer reported in a chunk kept back from the client (the node
+    /// asked for it, the client did not: crate::cloud::prepare). The answer's tokens.
+    pub withheld_usage: Arc<Mutex<Option<Value>>>,
     /// The answer's status ([attach]).
     status: u16,
     tail: Vec<u8>,
@@ -509,6 +512,7 @@ impl Draft {
             answer: Sha256::new(),
             answer_bytes: 0,
             complete: false,
+            withheld_usage: Arc::default(),
             status: 200,
             tail: Vec::new(),
         })
@@ -577,7 +581,8 @@ impl Draft {
         if let Some(dispatch) = &self.dispatch {
             receipt["dispatch"] = dispatch.clone();
         }
-        if let Some((input, output)) = usage(&self.tail) {
+        let withheld = self.withheld_usage.lock().expect("usage lock").as_ref().map(Value::to_string);
+        if let Some((input, output)) = withheld.and_then(|u| usage(u.as_bytes())).or_else(|| usage(&self.tail)) {
             receipt["tokens"] = json!({ "input": input, "output": output });
         }
         if let Some(error) = self.error() {
@@ -1009,6 +1014,18 @@ data: {"type":"error","status":400,"error":{"type":"invalid_request_error","code
         assert_eq!(usage(b"no usage"), None);
         // Anthropic Messages, whole and streamed.
         assert_eq!(usage(br#"{"usage":{"input_tokens":14,"output_tokens":20}}"#), Some((14, 20)));
+    }
+
+    /// A streamed cloud answer whose usage chunk the client did not get still has its tokens.
+    #[test]
+    fn usage_kept_back_from_the_client_is_counted() {
+        let mut draft = bound_draft();
+        draft.observe(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":null}\n\ndata: [DONE]\n\n");
+        assert_eq!(draft.receipt("k", 0).unwrap().get("tokens"), None);
+        *draft.withheld_usage.lock().unwrap() = Some(
+            json!({ "prompt_tokens": 11, "completion_tokens": 2, "prompt_tokens_details": { "cached_tokens": 3 } }),
+        );
+        assert_eq!(draft.receipt("k", 0).unwrap()["tokens"], json!({ "input": 11, "output": 2 }));
     }
 
     /// A random receipt-shaped value: integers, strings, booleans, arrays and objects.
