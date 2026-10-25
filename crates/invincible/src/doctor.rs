@@ -9,7 +9,7 @@
 //!   has not been started yet is a `!` with the command that creates it, never a `✗`. A `✗` means
 //!   something that was configured cannot work.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use serde_json::{Value, json};
@@ -232,7 +232,7 @@ fn check_node_state(home: &Path, cfg: &Config) -> Vec<Check> {
     }
 
     // --- the engine --------------------------------------------------------------------------
-    let engine = resolve_program(&cfg.engine.llama_server);
+    let engine = crate::cluster::resolve_program(&cfg.engine.llama_server);
     let probe = engine.as_ref().map(|server| {
         let runtime = tokio::runtime::Runtime::new();
         runtime.map(|rt| rt.block_on(crate::tune::probe(Some(server))))
@@ -273,7 +273,7 @@ fn check_node_state(home: &Path, cfg: &Config) -> Vec<Check> {
         checks.push(Check::warn(
             "models",
             "no models: every request will be blocked",
-            Some("invincible model add <id> --path <file.gguf>"),
+            Some("invincible model add <id> hf:<owner>/<repo>/<file.gguf> (a GGUF you already have: a [[models]] entry with its path)"),
         ));
     }
     for model in &cfg.models {
@@ -401,16 +401,6 @@ fn check_node_state(home: &Path, cfg: &Config) -> Vec<Check> {
     }
 
     checks
-}
-
-/// A program named without a path is looked up on PATH the way a shell would.
-fn resolve_program(program: &Path) -> Option<PathBuf> {
-    let text = program.to_string_lossy();
-    if text.contains('/') {
-        return program.is_file().then(|| program.to_path_buf());
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|dir| dir.join(&*text)).find(|candidate| candidate.is_file())
 }
 
 fn mode_of(path: &Path) -> Option<u32> {
@@ -546,6 +536,20 @@ mod tests {
         assert!(config.detail.contains("heads"), "{}", config.detail);
         assert_eq!(report.exit_code(), 1);
         assert!(report.checks.iter().all(|c| c.name != "links"), "no link advice from a config that did not parse");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_node_without_models_is_told_a_command_that_exists() {
+        let home = temp_home("no-models");
+        std::fs::write(home.join("config.toml"), "[node]\nnetwork = \"offline\"\n").expect("config");
+        let report = super::run(&home, None);
+        let models = report.checks.iter().find(|c| c.name == "models").expect("a models check");
+        assert_eq!(models.state, State::Warn);
+        // `model add` takes an id and a source (`hf:` or an HTTPS URL), and no `--path`.
+        let fix = models.fix.as_deref().unwrap_or_default();
+        assert!(fix.starts_with("invincible model add <id> hf:"), "{fix}");
+        assert!(!fix.contains("--"), "no flag model add does not have: {fix}");
         let _ = std::fs::remove_dir_all(&home);
     }
 

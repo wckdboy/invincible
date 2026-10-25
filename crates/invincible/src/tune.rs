@@ -4,6 +4,8 @@
 //! `invincible tune bench` runs `llama-bench` on one model and keeps the numbers in
 //! `$INVINCIBLE_HOME/tune/<model>.json`, which is what the cluster's planner reads as its
 //! `measured` table: a faster device takes more layers, and the plan states the rate it predicts.
+//! `llama-bench` is the one next to the configured `[engine] llama_server` (where the installer
+//! puts llama.cpp, off PATH), else the one on PATH.
 
 use std::path::{Path, PathBuf};
 
@@ -28,8 +30,12 @@ pub struct Probe {
     /// Whether this llama-server was built with RPC shards (`null`: no server to ask).
     #[serde(default)]
     pub rpc_backend: Option<bool>,
+    /// The configured engine as a file, and the `llama-bench` found for it.
     pub llama_server: Option<String>,
     pub llama_bench: Option<String>,
+    /// The llama.cpp build of that engine (`b6000 (abc1234)`); `null`: it named none.
+    #[serde(default)]
+    pub llama_build: Option<String>,
 }
 
 impl Probe {
@@ -51,12 +57,13 @@ impl Probe {
             "machine   {} {} · {} cores · {memory} memory\n\
              cpu       {}\n\
              devices   {devices}\n\
-             engines   llama-server {} · llama-bench {} · rpc {}\n\
+             engines   llama.cpp {} · llama-server {} · llama-bench {} · rpc {}\n\
              probe     {}",
             self.os,
             self.arch,
             self.cores,
             self.cpu.as_deref().unwrap_or("unknown"),
+            self.llama_build.as_deref().unwrap_or("build unknown"),
             self.llama_server.as_deref().unwrap_or("not found"),
             self.llama_bench.as_deref().unwrap_or("not found"),
             match self.rpc_backend {
@@ -85,8 +92,8 @@ pub struct Profile {
 }
 
 /// Every device a model has been measured on, on one machine. A profile is valid only for the
-/// hardware it was taken on: [`Probe::hardware_tag`] changes when the machine does, and a profile
-/// that no longer matches is ignored rather than trusted.
+/// hardware it was taken on: [hardware_tag] changes when the machine, its accelerators or its
+/// llama.cpp build do, and a profile that no longer matches is ignored rather than trusted.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Set {
     pub model: String,
@@ -95,27 +102,53 @@ pub struct Set {
 }
 
 impl Probe {
-    /// A short, stable description of this machine: what a profile is valid for.
+    /// What a profile taken now is valid for ([hardware_tag]).
     pub fn hardware_tag(&self) -> String {
-        format!(
-            "{} {} {}c {}",
-            self.os,
-            self.arch,
-            self.cores,
-            self.memory_bytes.map_or("?".to_owned(), crate::models::gib)
+        hardware_tag(
+            &machine(&self.os, &self.arch, self.cores, self.memory_bytes),
+            &self.devices,
+            self.llama_build.as_deref(),
         )
     }
 }
 
-/// The same tag, without asking an engine anything: for comparing a profile to this machine.
-pub fn hardware_now() -> String {
-    format!(
-        "{} {} {}c {}",
+fn machine(os: &str, arch: &str, cores: usize, memory_bytes: Option<u64>) -> String {
+    format!("{os} {arch} {cores}c {}", memory_bytes.map_or("?".to_owned(), crate::models::gib))
+}
+
+/// This machine without its accelerators (`linux x86_64 8c 31.2 GiB`), asking no engine anything.
+/// It is what a link measurement is valid for: a link does not change with the GPU or the build.
+pub fn machine_now() -> String {
+    machine(
         std::env::consts::OS,
         std::env::consts::ARCH,
         std::thread::available_parallelism().map_or(1, |n| n.get()),
-        cluster::memory_bytes().map_or("?".to_owned(), crate::models::gib)
+        cluster::memory_bytes(),
     )
+}
+
+/// What a profile is valid for: the [machine] ([machine_now]), the accelerators llama.cpp
+/// reports, each with its model and total memory (free memory moves with what runs), and the
+/// llama.cpp [build] (`linux x86_64 16c 62.7 GiB; CUDA0 NVIDIA GeForce RTX 4090 24080 MiB;
+/// llama.cpp b6000 (abc1234)`). Another GPU or another build is another tag, so its profiles
+/// are not used.
+pub fn hardware_tag(machine: &str, devices: &[Device], build: Option<&str>) -> String {
+    let devices = if devices.is_empty() {
+        "no accelerator".to_owned()
+    } else {
+        devices
+            .iter()
+            .map(|d| format!("{} {} {} MiB", d.name, d.description, d.total_mib))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!("{machine}; {devices}; llama.cpp {}", build.unwrap_or("?"))
+}
+
+/// The tag a profile taken now would carry, asking [llama_server] for its devices and build.
+pub async fn hardware_now(llama_server: &Path) -> String {
+    let (devices, build) = tokio::join!(cluster::probe_devices(llama_server), cluster::probe_build(llama_server));
+    hardware_tag(&machine_now(), &devices, build.as_deref())
 }
 
 /// `$INVINCIBLE_HOME/tune`.
@@ -209,7 +242,7 @@ pub fn load_links(home: &Path, max_age_hours: i64) -> Vec<invincible_policy::Lin
     let Ok(stored) = serde_json::from_str::<Links>(&text) else {
         return Vec::new();
     };
-    if stored.hardware != hardware_now() {
+    if stored.hardware != machine_now() {
         return Vec::new();
     }
     stored.links.into_iter().filter(|l| fresh(&l.at, max_age_hours)).map(|l| l.link).collect()
@@ -225,7 +258,7 @@ fn fresh(at: &str, max_age_hours: i64) -> bool {
 /// Keep one link measurement, replacing the one for that node and leaving every other node's
 /// timestamp as it was.
 pub fn record_link(home: &Path, link: invincible_policy::LinkSpeed) -> Result<(), String> {
-    let hardware = hardware_now();
+    let hardware = machine_now();
     let mut stored =
         match std::fs::read_to_string(links_path(home)).ok().and_then(|t| serde_json::from_str::<Links>(&t).ok()) {
             Some(old) if old.hardware == hardware => old,
@@ -245,12 +278,6 @@ fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-/// The first program called [name] on `PATH`.
-fn which(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    std::env::split_paths(&paths).map(|dir| dir.join(name)).find(|candidate| candidate.is_file())
-}
-
 fn cpu_name() -> Option<String> {
     if cfg!(target_os = "macos") {
         let out = std::process::Command::new("sysctl").args(["-n", "machdep.cpu.brand_string"]).output().ok()?;
@@ -265,13 +292,19 @@ fn cpu_name() -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-/// What this machine has. [llama_server] is the configured engine (or `None` when it is not
-/// installed), and the probe simply reports no devices then.
+/// What this machine has. [llama_server] is the configured engine (`[engine] llama_server`, a
+/// path or a name on PATH); when there is none, the probe reports no devices and no build.
 pub async fn probe(llama_server: Option<&Path>) -> Probe {
-    let (devices, rpc_backend) = match llama_server {
-        Some(server) => (cluster::probe_devices(server).await, cluster::probe_rpc_backend(server).await),
-        None => (Vec::new(), None),
+    let server = llama_server.and_then(cluster::resolve_program);
+    let (devices, rpc_backend, llama_build) = match &server {
+        Some(server) => tokio::join!(
+            cluster::probe_devices(server),
+            cluster::probe_rpc_backend(server),
+            cluster::probe_build(server)
+        ),
+        None => (Vec::new(), None, None),
     };
+    let llama_bench = cluster::find_beside(llama_server.unwrap_or(Path::new("llama-server")), &["llama-bench"]);
     Probe {
         at: now(),
         os: std::env::consts::OS.to_owned(),
@@ -281,15 +314,31 @@ pub async fn probe(llama_server: Option<&Path>) -> Probe {
         memory_bytes: cluster::memory_bytes(),
         devices,
         rpc_backend,
-        llama_server: which("llama-server").map(|p| p.display().to_string()),
-        llama_bench: which("llama-bench").map(|p| p.display().to_string()),
+        llama_server: server.map(|p| p.display().to_string()),
+        llama_bench: llama_bench.map(|p| p.display().to_string()),
+        llama_build,
     }
 }
 
-/// The generation and prompt rates in `llama-bench -o json` output: (pp, tg), tokens/s.
-pub fn parse_bench(text: &str) -> Result<(Option<f64>, f64), String> {
+/// What one `llama-bench` run measured.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bench {
+    /// Prompt-processing rate, tokens/s, when it was measured.
+    pub pp_tps: Option<f64>,
+    /// Generation rate, tokens/s.
+    pub tg_tps: f64,
+    /// The llama.cpp build llama-bench says it is ([cluster::build_tag]).
+    pub build: Option<String>,
+}
+
+/// The generation and prompt rates in `llama-bench -o json` output, tokens/s, and its build.
+pub fn parse_bench(text: &str) -> Result<Bench, String> {
     let rows: Value = serde_json::from_str(text).map_err(|e| format!("llama-bench output is not JSON: {e}"))?;
     let rows = rows.as_array().ok_or("llama-bench output is not a list of runs")?;
+    let build = rows.first().and_then(|row| {
+        let number = row.get("build_number").and_then(Value::as_u64)?;
+        cluster::build_tag(number, row.get("build_commit").and_then(Value::as_str).unwrap_or(""))
+    });
     let mut pp = None;
     let mut tg = None;
     for row in rows {
@@ -304,12 +353,12 @@ pub fn parse_bench(text: &str) -> Result<(Option<f64>, f64), String> {
         }
     }
     let tg = tg.ok_or("no generation run in llama-bench output (pass -n)")?;
-    Ok((pp, tg))
+    Ok(Bench { pp_tps: pp, tg_tps: tg, build })
 }
 
-/// Run `llama-bench` on [model] and report (pp, tg). The node's own resource controls: one
-/// repetition, short runs, so a probe stays a probe.
-pub fn bench(program: &Path, model: &Path, device: Option<&str>) -> Result<(Option<f64>, f64), String> {
+/// Run `llama-bench` on [model]. The node's own resource controls: one repetition, short runs,
+/// so a probe stays a probe.
+pub fn bench(program: &Path, model: &Path, device: Option<&str>) -> Result<Bench, String> {
     let mut command = std::process::Command::new(program);
     command.args(["-m"]).arg(model).args(["-p", "512", "-n", "128", "-r", "1", "-ngl", "999", "-o", "json"]);
     if let Some(device) = device {
@@ -402,7 +451,7 @@ mod tests {
         // The shape written before freshness was per measurement: one `at` for the whole file.
         let legacy = format!(
             r#"{{"hardware": {:?}, "at": {:?}, "links": [{{"node": "mini", "rtt_ms": 0.4, "mib_s": 110.0}}]}}"#,
-            hardware_now(),
+            machine_now(),
             now()
         );
         std::fs::create_dir_all(dir(&home)).unwrap();
@@ -429,12 +478,15 @@ mod tests {
     fn bench_output_is_read_both_ways() {
         // The shape `llama-bench -o json` prints: one run per prompt/generation pair.
         let text = r#"[
-            {"n_prompt":512,"n_gen":0,"avg_ts":1457.2},
-            {"n_prompt":0,"n_gen":128,"avg_ts":41.7}
+            {"build_commit":"abc1234","build_number":6000,"n_prompt":512,"n_gen":0,"avg_ts":1457.2},
+            {"build_commit":"abc1234","build_number":6000,"n_prompt":0,"n_gen":128,"avg_ts":41.7}
         ]"#;
-        let (pp, tg) = parse_bench(text).unwrap();
-        assert_eq!(pp, Some(1457.2));
-        assert_eq!(tg, 41.7);
+        let bench = parse_bench(text).unwrap();
+        assert_eq!(bench.pp_tps, Some(1457.2));
+        assert_eq!(bench.tg_tps, 41.7);
+        assert_eq!(bench.build.as_deref(), Some("b6000 (abc1234)"), "named as llama-server --version names it");
+        let unnamed = r#"[{"n_prompt":0,"n_gen":128,"avg_ts":41.7}]"#;
+        assert_eq!(parse_bench(unnamed).unwrap().build, None);
     }
 
     #[test]
@@ -458,14 +510,35 @@ mod tests {
     #[test]
     fn a_profile_from_other_hardware_is_ignored() {
         let home = temp_dir("hardware");
-        record(&home, "m", "linux x86_64 8c 16.0 GiB", profile("CUDA0", 40.0)).unwrap();
-        let devices =
-            vec![Device { name: "CUDA0".into(), description: "RTX".into(), total_mib: 24_000, free_mib: 24_000 }];
-        assert_eq!(measured(&home, "m", "studio", "linux x86_64 8c 16.0 GiB", &devices).len(), 1);
-        assert!(measured(&home, "m", "studio", "linux x86_64 8c 32.0 GiB", &devices).is_empty());
+        let machine = "linux x86_64 8c 16.0 GiB";
+        let build = Some("b6000 (abc1234)");
+        let rtx = vec![Device {
+            name: "CUDA0".into(),
+            description: "NVIDIA GeForce RTX 4090".into(),
+            total_mib: 24_564,
+            free_mib: 24_000,
+        }];
+        let here = hardware_tag(machine, &rtx, build);
+        record(&home, "m", &here, profile("CUDA0", 40.0)).unwrap();
+        assert_eq!(measured(&home, "m", "studio", &here, &rtx).len(), 1);
+        // Another machine: more memory.
+        assert!(
+            measured(&home, "m", "studio", &hardware_tag("linux x86_64 8c 32.0 GiB", &rtx, build), &rtx).is_empty()
+        );
+        // Another GPU behind the same device name, or the same one with less memory of its own.
+        let swapped = vec![Device { description: "NVIDIA GeForce RTX 3090".into(), ..rtx[0].clone() }];
+        assert!(measured(&home, "m", "studio", &hardware_tag(machine, &swapped, build), &swapped).is_empty());
+        let smaller = vec![Device { total_mib: 12_282, ..rtx[0].clone() }];
+        assert!(measured(&home, "m", "studio", &hardware_tag(machine, &smaller, build), &smaller).is_empty());
+        // Another llama.cpp build is another engine, and an unknown one is not this one.
+        assert!(measured(&home, "m", "studio", &hardware_tag(machine, &rtx, Some("b6001 (def5678)")), &rtx).is_empty());
+        assert!(measured(&home, "m", "studio", &hardware_tag(machine, &rtx, None), &rtx).is_empty());
+        // Free memory moves with what runs: it is not part of what a profile is valid for.
+        let busy = vec![Device { free_mib: 2_000, ..rtx[0].clone() }];
+        assert_eq!(hardware_tag(machine, &busy, build), here);
         // A device that is not here cannot be measured here.
         let other = vec![Device { name: "MTL0".into(), description: "M3".into(), total_mib: 24_000, free_mib: 24_000 }];
-        assert!(measured(&home, "m", "studio", "linux x86_64 8c 16.0 GiB", &other).is_empty());
+        assert!(measured(&home, "m", "studio", &here, &other).is_empty());
     }
 
     #[test]
@@ -480,7 +553,8 @@ mod tests {
         assert!(probe.cores >= 1);
         assert_eq!(probe.os, std::env::consts::OS);
         assert!(probe.devices.is_empty(), "no engine was given, so there are no devices to report");
-        assert!(probe.hardware_tag().contains(&probe.arch));
+        assert_eq!(probe.llama_build, None, "nor a build");
+        assert!(probe.hardware_tag().starts_with(&machine_now()), "{}", probe.hardware_tag());
         // The report is plain words, not JSON.
         let report = probe.report();
         assert!(report.contains("machine") && report.contains("engines"));

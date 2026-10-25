@@ -1202,6 +1202,11 @@ invincible cluster status     # devices, peers (probed now), heads served, where
 - The split is sized by each device's free memory, or by measured speed once every device taking
   part has been benchmarked (`invincible tune bench <model>`); receipts list the nodes that took
   part (`cluster`).
+- `invincible tune bench` runs the `llama-bench` next to the configured `llama-server` (where the
+  installer puts llama.cpp, `~/.invincible/llama.cpp`), else the one on PATH, and says which. A
+  measurement holds for the machine, its GPUs (name and memory) and the llama.cpp build it was
+  taken with: after a new GPU or a llama.cpp upgrade it is ignored until measured again
+  (`invincible tune show` says which). `invincible tune probe` shows what it would use.
 - Shard links stay on the local network (private, link-local, Tailscale or `.local` addresses),
   never go through Tor or SOCKS5, and stop under `network = "offline"`.
 - A shard that leaves mid-answer ends that answer with an error event; the model is planned again
