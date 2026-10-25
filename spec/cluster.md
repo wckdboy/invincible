@@ -362,7 +362,7 @@ lists hosts off hardware you own, and `cluster` lists your own machines that too
 Pairing and membership used to be CLI-only: `invincible pair` printed a code, `invincible join`
 consumed one on another machine, `invincible devices --remove` unpaired. A phone, a dashboard or
 a provisioning script could do none of it. These five routes do the same work over the node's own
-API — JSON in, JSON out — behind `Authorization: Bearer <token>` from
+API — JSON in, JSON out — behind `Authorization: Bearer <token>` (or `x-api-key: <token>`) from
 `$INVINCIBLE_HOME/token`, like every other admin route: without the token they answer `401
 invalid_api_key`, and a body that would be refused never reaches the handler. None of them is on
 the device API: a paired device cannot mint a code, join, rename or unpair.
