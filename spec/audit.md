@@ -100,10 +100,26 @@ a read outside the working directory, sending a turn to a cloud model), in
 `$AUTOBOT_HOME/actions.jsonl` (mode 0600, rotated at 8 MiB to `actions.1.jsonl`):
 
 ```json
-{"at": 1792400000, "session": "phone-1", "kind": "command", "action": "run: ls -la", "ran": true, "by": "app"}
+{"at": 1792400000, "session": "phone-1", "kind": "command", "action": "run: ls -la", "ran": true, "by": "app", "sandbox": "off"}
 ```
 
 `by` says who decided: `policy` (the approval rules allowed or refused it), `grant` (the owner said
 "always" earlier in the session), or the channel the owner answered on (`cli`, `app`, `telegram`).
-A scheduled run has no one to ask: `unattended`. Read it with `autobot actions` or
-`GET /v1/agent/actions?since=&limit=` ([agent.md](agent.md)).
+A run with no one to ask (a schedule, `autobot run`): `unattended`. Read it with `autobot actions`
+or `GET /v1/agent/actions?since=&limit=` ([agent.md](agent.md)).
+
+`sandbox`, on a command that ran, says where it ran and how it was confined:
+
+| Value | The command ran |
+|---|---|
+| `bwrap` (Linux), `sandbox-exec` (macOS) | on this machine, able to write only in the working directory and temporary directories |
+| `off` | on this machine, unconfined |
+| `container` | in the `[agent.docker]` container |
+| `ssh` | on the `[agent.ssh]` machine |
+
+Commands with nobody watching (schedules, board work, recipes, hooks, the heartbeat,
+`autobot run`) are confined unless `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned
+that off, so `off` on one of them is that choice on record; interactive turns are unconfined
+unless `[agent] sandbox = "always"`. `bwrap` or `sandbox-exec` says the command was confined, not
+that it succeeded: where bubblewrap is missing or cannot run, it is refused or fails as it
+starts. The field is absent on other kinds and on entries written before it was recorded.
