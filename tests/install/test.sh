@@ -200,8 +200,22 @@ pass "a broken partial download is replaced"
 # 9. Two runs at once, and a lock left by a run that was killed.
 sh -s -- --prefix "$PREFIX" --version 0.0.1 <"$INSTALL" >"$T/a" 2>&1 & a=$!
 sh -s -- --prefix "$PREFIX" --version 0.0.1 <"$INSTALL" >"$T/b" 2>&1 & b=$!
-wait "$a" || { cp "$T/a" "$T/out"; fail "concurrent run a"; }
-wait "$b" || { cp "$T/b" "$T/out"; fail "concurrent run b"; }
+status_a=0 status_b=0
+wait "$a" || status_a=$?
+wait "$b" || status_b=$?
+if [ "$status_a" != 0 ] || [ "$status_b" != 0 ]; then
+    # Both runs, their pids (as "waiting … (pid N)" names them) and what is left of the lock.
+    {
+        echo "run a: pid $a, exit $status_a"; cat "$T/a"
+        echo "run b: pid $b, exit $status_b"; cat "$T/b"
+        if [ -d "$INVINCIBLE_HOME/.install.lock" ]; then
+            echo "lock left behind, pid file: $(cat "$INVINCIBLE_HOME/.install.lock/pid" 2>/dev/null || echo none)"
+        else
+            echo "no lock left behind"
+        fi
+    } >"$T/out"
+    fail "two runs at once"
+fi
 [ "$(version invincible)" = 0.0.1 ] || fail "concurrent: not 0.0.1"
 mkdir -p "$INVINCIBLE_HOME/.install.lock" && echo 999999 >"$INVINCIBLE_HOME/.install.lock/pid"
 run || fail "stale lock"
