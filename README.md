@@ -96,7 +96,7 @@ Invincible is built for Autobot first, and shares its rules instead of re-implem
 |---|---|
 | Providers: presets with API keys (`ProviderPresets`) | A new **"My node"** provider kind, added by **pairing** (QR code, Noise handshake), never an API key |
 | Cascade: phone → cloud (`CascadePolicy`) | Phone → **node** → cloud. "Never" means "never beyond hardware I own", and the node counts as owned |
-| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN, WireGuard / Tailscale or a Tor onion service; its requests appear in the phone's audit log, and the node's own egress log is viewable from the phone |
+| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN, WireGuard / Tailscale or a Tor onion service; its requests appear in the phone's audit log, and the phone (granted `audit`) can read the node's record of its own requests, with what left the node for each |
 | Data policy per model (`ModelDataPolicy`) | Node models read as **owned · zero retention**, and the claim is checkable: it's your machine |
 | Redaction before cloud calls | Phone → node needs no redaction (you own both ends). Node → cloud passes the same redaction gateway, running a larger detection model than a phone can |
 | Receipts per answer | The node signs a receipt per request (tier, model, engine, tokens, whether anything left the node); Autobot merges it into its own receipt |
@@ -129,7 +129,9 @@ A privacy fix starts as a spec change with a new vector, and neither side is don
 1. `invincible pair` on the node shows a QR code (the node's static public key plus addresses).
 2. Autobot scans it; the two complete a Noise handshake and pin each other's keys.
 3. The node appears in Autobot under Providers as **My node** with its live model list.
-4. Unpairing from either side revokes the key. A panic wipe on the phone forgets the node.
+4. The phone reaches what the node granted it: chat (`shard`) unless the code or
+   `invincible devices grant` said more (`shard,agent,audit` for the agent and activity screens).
+5. Unpairing from either side revokes the key. A panic wipe on the phone forgets the node.
 
 There are no accounts, no passwords and no third-party relay.
 
@@ -798,10 +800,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
   device granted the `agent` capability can therefore start turns, watch their events (tool runs,
   receipts, approval questions, the answer) and answer approvals, all inside its Noise session.
-  Granting it is explicit — `invincible pair --capabilities agent`, or `PATCH
-  /v1/cluster/nodes/<name>` on the device already paired — because the proxy speaks with the
-  node's own token: a device granted nothing reaches a 404 there, exactly as for a route that does
-  not exist. A turn may carry up to four
+  Granting it is explicit — `invincible pair --capabilities shard,agent` (the list is the whole
+  set, so keep `shard` for chat), or `invincible devices grant <name> shard,agent` for a device
+  already paired — because the proxy speaks with the node's own token: a device not granted it
+  reaches a 404 there, exactly as for a route that does not exist. A turn may carry up to four
   images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
   that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
   agent is reachable from this machine, and over a device session only where you granted it.
@@ -1138,8 +1140,8 @@ answer text; images are listed by SHA-256, size and type (`"images": [{"sha256",
 
 Every request the node answered is also written to `~/.invincible/audit.jsonl`
 ([spec/audit.md](spec/audit.md)): its signed receipt, when, and who asked (`local`, or the paired
-device by name). Each entry carries the hash of the one before it, so an entry removed or edited
-later breaks the chain.
+device by name, with the key it was pinned with). Each entry carries the hash of the one before
+it, so an entry removed or edited later breaks the chain.
 
 ```sh
 invincible audit                    # the newest requests: when, who, where it ran, tokens, what left
@@ -1147,8 +1149,12 @@ invincible audit --since 7d --summary   # totals per model, and every host anyth
 invincible audit --verify           # check the chain and every receipt's signature
 ```
 
-Paired devices read the same log with `GET /v1/audit`. There is no telemetry: nothing about your
-requests leaves the node unless you send it.
+A paired device granted `audit` reads its own entries in the same log with `GET /v1/audit`, and
+no one else's: not yours, not another device's, not a device's that had its name before it. They
+come without the hash of the line before each, which would tell the device when someone else used
+the node. A node that sends work here (a cluster head, a dispatcher) is a paired device too, and
+reads the same way.
+There is no telemetry: nothing about your requests leaves the node unless you send it.
 
 ### Checking the node
 
@@ -1182,11 +1188,12 @@ advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, �
 
 ```sh
 invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
-invincible pair --capabilities agent,audit   # …pre-granting those to the device that joins
+invincible pair --capabilities shard,agent,audit   # …granting exactly these to the device that joins
 invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
 invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
                                      # (with that machine's token, `invincible token`: web pages cannot use it)
 invincible devices                   # on the node: who is paired, and what each may reach
+invincible devices grant laptop shard,agent   # set what it may reach, from its next request
 invincible devices --remove laptop   # unpair: refused at the next handshake or frame
 ```
 
@@ -1199,21 +1206,26 @@ Every paired device is granted a small set of capabilities when it pairs
 routes above: `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
 cluster's `/v1/cluster/node` and `/v1/cluster/meter`, with no token (the device's key
 authenticates it). `agent` adds `/v1/agent` — the Autobot proxy, which runs with the node's own
-token — `audit` adds the audit log, and `dispatch` adds `/v1/dispatch`, a hop into your other
-nodes. Nothing else is reachable, and a route the device was not granted answers exactly as a path
-that does not exist, so a device cannot even learn it is there. Past that check, each route takes
-only the body it needs (32 MiB for a chat completion, 5 MiB for the meter), and the node holds at
-most `[node] max_buffered_bytes` of device request bodies at once — 256 MiB unless set, refusing
-with 503 and `Retry-After: 2` past it instead of running itself out of memory. A device outside its
-grant never reaches either check, so its 404 says nothing about them
-([spec/pairing.md](spec/pairing.md), Limits). Grant and revoke on the node's own
-API, with no re-pairing:
+token — `audit` adds that device's own entries in the audit log, and `dispatch` adds
+`/v1/dispatch`, a hop into your other nodes. Nothing else is reachable, and a route the device was
+not granted answers exactly as a path that does not exist, so a device cannot even learn it is
+there. Past that check, each route takes only the body it needs (32 MiB for a chat completion,
+5 MiB for the meter), and the node holds at most `[node] max_buffered_bytes` of device request
+bodies at once — 256 MiB unless set, refusing with 503 and `Retry-After: 2` past it instead of
+running itself out of memory. A device outside its grant never reaches either check, so its 404
+says nothing about them ([spec/pairing.md](spec/pairing.md), Limits). Grant and revoke on the
+node, from the device's next request, with no re-pairing; the list is the whole set, not an
+addition to `shard`:
 
 ```sh
-curl -X PATCH localhost:7777/v1/cluster/nodes/laptop \
-     -H "authorization: Bearer $(invincible token)" \
-     -d '{"capabilities": ["shard", "agent"]}'
+invincible devices                                 # who is paired, and what each may reach
+invincible devices grant phone shard,agent,audit   # what the Autobot app's chat, agent and activity screens need
+invincible devices grant laptop shard              # back to chat only
 ```
+
+That is `PATCH /v1/admin/devices/<name> {"capabilities": [...]}` on the node's own API, and
+`PATCH /v1/cluster/nodes/<name>` with the same body is the same write: a node that joined this one
+is a paired device like any other.
 
 The list is in [spec/pairing.md](spec/pairing.md) (Transport). Autobot
 pairs by scanning the same QR code: its protocol layer is in

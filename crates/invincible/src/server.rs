@@ -15,7 +15,7 @@ use axum::extract::{FromRequest, Path, Request as HttpRequest, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{MethodRouter, any, delete, get, patch, post};
+use axum::routing::{MethodRouter, any, get, patch, post};
 use axum::{Extension, Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -540,15 +540,40 @@ struct AuditQuery {
 }
 
 /// The newest audit entries (at most 500), oldest first, with totals over them.
+///
+/// The operator reads every caller's. A paired device (granted `audit`) reads only its own: the
+/// entries that carry the key it was pinned with, so neither another device's records nor the
+/// operator's, nor those of an earlier device that went by the same name, and none written before
+/// entries carried the key (spec/audit.md, Reading it). A cluster peer is a paired device here, so
+/// it reads the requests it sent this node and nothing else. A device's entries come without
+/// `prev`: it is the hash of whichever line came before, often another caller's, so it would say
+/// whether someone used the node between two of the device's requests.
 async fn audit(
     State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Caller>>,
     axum::extract::Query(q): axum::extract::Query<AuditQuery>,
 ) -> Response {
     let Some(log) = state.audit.clone() else {
         return Json(json!({ "entries": [], "summary": crate::audit::summary(&[]), "kept": false })).into_response();
     };
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
-    let entries = tokio::task::spawn_blocking(move || log.read(q.since, limit)).await.unwrap_or_default();
+    let device = caller.and_then(|Extension(caller)| caller.key().map(str::to_owned));
+    let entries = tokio::task::spawn_blocking(move || match device {
+        Some(key) => {
+            let mut entries =
+                log.read_where(q.since, limit, |entry| entry["caller_key"].as_str() == Some(key.as_str()));
+            // The chain is the operator's to check: a device never sees the lines it links.
+            for entry in &mut entries {
+                if let Some(entry) = entry.as_object_mut() {
+                    entry.remove("prev");
+                }
+            }
+            entries
+        }
+        None => log.read(q.since, limit),
+    })
+    .await
+    .unwrap_or_default();
     let summary = crate::audit::summary(&entries);
     Json(json!({ "entries": entries, "summary": summary, "kept": true })).into_response()
 }
@@ -801,7 +826,8 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/fetch", post(fetch))
         .route("/v1/admin/pairing", post(start_pairing))
         .route("/v1/admin/devices", get(list_devices))
-        .route("/v1/admin/devices/{name}", delete(remove_device))
+        // `PATCH` sets what a device may reach (spec/pairing.md, Capabilities); `DELETE` unpairs.
+        .route("/v1/admin/devices/{name}", patch(grant_device).delete(remove_device))
         .route("/v1/cluster", get(cluster_status))
         .route("/v1/dispatch", get(dispatch_status))
         // Discovery (spec/discovery.md): what this node announces, and the verified descriptors
@@ -1215,44 +1241,25 @@ async fn cluster_patch(State(state): State<Arc<AppState>>, Path(name): Path<Stri
         },
         (None, Some(_)) => None,
     };
-    let granted = match body.get("capabilities") {
-        Some(value) => match DeviceCapabilities::from_json(value) {
-            Ok(capabilities) => Some(capabilities),
-            Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_capabilities", &message),
-        },
-        None => None,
+    let granted = match requested_capabilities(&body) {
+        Ok(granted) => granted,
+        Err(refusal) => return refusal.into_response(),
     };
     // Resolve both targets before writing anything: a name that is in neither record is a 404
     // with nothing changed.
     if granted.is_some() && state.pairing.as_ref().is_none_or(|pairing| pairing.devices.named(&name).is_none()) {
-        return error(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            &format!("no paired device \"{name}\" (GET /v1/admin/devices lists them)"),
-        );
+        return no_such_device(&name).into_response();
     }
     let rename = match renamed_to.as_deref().map(|new| rename_node(&state, &name, new)) {
         Some(Ok(rename)) => Some(rename),
         Some(Err(refusal)) => return refusal.into_response(),
         None => None,
     };
-    let mut grant = None;
-    if let (Some(capabilities), Some(pairing)) = (&granted, state.pairing.clone()) {
-        let was = pairing.devices.named(&name).map(|device| device.capabilities);
-        let device = match pairing.devices.set_capabilities(&name, capabilities.clone()) {
-            Ok(Some(device)) => device,
-            Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "no such device"),
-            Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
-        };
-        tracing::info!(device = %name, capabilities = ?device.capabilities.codes(), "device capabilities set");
-        let changed = was.as_ref() != Some(&device.capabilities);
-        grant = Some(json!({
-            "device": device.name,
-            "capabilities": device.capabilities.codes(),
-            "was": was.map(|was| was.codes()),
-            "changed": changed,
-        }));
-    }
+    let grant = match granted.map(|capabilities| grant(&state, &name, capabilities)) {
+        Some(Ok(grant)) => Some(grant),
+        Some(Err(refusal)) => return refusal.into_response(),
+        None => None,
+    };
     match (grant, rename) {
         (Some(grant), Some(rename)) => Json(json!({ "device": grant, "node": rename })).into_response(),
         (Some(grant), None) => Json(grant).into_response(),
@@ -1269,6 +1276,84 @@ fn rename_node(state: &Arc<AppState>, name: &str, new: &str) -> Result<Value, me
         return Err(membership::Refusal::unavailable());
     };
     membership.rename(name, new)
+}
+
+/// `PATCH /v1/admin/devices/{name} {"capabilities": ["shard", "agent"]}`: grants the paired device
+/// called {name} exactly that set (spec/pairing.md, Capabilities), so a grant and a revocation are
+/// the same write — what `invincible devices grant` sends. The grant half of `PATCH
+/// /v1/cluster/nodes/{name}` is the same write ([grant]): a node that joined this one is a paired
+/// device in the same `devices.json`. The answer names the set before and after, and whether it
+/// changed.
+async fn grant_device(State(state): State<Arc<AppState>>, Path(name): Path<String>, body: Bytes) -> Response {
+    let body = match json_body(&body) {
+        Ok(body) => body,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", message),
+    };
+    let capabilities = match requested_capabilities(&body) {
+        Ok(Some(capabilities)) => capabilities,
+        Ok(None) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &format!("the body is {{\"capabilities\": [...]}}, of {}", DeviceCapabilities::known()),
+            );
+        }
+        Err(refusal) => return refusal.into_response(),
+    };
+    match grant(&state, &name, capabilities) {
+        Ok(answer) => Json(answer).into_response(),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+/// The set a body's `{"capabilities": [...]}` names; `None` when it names none, and a 400
+/// `invalid_capabilities` when a name in it is not a capability.
+fn requested_capabilities(body: &Value) -> Result<Option<DeviceCapabilities>, membership::Refusal> {
+    match body.get("capabilities") {
+        Some(value) => DeviceCapabilities::from_json(value).map(Some).map_err(|message| membership::Refusal {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_capabilities",
+            message,
+        }),
+        None => Ok(None),
+    }
+}
+
+/// Grants the device this node hosts under [name] exactly [capabilities], from its next request:
+/// the device gate reads `devices.json` on every request, so no re-pairing is involved. The one
+/// write behind both operator routes that grant, so they validate and answer alike:
+/// `{"device", "capabilities", "was", "changed"}`, or a 404 that names [name] with nothing written.
+fn grant(state: &AppState, name: &str, capabilities: DeviceCapabilities) -> Result<Value, membership::Refusal> {
+    let Some(pairing) = &state.pairing else {
+        return Err(no_such_device(name));
+    };
+    let was = pairing.devices.named(name).map(|device| device.capabilities);
+    let device = match pairing.devices.set_capabilities(name, capabilities) {
+        Ok(Some(device)) => device,
+        Ok(None) => return Err(no_such_device(name)),
+        Err(message) => {
+            return Err(membership::Refusal {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "internal_error",
+                message,
+            });
+        }
+    };
+    tracing::info!(device = %name, capabilities = ?device.capabilities.codes(), "device capabilities set");
+    let changed = was.as_ref() != Some(&device.capabilities);
+    Ok(json!({
+        "device": device.name,
+        "capabilities": device.capabilities.codes(),
+        "was": was.map(|was| was.codes()),
+        "changed": changed,
+    }))
+}
+
+/// 404: no device is paired under [name], and where the operator finds the ones that are.
+fn no_such_device(name: &str) -> membership::Refusal {
+    membership::Refusal::not_found(format!(
+        "no paired device \"{name}\" (`invincible devices` or GET /v1/admin/devices lists them)"
+    ))
 }
 
 async fn remove_device(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
