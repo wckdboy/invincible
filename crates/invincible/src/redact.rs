@@ -673,7 +673,9 @@ const MIN_TERM: usize = 3;
 const MAX_TERM: usize = 120;
 const MIN_DIGITS: usize = 4;
 
-/// [literal]: placeholder-shaped text the user wrote themselves ("[PERSON_1]").
+/// [literal]: placeholder-shaped text the user wrote themselves ("[PERSON_1]"). [unescaped]: what
+/// [value] stood for, where it was found written as inside a JSON string (`12a,\n10115 Berlin` in
+/// JSON lines, a line break): it goes back into JSON as that, and into text as it was written.
 struct Entry {
     kind: Kind,
     value: String,
@@ -681,6 +683,7 @@ struct Entry {
     digits: Option<String>,
     forms: Vec<String>,
     literal: bool,
+    unescaped: Option<String>,
 }
 
 /// The placeholders of one request, as Autobot's `RedactionVault`: each personal value gets a
@@ -813,6 +816,11 @@ fn spaced(text: &str) -> Cow<'_, str> {
     Cow::Owned(String::from_utf8(out).expect("only ASCII bytes replaced by ASCII"))
 }
 
+/// What [raw] stands for as the inside of a JSON string, where it has an escape and reads as one.
+fn unescape(raw: &str) -> Option<String> {
+    raw.contains('\\').then(|| serde_json::from_str(&format!("\"{raw}\"")).ok()).flatten()
+}
+
 /// [value] as it is written inside a JSON string (a line break as `\n`).
 fn json_escape(value: &str) -> String {
     let quoted = Value::String(value.to_owned()).to_string();
@@ -887,6 +895,7 @@ impl Vault {
             digits: None,
             forms: vec![bracket.clone()],
             literal: true,
+            unescaped: None,
         };
         match owner {
             // Kept as written: it stands for itself.
@@ -902,9 +911,13 @@ impl Vault {
     }
 
     /// The entry for a detected value, new or known. It gets its placeholder when it is replaced.
-    fn register(&mut self, kind: Kind, value: &str) -> usize {
+    /// Found in a JSON text read as text ([json]), a value with an escape is also known by what it
+    /// stands for, so the same value read unescaped (in a JSON document, a message) is the same.
+    fn register(&mut self, kind: Kind, value: &str, json: bool) -> usize {
         let k = key(kind, value);
-        if let Some(&i) = self.index.get(&k) {
+        let unescaped = if json { unescape(value) } else { None };
+        let unescaped_key = unescaped.as_deref().map(|u| key(kind, u));
+        if let Some(&i) = self.index.get(&k).or_else(|| self.index.get(unescaped_key.as_ref()?)) {
             if !self.entries[i].1.forms.iter().any(|f| f == value) {
                 self.entries[i].1.forms.push(value.to_owned());
             }
@@ -916,11 +929,15 @@ impl Vault {
                 kind,
                 value: value.to_owned(),
                 placeholder: None,
-                digits: digits_of(kind, value),
-                forms: vec![value.to_owned()],
+                digits: digits_of(kind, unescaped.as_deref().unwrap_or(value)),
+                forms: std::iter::once(value.to_owned()).chain(unescaped.clone()).collect(),
                 literal: false,
+                unescaped,
             },
         );
+        if let Some(unescaped_key) = unescaped_key {
+            self.index.insert(unescaped_key, i);
+        }
         // The parts of a full name get their own placeholders when they appear alone.
         if kind == Kind::Person {
             let parts: Vec<&str> = value
@@ -958,13 +975,14 @@ impl Vault {
                 digits: digits_of(kind, value),
                 forms: vec![value.to_owned()],
                 literal: false,
+                unescaped: None,
             },
         );
     }
 
     /// [text] with its personal data replaced.
     pub fn redact(&mut self, text: &str) -> String {
-        self.redact_with(text, true)
+        self.redact_with(text, Form::Text)
     }
 
     /// [Vault::redact] for a tool's description, which goes with every request: only what is
@@ -972,17 +990,18 @@ impl Vault {
     /// called Report" or "Hi Claude," names no one who would then be replaced in every message.
     /// Values already known are replaced as in any text.
     pub fn redact_description(&mut self, text: &str) -> String {
-        self.redact_with(text, false)
+        self.redact_with(text, Form::Description)
     }
 
     /// [Vault::redact] for a text that is often JSON (a tool result, tool-call arguments). When it
     /// parses, each string in it (keys too) is redacted as what it stands for, unescaped, and
     /// written back escaped; a number is redacted as written and becomes a string if it changes. So
-    /// a value right after a `\n` is found whole and the text stays JSON. Other text is redacted as
-    /// text.
+    /// a value right after a `\n` is found whole and the text stays JSON. Other text (JSON lines,
+    /// JSON inside prose) is redacted as text, and a value with an escape found in it is taken as
+    /// written inside a JSON string ([Entry::unescaped]).
     pub fn redact_json(&mut self, text: &str) -> String {
         if serde_json::from_str::<Value>(text).is_err() {
-            return self.redact(text);
+            return self.redact_with(text, Form::Json);
         }
         // As in a text, placeholder-shaped text anywhere in it comes first.
         for c in PLACEHOLDER.captures_iter(text) {
@@ -1027,12 +1046,12 @@ impl Vault {
         out
     }
 
-    fn redact_with(&mut self, text: &str, words: bool) -> String {
+    fn redact_with(&mut self, text: &str, form: Form) -> String {
         if text.trim().is_empty() {
             return text.to_owned();
         }
         let read = spaced(text);
-        let spans = find(&read, words);
+        let spans = find(&read, form != Form::Description);
         // Placeholder-shaped text the user wrote comes first: its numbers are never handed out.
         let literals: Vec<(String, String, String)> =
             PLACEHOLDER.captures_iter(text).map(|c| (c[1].to_owned(), c[2].to_owned(), c[3].to_owned())).collect();
@@ -1050,7 +1069,7 @@ impl Vault {
             }
             found.push(match escaped.iter().find(|&&(s, e, _)| s <= start && span.end <= e) {
                 Some(&hit) => hit,
-                None => (start, span.end, self.register(span.kind, &text[start..span.end])),
+                None => (start, span.end, self.register(span.kind, &text[start..span.end], form == Form::Json)),
             });
         }
         self.replace(text, &read, found)
@@ -1181,7 +1200,8 @@ impl Vault {
     }
 
     /// [Vault::restore] for JSON text (tool-call arguments): values come back escaped for a JSON
-    /// string, so a value with a line break leaves the arguments valid JSON.
+    /// string, so a value with a line break leaves the arguments valid JSON. A value found written
+    /// as inside a JSON string comes back as it was written there, so it reads as it did.
     pub fn restore_json(&self, text: &str) -> String {
         self.restore_in(text, true)
     }
@@ -1193,11 +1213,13 @@ impl Vault {
         PLACEHOLDER
             .replace_all(text, |caps: &regex::Captures| {
                 let bracket = format!("[{}_{}]", &caps[2], &caps[3]);
-                match self.by_placeholder.get(&bracket) {
-                    Some(&i) if &caps[1] == "[" && json => json_escape(&self.entries[i].1.value),
-                    Some(&i) if &caps[1] == "[" => self.entries[i].1.value.clone(),
-                    Some(&i) => percent_encode(&self.entries[i].1.value),
-                    None => caps[0].to_owned(),
+                let Some(&i) = self.by_placeholder.get(&bracket) else { return caps[0].to_owned() };
+                let e = &self.entries[i].1;
+                match (&caps[1] == "[", json, e.unescaped.as_deref()) {
+                    (true, true, None) => json_escape(&e.value),
+                    (true, _, _) => e.value.clone(),
+                    (false, true, Some(unescaped)) => percent_encode(unescaped),
+                    (false, _, _) => percent_encode(&e.value),
                 }
             })
             .into_owned()
@@ -1236,7 +1258,8 @@ impl Vault {
 enum Form {
     /// [Vault::redact].
     Text,
-    /// A tool result or tool-call arguments: [Vault::redact_json].
+    /// A tool result or tool-call arguments: [Vault::redact_json] (in [Vault::redact_with], one
+    /// that is not a JSON document, read as text).
     Json,
     /// A tool's description: [Vault::redact_description].
     Description,
@@ -2121,8 +2144,9 @@ mod tests {
     }
 
     #[test]
-    fn a_value_found_across_a_json_escape_comes_back_as_it_was_written() {
-        // A tool result that is not one JSON document is read as text, as written.
+    fn a_value_found_across_a_json_escape_comes_back_as_written_and_reads_as_it_did() {
+        // A tool result that is not one JSON document is read as text, as written: its `\n` is a
+        // line break in the JSON it holds.
         let mut body = json!({ "messages": [
             { "role": "tool", "tool_call_id": "c1", "content": r#"Order 7: {"to":"Hauptstraße 12a,\n10115 Berlin"}"# }
         ] });
@@ -2134,10 +2158,68 @@ mod tests {
         } }] });
         restore_response(&vault, &mut answer);
         let message = &answer["choices"][0]["message"];
+        // Into text as it was written; into a tool call as what it stood for, a line break.
         assert_eq!(message["content"], r"It goes to Hauptstraße 12a,\n10115 Berlin.");
         let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(args, r#"{"to":"Hauptstraße 12a,\n10115 Berlin"}"#);
         let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
-        assert_eq!(parsed["to"], r"Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(parsed["to"], "Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(vault.restore_json("%5BADDRESS_1%5D"), "Hauptstra%C3%9Fe%2012a%2C%0A10115%20Berlin");
+        assert_eq!(vault.restore("%5BADDRESS_1%5D"), "Hauptstra%C3%9Fe%2012a%2C%5Cn10115%20Berlin");
+
+        // The same when streamed.
+        let mut restorer = StreamRestorer::new(vault);
+        let mut out = Vec::new();
+        for event in [
+            sse(json!({ "content": "It goes to [ADDR" })),
+            sse(
+                json!({ "content": "ESS_1].", "tool_calls": [{ "index": 0, "function": { "arguments": "{\"to\":\"[ADD" } }] }),
+            ),
+            sse(json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "RESS_1]\"}" } }] })),
+        ] {
+            out.extend(restorer.push(event.as_bytes()));
+        }
+        out.extend(restorer.push(b"data: [DONE]\n\n"));
+        out.extend(restorer.finish());
+        let (content, _, _, calls) = channels_of(&out);
+        assert_eq!(content, r"It goes to Hauptstraße 12a,\n10115 Berlin.");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&calls[&0]).unwrap()["to"],
+            "Hauptstraße 12a,\n10115 Berlin"
+        );
+    }
+
+    #[test]
+    fn a_value_written_escaped_and_unescaped_is_one() {
+        let address = "Hauptstraße 12a,\n10115 Berlin";
+        let lines = concat!(r#"{"ok":1}"#, "\n", r#"{"to":"Hauptstraße 12a,\n10115 Berlin"}"#);
+        let document = json!({ "shipped_to": address }).to_string();
+        // Found in JSON lines first, then in a JSON document and in a message.
+        let mut body = json!({ "messages": [
+            { "role": "tool", "tool_call_id": "c1", "content": lines },
+            { "role": "tool", "tool_call_id": "c2", "content": document },
+            { "role": "user", "content": format!("Ship to {address} please") }
+        ] });
+        let vault = redact_request(&mut body);
+        let messages = &body["messages"];
+        assert_eq!(messages[0]["content"], concat!(r#"{"ok":1}"#, "\n", r#"{"to":"[ADDRESS_1]"}"#));
+        assert_eq!(messages[1]["content"], r#"{"shipped_to":"[ADDRESS_1]"}"#);
+        assert_eq!(messages[2]["content"], "Ship to [ADDRESS_1] please");
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1)]));
+        // As it was first written.
+        assert_eq!(vault.restore("[ADDRESS_1]"), r"Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(vault.restore_json("[ADDRESS_1]"), r"Hauptstraße 12a,\n10115 Berlin");
+
+        // The other way round: found in a JSON document first.
+        let mut body = json!({ "messages": [
+            { "role": "tool", "tool_call_id": "c1", "content": document },
+            { "role": "tool", "tool_call_id": "c2", "content": lines }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][1]["content"], concat!(r#"{"ok":1}"#, "\n", r#"{"to":"[ADDRESS_1]"}"#));
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1)]));
+        assert_eq!(vault.restore("[ADDRESS_1]"), address);
+        assert_eq!(vault.restore_json("[ADDRESS_1]"), r"Hauptstraße 12a,\n10115 Berlin");
     }
 
     #[test]

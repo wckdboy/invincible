@@ -1079,16 +1079,19 @@ data_policy = "retention:30"        # what the provider does with prompts
   ([spec/redaction.md](spec/redaction.md)): in the messages, the model's earlier reasoning and tool
   calls, the tools' descriptions and the `user` field. Later mentions of a known value are hidden
   too, as words of their own and written as before, with the same capitals (`ANNA BERG` is not
-  `Anna Berg`), an email in any case. A phone, card or account number may have its digits grouped
-  differently, split by one space of any width (a no-break one too), `-`, `.` or `/`, but not by
-  two spaces, a tab or a line break, and not where it runs on into another number
-  (`2 4111111111111111`). A name or an address is not hidden inside a longer word of its script or
-  inflected (`Иван` in `Ивановка` or `Ивана`), nor in code or links. A word of a script without
-  case may follow a value without a space (`Annaさん`, `010-1234-5678으로`). A tool result or tool
-  call that is JSON is read string by string, unescaped. Other text (JSON
-  lines, JSON inside prose) is read as written: a known value is found where its line breaks or
-  quotes are escaped, but not where its non-ASCII letters are (`Hauptstra\u00dfe`, as Python's
-  `json.dumps` writes it). In tool descriptions only emails and numbers are looked for, so a tool's
+  `Anna Berg`), an email in any case. A phone, card or account number of digits only may have its
+  digits grouped differently, split by one space of any width (a no-break one too), `-`, `.` or
+  `/`, but not by two spaces, a tab or a line break, and not where it runs on into another number
+  (`2 4111111111111111`). A name or an address is not hidden inside a longer word, next to a digit,
+  `_` or a letter of a script with case (`Иван` in `Ивановка` or `Ивана`, `Anna` in `Annaй`), nor
+  in code or links. A word of a script without case may follow a value without a space
+  (`Annaさん`, `010-1234-5678으로`). A tool result or tool call that is JSON is read string by
+  string, unescaped. Other text (JSON lines, JSON inside prose) is read as written: a known value
+  is found where its line breaks or quotes are escaped, but not where its non-ASCII letters are
+  (`Hauptstra\u00dfe`, as Python's `json.dumps` writes it). A value found there across an escape
+  (`12a,\n10115 Berlin`) comes back in the answer's text as written, and in its tool calls as what
+  it stood for, a line break; seen both escaped and not, it is one value and comes back as first
+  written. In tool descriptions only emails and numbers are looked for, so a tool's
   wording names no one, but known values are hidden there too. The answer gets the real values back
   in its text, its reasoning and its tool calls' arguments, streams included, and the
   `invincible-redacted` header counts what was hidden.
