@@ -54,8 +54,9 @@ Not in scope here:
 **Limits that are already documented.** These are known; a way around them that the docs do not
 describe is a finding.
 
-- Unattended commands are write-confined only: a command's own writes go only to its working
-  directory and temp. Reads, the network and the programs it can talk to (systemd or launchd,
+- Unattended commands are write-confined only, and only on the agent's own machine (over
+  `[agent.ssh]` or in `[agent.docker]` the other machine or the container is what holds them): a
+  command's own writes go only to its working directory and temp. Reads, the network and the programs it can talk to (systemd or launchd,
   D-Bus, Docker's socket, the node's and agent's local APIs, any other socket) are not restricted
   yet, so it can read what the owner can, reach any host and have a program outside the sandbox
   write for it ([README](README.md), Sandbox).
@@ -107,15 +108,16 @@ invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPG
 ```
 
 Its fingerprint is `SHA256:4i+8H37Nm9hiL/ce25aKi+QfYgXMzNfmd4fIidDqBIQ` (ED25519). To check a
-release by hand, in an empty directory, with the archive for your platform under the name
-`SHA256SUMS` lists (`invincible-linux-x64.tar.gz`, `invincible-linux-arm64.tar.gz` or
-`invincible-macos-arm64.tar.gz`) next to `SHA256SUMS`:
+release by hand, in an empty directory, set `archive` to your platform's archive as `SHA256SUMS`
+names it (`invincible-linux-x64.tar.gz`, `invincible-linux-arm64.tar.gz` or
+`invincible-macos-arm64.tar.gz`):
 
 ```sh
+archive=invincible-linux-x64.tar.gz   # or invincible-linux-arm64.tar.gz, invincible-macos-arm64.tar.gz
 base=https://github.com/wckdboy/invincible/releases/latest/download   # or releases/download/<tag>
 curl -fLO "$base/SHA256SUMS"
 curl -fLO "$base/SHA256SUMS.sig"
-curl -fLO "$base/invincible-linux-x64.tar.gz"   # your platform's archive, as SHA256SUMS names it
+curl -fLO "$base/$archive"
 echo 'invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPGy6kHVQQ+W282VFPR/Qo' > allowed_signers
 ssh-keygen -lf allowed_signers        # prints the fingerprint above
 ssh-keygen -Y verify -f allowed_signers -I invincible-release -n invincible-release -s SHA256SUMS.sig < SHA256SUMS
@@ -123,9 +125,10 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 ```
 
 `ssh-keygen -Y verify` must print `Good "invincible-release" signature`, and `shasum` must print
-`invincible-linux-x64.tar.gz: OK` (with your archive's name). `--ignore-missing` skips every
-file the list names that is not in the directory, the other platforms' archives and an archive
-saved under another name alike, so without that `OK` line your archive was not checked.
+your archive's name followed by `: OK` (`invincible-linux-x64.tar.gz: OK`). `--ignore-missing`
+skips every file the list names that is not in the directory, the other platforms' archives and
+an archive saved under another name alike, so without that `OK` line your archive was not
+checked.
 
 A release whose signature does not verify with this key is not ours: do not install it, and report
 it as above.
