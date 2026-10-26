@@ -160,22 +160,30 @@ pairing grants unless the operator says otherwise; over its session):
 - `profiles`: what this machine measured on itself (`invincible tune bench`): per model, per device,
   the generation and prompt rates, and the hardware tag they are valid for. A head uses a peer's
   profile for the model it is planning, and only while the peer's `hardware` still matches it.
-- `hardware`: the tag those profiles were measured on (os, arch, cores, memory). A changed machine
-  invalidates them rather than being trusted.
+- `hardware`: the tag those profiles were measured on: os, arch, cores and memory; each device
+  `llama-server --list-devices` reports, with its description and total memory (not its free
+  memory, which moves with what runs); and the llama.cpp build, from `llama-server --version`
+  (`b6000 (abc1234)`). A changed machine, a swapped GPU or another llama.cpp build invalidates
+  them rather than being trusted. A build that names no number (`0 (unknown)`, built without
+  git) has no tag, so nothing is measured on it. A node keeps the build it started with, which
+  is the one its engines run.
 - `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
   `{"bytes": n}` for an `n`-byte body and nothing else, and holds none of it (the body is read and
   dropped a frame at a time — spec/pairing.md, Limits). A head times a link with it — five small
   posts for the median round trip, one 4 MiB post for the throughput — and keeps the result in
-  `$INVINCIBLE_HOME/tune/links.json`, each measurement timestamped on its own, behind the same
-  hardware tag and an hour's freshness: metering one peer does not refresh another's number. A link
+  `$INVINCIBLE_HOME/tune/links.json`, each measurement timestamped on its own, behind the
+  machine's part of that tag (os, arch, cores, memory: a link does not change with the GPU or the
+  build) and an hour's freshness: metering one peer does not refresh another's number. A link
   that cannot be measured leaves the plan without a prediction.
 - `tg_tps`: a device's generation rate for one model, alone on that device, tokens/s, from
-  `invincible tune bench <model> --device <name>` (llama-bench, one repetition). It is not a
-  capability of its own: it is the `tg_tps` of each `profiles` entry above, joined to a device by
-  name. Absent until the node has benchmarked that model, and one unmeasured device keeps a plan
-  on the memory rule. `invincible tune probe` reports the machine only (os, arch, cores, memory,
-  devices, engines) and runs no benchmark; link round-trip time and throughput come from the meter
-  above, not from either `tune` command.
+  `invincible tune bench <model> --device <name>` (llama-bench, one repetition: the one next to
+  the configured `llama-server`, else the one on PATH, and refused when it reports another
+  llama.cpp build than that engine). It is not a capability of its own: it is the `tg_tps` of
+  each `profiles` entry above, joined to a device by name. Absent until the node has benchmarked
+  that model, and one unmeasured device keeps a plan on the memory rule. `invincible tune probe`
+  reports the machine only (os, arch, cores, memory, devices, engines and their llama.cpp build)
+  and runs no benchmark; link round-trip time and throughput come from the meter above, not from
+  either `tune` command.
 
 `GET /v1/cluster/node` and `POST /v1/cluster/meter` are both reached through the device API, so
 both are admitted the same way: the `shard` capability first ([pairing.md](pairing.md),
