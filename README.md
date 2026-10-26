@@ -260,7 +260,7 @@ secrets = false
 ```sh
 autobot              # chat in the terminal
 autobot code         # code in this directory (see "Code with Autobot")
-autobot run "task"   # one task, no questions: anything not allowlisted is refused
+autobot run "task"   # one task, no questions: anything not allowlisted is refused, commands sandboxed
 autobot doctor       # check everything, 24/7 readiness included
 ```
 
@@ -269,8 +269,12 @@ the release key, which lives only as a GitHub secret; the installer and `invinci
 its public key and refuse anything else, then check the archive against the list. With a
 signed-in GitHub CLI the installer also checks the archive's Sigstore build attestation. Releases
 are built by [`release.yml`](.github/workflows/release.yml): a `v*` tag publishes stable, every
-green push to main refreshes the `edge` prerelease. The Linux builds are reproducible: the
-workflow builds the x86_64 archive again on another machine and publishes only if the bytes match
+green push to main refreshes the `edge` prerelease. Every action the workflows run is pinned to a
+commit (the version in a comment beside it), so moving an action's tag upstream changes nothing
+(the CI-only `cargo-deny` action still downloads its binary by release tag), and no checkout keeps
+the workflow's token where the code it builds could read it. The Linux
+builds are reproducible: the workflow builds the x86_64 archive again on another machine and
+publishes only if the bytes match
 (to check one yourself, build the commit from `/tmp/invincible-src` with the flags in
 `release.yml`). By hand:
 
@@ -406,6 +410,19 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
+  Nobody watches such a run, so its commands run sandboxed like a scheduled task's (see
+  **Sandbox** below), whatever `--approvals` allows: `--approvals trust` decides which commands
+  run, the sandbox bounds what they can change. A confined command writes only in `DIR` and
+  temporary directories, so a build that writes caches in your home (`~/.cargo`, `~/.npm`)
+  fails there. On Linux without bubblewrap, commands are refused and the run says so before it
+  starts; where bubblewrap cannot make its namespaces (some containers), each command fails
+  with bubblewrap's error. Either way nothing runs unconfined: install it
+  (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine you can
+  throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack
+  bubblewrap or the namespaces it needs and are themselves the boundary. It is a flag for one
+  run, not a setting, so the workflow file shows it; the run prints it on standard error before
+  it starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks
+  and the board stay confined.
 
 ### In your editor: Zed and other ACP editors
 
@@ -521,11 +538,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
-- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes) run
-  sandboxed: they read what you can, but write only in the working directory and temporary
-  directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users
-  may need to install). Without a sandbox they are refused, not run unconfined.
-  `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off.
+- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes, hooks,
+  Home Assistant's voice requests, the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
+  working directory and temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e.
+  bubblewrap, which `install.sh` users may need to install). Without a sandbox they are
+  refused, not run unconfined. `[agent] sandbox = "always"` confines interactive turns too;
+  `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run. Commands in
+  `[agent.docker]` or over `[agent.ssh]` run there instead. The sandbox does not limit reads or
+  the network.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands
@@ -739,8 +759,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Receipts:** each model call shows its model, tier and receipt id.
 - **Action log:** every command, file write, outside read and cloud send the agent asked for, whether
   it ran, and who decided (the rules, an "always" earlier in the session, or you on the CLI, the
-  app or Telegram), in `~/.autobot/actions.jsonl`. `autobot actions` shows it; the app reads it
-  through the agent API.
+  app or Telegram), in `~/.autobot/actions.jsonl`; for a command that ran, where and how confined
+  (`bwrap` or `sandbox-exec`, `off`, `container`, `ssh`). `autobot actions` shows it; the app
+  reads it through the agent API.
 - **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
   no public address. Strangers get a one-time code, and nobody gets in until you run
   `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
@@ -887,7 +908,8 @@ OpenAI Conversation): `autobot hooks new homeassistant` makes its API key, and t
 `http://<this machine>:7794/hooks/homeassistant/v1` on the hooks listener (another bot's:
 `/hooks/<bot>/homeassistant/v1`). On this machine the agent API serves it too, at
 `/v1/agent/openai/v1` with the gateway's token (`model` names the bot). Its turns follow the
-unattended rules: what is allowlisted runs, the rest is refused.
+unattended rules: what is allowlisted runs, the rest is refused, and its commands are confined
+like a scheduled task's (**Sandbox** above).
 
 `autobot doctor` checks WhatsApp (its secrets, the number, the hooks listener) and Home Assistant
 (the token, how many entities the agent sees), and lists the bots `autobot serve` runs with any
@@ -946,14 +968,23 @@ cargo run --release -- token      # the API token (created on first run, mode 06
 ```
 
 Any OpenAI-compatible client on the same machine works against `http://127.0.0.1:7777/v1` with that
-token as the API key. `model: "auto"` (or no model) lets the router choose.
+token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <token>`.
+`model: "auto"` (or no model) lets the router choose.
 
 - Anthropic Messages clients can use `POST /v1/messages` the same way. It is served by the node's
   engines only (llama.cpp speaks it natively), so a Messages request never goes to the cloud.
 - Every response carries the routing decision in an `invincible-decision` header.
 - `invincible-private: 1` marks a request that must never leave hardware you own;
   `invincible-risk: health,personal` passes risk codes; `invincible-confirmed: 1` answers an `ask`.
-- Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
+- Blocked requests answer 403, 404 or 503 with the reason. An `ask` answers 409
+  `confirmation_required`, and its error body carries the same decision as the header
+  (`error.decision`) and the header that answers it (`error.confirm_header`:
+  `"invincible-confirmed"`), so a client whose SDK shows only error bodies can still act on it
+  ([spec/routing.md](spec/routing.md), Over HTTP).
+- `GET /v1/models` lists each model with its context window as top-level `context_length` when it
+  is known (absent when not, never guessed), and with an `invincible` block: `tier`, `healthy`,
+  `context`, `data_policy` and `vision`. There is no `max_completion_tokens`: the node does not
+  know a model's output limit.
 - A streamed answer from a local engine is kept alive while the engine reads a long prompt
   (`: keep-alive` comments every 20 s, which SSE clients skip); an engine silent for 30 minutes
   is given up on with an `engine_stalled` error event (a 504 when not streamed, where 30 minutes
@@ -986,6 +1017,36 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
   `/v1/models` reports it (`"vision": true`, `false`, or `null` when not known), and a request
   with images for a model known not to see them answers `400 model_cannot_see_images` instead of
   being sent.
+
+### Use the node from other tools
+
+A tool that takes an OpenAI- or Anthropic-compatible base URL and a key works with the node as it
+is: give it the base URL and `invincible token` as the key.
+
+| The tool speaks | Base URL | The key goes in |
+|---|---|---|
+| OpenAI Chat Completions (OpenAI SDKs, Hermes Agent, Polykrom's OpenAI protocol) | `http://127.0.0.1:7777/v1` | `Authorization: Bearer <token>` |
+| Anthropic Messages (Anthropic SDKs, Polykrom's Anthropic protocol) | `http://127.0.0.1:7777` | `x-api-key: <token>` |
+
+```sh
+curl http://127.0.0.1:7777/v1/messages \
+     -H "x-api-key: $(invincible token)" -H "content-type: application/json" \
+     -d '{"model": "auto", "max_tokens": 256, "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+- Either header works on every route of the local API. When a request carries both,
+  `Authorization` is the one read, so an SDK that also sends your `ANTHROPIC_API_KEY` as
+  `x-api-key` still gets in with a bearer token; a wrong token in the header that is read is
+  refused (401 `invalid_api_key`).
+- Tools that size their context from `/v1/models` find `context_length` there, so they need no
+  setting for it when the node knows the model's window.
+- Messages requests run on the node's own models only (above), so pick Chat Completions in a tool
+  that should also reach your cloud backends.
+- A tool that cannot ask its user gets a 409 for an `ask`. Its body says why (`error.decision.reason`)
+  and what to send back (`invincible-confirmed: 1`), so a plugin can turn it into its own prompt.
+- From another machine, `invincible join` then `invincible tunnel`: `http://127.0.0.1:7780/v1` takes
+  that machine's token in either header and reaches what a paired device may (`/v1/models` and
+  Chat Completions, not Messages; [Pairing other machines](#pairing-other-machines)).
 
 ### Cloud backends (optional)
 
@@ -1219,6 +1280,16 @@ invincible cluster status     # devices, peers (probed now), heads served, where
 - The split is sized by each device's free memory, or by measured speed once every device taking
   part has been benchmarked (`invincible tune bench <model>`); receipts list the nodes that took
   part (`cluster`).
+- `invincible tune bench` runs the `llama-bench` next to the configured `llama-server` (where the
+  installer puts llama.cpp, `~/.invincible/llama.cpp`), else the one on PATH, and says which. A
+  measurement holds for the machine, its GPUs (name and memory) and the llama.cpp build it was
+  taken with: after a new GPU or a llama.cpp upgrade it is ignored until measured again
+  (`invincible tune show` says which). A running node uses the build it started with, as its
+  engines do, so a measurement of a newer build counts from the next `invincible serve`.
+  Measurements from earlier versions named only the machine and are ignored: measure again.
+  `invincible tune probe` shows what it would use. A llama.cpp that names no build (`llama-server
+  --version` says `0 (unknown)`, as one built from a source archive without git does) cannot be
+  measured: build it from a git checkout, or use a release archive.
 - Shard links stay on the local network (private, link-local, Tailscale or `.local` addresses),
   never go through Tor or SOCKS5, and stop under `network = "offline"`.
 - A shard that leaves mid-answer ends that answer with an error event; the model is planned again

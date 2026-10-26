@@ -24,6 +24,11 @@ pub struct Entry {
     /// or the channel the owner answered on (`cli`, `app`, `telegram`); `unattended` when no one
     /// could be asked.
     pub by: String,
+    /// On a command that ran: where, and how confined ([crate::tools::Tools::confinement]):
+    /// `bwrap` or `sandbox-exec` (here, writing only in the working directory), `off` (here,
+    /// unconfined), `container` or `ssh`. None on other kinds and on older entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<String>,
 }
 
 pub struct ActionLog {
@@ -83,13 +88,18 @@ mod tests {
                 action: format!("run: echo {i}"),
                 ran: i != 1,
                 by: (*by).into(),
+                sandbox: (i != 1).then(|| "off".into()),
             })
             .unwrap();
         }
         let newest = log.read(0, 2);
         assert_eq!(newest.iter().map(|e| e.by.as_str()).collect::<Vec<_>>(), ["telegram", "grant"]);
         assert!(!newest[0].ran);
+        assert_eq!(newest[1].sandbox.as_deref(), Some("off"));
         assert_eq!(log.read(102, 10).len(), 1);
+        // Entries from before the field was recorded still read.
+        let old = r#"{"at":1,"session":"s","kind":"command","action":"run: ls","ran":true,"by":"policy"}"#;
+        assert_eq!(serde_json::from_str::<Entry>(old).unwrap().sandbox, None);
         std::fs::remove_dir_all(home).unwrap();
     }
 }

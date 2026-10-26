@@ -62,7 +62,7 @@ async fn fake(name: &str, tps: f64, max_inflight: u64, behaviour: Behaviour) -> 
         vec![addr.clone()],
         Devices::load(&dir.join("devices.json")).unwrap(),
     ));
-    let hardware = invincible::tune::hardware_now();
+    let hardware = "linux x86_64 8c 32.0 GiB; CUDA0 NVIDIA GeForce RTX 4090 24564 MiB; llama.cpp b6000 (abc1234)";
     let caps = json!({
         "name": name,
         "version": "test",

@@ -33,6 +33,8 @@ use crate::receipts::{Attempt, Draft, ReceiptKey, ReceiptStore};
 use crate::remote::{CODE_LIFETIME, Pairing};
 
 pub const DECISION_HEADER: &str = "invincible-decision";
+/// The header that answers an `ask` (`invincible-confirmed: 1`); a 409 names it in its body too.
+pub const CONFIRMED_HEADER: &str = "invincible-confirmed";
 /// Set by the gateway on requests it passes to the agent: `local` or `device:<name>`.
 pub const CALLER_HEADER: &str = "invincible-caller";
 /// Names the program sending a request (`autobot-agent`), for the audit log.
@@ -1283,14 +1285,10 @@ async fn remove_device(State(state): State<Arc<AppState>>, Path(name): Path<Stri
     }
 }
 
+/// The loopback API's gate: the node's token, as `Authorization: Bearer` or `x-api-key`
+/// ([crate::token::presented]). The device API has no such gate; a device is its pinned key.
 async fn require_token(State(state): State<Arc<AppState>>, request: HttpRequest, next: Next) -> Response {
-    let given = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-    if crate::token::matches(&state.token, given) {
+    if crate::token::presented(&state.token, request.headers()) {
         next.run(request).await
     } else {
         error(StatusCode::UNAUTHORIZED, "invalid_api_key", "missing or wrong token (see `invincible token`)")
@@ -1317,6 +1315,12 @@ async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
             // A model split across paired nodes names them (spec/cluster.md).
             if let Some(run) = state.engines.iter().find(|e| e.id == m.id).and_then(|e| e.cluster.as_ref()) {
                 model["invincible"]["cluster"] = json!(run.links.iter().map(|l| &l.peer.name).collect::<Vec<_>>());
+            }
+            // The same window where clients that know nothing of the block above look for it
+            // (Hermes Agent reads top-level keys only); absent when unknown, never guessed. The
+            // node knows no model's output limit, so it states no `max_completion_tokens`.
+            if let Some(context) = m.context {
+                model["context_length"] = json!(context);
             }
             model
         })
@@ -1473,7 +1477,7 @@ async fn infer(
                     }
                 }
             }
-            (Action::Ask, _) => error(StatusCode::CONFLICT, "confirmation_required", ask_message(&decision)),
+            (Action::Ask, _) => ask(&decision),
             (Action::Block, _) => error(
                 block_status(decision.reason),
                 "request_blocked",
@@ -1508,8 +1512,7 @@ pub(crate) fn route_request(headers: &HeaderMap, body: &Value) -> Request {
             .map(|v| v.split(',').map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned).collect())
             .unwrap_or_default(),
         prompt_tokens: estimate_tokens(body),
-        confirmed: text("invincible-confirmed")
-            .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true")),
+        confirmed: text(CONFIRMED_HEADER).is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true")),
     }
 }
 
@@ -1570,12 +1573,27 @@ pub(crate) fn reason_code(reason: Reason) -> String {
     serde_json::to_value(reason).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
-pub(crate) fn ask_message(decision: &Decision) -> &'static str {
+fn ask_message(decision: &Decision) -> &'static str {
     match decision.reason {
         Reason::Trains => "this model trains on prompts; send again with `invincible-confirmed: 1` to use it",
         Reason::Sensitive => "this request looks sensitive; send again with `invincible-confirmed: 1` to use the cloud",
         _ => "cloud use needs confirmation; send again with `invincible-confirmed: 1`",
     }
+}
+
+/// The answer to an `ask`: 409 `confirmation_required`, with the decision in the body as well as
+/// in the header, and the header that answers it, so a client whose SDK shows only the error body
+/// can still act on the reason code (spec/routing.md, Over HTTP).
+pub(crate) fn ask(decision: &Decision) -> Response {
+    let code = "confirmation_required";
+    let body = json!({ "error": {
+        "message": ask_message(decision),
+        "type": code,
+        "code": code,
+        "decision": decision,
+        "confirm_header": CONFIRMED_HEADER,
+    } });
+    (StatusCode::CONFLICT, Json(body)).into_response()
 }
 
 /// An error in the OpenAI shape.

@@ -865,8 +865,8 @@ struct Door {
 
 /// Serves a plain-HTTP door on [listener] (loopback) that leads to the node: each request goes
 /// through its own encrypted session. A request needs this machine's local token (`Authorization:
-/// Bearer`, as on a node's own API) and a loopback `Host`, so a web page in a browser on this
-/// machine cannot use the door (no cross-site requests, no DNS rebinding).
+/// Bearer` or `x-api-key`, as on a node's own API) and a loopback `Host`, so a web page in a
+/// browser on this machine cannot use the door (no cross-site requests, no DNS rebinding).
 pub async fn tunnel(listener: TcpListener, addrs: Vec<String>, node_key: Vec<u8>, device: StaticKey, token: String) {
     let door = Arc::new(Door { addrs, node_key, device, token });
     let app = axum::Router::new().fallback(through_door).with_state(door);
@@ -893,18 +893,13 @@ async fn through_door(
     if !loopback_host(host) {
         return (StatusCode::FORBIDDEN, "the tunnel answers only requests to 127.0.0.1 or localhost").into_response();
     }
-    let given = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-    if !crate::token::matches(&door.token, given) {
+    if !crate::token::presented(&door.token, request.headers()) {
         return (StatusCode::UNAUTHORIZED, "missing or wrong token (see `invincible token` on this machine)")
             .into_response();
     }
-    // The node knows the device by its key; the local token stays here.
+    // The node knows the device by its key; the local token, in either header, stays here.
     request.headers_mut().remove(header::AUTHORIZATION);
+    request.headers_mut().remove(crate::token::API_KEY_HEADER);
     let (tcp, transport) = match connect(&door.addrs, &door.node_key, &door.device).await {
         Ok(session) => session,
         Err(e) => return (StatusCode::BAD_GATEWAY, format!("the node: {e}")).into_response(),

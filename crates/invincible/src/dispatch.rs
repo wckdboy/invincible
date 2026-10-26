@@ -127,10 +127,11 @@ pub fn rate(caps: &Capabilities, model: Option<&str>) -> Option<f64> {
         .reduce(f64::max)
 }
 
-/// What this machine measured for [model], on the hardware it is running on now.
-pub fn local_rate(home: &Path, model: &str) -> Option<f64> {
+/// What this machine measured for [model], on the [hardware] it is running on now
+/// ([crate::tune::hardware_tag]; `None`: not known, so no measurement is this machine's).
+pub fn local_rate(home: &Path, model: &str, hardware: Option<&str>) -> Option<f64> {
     let set = crate::tune::load(home, model)?;
-    if set.hardware != crate::tune::hardware_now() {
+    if Some(set.hardware.as_str()) != hardware {
         return None;
     }
     set.profiles.iter().map(|profile| profile.tg_tps).filter(|tps| tps.is_finite() && *tps > 0.0).reduce(f64::max)
@@ -174,6 +175,8 @@ pub struct Dispatch {
     max_inflight: u64,
     /// Where this machine's measurements live (`$INVINCIBLE_HOME`).
     home: PathBuf,
+    /// What they must have been measured on ([crate::tune::hardware_tag]); unset, none is used.
+    hardware: Option<String>,
     /// The nodes this machine paired with: every candidate but itself.
     peers: Vec<KnownNode>,
     /// This machine's device key, which a paired node knows it by.
@@ -206,7 +209,25 @@ impl Dispatch {
             .connect_timeout(Duration::from_secs(2))
             .build()
             .expect("HTTP client for this machine's engine");
-        Self { name, models, max_inflight, home, peers, device_key, network, links, inflight: Arc::default(), client }
+        Self {
+            name,
+            models,
+            max_inflight,
+            home,
+            hardware: None,
+            peers,
+            device_key,
+            network,
+            links,
+            inflight: Arc::default(),
+            client,
+        }
+    }
+
+    /// This machine's hardware tag, so its own measurements give it a rate.
+    pub fn with_hardware(mut self, hardware: String) -> Self {
+        self.hardware = Some(hardware);
+        self
     }
 
     pub fn name(&self) -> &str {
@@ -222,7 +243,7 @@ impl Dispatch {
             models: self.models.clone(),
             max_inflight: self.max_inflight,
             inflight: self.inflight(&self.name),
-            tg_tps: model.and_then(|model| local_rate(&self.home, model)),
+            tg_tps: model.and_then(|model| local_rate(&self.home, model, self.hardware.as_deref())),
         };
         let rows = rows(&local, &peers, model);
         let choice = choose(&rows, model);

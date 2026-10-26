@@ -641,7 +641,8 @@ pub async fn send_files(transport: &dyn Transport, chat: &str, made: Vec<crate::
 
 /// One turn of [runtime] in its conversation [session], for a caller that is not a chat
 /// platform (Home Assistant's conversation agent): in turn with others there, asking [approver],
-/// with the nudge after it. Its answer.
+/// with the nudge after it. Its answer. Nobody watches it, so its commands are confined like a
+/// scheduled task's ([crate::tools::Tools::unattended]).
 pub async fn converse(
     runtime: &Arc<Runtime>,
     session: &str,
@@ -650,7 +651,11 @@ pub async fn converse(
 ) -> Result<String, String> {
     let slot = runtime.conversations.slot(&runtime.home, session)?;
     let mut guard = slot.chat.lock().await;
-    let agent = runtime.agent();
+    let agent = {
+        let mut unattended = (*runtime.agent()).clone();
+        unattended.tools = unattended.tools.clone().unattended();
+        Arc::new(unattended)
+    };
     let context = crate::tools::TurnContext {
         session: session.to_owned(),
         inbox: Some(slot.inbox.clone()),
