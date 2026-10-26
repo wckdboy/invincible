@@ -563,11 +563,12 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   any file you can (keys and tokens included), reach any host, and have a program outside the
   sandbox write for it (`systemd-run --user` or `launchctl`, D-Bus, Docker's socket, the node's and
   agent's local APIs, any other socket). Where no sandbox can be set up (Linux without bubblewrap;
-  on macOS, where `sandbox-exec` is built in, a working directory whose path holds a quote, a
-  backslash or a line break), unattended commands are refused, not run unconfined, unless
-  `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned it off; where bubblewrap is
-  installed but cannot make its namespaces (some containers), each command fails with bubblewrap's
-  error as it starts. And the working directory is shared: a confined command can leave files there
+  on macOS, where `sandbox-exec` is built in, a working directory whose path holds a double quote
+  (`"`), a backslash or a newline; on either system, one whose path is not UTF-8), unattended
+  commands are refused, not run unconfined, unless `[agent] sandbox = "off"` or
+  `autobot run --no-sandbox` turned it off; where bubblewrap is installed but cannot make its
+  namespaces (some containers), each command fails with bubblewrap's error as it starts. And the
+  working directory is shared: a confined command can leave files there
   (`core.hooksPath` or `core.fsmonitor` in `.git/config`, a `Makefile`, `node_modules/.bin`, an
   `.envrc` once you `direnv allow` it) that run unconfined when a later interactive turn, or your
   own shell, works in that directory. `[agent] sandbox = "always"` confines interactive turns too
