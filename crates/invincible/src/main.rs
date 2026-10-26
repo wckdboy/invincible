@@ -1415,8 +1415,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     tracing::info!("serving on http://{} ({})", config.listen, invincible::version::VERSION);
     invincible::watchdog::spawn("gateway", config.listen, logs.clone());
     // Answers in flight may finish, for 15 s: then the engines are stopped whatever still runs,
-    // before a service manager's SIGKILL (at 20 s) would leave them running. launchd then kills
-    // what is left in the node's own process group, and engines are in groups of their own.
+    // which ends those answers, so the node stops before a service manager's SIGKILL (at 20 s).
     let stop_engines: Vec<_> = supervisors.iter().map(|s| s.abort_handle()).collect();
     axum::serve(listener, server::app(state))
         .with_graceful_shutdown(async move {

@@ -992,7 +992,7 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff. Stopping the node (Ctrl-C, `kill`, its service stopping, its terminal
   closing) stops its engines and whatever they started, once answers in flight have finished or
-  had 15 s.
+  had 15 s. A node that dies instead (`kill -9`, a crash, `Ctrl-\`) takes them with it at once.
 - An engine answers the node and nothing else on the machine. Each gets its own random key when
   the node starts, in a file only your user can read (`~/.invincible/engines/<n>.key`, mode 0600) that
   llama-server is given with `--api-key-file`: the path is on its command line, the key is not, so

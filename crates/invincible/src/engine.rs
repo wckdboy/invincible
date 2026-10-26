@@ -12,8 +12,8 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::process::Command;
@@ -455,25 +455,23 @@ pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
 
 /// An engine's process, and on Unix the process group it leads, which holds whatever it started
 /// too: the server a wrapper script runs without `exec`, say, which killing the script alone would
-/// leave running. The group is killed with the process ([Running::kill]), when this is dropped
-/// (the task aborted, the node stopping) and by [kill_all], until the process is reaped: its
-/// number may then go to another process.
+/// leave running. The group is killed when the process exits or is killed ([Running::kill]), when
+/// this is dropped (the task aborted, the node stopping), and by its lifeline ([Group]) when the
+/// node dies without stopping it.
 struct Running {
     child: tokio::process::Child,
-    group: Option<u32>,
+    group: Option<Group>,
 }
 
-/// The process groups of the engines running now ([Running]).
-static GROUPS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
-
-/// Kills every engine's process group now, for a node that exits without stopping its tasks (the
-/// watchdog's restart): launchd then kills what is left in the node's own process group, and
-/// engines are not in it.
-pub fn kill_all() {
-    let groups = std::mem::take(&mut *GROUPS.lock().unwrap_or_else(PoisonError::into_inner));
-    for group in groups {
-        kill_group(group);
-    }
+/// An engine's process group, and its lifeline: a shell in the group that kills it once the node
+/// is gone, however it goes (`kill -9`, a crash, the watchdog's exit, `Ctrl-\` in a terminal), as
+/// it waits on a pipe that only the node holds open and that closes with the node's process.
+/// Nothing else would stop the engine then: launchd kills what is left in the node's own process
+/// group and a terminal signals the node's, and engines are in neither. The lifeline is reaped only
+/// once the group is killed, so until then the group's number cannot go to another process.
+struct Group {
+    id: u32,
+    lifeline: tokio::process::Child,
 }
 
 #[cfg(unix)]
@@ -487,41 +485,59 @@ fn kill_group(group: u32) {
 #[cfg(not(unix))]
 fn kill_group(_: u32) {}
 
-impl Running {
-    fn new(child: tokio::process::Child) -> Self {
-        let group = child.id();
-        if let Some(group) = group {
-            GROUPS.lock().unwrap_or_else(PoisonError::into_inner).push(group);
-        }
-        Self { child, group }
-    }
+/// [child]'s process group, with its lifeline started in it.
+#[cfg(unix)]
+fn group(child: &tokio::process::Child) -> std::io::Result<Option<Group>> {
+    let Some(id) = child.id() else { return Ok(None) };
+    // The pipe is its stdin: the node's end stays in [Group::lifeline] until the group is killed.
+    let lifeline = Command::new("/bin/sh")
+        .args(["-c", "read _; kill -KILL 0"])
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(id as i32)
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| {
+            kill_group(id);
+            std::io::Error::new(e.kind(), format!("/bin/sh, to stop the engine with the node: {e}"))
+        })?;
+    Ok(Some(Group { id, lifeline }))
+}
 
+#[cfg(not(unix))]
+fn group(_: &tokio::process::Child) -> std::io::Result<Option<Group>> {
+    Ok(None)
+}
+
+impl Running {
     async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
         let status = self.child.wait().await;
-        self.forget();
+        // What it started goes with it.
+        self.stop_group().await;
         status
     }
 
     /// Kills the process group, then waits for the process.
     async fn kill(&mut self) {
-        if let Some(group) = self.forget() {
-            kill_group(group);
-        }
+        self.stop_group().await;
         let _ = self.child.kill().await;
     }
 
-    /// The group, taken out of [GROUPS]: it is being killed, or its process was reaped.
-    fn forget(&mut self) -> Option<u32> {
-        let group = self.group.take()?;
-        GROUPS.lock().unwrap_or_else(PoisonError::into_inner).retain(|g| *g != group);
-        Some(group)
+    /// Kills the process group, lifeline and all, then reaps the lifeline.
+    async fn stop_group(&mut self) {
+        if let Some(mut group) = self.group.take() {
+            kill_group(group.id);
+            let _ = group.lifeline.wait().await;
+        }
     }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        if let Some(group) = self.forget() {
-            kill_group(group);
+        if let Some(group) = &self.group {
+            kill_group(group.id);
         }
     }
 }
@@ -548,7 +564,8 @@ fn spawn(launch: &Launch) -> std::io::Result<Running> {
     // the node alone, which stops its engines as it shuts down.
     #[cfg(unix)]
     command.process_group(0);
-    Ok(Running::new(command.spawn()?))
+    let child = command.spawn()?;
+    Ok(Running { group: group(&child)?, child })
 }
 
 #[cfg(test)]

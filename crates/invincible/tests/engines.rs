@@ -371,6 +371,28 @@ async fn what_an_engine_started_stops_with_the_node() {
 }
 
 #[tokio::test]
+async fn what_an_engine_started_goes_when_the_node_dies() {
+    // Killed (`kill -9`, as for a node out of memory) or quit (Ctrl-\), the node stops nothing on
+    // the way out, and neither launchd, which kills what is left in the node's process group, nor
+    // the terminal reach engines: the engine's group must go by itself, the server with it.
+    for signal in ["-KILL", "-QUIT"] {
+        let (mut node, url) = serve(&format!("die{signal}"), &[], &[], Run::Wrapped);
+        let engine = started(&node.dir).await;
+        through_the_node(&url).await;
+        assert!(node.stop(signal), "the node did not die on {signal}");
+        let health = format!("http://127.0.0.1:{}/health", engine["port"]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while reqwest::get(&health).await.is_ok() {
+            if Instant::now() > deadline {
+                let _ = Command::new("kill").args(["-KILL", &engine["pid"].to_string()]).status();
+                panic!("the server outlived the node, killed with {signal}");
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+#[tokio::test]
 async fn an_engine_inherits_no_secret_and_no_llama_flag() {
     let (node, url) = serve("env", &[SHELL_KEY], &[], Run::Direct);
     let engine = started(&node.dir).await;
