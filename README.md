@@ -260,7 +260,7 @@ secrets = false
 ```sh
 autobot              # chat in the terminal
 autobot code         # code in this directory (see "Code with Autobot")
-autobot run "task"   # one task, no questions: anything not allowlisted is refused
+autobot run "task"   # one task, no questions: anything not allowlisted is refused, commands sandboxed
 autobot doctor       # check everything, 24/7 readiness included
 ```
 
@@ -410,6 +410,19 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
+  Nobody watches such a run, so its commands run sandboxed like a scheduled task's (see
+  **Sandbox** below), whatever `--approvals` allows: `--approvals trust` decides which commands
+  run, the sandbox bounds what they can change. A confined command writes only in `DIR` and
+  temporary directories, so a build that writes caches in your home (`~/.cargo`, `~/.npm`)
+  fails there. On Linux without bubblewrap, commands are refused and the run says so before it
+  starts; where bubblewrap cannot make its namespaces (some containers), each command fails
+  with bubblewrap's error. Either way nothing runs unconfined: install it
+  (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine you can
+  throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack
+  bubblewrap or the namespaces it needs and are themselves the boundary. It is a flag for one
+  run, not a setting, so the workflow file shows it; the run prints it on standard error before
+  it starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks
+  and the board stay confined.
 
 ### In your editor: Zed and other ACP editors
 
@@ -525,11 +538,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
-- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes) run
-  sandboxed: they read what you can, but write only in the working directory and temporary
-  directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users
-  may need to install). Without a sandbox they are refused, not run unconfined.
-  `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off.
+- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes, hooks,
+  Home Assistant's voice requests, the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
+  working directory and temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e.
+  bubblewrap, which `install.sh` users may need to install). Without a sandbox they are
+  refused, not run unconfined. `[agent] sandbox = "always"` confines interactive turns too;
+  `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run. Commands in
+  `[agent.docker]` or over `[agent.ssh]` run there instead. The sandbox does not limit reads or
+  the network.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands
@@ -743,8 +759,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Receipts:** each model call shows its model, tier and receipt id.
 - **Action log:** every command, file write, outside read and cloud send the agent asked for, whether
   it ran, and who decided (the rules, an "always" earlier in the session, or you on the CLI, the
-  app or Telegram), in `~/.autobot/actions.jsonl`. `autobot actions` shows it; the app reads it
-  through the agent API.
+  app or Telegram), in `~/.autobot/actions.jsonl`; for a command that ran, where and how confined
+  (`bwrap` or `sandbox-exec`, `off`, `container`, `ssh`). `autobot actions` shows it; the app
+  reads it through the agent API.
 - **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
   no public address. Strangers get a one-time code, and nobody gets in until you run
   `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
@@ -891,7 +908,8 @@ OpenAI Conversation): `autobot hooks new homeassistant` makes its API key, and t
 `http://<this machine>:7794/hooks/homeassistant/v1` on the hooks listener (another bot's:
 `/hooks/<bot>/homeassistant/v1`). On this machine the agent API serves it too, at
 `/v1/agent/openai/v1` with the gateway's token (`model` names the bot). Its turns follow the
-unattended rules: what is allowlisted runs, the rest is refused.
+unattended rules: what is allowlisted runs, the rest is refused, and its commands are confined
+like a scheduled task's (**Sandbox** above).
 
 `autobot doctor` checks WhatsApp (its secrets, the number, the hooks listener) and Home Assistant
 (the token, how many entities the agent sees), and lists the bots `autobot serve` runs with any

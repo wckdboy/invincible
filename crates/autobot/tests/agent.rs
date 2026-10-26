@@ -283,6 +283,91 @@ async fn a_scheduled_run_follows_allowlist_rules_with_nobody_to_ask() {
     assert!(session.messages.iter().any(|m| m["content"].as_str().is_some_and(|c| c.starts_with("refused"))));
 }
 
+/// `autobot run` as a CI job or another tool runs it, with `--json`: (whether it succeeded, the
+/// terminal tool's output, standard error, the action log's last entry).
+async fn autobot_run(dir: &std::path::Path, task_command: &str, extra: &[&str]) -> (bool, String, String, Value) {
+    let (url, _) = gateway(vec![call("terminal", json!({ "command": task_command })), say("Done.")]).await;
+    let home = dir.join("autobot");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(dir.join("token"), "secret").unwrap();
+    let config = format!(
+        "[gateway]\nurl = \"{url}\"\ntoken_file = \"{}\"\n\n[agent]\nheartbeat = \"off\"\nstream = false\n",
+        dir.join("token").display()
+    );
+    std::fs::write(home.join("config.toml"), config).unwrap();
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_autobot"))
+        .args(["run", "--json", "--approvals", "trust", "-C"])
+        .arg(&work)
+        .args(extra)
+        .arg("write the files")
+        .env("AUTOBOT_HOME", &home)
+        .env_remove("AUTOBOT_BOT")
+        .env("NO_COLOR", "1")
+        .output()
+        .await
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let output = stdout
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find(|e| e["type"] == "output" && e["tool"] == "terminal")
+        .map(|e| e["text"].as_str().unwrap_or_default().to_owned())
+        .unwrap_or_else(|| format!("no terminal output in: {stdout}"));
+    let log = std::fs::read_to_string(home.join("actions.jsonl")).unwrap_or_default();
+    let last = log.lines().last().and_then(|l| serde_json::from_str(l).ok()).unwrap_or(Value::Null);
+    (out.status.success(), output, String::from_utf8_lossy(&out.stderr).into_owned(), last)
+}
+
+#[tokio::test]
+async fn a_run_from_another_tool_confines_its_commands_like_a_scheduled_task() {
+    let dir = temp("run-sandbox");
+    // Outside the working directory and the temporary directories (which macOS's sandbox lets
+    // commands write to).
+    let outside = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        .join(format!(".autobot-run-sandbox-test-{}", std::process::id()));
+    let _ = std::fs::remove_file(&outside);
+    let command = format!("echo in > inside.txt; echo out > '{}'; echo done", outside.display());
+    // Nobody watches and every command is allowed (`--approvals trust`): still confined.
+    let (ok, output, stderr, entry) = autobot_run(&dir, &command, &[]).await;
+    assert!(ok, "{stderr}");
+    let wrote_outside = outside.exists();
+    let _ = std::fs::remove_file(&outside);
+    assert!(!wrote_outside, "a command of `autobot run` wrote outside its working directory: {output}");
+    if output.contains("bwrap") {
+        // No usable sandbox here (bubblewrap not installed, or user namespaces disallowed):
+        // refused or failed, never run unconfined, and the run says how to fix it.
+        assert!(!dir.join("work/inside.txt").exists(), "{output}");
+        if output.contains("not installed") {
+            assert!(stderr.contains("bubblewrap") && stderr.contains("--no-sandbox"), "{stderr}");
+        }
+    } else {
+        assert_eq!(std::fs::read_to_string(dir.join("work/inside.txt")).unwrap(), "in\n", "{output}");
+        assert!(output.contains("done"), "{output}");
+    }
+    assert_eq!(entry["sandbox"], autobot::sandbox::name(), "{entry}");
+
+    // `--no-sandbox`: unconfined, said loudly, and recorded in the action log.
+    let dir = temp("run-no-sandbox");
+    let (ok, output, stderr, entry) = autobot_run(&dir, &command, &["--no-sandbox"]).await;
+    let wrote_outside = outside.exists();
+    let _ = std::fs::remove_file(&outside);
+    assert!(ok, "{stderr}");
+    assert!(wrote_outside, "{output}");
+    assert!(stderr.contains("not sandboxed") && stderr.contains("--no-sandbox"), "{stderr}");
+    assert_eq!(entry["action"], format!("run: {command}"), "{entry}");
+    assert_eq!(entry["sandbox"], "off", "{entry}");
+    // `autobot actions` says so too.
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_autobot"))
+        .arg("actions")
+        .env("AUTOBOT_HOME", dir.join("autobot"))
+        .output()
+        .unwrap();
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains("allowed by the rules, sandbox off"), "{listed}");
+}
+
 #[tokio::test]
 async fn a_recipe_gets_only_its_tool_groups() {
     let (url, script) = gateway(vec![

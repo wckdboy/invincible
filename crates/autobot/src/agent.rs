@@ -1067,6 +1067,7 @@ impl Agent {
                 action: action.describe(),
                 ran,
                 by: by.to_owned(),
+                sandbox: (ran && matches!(action, Action::Command(_))).then(|| self.tools.confinement().to_owned()),
             };
             if let Err(e) = crate::actions::ActionLog::new(home).append(&entry) {
                 tracing::warn!("action log not written: {e}");
