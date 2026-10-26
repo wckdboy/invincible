@@ -798,6 +798,15 @@ fn spaced(text: &str) -> Cow<'_, str> {
     Cow::Owned(String::from_utf8(out).expect("only ASCII bytes replaced by ASCII"))
 }
 
+/// [raw] with its JSON escapes read as what they stand for (an address found across `\n`), where
+/// it reads as the inside of a JSON string; as it is where it does not.
+fn unescape(raw: &str) -> Cow<'_, str> {
+    if !raw.contains('\\') {
+        return Cow::Borrowed(raw);
+    }
+    serde_json::from_str::<String>(&format!("\"{raw}\"")).map_or(Cow::Borrowed(raw), Cow::Owned)
+}
+
 /// [value] as it is written inside a JSON string (a line break as `\n`).
 fn json_escape(value: &str) -> String {
     let quoted = Value::String(value.to_owned()).to_string();
@@ -1016,7 +1025,8 @@ impl Vault {
         if text.trim().is_empty() {
             return text.to_owned();
         }
-        let spans = find(&spaced(text), words);
+        let read = spaced(text);
+        let spans = find(&read, words);
         // Placeholder-shaped text the user wrote comes first: its numbers are never handed out.
         let literals: Vec<(String, String, String)> =
             PLACEHOLDER.captures_iter(text).map(|c| (c[1].to_owned(), c[2].to_owned(), c[3].to_owned())).collect();
@@ -1034,10 +1044,10 @@ impl Vault {
             }
             found.push(match escaped.iter().find(|&&(s, e, _)| s <= start && span.end <= e) {
                 Some(&hit) => hit,
-                None => (start, span.end, self.register(span.kind, &text[start..span.end])),
+                None => (start, span.end, self.register(span.kind, &unescape(&text[start..span.end]))),
             });
         }
-        self.replace(text, found)
+        self.replace(text, &read, found)
     }
 
     /// Where a known value is written escaped for a JSON string, and differently from how it was
@@ -1060,8 +1070,9 @@ impl Vault {
     /// whatever is next to it, and every occurrence of a known value (earliest, then longest first,
     /// no overlaps), also where it is written escaped for a JSON string (a tool result, tool-call
     /// arguments). A known value that overlaps what was found is replaced only where it covers it.
-    fn replace(&mut self, text: &str, mut detected: Vec<(usize, usize, usize)>) -> String {
-        let guards = Guards::new(text);
+    /// [read] is [text] as detection read it ([spaced]), where a link ends at an escaped line break.
+    fn replace(&mut self, text: &str, read: &str, mut detected: Vec<(usize, usize, usize)>) -> String {
+        let guards = Guards::new(read);
         let mut lower: Option<String> = None;
         let mut hits: Vec<(usize, usize, usize)> = Vec::new();
         // An escaped form that differs has a backslash.
@@ -1785,6 +1796,7 @@ mod tests {
     fn streams_restore_tool_call_arguments_and_reasoning() {
         let mut vault = Vault::default();
         assert_eq!(vault.redact("bob@posteo.de, +44 20 7946 0958"), "[EMAIL_1], [PHONE_1]");
+        assert_eq!(vault.redact("Hauptstraße 12a,\n10115 Berlin"), "[ADDRESS_1]");
         let mut restorer = StreamRestorer::new(vault);
         let args = |at: u64, s: &str| json!({ "tool_calls": [{ "index": at, "function": { "arguments": s } }] });
         let mut out = Vec::new();
@@ -1799,10 +1811,10 @@ mod tests {
             ),
             sse(args(0, "_1]\"}")),
             sse(json!({ "reasoning_content": "NE_1]", "reasoning": "ONE_1]" })),
-            // A server that sends whole calls, without an index.
-            sse(
-                json!({ "tool_calls": [{ "id": "c", "function": { "name": "mail", "arguments": "{\"cc\":\"[EMAIL_1]\"}" } }] }),
-            ),
+            // A server that sends whole calls, without an index. Their arguments are JSON too.
+            sse(json!({ "tool_calls": [{ "id": "c", "function": {
+                "name": "mail", "arguments": "{\"cc\":\"[EMAIL_1]\",\"to\":\"[ADDRESS_1]\"}"
+            } }] })),
         ] {
             let sent = restorer.push(event.as_bytes());
             assert!(!String::from_utf8_lossy(&sent).contains("[EMAIL_1]"), "{}", String::from_utf8_lossy(&sent));
@@ -1824,7 +1836,10 @@ mod tests {
         assert_eq!(calls[&0], r#"{"to":"bob@posteo.de"}"#);
         assert_eq!(calls[&1], r#"{"n":"[PHONE_"#);
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains(r#""arguments":"{\"cc\":\"bob@posteo.de\"}""#), "{text}");
+        assert!(
+            text.contains(r#""arguments":"{\"cc\":\"bob@posteo.de\",\"to\":\"Hauptstraße 12a,\\n10115 Berlin\"}""#),
+            "{text}"
+        );
         // Nothing to add to a `content` that was null: it stays null.
         assert!(text.contains(r#""content":null"#), "{text}");
     }
@@ -1990,6 +2005,36 @@ mod tests {
         assert_eq!(vault.redact("my sister Hannah Lisa Weber"), "my sister [PERSON_1]");
         assert_eq!(vault.redact("Hannah Lisa Weber called"), "[PERSON_1] called");
         assert_eq!(vault.found(), BTreeMap::from([("PERSON", 1)]));
+    }
+
+    #[test]
+    fn a_value_found_across_a_json_escape_comes_back_as_what_it_stands_for() {
+        // A tool result that is not one JSON document is read as text.
+        let mut body = json!({ "messages": [
+            { "role": "tool", "tool_call_id": "c1", "content": r#"Order 7: {"to":"Hauptstraße 12a,\n10115 Berlin"}"# }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], r#"Order 7: {"to":"[ADDRESS_1]"}"#);
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": "It goes to [ADDRESS_1].",
+            "tool_calls": [{ "function": { "name": "label", "arguments": r#"{"to":"[ADDRESS_1]"}"# } }]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        assert_eq!(message["content"], "It goes to Hauptstraße 12a,\n10115 Berlin.");
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
+        assert_eq!(parsed["to"], "Hauptstraße 12a,\n10115 Berlin");
+    }
+
+    #[test]
+    fn a_link_ends_at_a_json_escape_in_text_that_is_not_json() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("My friend Zork Blax"), "My friend [PERSON_1]");
+        assert_eq!(
+            vault.redact(r"GET https://api.example.org/x\nZork Blax called"),
+            r"GET https://api.example.org/x\n[PERSON_1] called"
+        );
     }
 
     #[test]

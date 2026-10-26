@@ -1076,10 +1076,12 @@ data_policy = "retention:30"        # what the provider does with prompts
   account numbers become placeholders (`[PERSON_1]`, `[EMAIL_1]`), with the same rules as Autobot
   ([spec/redaction.md](spec/redaction.md)): in the messages, the model's earlier reasoning and tool
   calls, the tools' descriptions and the `user` field. Later mentions of a known value are hidden
-  too, also where a tool result or tool call writes it escaped as JSON; one that is JSON is read
-  string by string, unescaped. In tool descriptions only emails and numbers are looked for, so a
-  tool's wording names no one, but known values are hidden there too. The answer gets the real
-  values back in its text, its reasoning and its tool calls' arguments, streams included, and the
+  too. A tool result or tool call that is JSON is read string by string, unescaped. Other text (JSON
+  lines, JSON inside prose) is read as written: a known value is found where its line breaks or
+  quotes are escaped, but not where its non-ASCII letters are (`Hauptstra\u00dfe`, as Python's
+  `json.dumps` writes it). In tool descriptions only emails and numbers are looked for, so a tool's
+  wording names no one, but known values are hidden there too. The answer gets the real values back
+  in its text, its reasoning and its tool calls' arguments, streams included, and the
   `invincible-redacted` header counts what was hidden.
 - A streamed request to OpenAI, Anthropic or DeepSeek asks for its token usage
   (`stream_options.include_usage`) when the client sets no `stream_options`, so the receipt counts
