@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 
 use crate::cluster::{self, Capabilities};
 use crate::devices::{KnownNode, StaticKey};
+use crate::engine::Engine;
 
 /// The header that names the node whose answer this is.
 pub const DISPATCHED_TO: &str = "invincible-dispatched-to";
@@ -188,7 +189,8 @@ pub struct Dispatch {
     /// forgets them, and a node that kept a request running when the head died is found out by
     /// its next answer, not by a count.
     inflight: Arc<Mutex<BTreeMap<String, u64>>>,
-    /// This machine's own hop (loopback, no session, no token: the engine is ours).
+    /// This machine's own hop (loopback, no session, no token: the engine is ours, and takes its
+    /// key).
     client: reqwest::Client,
 }
 
@@ -303,10 +305,10 @@ impl Dispatch {
     /// Sends one non-streaming chat completion to the node [`choose`] names (spec/dispatch.md,
     /// Lifecycle), and to one other node if the first fails before it answers at all.
     ///
-    /// [self_url] is this machine's own engine for the model (the caller knows its engines); it is
+    /// [here] is this machine's own engine for the model (the caller knows its engines); it is
     /// only used when the choice is this node. All of [body] goes on unchanged, so the request the
     /// answering node sees is the one the client wrote.
-    pub async fn answer(&self, self_url: Option<&str>, model: Option<&str>, body: &[u8]) -> Result<Reply, Unavailable> {
+    pub async fn answer(&self, here: Option<&Engine>, model: Option<&str>, body: &[u8]) -> Result<Reply, Unavailable> {
         let snapshot = self.snapshot(model).await;
         let mut rows = snapshot.rows;
         let mut failures: Vec<String> = Vec::new();
@@ -337,7 +339,7 @@ impl Dispatch {
                 }
             };
             let slot = self.slot(&name);
-            let outcome = self.call(&name, self_url, body).await;
+            let outcome = self.call(&name, here, body).await;
             drop(slot);
             let may_retry = attempt < RETRIES;
             match outcome {
@@ -365,12 +367,11 @@ impl Dispatch {
     }
 
     /// One attempt on [name]: the answer's status and body, or why no answer came.
-    async fn call(&self, name: &str, self_url: Option<&str>, body: &[u8]) -> Result<(u16, Vec<u8>), String> {
+    async fn call(&self, name: &str, here: Option<&Engine>, body: &[u8]) -> Result<(u16, Vec<u8>), String> {
         if name == self.name {
-            let url = self_url.ok_or_else(|| "this node serves no engine for it".to_owned())?;
-            let response = self
-                .client
-                .post(format!("{url}{PATH}"))
+            let engine = here.ok_or_else(|| "this node serves no engine for it".to_owned())?;
+            let response = engine
+                .authorized(self.client.post(format!("{}{PATH}", engine.base_url)))
                 .header(CONTENT_TYPE, "application/json")
                 .body(body.to_vec())
                 .send()

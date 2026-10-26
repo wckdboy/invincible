@@ -743,11 +743,11 @@ async fn dispatch_completion(
     let named = (request.model != "auto").then(|| request.model.clone());
     // What this machine would answer with, if the choice is this node: a healthy engine for the
     // model (or for anything, when the request names none).
-    let self_url = state
+    let here = state
         .engines
         .iter()
         .find(|engine| engine.healthy() && named.as_deref().is_none_or(|model| engine.id == model))
-        .map(|engine| engine.base_url.clone());
+        .cloned();
     let mut draft = match Draft::new() {
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
@@ -762,7 +762,7 @@ async fn dispatch_completion(
     draft.data_policy = Some("owned".to_owned());
     draft.images = crate::media::images(&parsed).iter().map(crate::media::Image::to_json).collect();
 
-    let outcome = dispatch.answer(self_url.as_deref(), named.as_deref(), &body).await;
+    let outcome = dispatch.answer(here.as_ref(), named.as_deref(), &body).await;
     let mut answered_model = None;
     let (node, response) = match outcome {
         Ok(reply) => {
@@ -1643,7 +1643,8 @@ fn estimate_tokens(body: &Value) -> u64 {
 /// on after [crate::egress::LOCAL_SILENCE] of silence).
 async fn forward(client: &reqwest::Client, engine: &Engine, path: &str, body: Bytes, streaming: bool) -> Response {
     let url = format!("{}{path}", engine.base_url);
-    crate::relay::engine(client, &url, body, streaming, crate::relay::KEEP_ALIVE, crate::egress::LOCAL_SILENCE).await
+    let (every, silence) = (crate::relay::KEEP_ALIVE, crate::egress::LOCAL_SILENCE);
+    crate::relay::engine(client, &url, engine.key(), body, streaming, every, silence).await
 }
 
 pub(crate) fn block_status(reason: Reason) -> StatusCode {

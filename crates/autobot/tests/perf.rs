@@ -14,22 +14,28 @@ use serde_json::json;
 use support::*;
 
 /// `invincible serve` with one local model whose engine is the stand-in: the gateway runs a
-/// fake `llama-server` that only says which port it was given, and the stand-in listens there.
+/// fake `llama-server` that only says which port and key file it was given, and the stand-in
+/// listens there, requiring that key.
 struct Gateway {
     proc: Proc,
     url: String,
     engine: Mock,
+    /// The engine's key, for the requests that go to it directly.
+    key: String,
 }
 
 async fn gateway(dir: &std::path::Path, homes: &Homes, shape: Shape) -> Gateway {
     let port = free_port();
     let port_file = dir.join("engine.port");
+    let key_file = dir.join("engine.key");
     let fake = dir.join("fake-llama-server");
-    // Exits when the gateway does (its parent), so nothing is left behind.
+    // Exits when the gateway does (its parent), so nothing is left behind. The key first: the
+    // port is what the test waits for.
     std::fs::write(
         &fake,
         format!(
-            "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --port ] && echo \"$2\" > '{}'; shift; done\nwhile kill -0 $PPID 2>/dev/null; do sleep 1; done\n",
+            "#!/bin/sh\nfor a in \"$@\"; do [ \"$prev\" = --api-key-file ] && cp \"$a\" '{}'; prev=\"$a\"; done\nwhile [ $# -gt 0 ]; do [ \"$1\" = --port ] && echo \"$2\" > '{}'; shift; done\nwhile kill -0 $PPID 2>/dev/null; do sleep 1; done\n",
+            key_file.display(),
             port_file.display()
         ),
     )
@@ -58,7 +64,8 @@ async fn gateway(dir: &std::path::Path, homes: &Homes, shape: Shape) -> Gateway 
         assert!(Instant::now() < until, "the gateway did not start its engine: {}", dir.join("gateway.log").display());
         tokio::time::sleep(Duration::from_millis(20)).await;
     };
-    let engine = mock(([127, 0, 0, 1], engine_port).into(), shape).await;
+    let key = std::fs::read_to_string(&key_file).unwrap().trim().to_owned();
+    let engine = mock_keyed(([127, 0, 0, 1], engine_port).into(), shape, &key).await;
     let url = format!("http://127.0.0.1:{port}");
     wait_healthy(&format!("{url}/health"), Duration::from_secs(20)).await;
     // The engine counts once its health check passed (every 500 ms).
@@ -72,29 +79,29 @@ async fn gateway(dir: &std::path::Path, homes: &Homes, shape: Shape) -> Gateway 
         assert!(Instant::now() < until, "the engine never became healthy: {models}");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    Gateway { proc, url, engine }
+    Gateway { proc, url, engine, key }
 }
 
 fn chat_body(stream: bool) -> serde_json::Value {
     json!({ "model": "mock", "stream": stream, "messages": [{ "role": "user", "content": "say something short" }] })
 }
 
-/// One whole request: its time.
-async fn timed(client: &reqwest::Client, url: &str, stream: bool) -> Duration {
+/// One whole request with [token]: its time.
+async fn timed(client: &reqwest::Client, url: &str, token: &str, stream: bool) -> Duration {
     let started = Instant::now();
-    let response = client.post(format!("{url}/v1/chat/completions")).bearer_auth(TOKEN).json(&chat_body(stream)).send();
+    let response = client.post(format!("{url}/v1/chat/completions")).bearer_auth(token).json(&chat_body(stream)).send();
     let body = response.await.unwrap().bytes().await.unwrap();
     assert!(!body.is_empty());
     started.elapsed()
 }
 
-/// A streamed request: the time to its first content piece (`tok`).
-async fn first_token(client: &reqwest::Client, url: &str) -> Duration {
+/// A streamed request with [token]: the time to its first content piece (`tok`).
+async fn first_token(client: &reqwest::Client, url: &str, token: &str) -> Duration {
     use futures_util::StreamExt;
     let started = Instant::now();
     let response = client
         .post(format!("{url}/v1/chat/completions"))
-        .bearer_auth(TOKEN)
+        .bearer_auth(token)
         .json(&chat_body(true))
         .send()
         .await
@@ -126,14 +133,14 @@ async fn gateway_added_latency_and_memory() {
     let engine = g.engine.url();
     // Warm both paths up (connections, caches).
     for _ in 0..20 {
-        timed(&client, &engine, false).await;
-        timed(&client, &g.url, false).await;
+        timed(&client, &engine, &g.key, false).await;
+        timed(&client, &g.url, TOKEN, false).await;
     }
     let n = 400;
     let (mut direct, mut via) = (Vec::new(), Vec::new());
     for _ in 0..n {
-        direct.push(timed(&client, &engine, false).await);
-        via.push(timed(&client, &g.url, false).await);
+        direct.push(timed(&client, &engine, &g.key, false).await);
+        via.push(timed(&client, &g.url, TOKEN, false).await);
     }
     let (d50, v50) = (quantile_ms(&mut direct, 0.5), quantile_ms(&mut via, 0.5));
     let (d99, v99) = (quantile_ms(&mut direct, 0.99), quantile_ms(&mut via, 0.99));
@@ -143,8 +150,8 @@ async fn gateway_added_latency_and_memory() {
     report("gateway.added_p99", v99 - d99, "ms");
     let (mut direct, mut via) = (Vec::new(), Vec::new());
     for _ in 0..100 {
-        direct.push(first_token(&client, &engine).await);
-        via.push(first_token(&client, &g.url).await);
+        direct.push(first_token(&client, &engine, &g.key).await);
+        via.push(first_token(&client, &g.url, TOKEN).await);
     }
     let (d50, v50) = (quantile_ms(&mut direct, 0.5), quantile_ms(&mut via, 0.5));
     report("gateway.first_token_direct_p50", d50, "ms");
@@ -152,8 +159,8 @@ async fn gateway_added_latency_and_memory() {
     report("gateway.first_token_added_p50", v50 - d50, "ms");
     let (mut direct, mut via) = (Vec::new(), Vec::new());
     for _ in 0..100 {
-        direct.push(timed(&client, &engine, true).await);
-        via.push(timed(&client, &g.url, true).await);
+        direct.push(timed(&client, &engine, &g.key, true).await);
+        via.push(timed(&client, &g.url, TOKEN, true).await);
     }
     report("gateway.stream_added_p50", quantile_ms(&mut via, 0.5) - quantile_ms(&mut direct, 0.5), "ms");
     // 1000 requests through the gateway in all, 8 at a time for the rest.
@@ -161,7 +168,7 @@ async fn gateway_added_latency_and_memory() {
     let rest: Vec<_> = (done..1000)
         .map(|i| {
             let (client, url) = (client.clone(), g.url.clone());
-            async move { timed(&client, &url, i % 2 == 0).await }
+            async move { timed(&client, &url, TOKEN, i % 2 == 0).await }
         })
         .collect();
     let started = Instant::now();

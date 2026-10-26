@@ -992,7 +992,56 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
   is given up on with an `engine_stalled` error event (a 504 when not streamed, where 30 minutes
   is the whole answer's limit).
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
-  restarted with backoff, and stopping the node stops its engines.
+  restarted with backoff. Stopping the node (Ctrl-C, `kill`, its service stopping, its terminal
+  closing unless it was started with `nohup`) stops its engines and whatever they started, once
+  answers in flight have finished or had 15 s. Under systemd that takes `KillMode=mixed`, which
+  the unit `autobot setup` or `autobot service install` writes has; rerunning the installer, or
+  `invincible update` run by hand, writes the unit again, but the daily update leaves it as it is.
+  With systemd's default kill mode, a unit an earlier release wrote, or one of your own, stops the
+  engines at the same moment as the node. A node that dies instead (`kill -9`, a crash, `Ctrl-\`)
+  takes them with it as its process ends: after a crash, once the crash reporter (ReportCrash,
+  systemd-coredump) lets it go.
+- An engine answers the node and nothing else on the machine. Each gets its own random key when
+  the node starts, in a file only your user can read (`~/.invincible/engines/<n>.key`, mode 0600) that
+  llama-server is given with `--api-key-file`: the path is on its command line, the key is not, so
+  `ps` does not show it. The node sends the key with every request. Anything else that finds an
+  engine's loopback port (another user, a web page, a script) gets a 401 for a completion or
+  anything else that runs the model, not an answer that skips the receipts, redaction and audit.
+  What llama-server keeps open stays open: `/health` and its web page, and in ik_llama.cpp also
+  `/models`, `/v1/models` and `/api/tags`, which name the model it serves.
+- The node checks the key rather than trusting it: once an engine is healthy, and before it
+  serves anything, the node asks it for a chat completion without the key. A 401 lets it serve.
+  A 503 or no answer is asked again at the next health check, and until then its model is not
+  served: a model still loading is not stopped for it. Any other answer stops the engine, and its
+  model is not served until the node restarts; the node's log names the model and says to use a
+  llama-server that honours `--api-key-file`. llama.cpp's and ik_llama.cpp's do; a wrapper that
+  drops the flag would not, nor would a container the key file is not mounted into (that one does
+  not start at all). Stopping the engine stops what it started too (it runs in a process group of
+  its own), so the server a wrapper script runs goes with the script. What the node did not start
+  does not, such as a container `docker run` started: when something still answers on the
+  engine's port, the log says so and names the port, and it must be stopped by hand. A process
+  running as your own user can still read the key file; confining engines is planned.
+- A shard's `ggml-rpc-server` takes no key: llama.cpp's RPC protocol has none. It listens on
+  loopback only, so from other machines only a shard link from a head you named reaches it, but
+  any process on this machine can connect to its port, as to a head's loopback doors
+  ([spec/cluster.md](spec/cluster.md), Known limits).
+- An engine starts with a clean environment: `PATH`, `HOME`, the temporary directory, the locale,
+  the library paths, and the GPU runtimes' and ggml's own variables (`CUDA_*`, `HIP_*`, `ROCR_*`,
+  `HSA_*`, `ROCM_*`, `VK_*`, `ONEAPI_*`, `SYCL_*`, `ZE_*`, `ZES_*`, `GGML_*`), never a name with
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL` in it, and not the variables that say
+  where to load code from: ggml's (`GGML_BACKEND_PATH`, a backend library ggml would load, and
+  `GGML_ET_KERNELS_PATH`, `GGML_METAL_PATH_RESOURCES`, `GGML_OPENCL_KERNEL_CACHE_DIR`,
+  `GGML_OPENVINO_CACHE_DIR`, `GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`), the libraries CUDA and
+  ROCm would load into the engine (`CUDA_INJECTION64_PATH`, `HSA_TOOLS_LIB`), where CUDA and
+  SYCL cache compiled kernels (`CUDA_CACHE_PATH`, `SYCL_CACHE_DIR`) and where Vulkan
+  finds layers (`VK_LAYER_PATH`, `VK_ADD_LAYER_PATH`, `VK_IMPLICIT_LAYER_PATH`,
+  `VK_ADD_IMPLICIT_LAYER_PATH`). Provider keys and `LLAMA_*`
+  variables stay with the node: llama.cpp reads `LLAMA_ARG_*` as flags (`LLAMA_ARG_TOOLS` and
+  `LLAMA_ARG_AGENT` turn on its file and shell tools), so llama-server options go in
+  `[engine] extra_args` instead. The same holds for `ggml-rpc-server`, `llama-bench` and the
+  device probes. A server you run yourself and name in `[[cloud]]`, `[[speech]]` or `[[images]]`
+  is not one of the node's engines: it gets the key you configure for it, and its port is as open
+  as you leave it.
 - Images (OpenAI `image_url` parts, Messages `image` blocks) pass through to the model as they
   came; a request may be up to 32 MiB. A local model sees images when it has its multimodal
   projector: `mmproj = "/models/mmproj-….gguf"` in its `[[models]]` entry (passed to

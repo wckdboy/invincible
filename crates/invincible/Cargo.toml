@@ -34,6 +34,10 @@ ed25519-dalek.workspace = true
 mdns-sd.workspace = true
 chrono.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# An engine's process group, killed with everything in it (the same crate autobot uses).
+rustix = { version = "1", features = ["process"] }
+
 [dev-dependencies]
 # A paused clock for tests of timeouts.
 tokio = { workspace = true, features = ["test-util"] }
