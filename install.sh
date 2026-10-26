@@ -207,7 +207,10 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir -p "$INV_HOME"
 waited=0
-while ! mkdir "$LOCK" 2>/dev/null; do
+# The lock is taken when its pid file is made, by the shell with noclobber (O_EXCL). mkdir alone
+# is not enough: uutils mkdir (Ubuntu 26.04's) also exits 0 when another run made the directory
+# a moment before.
+while ! { mkdir "$LOCK" 2>/dev/null && (set -C; echo "$$" >"$LOCK/pid") 2>/dev/null; }; do
     holder=$(cat "$LOCK/pid" 2>/dev/null || true)
     if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
         rm -rf "$LOCK" # left by a run that was killed
@@ -218,7 +221,6 @@ while ! mkdir "$LOCK" 2>/dev/null; do
     [ "$waited" -le 120 ] || die "another install (pid ${holder:-?}) is still running; remove $LOCK if it is not"
     sleep 1
 done
-echo "$$" >"$LOCK/pid"
 
 # --- Services: where their definitions are ----------------------------------------------------
 if [ "$OS" = Darwin ]; then
