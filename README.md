@@ -1083,9 +1083,10 @@ data_policy = "retention:30"        # what the provider does with prompts
   `invincible-redacted` header counts what was hidden.
 - A streamed request to OpenAI, Anthropic or DeepSeek asks for its token usage
   (`stream_options.include_usage`) when the client sets no `stream_options`, so the receipt counts
-  the tokens; that extra chunk is kept from a client that did not ask for it. OpenRouter reports
-  usage unasked. Another endpoint gets the field only with `include_usage = true` in its
-  `[[cloud]]` (some APIs refuse fields they do not know); `false` turns it off for a preset.
+  the tokens; that usage is kept from a client that did not ask for it, whether it comes in a chunk
+  of its own or on the last one (DeepSeek). OpenRouter reports usage unasked. Another endpoint gets
+  the field only with `include_usage = true` in its `[[cloud]]` (some APIs refuse fields they do
+  not know); `false` turns it off for a preset.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
 

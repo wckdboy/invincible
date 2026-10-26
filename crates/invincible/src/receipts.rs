@@ -486,8 +486,8 @@ pub struct Draft {
     answer_bytes: u64,
     /// Whether the answer's body ended on its own, rather than the client going away mid-stream.
     complete: bool,
-    /// The usage a streamed cloud answer reported in a chunk kept back from the client (the node
-    /// asked for it, the client did not: crate::cloud::prepare). The answer's tokens.
+    /// The usage a streamed cloud answer reported, kept back from the client (the node asked for
+    /// it, the client did not: crate::cloud::prepare). The answer's tokens.
     pub withheld_usage: Arc<Mutex<Option<Value>>>,
     /// The answer's status ([attach]).
     status: u16,
@@ -1016,7 +1016,7 @@ data: {"type":"error","status":400,"error":{"type":"invalid_request_error","code
         assert_eq!(usage(br#"{"usage":{"input_tokens":14,"output_tokens":20}}"#), Some((14, 20)));
     }
 
-    /// A streamed cloud answer whose usage chunk the client did not get still has its tokens.
+    /// A streamed cloud answer whose usage the client did not get still has its tokens.
     #[test]
     fn usage_kept_back_from_the_client_is_counted() {
         let mut draft = bound_draft();

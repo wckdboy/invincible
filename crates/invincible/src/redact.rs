@@ -1313,8 +1313,7 @@ pub struct StreamRestorer {
     line: Vec<u8>,
     /// What is held back, per choice index and channel.
     carry: BTreeMap<(u64, Channel), String>,
-    /// Where the usage of a usage-only chunk goes instead of to the client
-    /// ([StreamRestorer::withholding_usage]).
+    /// Where the usage goes instead of to the client ([StreamRestorer::withholding_usage]).
     usage: Option<Arc<Mutex<Option<Value>>>>,
     /// Set after a chunk was kept back: the blank line that ended its event goes too.
     drop_blank: bool,
@@ -1346,9 +1345,11 @@ impl StreamRestorer {
         Self { vault, line: Vec::new(), carry: BTreeMap::new(), usage: None, drop_blank: false }
     }
 
-    /// Also keeps back a chunk that carries only usage (`"choices": []`): the node asked the
-    /// provider for it and the client did not. Its `usage` goes to [into], and the other chunks
-    /// lose the `"usage": null` that asking added.
+    /// Also keeps the usage from the client: the node asked the provider for it and the client did
+    /// not. It goes to [into] from whichever chunk carries it: one of its own (`"choices": []`,
+    /// as OpenAI sends it), which is then not sent, or the last one with the finished choice (as
+    /// DeepSeek sends it), which is sent without it. The other chunks lose the `"usage": null`
+    /// that asking added.
     pub fn withholding_usage(mut self, into: Arc<Mutex<Option<Value>>>) -> Self {
         self.usage = Some(into);
         self
@@ -1428,20 +1429,19 @@ impl StreamRestorer {
             return out;
         }
         let Ok(mut chunk) = serde_json::from_str::<Value>(data) else { return line.to_vec() };
+        // Usage the node asked for leaves every chunk: the one that carries it for [into], the
+        // others' `"usage": null` for nothing.
         if let Some(into) = &self.usage
-            && chunk.get("choices").and_then(Value::as_array).is_some_and(Vec::is_empty)
-            && chunk.get("usage").is_some_and(Value::is_object)
-        {
-            *into.lock().expect("usage lock") = chunk.get_mut("usage").map(Value::take);
-            self.drop_blank = true;
-            return Vec::new();
-        }
-        // With usage asked for, a provider marks every other chunk `"usage": null`.
-        if self.usage.is_some()
             && let Some(object) = chunk.as_object_mut()
-            && object.get("usage").is_some_and(Value::is_null)
+            && let Some(usage) = object.remove("usage")
+            && usage.is_object()
         {
-            object.remove("usage");
+            *into.lock().expect("usage lock") = Some(usage);
+            // Nothing left for the client.
+            if object.get("choices").and_then(Value::as_array).is_none_or(Vec::is_empty) {
+                self.drop_blank = true;
+                return Vec::new();
+            }
         }
         if let Some(choices) = chunk.get_mut("choices").and_then(Value::as_array_mut) {
             for choice in choices {
@@ -1991,6 +1991,43 @@ mod tests {
         out.extend(passed.finish());
         let out = String::from_utf8(out).unwrap();
         assert!(out.contains(r#""prompt_tokens":5"#) && out.contains(r#""usage":null"#), "{out}");
+    }
+
+    #[test]
+    fn usage_on_the_last_chunk_is_kept_back_and_the_chunk_sent() {
+        // As DeepSeek sends it: no chunk of its own, the usage rides with the finished choice.
+        let usage = json!({ "prompt_tokens": 5, "completion_tokens": 2 });
+        let events = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({ "choices": [{ "index": 0, "delta": { "content": "to [EMA" }, "finish_reason": null }], "usage": null }),
+            json!({ "choices": [{ "index": 0, "delta": { "content": "IL_1]" }, "finish_reason": "stop" }], "usage": usage })
+        );
+        let vault = || {
+            let mut vault = Vault::default();
+            vault.redact("bob@posteo.de");
+            vault
+        };
+        let into = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut kept = StreamRestorer::new(vault()).withholding_usage(into.clone());
+        let mut out = kept.push(events.as_bytes());
+        out.extend(kept.finish());
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({ "choices": [{ "index": 0, "delta": { "content": "to " }, "finish_reason": null }] }),
+                json!({ "choices": [{ "index": 0, "delta": { "content": "bob@posteo.de" }, "finish_reason": "stop" }] })
+            )
+        );
+        assert_eq!(*into.lock().unwrap(), Some(usage.clone()));
+
+        // The client asked for it: the chunks go as they came, restored.
+        let mut passed = StreamRestorer::new(vault());
+        let mut out = passed.push(events.as_bytes());
+        out.extend(passed.finish());
+        let out = String::from_utf8(out).unwrap();
+        let last = json!({ "choices": [{ "index": 0, "delta": { "content": "bob@posteo.de" }, "finish_reason": "stop" }], "usage": usage });
+        assert!(out.contains(&format!("data: {last}\n")) && out.contains(r#""usage":null"#), "{out}");
     }
 
     #[test]

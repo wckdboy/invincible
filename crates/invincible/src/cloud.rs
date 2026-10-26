@@ -152,8 +152,8 @@ pub struct Prepared {
     pub body: Vec<u8>,
     /// Restores the answer.
     pub vault: Vault,
-    /// The node asked for the stream's token usage and the client did not: the chunk that carries
-    /// it is for the receipt, not for the client.
+    /// The node asked for the stream's token usage and the client did not: the usage is for the
+    /// receipt, not for the client, whichever chunk carries it.
     pub usage_for_receipt: bool,
 }
 

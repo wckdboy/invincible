@@ -25,7 +25,8 @@ struct Seen {
 /// A stub provider. `mode`: "echo" answers with the last user message; "stream" streams it with a
 /// placeholder split across chunks; "call" answers with reasoning and a tool call that name the
 /// last message's placeholder; "call-stream" streams them, the placeholder split in each, and the
-/// usage when asked for it; "fail" answers 500; "deny" answers 401.
+/// usage when asked for it in a chunk of its own (as OpenAI's), "call-stream-last" with it on the
+/// last chunk (as DeepSeek's); "fail" answers 500; "deny" answers 401.
 async fn provider(mode: &'static str) -> (String, Arc<Mutex<Seen>>) {
     let seen = Arc::new(Mutex::new(Seen::default()));
     let record = seen.clone();
@@ -45,7 +46,7 @@ async fn provider(mode: &'static str) -> (String, Arc<Mutex<Seen>>) {
                     "fail" => (StatusCode::INTERNAL_SERVER_ERROR, "down").into_response(),
                     "deny" => (StatusCode::UNAUTHORIZED, axum::Json(json!({ "error": { "message": "bad key" } })))
                         .into_response(),
-                    "call" | "call-stream" => {
+                    "call" | "call-stream" | "call-stream-last" => {
                         let at = said.find('[').unwrap();
                         let placeholder = &said[at..at + said[at..].find(']').unwrap() + 1];
                         if mode == "call" {
@@ -73,6 +74,12 @@ async fn provider(mode: &'static str) -> (String, Arc<Mutex<Seen>>) {
                             format!("data: {chunk}\n\n")
                         };
                         let args = |s: &str| json!({ "tool_calls": [{ "index": 0, "function": { "arguments": s } }] });
+                        let tokens = json!({ "prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19 });
+                        let mut finish = json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] });
+                        let on_last = mode == "call-stream-last";
+                        if usage && on_last {
+                            finish["usage"] = tokens.clone();
+                        }
                         let mut events = [
                             delta(json!({ "role": "assistant", "reasoning_content": format!("Sending to {a}") })),
                             delta(json!({ "reasoning_content": format!("{b}{c}.") })),
@@ -80,14 +87,11 @@ async fn provider(mode: &'static str) -> (String, Arc<Mutex<Seen>>) {
                                 "function": { "name": "send", "arguments": format!("{{\"to\":\"{a}") } }] })),
                             delta(args(b)),
                             delta(args(&format!("{c}\"}}"))),
-                            format!("data: {}\n\n", json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] })),
+                            format!("data: {finish}\n\n"),
                         ]
                         .concat();
-                        if usage {
-                            events.push_str(&format!(
-                                "data: {}\n\n",
-                                json!({ "choices": [], "usage": { "prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19 } })
-                            ));
+                        if usage && !on_last {
+                            events.push_str(&format!("data: {}\n\n", json!({ "choices": [], "usage": tokens })));
                         }
                         events.push_str("data: [DONE]\n\n");
                         ([("content-type", "text/event-stream")], events).into_response()
@@ -385,15 +389,42 @@ async fn streamed_tool_calls_and_reasoning_are_restored_across_chunks() {
     assert_eq!(seen.lock().unwrap().bodies[0]["stream_options"], json!({ "include_usage": true }));
     assert_eq!(empty, 0, "{text}");
     assert!(!text.contains("usage"), "{text}");
-    let receipt: Value = reqwest::Client::new()
-        .get(format!("{node}/v1/receipts/{id}"))
-        .bearer_auth("token")
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let receipt = receipt_of(&node, &id).await;
+    assert_eq!(receipt["receipt"]["tokens"], json!({ "input": 12, "output": 7 }), "{receipt}");
+}
+
+/// The receipt of request [id].
+async fn receipt_of(node: &str, id: &str) -> Value {
+    let url = format!("{node}/v1/receipts/{id}");
+    reqwest::Client::new().get(url).bearer_auth("token").send().await.unwrap().json().await.unwrap()
+}
+
+#[tokio::test]
+async fn usage_on_the_last_chunk_is_kept_back_and_the_chunk_sent() {
+    let (url, seen) = provider("call-stream-last").await;
+    let node = open_node(&url).await;
+    let response = chat(&node, agent_turn(true)).send().await.unwrap();
+    let id = response.headers()["invincible-request-id"].to_str().unwrap().to_owned();
+    let text = response.text().await.unwrap();
+    assert_eq!(seen.lock().unwrap().bodies[0]["stream_options"], json!({ "include_usage": true }));
+    // The finished choice still comes, without the usage the client did not ask for.
+    let (reasoning, calls, empty) = assemble(&text);
+    assert_eq!(reasoning, "Sending to bob@posteo.de.");
+    assert_eq!(calls, [r#"{"to":"bob@posteo.de"}"#]);
+    assert_eq!(empty, 0, "{text}");
+    assert!(text.contains(r#""finish_reason":"tool_calls""#) && !text.contains("usage"), "{text}");
+    let receipt = receipt_of(&node, &id).await;
+    assert_eq!(receipt["receipt"]["tokens"], json!({ "input": 12, "output": 7 }), "{receipt}");
+
+    // A client that asked gets the last chunk as it came.
+    let mut body = agent_turn(true);
+    body["stream_options"] = json!({ "include_usage": true });
+    let response = chat(&node, body).send().await.unwrap();
+    let id = response.headers()["invincible-request-id"].to_str().unwrap().to_owned();
+    let text = response.text().await.unwrap();
+    let last = text.lines().rfind(|l| l.contains("finish_reason")).unwrap_or_default();
+    assert!(last.contains(r#""finish_reason":"tool_calls""#) && last.contains(r#""prompt_tokens":12"#), "{text}");
+    let receipt = receipt_of(&node, &id).await;
     assert_eq!(receipt["receipt"]["tokens"], json!({ "input": 12, "output": 7 }), "{receipt}");
 }
 
