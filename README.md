@@ -1076,7 +1076,9 @@ data_policy = "retention:30"        # what the provider does with prompts
   account numbers become placeholders (`[PERSON_1]`, `[EMAIL_1]`), with the same rules as Autobot
   ([spec/redaction.md](spec/redaction.md)): in the messages, the model's earlier reasoning and tool
   calls, the tools' descriptions and the `user` field. Later mentions of a known value are hidden
-  too, also where a tool result or tool call writes it escaped as JSON. The answer gets the real
+  too, also where a tool result or tool call writes it escaped as JSON; one that is JSON is read
+  string by string, unescaped. In tool descriptions only emails and numbers are looked for, so a
+  tool's wording names no one, but known values are hidden there too. The answer gets the real
   values back in its text, its reasoning and its tool calls' arguments, streams included, and the
   `invincible-redacted` header counts what was hidden.
 - A streamed request to OpenAI, Anthropic or DeepSeek asks for its token usage

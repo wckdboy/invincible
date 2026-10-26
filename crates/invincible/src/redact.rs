@@ -6,6 +6,7 @@
 //! matches its one character of context instead and captures the core in group 1. Leftmost-first
 //! matching picks the same core a backtracking engine with look-around would.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -410,6 +411,11 @@ impl Found<'_> {
 
 /// Personal data in [text], non-overlapping, in order.
 pub fn detect(text: &str) -> Vec<Span> {
+    find(text, true)
+}
+
+/// [detect]; names and addresses ([Kind::wordy]) only with [words].
+fn find(text: &str, words: bool) -> Vec<Span> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -420,8 +426,10 @@ pub fn detect(text: &str) -> Vec<Span> {
     cards(text, &guards, &mut found);
     accounts(text, &guards, &mut found);
     phones(text, &guards, &mut found);
-    addresses(text, &guards, &mut found);
-    people(text, &guards, &mut found);
+    if words {
+        addresses(text, &guards, &mut found);
+        people(text, &guards, &mut found);
+    }
 
     // The most reliable first, then the longest, then the earliest; keep what does not overlap.
     let mut list = found.list;
@@ -698,11 +706,74 @@ fn digits_of(kind: Kind, value: &str) -> Option<String> {
     (kind.numeric() && !value.chars().any(char::is_alphabetic) && digits.len() >= MIN_DIGITS).then_some(digits)
 }
 
-/// Not part of a longer word or number.
+fn word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Not part of a longer word or number. A JSON escape next to it counts as what it stands for: in
+/// `"Hi,\nHannah"` the `n` of `\n` is a line break, not a letter.
 fn bounded(text: &str, start: usize, end: usize) -> bool {
-    let before = text[..start].chars().next_back().unwrap_or(' ');
-    let after = text[end..].chars().next().unwrap_or(' ');
-    !before.is_alphanumeric() && before != '_' && !after.is_alphanumeric() && after != '_'
+    let before = escape_before(text, start).or_else(|| text[..start].chars().next_back()).unwrap_or(' ');
+    let after = escape_at(text, end).map(|(c, _)| c).or_else(|| text[end..].chars().next()).unwrap_or(' ');
+    !word_char(before) && !word_char(after)
+}
+
+/// What the JSON escape at [at] stands for (`\n`, `\u00e9`), and its length in bytes. None where
+/// there is none, or where its backslash is itself escaped (`\\n` is a backslash and an `n`).
+fn escape_at(text: &str, at: usize) -> Option<(char, usize)> {
+    let bytes = text.as_bytes();
+    if bytes.get(at) != Some(&b'\\') || bytes[..at].iter().rev().take_while(|&&b| b == b'\\').count() % 2 == 1 {
+        return None;
+    }
+    match bytes.get(at + 1)? {
+        b'n' => Some(('\n', 2)),
+        b'r' => Some(('\r', 2)),
+        b't' => Some(('\t', 2)),
+        b'b' => Some(('\u{8}', 2)),
+        b'f' => Some(('\u{c}', 2)),
+        b'u' => {
+            let hex = text.get(at + 2..at + 6).filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()))?;
+            let code = u32::from_str_radix(hex, 16).ok()?;
+            // Half of a surrogate pair: not a letter on its own.
+            Some((char::from_u32(code).unwrap_or(char::REPLACEMENT_CHARACTER), 6))
+        }
+        _ => None,
+    }
+}
+
+/// What a JSON escape that ends at [at] stands for.
+fn escape_before(text: &str, at: usize) -> Option<char> {
+    [2, 6].into_iter().find_map(|len| escape_at(text, at.checked_sub(len)?).filter(|&(_, l)| l == len).map(|(c, _)| c))
+}
+
+/// [text] as detection reads it: a JSON escape that stands for something other than a letter, a
+/// digit or `_` is written as spaces, ending in the line break or tab it stands for, so a value
+/// right after `\n` is found without the `n` and every offset holds in [text].
+fn spaced(text: &str) -> Cow<'_, str> {
+    if !text.contains('\\') {
+        return Cow::Borrowed(text);
+    }
+    let mut out = text.as_bytes().to_vec();
+    let mut at = 0;
+    while at < out.len() {
+        if out[at] != b'\\' {
+            at += 1;
+            continue;
+        }
+        match escape_at(text, at) {
+            Some((c, len)) if !word_char(c) => {
+                out[at..at + len].fill(b' ');
+                if matches!(c, '\n' | '\r' | '\t') {
+                    out[at + len - 1] = c as u8;
+                }
+                at += len;
+            }
+            Some((_, len)) => at += len,
+            // `\\`, `\"`: kept as written.
+            None => at += 2,
+        }
+    }
+    Cow::Owned(String::from_utf8(out).expect("only ASCII bytes replaced by ASCII"))
 }
 
 /// [value] as it is written inside a JSON string (a line break as `\n`).
@@ -858,10 +929,74 @@ impl Vault {
 
     /// [text] with its personal data replaced.
     pub fn redact(&mut self, text: &str) -> String {
+        self.redact_with(text, true)
+    }
+
+    /// [Vault::redact] for a tool's description, which goes with every request: only what is
+    /// found without guessing at words (emails, phone, card, IBAN and account numbers), so "a file
+    /// called Report" or "Hi Claude," names no one who would then be replaced in every message.
+    /// Values already known are replaced as in any text.
+    pub fn redact_description(&mut self, text: &str) -> String {
+        self.redact_with(text, false)
+    }
+
+    /// [Vault::redact] for a text that is often JSON (a tool result, tool-call arguments). When it
+    /// parses, each string in it (keys too) is redacted as what it stands for, unescaped, and
+    /// written back escaped; a number is redacted as written and becomes a string if it changes. So
+    /// a value right after a `\n` is found whole and the text stays JSON. Other text is redacted as
+    /// text.
+    pub fn redact_json(&mut self, text: &str) -> String {
+        if serde_json::from_str::<Value>(text).is_err() {
+            return self.redact(text);
+        }
+        // As in a text, placeholder-shaped text anywhere in it comes first.
+        for c in PLACEHOLDER.captures_iter(text) {
+            self.literal(&c[1], &c[2], &c[3]);
+        }
+        let bytes = text.as_bytes();
+        let mut out = String::with_capacity(text.len());
+        let (mut cursor, mut at) = (0, 0);
+        while at < bytes.len() {
+            // Valid JSON: outside a string, a `-` or a digit starts a number.
+            let end = match bytes[at] {
+                b'"' => {
+                    let mut end = at + 1;
+                    while bytes[end] != b'"' {
+                        end += if bytes[end] == b'\\' { 2 } else { 1 };
+                    }
+                    end + 1
+                }
+                b'-' | b'0'..=b'9' => {
+                    at + bytes[at..]
+                        .iter()
+                        .take_while(|b| matches!(b, b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E'))
+                        .count()
+                }
+                _ => {
+                    at += 1;
+                    continue;
+                }
+            };
+            let token = &text[at..end];
+            let value =
+                if bytes[at] == b'"' { serde_json::from_str(token).expect("a JSON string") } else { token.to_owned() };
+            let redacted = self.redact(&value);
+            if redacted != value {
+                out.push_str(&text[cursor..at]);
+                out.push_str(&Value::String(redacted).to_string());
+                cursor = end;
+            }
+            at = end;
+        }
+        out.push_str(&text[cursor..]);
+        out
+    }
+
+    fn redact_with(&mut self, text: &str, words: bool) -> String {
         if text.trim().is_empty() {
             return text.to_owned();
         }
-        let spans = detect(text);
+        let spans = find(&spaced(text), words);
         // Placeholder-shaped text the user wrote comes first: its numbers are never handed out.
         let literals: Vec<(String, String, String)> =
             PLACEHOLDER.captures_iter(text).map(|c| (c[1].to_owned(), c[2].to_owned(), c[3].to_owned())).collect();
@@ -1017,15 +1152,26 @@ impl Vault {
 // ---------------------------------------------------------------------------------------------
 // Requests and answers
 
+/// How a text of a request is redacted.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Form {
+    /// [Vault::redact].
+    Text,
+    /// A tool result or tool-call arguments: [Vault::redact_json].
+    Json,
+    /// A tool's description: [Vault::redact_description].
+    Description,
+}
+
 /// The texts of a chat completion request that redaction covers, in order. What stays the same for
 /// a whole conversation (the `user` field, the tools) comes first, so its placeholders keep their
 /// numbers as the conversation grows.
-fn request_texts(body: &mut Value) -> Vec<&mut String> {
+fn request_texts(body: &mut Value) -> Vec<(&mut String, Form)> {
     let (mut user, mut tools, mut messages) = (Vec::new(), Vec::new(), Vec::new());
     let Some(body) = body.as_object_mut() else { return messages };
     for (field, value) in body.iter_mut() {
         match (field.as_str(), value) {
-            ("user", Value::String(s)) => user.push(s),
+            ("user", Value::String(s)) => user.push((s, Form::Text)),
             ("tools", Value::Array(list)) => {
                 for tool in list {
                     if let Some(function) = tool.get_mut("function") {
@@ -1048,14 +1194,14 @@ fn request_texts(body: &mut Value) -> Vec<&mut String> {
 
 /// Every string `description` in a tool's function: its own, and its parameters' at any depth (a
 /// property that is itself called `description` is a schema, not a string, and is looked into).
-fn descriptions<'a>(value: &'a mut Value, out: &mut Vec<&'a mut String>) {
+fn descriptions<'a>(value: &'a mut Value, out: &mut Vec<(&'a mut String, Form)>) {
     match value {
         Value::Object(map) => {
             for (key, value) in map.iter_mut() {
                 match value {
                     Value::String(s) => {
                         if key == "description" {
-                            out.push(s);
+                            out.push((s, Form::Description));
                         }
                     }
                     other => descriptions(other, out),
@@ -1071,26 +1217,28 @@ fn descriptions<'a>(value: &'a mut Value, out: &mut Vec<&'a mut String>) {
     }
 }
 
-/// A message's texts: its content, its reasoning (`reasoning_content`, `reasoning`), then its tool
-/// calls' arguments.
-fn message_texts<'a>(message: &'a mut Value, out: &mut Vec<&'a mut String>) {
+/// A message's texts: its content (a tool result's as JSON), its reasoning (`reasoning_content`,
+/// `reasoning`), then its tool calls' arguments.
+fn message_texts<'a>(message: &'a mut Value, out: &mut Vec<(&'a mut String, Form)>) {
     let Some(message) = message.as_object_mut() else { return };
+    let result = matches!(message.get("role").and_then(Value::as_str), Some("tool" | "function"));
+    let content = if result { Form::Json } else { Form::Text };
     let (mut reasoning, mut calls) = (Vec::new(), Vec::new());
     for (field, value) in message.iter_mut() {
         match (field.as_str(), value) {
-            ("content", Value::String(s)) => out.push(s),
+            ("content", Value::String(s)) => out.push((s, content)),
             ("content", Value::Array(parts)) => {
                 for part in parts {
                     if let Some(Value::String(s)) = part.get_mut("text") {
-                        out.push(s);
+                        out.push((s, content));
                     }
                 }
             }
-            ("reasoning_content" | "reasoning", Value::String(s)) => reasoning.push(s),
+            ("reasoning_content" | "reasoning", Value::String(s)) => reasoning.push((s, Form::Text)),
             ("tool_calls", Value::Array(list)) => {
                 for call in list {
                     if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
-                        calls.push(args);
+                        calls.push((args, Form::Json));
                     }
                 }
             }
@@ -1104,8 +1252,22 @@ fn message_texts<'a>(message: &'a mut Value, out: &mut Vec<&'a mut String>) {
 /// Redacts a chat completion request in place; the vault restores the answer.
 pub fn redact_request(body: &mut Value) -> Vault {
     let mut vault = Vault::default();
-    for text in request_texts(body) {
-        *text = vault.redact(text);
+    let mut texts = request_texts(body);
+    let mut descriptions = Vec::new();
+    for (at, (text, form)) in texts.iter_mut().enumerate() {
+        **text = match form {
+            Form::Text => vault.redact(text),
+            Form::Json => vault.redact_json(text),
+            Form::Description => {
+                descriptions.push((at, text.clone()));
+                vault.redact_description(text)
+            }
+        };
+    }
+    // The descriptions come first, for their numbers; written again from what they were, they also
+    // lose the values the messages brought.
+    for (at, original) in descriptions {
+        *texts[at].0 = vault.redact_description(&original);
     }
     vault
 }
@@ -1497,6 +1659,23 @@ mod tests {
     }
 
     #[test]
+    fn json_is_redacted_as_json_and_undone_exactly() {
+        crate::testgen::cases("redact_json/restore_json", |g| {
+            let list: Vec<String> = (0..g.below(4)).map(|_| g.assemble(PIECES, 8)).collect();
+            let text = json!({ "a": g.assemble(PIECES, 12), "b": list, "n": -1.5e3 }).to_string();
+            let mut vault = Vault::default();
+            let redacted = vault.redact_json(&text);
+            serde_json::from_str::<serde_json::Value>(&redacted).expect("still JSON");
+            let restored = vault.restore_json(&redacted);
+            if text.contains("Bob@Posteo.DE") {
+                assert_eq!(restored.to_ascii_lowercase(), text.to_ascii_lowercase(), "redacted as {redacted:?}");
+            } else {
+                assert_eq!(restored, text, "redacted as {redacted:?}");
+            }
+        });
+    }
+
+    #[test]
     fn a_stream_restores_the_same_however_it_is_cut() {
         crate::testgen::cases("stream restore", |g| {
             let make = || {
@@ -1651,6 +1830,102 @@ mod tests {
         assert_eq!(vault.found()["ADDRESS"], 1);
         // Escaped as spec/redaction.md says.
         assert_eq!(super::json_escape("\"\\\n\r\t\u{8}\u{c}\u{1}\u{7f}ß"), "\\\"\\\\\\n\\r\\t\\b\\f\\u0001\u{7f}ß");
+    }
+
+    #[test]
+    fn a_value_right_after_a_json_escape_is_hidden() {
+        let label = json!({ "label": "Recipient:\nHauptstraße 12a,\n10115 Berlin" }).to_string();
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin for Hannah Weber, account number is 12345678" },
+            { "role": "assistant", "tool_calls": [{ "function": { "name": "label", "arguments": label } }] },
+            { "role": "tool", "tool_call_id": "c1", "content": json!({
+                "note": "Hi,\nHannah Weber",
+                "from": "From:\nbob@posteo.de",
+                "account": 12345678,
+            }).to_string() },
+            // JSON that escapes non-ASCII, and a tool result as text parts.
+            { "role": "tool", "tool_call_id": "c2", "content": [
+                { "type": "text", "text": r#"{"to":"Hauptstra\u00dfe 12a,\n10115 Berlin"}"# }
+            ] }
+        ] });
+        let vault = redact_request(&mut body);
+        let messages = &body["messages"];
+        assert_eq!(messages[0]["content"], "Ship to [ADDRESS_1] for [PERSON_1], account number is [ACCOUNT_1]");
+        let args = messages[1]["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(args, r#"{"label":"Recipient:\n[ADDRESS_1]"}"#);
+        let result = messages[2]["content"].as_str().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(result).expect("still JSON"),
+            json!({ "note": "Hi,\n[PERSON_1]", "from": "From:\n[EMAIL_1]", "account": "[ACCOUNT_1]" })
+        );
+        assert_eq!(messages[3]["content"][0]["text"], r#"{"to":"[ADDRESS_1]"}"#);
+        // The email after `From:\n`, not `nbob@posteo.de`.
+        assert_eq!(vault.restore("[EMAIL_1]"), "bob@posteo.de");
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("ADDRESS", 1), ("EMAIL", 1), ("PERSON", 1)]));
+        assert_eq!(vault.restore_json(args), label);
+
+        // Text that is not JSON: an escape before a value is a word boundary there too, and what
+        // detection finds after one starts after it.
+        let text = r#"Result: {"label":"Recipient:\nHauptstraße 12a,\n10115 Berlin","note":"Hi,\nHannah Weber","from":"From:\ncarol@posteo.de"}"#;
+        let mut vault = vault;
+        let redacted = vault.redact(text);
+        assert_eq!(
+            redacted,
+            r#"Result: {"label":"Recipient:\n[ADDRESS_1]","note":"Hi,\n[PERSON_1]","from":"From:\n[EMAIL_2]"}"#
+        );
+        assert_eq!(vault.restore("[EMAIL_2]"), "carol@posteo.de");
+        assert_eq!(vault.restore_json(&redacted), text);
+        // An escaped backslash before an `n` is a backslash and a letter.
+        assert_eq!(vault.redact(r"C:\\nHannah Weber"), r"C:\\nHannah [PERSON_2]");
+    }
+
+    #[test]
+    fn json_escapes_are_read_as_what_they_stand_for() {
+        use super::{bounded, escape_at, spaced};
+        let text = r#"a\nb\\nc\u00e9d\u000ae\ud83d\"f"#;
+        assert_eq!(escape_at(text, 1), Some(('\n', 2)));
+        assert_eq!(escape_at(text, 4), None);
+        assert_eq!(escape_at(text, 5), None);
+        assert_eq!(escape_at(text, 8), Some(('é', 6)));
+        assert_eq!(escape_at(text, 15), Some(('\n', 6)));
+        assert_eq!(escape_at(text, 22), Some((char::REPLACEMENT_CHARACTER, 6)));
+        assert_eq!(escape_at(r"\uzzzz", 0), None);
+        // `b` follows a line break; `c` an escaped backslash and an `n`; `d` an `é`.
+        assert!(bounded(text, 3, 4));
+        assert!(!bounded(text, 7, 8));
+        assert!(!bounded(text, 14, 15));
+        assert!(bounded(text, 21, 22));
+        let spaced = spaced(text);
+        assert_eq!(spaced.len(), text.len());
+        assert_eq!(spaced, "a \nb\\\\nc\\u00e9d     \ne      \\\"f");
+    }
+
+    #[test]
+    fn tool_descriptions_name_no_one() {
+        let mut body = json!({
+            "tools": [{ "type": "function", "function": {
+                "name": "file",
+                "description": "Create a new file called Report. My name is Weather Bot.\nHi Claude, mail erin@posteo.de",
+                "parameters": { "type": "object", "properties": {
+                    "to": { "type": "string", "description": "Hauptstraße 12a, 10115 Berlin, or Hannah Weber, +49 171 2345678" }
+                } }
+            } }],
+            "messages": [{ "role": "user", "content": "Make the Report, Claude. I am Hannah Weber." }]
+        });
+        let vault = redact_request(&mut body);
+        let function = &body["tools"][0]["function"];
+        // Only what is found without guessing at words: no Report, Weather Bot or Claude.
+        assert_eq!(
+            function["description"],
+            "Create a new file called Report. My name is Weather Bot.\nHi Claude, mail [EMAIL_1]"
+        );
+        assert_eq!(body["messages"][0]["content"], "Make the Report, Claude. I am [PERSON_1].");
+        // A name the user's own messages gave is hidden in the descriptions too, though they come first.
+        assert_eq!(
+            function["parameters"]["properties"]["to"]["description"],
+            "Hauptstraße 12a, 10115 Berlin, or [PERSON_1], [PHONE_1]"
+        );
+        assert_eq!(vault.found(), BTreeMap::from([("EMAIL", 1), ("PERSON", 1), ("PHONE", 1)]));
     }
 
     #[test]

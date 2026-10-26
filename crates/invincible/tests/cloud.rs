@@ -432,18 +432,25 @@ async fn a_value_given_to_a_tool_stays_hidden_when_the_tool_echoes_it() {
     let args: Value = serde_json::from_str(call["function"]["arguments"].as_str().unwrap()).expect("valid JSON");
     assert_eq!(args["to"], address);
 
-    // The tool answers in JSON, so the line break comes back escaped.
-    let result = json!({ "shipped_to": args["to"] }).to_string();
+    // The tool answers in JSON, so the line break comes back escaped, and so does one before it.
+    let result =
+        json!({ "shipped_to": args["to"], "label": format!("Recipient:\n{address}"), "from": "From:\nbob@posteo.de" })
+            .to_string();
     let turn = json!({ "model": "claude", "messages": [
         ask,
         { "role": "assistant", "content": null, "tool_calls": [call] },
         { "role": "tool", "tool_call_id": "c1", "content": result }
     ] });
     let response = chat(&node, turn).send().await.unwrap();
-    assert_eq!(response.headers()[REDACTED_HEADER], r#"{"ADDRESS":1}"#);
+    assert_eq!(response.headers()[REDACTED_HEADER], r#"{"ADDRESS":1,"EMAIL":1}"#);
     let seen = seen.lock().unwrap();
     let sent = &seen.bodies[1];
     assert_eq!(sent["messages"][1]["tool_calls"][0]["function"]["arguments"], r#"{"to":"[ADDRESS_1]"}"#);
-    assert_eq!(sent["messages"][2]["content"], r#"{"shipped_to":"[ADDRESS_1]"}"#);
-    assert!(!sent.to_string().contains("Berlin") && !sent.to_string().contains("10115"), "{sent}");
+    let result: Value = serde_json::from_str(sent["messages"][2]["content"].as_str().unwrap()).expect("still JSON");
+    assert_eq!(
+        result,
+        json!({ "shipped_to": "[ADDRESS_1]", "label": "Recipient:\n[ADDRESS_1]", "from": "From:\n[EMAIL_1]" })
+    );
+    let sent = sent.to_string();
+    assert!(!sent.contains("Berlin") && !sent.contains("10115") && !sent.contains("posteo"), "{sent}");
 }

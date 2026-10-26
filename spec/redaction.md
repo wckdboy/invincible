@@ -66,14 +66,36 @@ A request gets one vault, and its texts are redacted in this order:
 
 What stays the same for a whole conversation comes first, so its placeholders keep their numbers
 as the conversation grows. Nothing else is redacted: other fields (tool names, `enum` values,
-`response_format`) and images leave as they are. For each text:
+`response_format`) and images leave as they are.
+
+**Tool descriptions** go with every request, and their words are the client's, not the user's. In
+them only the rules that guess at no word run: `EMAIL`, `IBAN`, `CARD`, `ACCOUNT` and `PHONE`, not
+`ADDRESS` or `PERSON`. So `Create a file called Report`, `My name is Weather Bot` or `Hi Claude,`
+makes no value that every later text would then lose. Known values are replaced in them as in any
+text (step 3): once the messages are done, each description is redacted again from what it was, so a
+value the messages brought (`I am Hannah Weber`) is hidden in it too, and its own values keep the
+numbers they got first.
+
+**JSON texts.** A tool result (the `content` of a message whose `role` is `tool` or `function`, or
+the `text` of each of its parts) and a tool call's `arguments` are often JSON. When such a text
+parses as JSON, its literal placeholders are taken first (step 1, over the whole text), then each
+string in it, keys included, is redacted as a text of its own in its unescaped form and, where that
+changed it, written back as a JSON string (escaped as below); everything else stays byte for byte.
+So `"Recipient:\nHauptstraße 12a,\n10115 Berlin"` is read with a line break and `"Hauptstra\u00dfe"`
+as `Hauptstraße`, and the text stays JSON. A number is redacted as written (`12345678`), and becomes
+a JSON string if that changed it (`"[ACCOUNT_1]"`). A text that does not parse is redacted as a text.
+
+For each text:
 
 1. **Literal placeholders first.** Placeholder-shaped text the user wrote (`[EMAIL_3]`) raises its
    kind's counter to its number, so numbering continues after it. It stands for itself. If it
    already names a value from an earlier text, it gets a placeholder of its own, so the model can
    tell the two apart. Percent-encoded ones (`%5BEMAIL_3%5D`) only raise the counter.
-2. **Register what was detected**, in order. A new value gets the next number of its kind,
-   `[KIND_N]` counting from 1. Values are compared:
+2. **Register what was detected**, in order. Detection reads a JSON escape that stands for
+   something other than a letter, digit or `_` (`\n`, `\t`, `\u000a`, not `\\` or `\u00e9`) as
+   spaces of the same length, the last one the line break or tab it stands for: in
+   `From:\nbob@posteo.de` it finds `bob@posteo.de`, not `nbob@posteo.de`. A new value gets the
+   next number of its kind, `[KIND_N]` counting from 1. Values are compared:
    - emails case-insensitively;
    - IBANs without spaces, in upper case;
    - phones, cards and account numbers with no letters by their digits only (`+49 30 1234567` and
@@ -87,15 +109,16 @@ as the conversation grows. Nothing else is redacted: other fields (tool names, `
    A span that lies inside a value from an earlier text written escaped for a JSON string (see
    step 3) is part of that value and is not registered.
 3. **Replace every occurrence of every known value**, including values first seen in earlier texts.
-   A value counts only as a whole word (not inside a longer word or number). Names and addresses are
-   not replaced inside code or links. Emails match case-insensitively. Numbers of 4+ digits also
-   match when written with other spacing or punctuation. A value is also found where it is written
-   escaped for a JSON string, in any text: tool results and tool-call arguments are often JSON, and
-   a value given to a tool comes back that way. Escaped means as the answer's tool-call arguments
-   are restored (below): `"` as `\"`, `\` as `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, any other
-   control character as `\u00xx`, and every other character as it is (so JSON that escapes
-   non-ASCII, `ß` as `\u00df`, is not matched). Where hits overlap, the earliest and then longest
-   wins.
+   A value counts only as a whole word (not inside a longer word or number); a JSON escape next to
+   it counts as what it stands for, so `\n` before `Hannah` is a line break and `\u00e9` a letter,
+   while `\\n` is a backslash and an `n`. Names and addresses are not replaced inside code or
+   links. Emails match case-insensitively. Numbers of 4+ digits also match when written with other
+   spacing or punctuation. A value is also found where it is written escaped for a JSON string, in
+   any text: tool results and tool-call arguments are often JSON, and a value given to a tool comes
+   back that way. Escaped means as the answer's tool-call arguments are restored (below): `"` as
+   `\"`, `\` as `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, any other control character as `\u00xx`,
+   and every other character as it is (so where a text is not read as JSON, `ß` written `\u00df`
+   is not matched). Where hits overlap, the earliest and then longest wins.
 
 ## Restoring
 
