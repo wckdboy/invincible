@@ -122,14 +122,15 @@ For each text:
    break, `\u00e9` a Latin letter and `\ub85c` (`로`) a letter of another script, while `\\n` is a
    backslash and an `n`. Names and addresses are not replaced inside code or links, read as
    detection reads them (a link ends at `\n`). Emails match case-insensitively. Numbers of 4+ digits
-   also match when written with other spacing or punctuation. A value is also found where it is
-   written escaped for a JSON string, in any text: tool results and tool-call arguments are often
-   JSON, and a value given to a tool comes back that way. Escaped means as the answer's tool-call
-   arguments are restored (below): `"` as `\"`, `\` as `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, any other
-   control character as `\u00xx`, and every other character as it is (so where a text is not read as
-   JSON, `ß` written `\u00df` is not matched). Where hits overlap, the earliest and then longest
-   wins; a known value that overlaps what was detected in this text is replaced only where it covers
-   it.
+   also match when written with other spacing or punctuation; the hex digits of a `\uXXXX` escape
+   before one are not part of it (`\ud63801012345678` is `호` and `01012345678`). A value is also
+   found where it is written escaped for a JSON string, in any text: tool results and tool-call
+   arguments are often JSON, and a value given to a tool comes back that way. Escaped means as the
+   answer's tool-call arguments are restored (below): `"` as `\"`, `\` as `\\`, `\n`, `\r`, `\t`,
+   `\b`, `\f`, any other control character as `\u00xx`, and every other character as it is (so
+   where a text is not read as JSON, `ß` written `\u00df` is not matched). Where hits overlap,
+   the earliest and then longest wins; a known value that overlaps what was detected in this text
+   is replaced only where it covers it.
 
 ## Restoring
 

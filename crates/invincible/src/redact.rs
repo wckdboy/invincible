@@ -1119,12 +1119,19 @@ impl Vault {
             self.entries.iter().enumerate().filter_map(|(i, (_, e))| e.digits.as_deref().map(|d| (d, i))).collect();
         if !by_digits.is_empty() {
             for m in DIGIT_RUN.find_iter(text) {
-                let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
+                // A run that begins in the hex digits of a `\uXXXX` begins after it, at its first
+                // digit (`\ud63801012345678` and `\ud638 01012345678` are 호 and a number).
+                let from = past_escape(text, m.start());
+                if from >= m.end() {
+                    continue;
+                }
+                let run = text[from..m.end()].trim_start_matches([' ', '-', '.', '/']);
+                let digits: String = run.chars().filter(char::is_ascii_digit).collect();
                 if let Some(&i) = by_digits.get(digits.as_str()) {
                     // A `+` the value was found without stays in the text (it would not come
                     // back: the value is restored as it was found).
-                    let plus = m.as_str().starts_with('+') && !self.entries[i].1.value.starts_with('+');
-                    let start = m.start() + usize::from(plus);
+                    let plus = run.starts_with('+') && !self.entries[i].1.value.starts_with('+');
+                    let start = m.end() - run.len() + usize::from(plus);
                     if bounded(text, start, m.end(), self.entries[i].1.kind) {
                         hits.push((start, m.end(), i));
                     }
@@ -1980,6 +1987,39 @@ mod tests {
         assert_eq!(messages[4]["content"], "카드 [CARD_1]로, [ACCOUNT_1]번 계좌");
         assert_eq!(vault.restore("[PHONE_2] [EMAIL_1]"), "010-1234-5678 bob@posteo.de");
         assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("CARD", 1), ("EMAIL", 1), ("PHONE", 2)]));
+    }
+
+    #[test]
+    fn a_known_number_after_an_escape_that_ends_in_a_digit_is_hidden_and_counted() {
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "My number is 010-1234-5678, card 4111 1111 1111 1111, account number is 12345678" },
+            // JSON lines from Python's json.dumps: "전화번호01012345678", "카드번호4111111111111111",
+            // "계좌번호1234-5678", "계좌 번호 1234 5678". The `\ud638` of 호 ends in hex digits that a
+            // number would read on.
+            { "role": "tool", "tool_call_id": "c1", "content": concat!(
+                r#"{"ok":1}"#, "\n",
+                r#"{"m":"\uc804\ud654\ubc88\ud63801012345678"}"#, "\n",
+                r#"{"m":"\uce74\ub4dc\ubc88\ud6384111111111111111"}"#, "\n",
+                r#"{"m":"\uacc4\uc88c\ubc88\ud6381234-5678"}"#, "\n",
+                r#"{"m":"\uacc4\uc88c \ubc88\ud638 1234 5678"}"#
+            ) }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(
+            body["messages"][1]["content"],
+            concat!(
+                r#"{"ok":1}"#,
+                "\n",
+                r#"{"m":"\uc804\ud654\ubc88\ud638[PHONE_1]"}"#,
+                "\n",
+                r#"{"m":"\uce74\ub4dc\ubc88\ud638[CARD_1]"}"#,
+                "\n",
+                r#"{"m":"\uacc4\uc88c\ubc88\ud638[ACCOUNT_1]"}"#,
+                "\n",
+                r#"{"m":"\uacc4\uc88c \ubc88\ud638 [ACCOUNT_1]"}"#
+            )
+        );
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("CARD", 1), ("PHONE", 1)]));
     }
 
     #[test]
