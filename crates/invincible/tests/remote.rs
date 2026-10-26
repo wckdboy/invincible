@@ -276,7 +276,8 @@ async fn a_device_pins_the_receipt_key_and_checks_receipts_through_the_tunnel() 
     assert_eq!(envelope["receipt"]["egress"], json!([]));
 
     // The node's audit log has it, as the device's request — and the device cannot read the log
-    // (spec/pairing.md, Transport: it is not a device route, and it holds every caller's records).
+    // (spec/pairing.md, Capabilities: reading it, even its own entries only, needs `audit`, and
+    // pairing grants `shard`).
     let refused = client.get(format!("{door}/v1/audit")).send().await.unwrap();
     assert_eq!(refused.status(), 404, "a paired device must not read the audit log");
     let log = invincible::audit::AuditLog::new(&node.dir);

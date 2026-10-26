@@ -80,7 +80,7 @@ pub enum Capability {
     Shard,
     /// `/v1/agent`: the Autobot proxy, which runs with this node's own token.
     Agent,
-    /// `/v1/audit`: every caller's records.
+    /// `/v1/audit`: the audit log, that device's own entries only (found by `caller_key`).
     Audit,
     /// `/v1/dispatch`: choosing among the nodes the operator owns, and sending work to them.
     Dispatch,
