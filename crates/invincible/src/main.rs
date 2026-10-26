@@ -630,6 +630,9 @@ fn run(cli: Cli) -> Result<(), String> {
             let config = config_for(config, &home)?;
             let token = token::load_or_create(&home.join("token"))?;
             tracing_subscriber::fmt().with_target(false).init();
+            // Asked before anything starts ([hangup_ignored]).
+            #[cfg(unix)]
+            hangup_ignored();
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
             runtime.block_on(serve(config, token, home))
         }
@@ -1240,7 +1243,7 @@ fn run(cli: Cli) -> Result<(), String> {
 async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), String> {
     let logs = home.join("logs");
     let mut engines = Vec::new();
-    // Held until shutdown: dropping a supervisor kills its engine.
+    // Aborted at shutdown, which kills their engines (a handle dropped would leave its task running).
     let mut supervisors = Vec::new();
     let heads_split = config.models.iter().any(|m| !m.cluster.is_empty());
     let peers = KnownNodes::load(&home)?.0;
@@ -1457,8 +1460,10 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         tokio::net::TcpListener::bind(config.listen).await.map_err(|e| format!("listen on {}: {e}", config.listen))?;
     tracing::info!("serving on http://{} ({})", config.listen, invincible::version::VERSION);
     invincible::watchdog::spawn("gateway", config.listen, logs.clone());
-    // Answers in flight may finish, for 15 s: then the engines are stopped whatever still runs,
-    // which ends those answers, so the node stops before a service manager's SIGKILL (at 20 s).
+    // Answers in flight may finish, for 15 s: then the engine supervisors are aborted, which stops
+    // the engines and ends the answers they were giving. A cloud, dispatched or remote answer still
+    // in flight is not ended by it: the node waits for it, its engines stopped, until a service
+    // manager's SIGKILL (at 20 s) if need be.
     let stop_engines: Vec<_> = supervisors.iter().map(|s| s.abort_handle()).collect();
     axum::serve(listener, server::app(state))
         .with_graceful_shutdown(async move {
@@ -2235,24 +2240,55 @@ fn query_value(value: &str) -> String {
 }
 
 /// Ctrl-C; SIGTERM, what launchd, systemd and `kill` send to stop a service; or SIGHUP, the
-/// terminal it runs in closing. All shut down cleanly, so the engines the node started are stopped
-/// with it: they run in process groups of their own, which a terminal's signals do not reach.
+/// terminal it runs in closing, unless the node was started with SIGHUP ignored (`nohup`), which
+/// it then keeps ignoring. All shut down cleanly, so the engines the node started are stopped with
+/// it: they run in process groups of their own, which a terminal's signals do not reach.
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
-        let (Ok(mut term), Ok(mut hangup)) = (signal(SignalKind::terminate()), signal(SignalKind::hangup())) else {
-            let _ = tokio::signal::ctrl_c().await;
-            return;
-        };
+        // Each listened for on its own: one that cannot be leaves the others.
+        let mut term = signal(SignalKind::terminate()).ok();
+        let mut hangup = if hangup_ignored() { None } else { signal(SignalKind::hangup()).ok() };
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
-            _ = hangup.recv() => {}
+            () = next(term.as_mut()) => {}
+            () = next(hangup.as_mut()) => {}
         }
     }
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
     }
+}
+
+/// The next of [signal], or never when it is not listened for.
+#[cfg(unix)]
+async fn next(signal: Option<&mut tokio::signal::unix::Signal>) {
+    match signal {
+        Some(signal) => {
+            signal.recv().await;
+        }
+        None => std::future::pending().await,
+    }
+}
+
+/// Whether SIGHUP was ignored when the node started (`nohup`). Asked once, before a handler would
+/// replace that; for `serve`, before the runtime and the engines start.
+#[cfg(unix)]
+fn hangup_ignored() -> bool {
+    static IGNORED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IGNORED.get_or_init(|| {
+        // A shell started from here inherits an ignored SIGHUP, and sends it to itself: it lives
+        // only if it is ignored. Asked so as the node has no unsafe code to ask `sigaction`; not
+        // known, and so false, when no shell runs.
+        std::process::Command::new("/bin/sh")
+            .args(["-c", "kill -HUP $$"])
+            .env_clear()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    })
 }

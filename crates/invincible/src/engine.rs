@@ -241,8 +241,10 @@ const SECRET_WORDS: &[&str] = &["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIA
 /// library ggml `dlopen()`s (`ggml_backend_load_all`); the other `GGML_` names a directory or
 /// file of compiled device code it loads: ET kernels, Metal shaders, cached OpenCL programs and
 /// OpenVINO models. The runtimes': CUDA's `CUDA_INJECTION64_PATH` and ROCm's `HSA_TOOLS_LIB` name
-/// a library the runtime loads into the process; the `VK_` names are where the Vulkan loader
-/// finds layers, code it loads into the process (an implicit layer into every one, unasked).
+/// a library the runtime loads into the process; CUDA's `CUDA_CACHE_PATH` and SYCL's
+/// `SYCL_CACHE_DIR` are where compiled kernels are cached, and loaded from again; the `VK_` names
+/// are where the Vulkan loader finds layers, code it loads into the process (an implicit layer
+/// into every one, unasked).
 /// Which driver to use (`VK_ICD_FILENAMES`) is still inherited: some machines need it to find
 /// their GPU at all.
 const WITHHELD: &[&str] = &[
@@ -253,7 +255,9 @@ const WITHHELD: &[&str] = &[
     "GGML_OPENVINO_CACHE_DIR",
     "GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR",
     "CUDA_INJECTION64_PATH",
+    "CUDA_CACHE_PATH",
     "HSA_TOOLS_LIB",
+    "SYCL_CACHE_DIR",
     "VK_LAYER_PATH",
     "VK_ADD_LAYER_PATH",
     "VK_IMPLICIT_LAYER_PATH",
@@ -285,7 +289,8 @@ pub fn free_port() -> std::io::Result<u16> {
 /// Runs [launch] and keeps it running: restarts it when it exits, with backoff, and keeps
 /// [engine]'s health current by polling `GET /health` (200 once the model is loaded). An engine
 /// that does not enforce its key is not restarted ([Ended::Unkeyed]): its model stays unhealthy.
-/// Dropping or aborting the returned task kills the engine and what it started ([Running]).
+/// Aborting the returned task, or dropping the runtime it runs on, kills the engine and what it
+/// started ([Running]); dropping the handle alone leaves the task running.
 pub fn supervise(engine: Engine, launch: Launch) -> JoinHandle<()> {
     tokio::spawn(async move {
         let client = health_client();
@@ -428,8 +433,8 @@ async fn still_answers(engine: &Engine, client: &reqwest::Client) -> bool {
 }
 
 /// Runs [launch] and restarts it whenever it exits, with backoff: for helpers with no health
-/// endpoint (`ggml-rpc-server`). Dropping or aborting the task kills the process and what it
-/// started.
+/// endpoint (`ggml-rpc-server`). Aborting the task, or dropping the runtime, kills the process
+/// and what it started; dropping the handle alone does not.
 pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
     let name = name.to_owned();
     tokio::spawn(async move {
@@ -456,8 +461,9 @@ pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
 /// An engine's process, and on Unix the process group it leads, which holds whatever it started
 /// too: the server a wrapper script runs without `exec`, say, which killing the script alone would
 /// leave running. The group is killed when the process exits or is killed ([Running::kill]), when
-/// this is dropped (the task aborted, the node stopping), and by its lifeline ([Group]) when the
-/// node dies without stopping it.
+/// its lifeline exits ([Running::wait]), when this is dropped (the task aborted, the runtime
+/// dropped as the node stops), and by its lifeline ([Group]) when the node dies without stopping
+/// it.
 struct Running {
     child: tokio::process::Child,
     group: Option<Group>,
@@ -466,12 +472,17 @@ struct Running {
 /// An engine's process group, and its lifeline: a shell in the group that kills it once the node
 /// is gone, however it goes (`kill -9`, a crash, the watchdog's exit, `Ctrl-\` in a terminal), as
 /// it waits on a pipe that only the node holds open and that closes with the node's process.
-/// Nothing else would stop the engine then: launchd kills what is left in the node's own process
-/// group and a terminal signals the node's, and engines are in neither. The lifeline is reaped only
-/// once the group is killed, so until then the group's number cannot go to another process.
+/// Under systemd the unit's processes go with the node anyway; elsewhere nothing else would stop
+/// the engine: launchd kills only what is left in the node's own process group, a terminal signals
+/// only the node's, and engines are in neither. The lifeline is reaped only once the group is
+/// killed, or once it has exited and before the engine is reaped, so until then the group's number
+/// cannot go to another process.
 struct Group {
     id: u32,
     lifeline: tokio::process::Child,
+    /// The node's end of the lifeline's pipe, kept apart from [Group::lifeline], since waiting on
+    /// a child closes its stdin, and that would set the lifeline off.
+    _pipe: Option<tokio::process::ChildStdin>,
 }
 
 #[cfg(unix)]
@@ -489,8 +500,8 @@ fn kill_group(_: u32) {}
 #[cfg(unix)]
 fn group(child: &tokio::process::Child) -> std::io::Result<Option<Group>> {
     let Some(id) = child.id() else { return Ok(None) };
-    // The pipe is its stdin: the node's end stays in [Group::lifeline] until the group is killed.
-    let lifeline = Command::new("/bin/sh")
+    // The pipe is its stdin: the node holds its end ([Group]) until the group is killed.
+    let mut lifeline = Command::new("/bin/sh")
         .args(["-c", "read _; kill -KILL 0"])
         .env_clear()
         .stdin(Stdio::piped())
@@ -503,7 +514,8 @@ fn group(child: &tokio::process::Child) -> std::io::Result<Option<Group>> {
             kill_group(id);
             std::io::Error::new(e.kind(), format!("/bin/sh, to stop the engine with the node: {e}"))
         })?;
-    Ok(Some(Group { id, lifeline }))
+    let pipe = lifeline.stdin.take();
+    Ok(Some(Group { id, lifeline, _pipe: pipe }))
 }
 
 #[cfg(not(unix))]
@@ -512,11 +524,25 @@ fn group(_: &tokio::process::Child) -> std::io::Result<Option<Group>> {
 }
 
 impl Running {
+    /// Waits for the process to exit, then kills its group: what it started goes with it. A
+    /// lifeline that exits first (killed by hand or for memory, or by a wrapper's `kill 0`) would
+    /// leave the engine to outlive a node that dies, so the group is killed then too, the process
+    /// with it, and the supervisor starts it again as after any exit.
     async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-        let status = self.child.wait().await;
-        // What it started goes with it.
+        if let Some(group) = &mut self.group {
+            tokio::select! {
+                status = self.child.wait() => {
+                    self.stop_group().await;
+                    return status;
+                }
+                lifeline = group.lifeline.wait() => {
+                    tracing::warn!("an engine's lifeline exited ({lifeline:?}): stopping the engine, to start it again");
+                }
+            }
+        }
+        // The process is not reaped yet, so its group's number is still its own.
         self.stop_group().await;
-        status
+        self.child.wait().await
     }
 
     /// Kills the process group, then waits for the process.
@@ -564,9 +590,19 @@ fn spawn(launch: &Launch) -> std::io::Result<Running> {
     // the node alone, which stops its engines as it shuts down.
     #[cfg(unix)]
     command.process_group(0);
+    let _starting = STARTING.lock().unwrap_or_else(|e| e.into_inner());
     let child = command.spawn()?;
     Ok(Running { group: group(&child)?, child })
 }
+
+/// Held while an engine (or `ggml-rpc-server`) and its lifeline start, so that none started
+/// meanwhile inherits either end of another's lifeline pipe. Linux and the BSDs create the pipe
+/// close-on-exec at once (`pipe2`); macOS creates it, then marks it, and a process started in
+/// between keeps it open: an engine holding another's lifeline open would outlive a node that
+/// dies, and two holding each other's would keep each other alive. What starts outside it is
+/// short-lived (the device probes): it can hold a lifeline open only until it exits, and an engine
+/// starting with it can hold its output open until its timeout.
+static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {
@@ -585,6 +621,7 @@ mod tests {
             "DYLD_FALLBACK_LIBRARY_PATH",
             "SystemRoot",
             "CUDA_VISIBLE_DEVICES",
+            "CUDA_CACHE_MAXSIZE",
             "HIP_VISIBLE_DEVICES",
             "HSA_OVERRIDE_GFX_VERSION",
             "VK_ICD_FILENAMES",
@@ -624,7 +661,9 @@ mod tests {
             "GGML_OPENVINO_CACHE_DIR",
             "GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR",
             "CUDA_INJECTION64_PATH",
+            "CUDA_CACHE_PATH",
             "HSA_TOOLS_LIB",
+            "SYCL_CACHE_DIR",
             "VK_LAYER_PATH",
             "VK_ADD_LAYER_PATH",
             "VK_IMPLICIT_LAYER_PATH",

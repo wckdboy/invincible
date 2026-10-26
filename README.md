@@ -993,8 +993,12 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
   is the whole answer's limit).
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff. Stopping the node (Ctrl-C, `kill`, its service stopping, its terminal
-  closing) stops its engines and whatever they started, once answers in flight have finished or
-  had 15 s. A node that dies instead (`kill -9`, a crash, `Ctrl-\`) takes them with it at once.
+  closing unless it was started with `nohup`) stops its engines and whatever they started, once
+  answers in flight have finished or had 15 s. Under systemd that takes `KillMode=mixed`, which
+  the unit `autobot setup` writes has; a unit of your own without it stops the engines at the
+  same moment as the node. A node that dies instead (`kill -9`, a crash, `Ctrl-\`) takes them
+  with it as its process ends: after a crash, once the crash reporter (ReportCrash,
+  systemd-coredump) lets it go.
 - An engine answers the node and nothing else on the machine. Each gets its own random key when
   the node starts, in a file only your user can read (`~/.invincible/engines/<n>.key`, mode 0600) that
   llama-server is given with `--api-key-file`: the path is on its command line, the key is not, so
@@ -1026,7 +1030,8 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
   where to load code from: ggml's (`GGML_BACKEND_PATH`, a backend library ggml would load, and
   `GGML_ET_KERNELS_PATH`, `GGML_METAL_PATH_RESOURCES`, `GGML_OPENCL_KERNEL_CACHE_DIR`,
   `GGML_OPENVINO_CACHE_DIR`, `GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`), the libraries CUDA and
-  ROCm would load into the engine (`CUDA_INJECTION64_PATH`, `HSA_TOOLS_LIB`) and where Vulkan
+  ROCm would load into the engine (`CUDA_INJECTION64_PATH`, `HSA_TOOLS_LIB`), where CUDA and
+  SYCL cache compiled kernels (`CUDA_CACHE_PATH`, `SYCL_CACHE_DIR`) and where Vulkan
   finds layers (`VK_LAYER_PATH`, `VK_ADD_LAYER_PATH`, `VK_IMPLICIT_LAYER_PATH`,
   `VK_ADD_IMPLICIT_LAYER_PATH`). Provider keys and `LLAMA_*`
   variables stay with the node: llama.cpp reads `LLAMA_ARG_*` as flags (`LLAMA_ARG_TOOLS` and

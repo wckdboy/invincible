@@ -243,8 +243,12 @@ impl Service {
             Kind::Daemon => {
                 // Never give up restarting (the default stops after 5 starts in 10 s).
                 unit.push_str("StartLimitIntervalSec=0\n");
+                // Stopping signals the gateway alone, which stops its engines once answers in
+                // flight have finished or had 15 s; what is left at TimeoutStopSec is killed. By
+                // default systemd signals the engines at the same moment, ending those answers.
+                let kill_mode = if self.name == GATEWAY { "KillMode=mixed\n" } else { "" };
                 format!(
-                    "{unit}\n[Service]\nType=simple\nExecStart={exec}\n{env}Restart=always\nRestartSec=5\nWatchdogSec={WATCHDOG_SECS}\nTimeoutStopSec=20\nLimitNOFILE=65536\nStandardOutput=append:{log}\nStandardError=append:{log}\n\n[Install]\nWantedBy={target}\n",
+                    "{unit}\n[Service]\nType=simple\nExecStart={exec}\n{env}Restart=always\nRestartSec=5\nWatchdogSec={WATCHDOG_SECS}\nTimeoutStopSec=20\n{kill_mode}LimitNOFILE=65536\nStandardOutput=append:{log}\nStandardError=append:{log}\n\n[Install]\nWantedBy={target}\n",
                     exec = exec.join(" "),
                     target = if system { "multi-user.target" } else { "default.target" },
                 )
@@ -617,6 +621,11 @@ mod tests {
     #[test]
     fn systemd_units() {
         let home = Path::new("/home/me");
+        // Stopping the gateway signals it alone: it stops its engines once answers in flight are done.
+        let gateway_unit = gateway().render(Platform::SystemdUser, "/usr/bin");
+        assert!(gateway_unit.contains("TimeoutStopSec=20\nKillMode=mixed\n"), "{gateway_unit}");
+        let agent_unit = agent().render(Platform::SystemdUser, "/usr/bin");
+        assert!(!agent_unit.contains("KillMode"), "{agent_unit}");
         snapshot("invincible.user.service", &gateway().render(Platform::SystemdUser, "/usr/bin"));
         snapshot(
             "invincible.system.service",

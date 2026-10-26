@@ -171,6 +171,12 @@ fn port() -> u16 {
 /// a cloud model whose key is in the environment, offline (the default), with [SECRETS] and [env]
 /// in its environment.
 fn serve(tag: &str, env: &[(&str, &str)], args: &[&str], run: Run) -> (Node, String) {
+    serve_with(None, tag, env, args, run)
+}
+
+/// [serve], the node started by [launcher] (`nohup`) when there is one, and in its own directory,
+/// where a node that dumps core leaves it.
+fn serve_with(launcher: Option<&str>, tag: &str, env: &[(&str, &str)], args: &[&str], run: Run) -> (Node, String) {
     let dir = std::env::temp_dir().join(format!("invincible-engines-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
@@ -212,8 +218,18 @@ fn serve(tag: &str, env: &[(&str, &str)], args: &[&str], run: Run) -> (Node, Str
     );
     std::fs::write(dir.join("config.toml"), config).unwrap();
     let log = std::fs::File::create(dir.join("serve.log")).unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_invincible"))
+    let invincible = env!("CARGO_BIN_EXE_invincible");
+    let mut command = match launcher {
+        Some(launcher) => {
+            let mut command = Command::new(launcher);
+            command.arg(invincible);
+            command
+        }
+        None => Command::new(invincible),
+    };
+    let child = command
         .arg("serve")
+        .current_dir(&dir)
         .env("INVINCIBLE_HOME", &dir)
         .env("HOME", &dir)
         .env("CUDA_VISIBLE_DEVICES", "0")
@@ -361,6 +377,12 @@ async fn what_an_engine_started_stops_with_the_node() {
     // node alone, as engines run in process groups of their own. Behind a script that runs it
     // without exec, the server is not the node's child, and stops too.
     for signal in ["-INT", "-TERM", "-HUP"] {
+        // A node started with SIGHUP ignored keeps ignoring it
+        // (a_node_started_with_nohup_outlives_its_terminal), as one started from here does when the
+        // test runs under `nohup`.
+        if signal == "-HUP" && ignored("HUP") {
+            continue;
+        }
         let (mut node, url) = serve(&format!("stop{signal}"), &[], &[], Run::Wrapped);
         let engine = started(&node.dir).await;
         through_the_node(&url).await;
@@ -376,20 +398,94 @@ async fn what_an_engine_started_goes_when_the_node_dies() {
     // the way out, and neither launchd, which kills what is left in the node's process group, nor
     // the terminal reach engines: the engine's group must go by itself, the server with it.
     for signal in ["-KILL", "-QUIT"] {
+        // A node that ignores SIGQUIT is not quit by it: one started from here does when the test
+        // runs as a background job of a non-interactive shell.
+        if signal == "-QUIT" && ignored("QUIT") {
+            continue;
+        }
         let (mut node, url) = serve(&format!("die{signal}"), &[], &[], Run::Wrapped);
         let engine = started(&node.dir).await;
         through_the_node(&url).await;
         assert!(node.stop(signal), "the node did not die on {signal}");
-        let health = format!("http://127.0.0.1:{}/health", engine["port"]);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while reqwest::get(&health).await.is_ok() {
-            if Instant::now() > deadline {
-                let _ = Command::new("kill").args(["-KILL", &engine["pid"].to_string()]).status();
-                panic!("the server outlived the node, killed with {signal}");
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        goes(&engine, signal).await;
     }
+}
+
+/// Waits for the server [engine] started as to stop answering, once the node was killed with
+/// [signal]; kills it and fails when it still answers after 5 s.
+async fn goes(engine: &Value, signal: &str) {
+    let health = format!("http://127.0.0.1:{}/health", engine["port"]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while reqwest::get(&health).await.is_ok() {
+        if Instant::now() > deadline {
+            let _ = Command::new("kill").args(["-KILL", &engine["pid"].to_string()]).status();
+            panic!("the server outlived the node, killed with {signal}");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Whether this test process ignores the signal [name]d (`HUP`, `QUIT`), as a node started from
+/// here then does: a background job of a non-interactive shell ignores SIGINT and SIGQUIT, one run
+/// under `nohup` SIGHUP. A program a shell runs inherits it too, and sends it to itself (`kill`,
+/// not the shell's own, which may ignore SIGQUIT for itself); with no core dumped.
+fn ignored(name: &str) -> bool {
+    Command::new("/bin/sh")
+        .args(["-c", &format!("ulimit -c 0 2>/dev/null; exec kill -{name} $$")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[tokio::test]
+async fn a_node_started_with_nohup_outlives_its_terminal() {
+    // `nohup` ignores SIGHUP, so the terminal closing does not stop what it runs: the node keeps
+    // it ignored, and serves on.
+    let (mut node, url) = serve_with(Some("nohup"), "nohup", &[], &[], Run::Direct);
+    started(&node.dir).await;
+    through_the_node(&url).await;
+    let _ = Command::new("kill").args(["-HUP", &node.child.id().to_string()]).status();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(matches!(node.child.try_wait(), Ok(None)), "the node stopped on SIGHUP, started with nohup");
+    through_the_node(&url).await;
+    assert!(node.stop("-TERM"), "the node did not stop on -TERM");
+}
+
+#[tokio::test]
+async fn an_engine_whose_lifeline_goes_is_started_again() {
+    // Its lifeline gone (killed by hand, or for memory), an engine would outlive a node that dies:
+    // it is stopped and started again, with a lifeline that takes it when the node dies.
+    let (mut node, url) = serve("lifeline", &[], &[], Run::Direct);
+    let first = started(&node.dir).await;
+    through_the_node(&url).await;
+    // Run directly, the stand-in leads its process group, and the lifeline is the shell in it.
+    let group = first["pid"].to_string();
+    let killed = Command::new("pkill").args(["-KILL", "-g", &group, "-f", "read _"]).status().unwrap();
+    assert!(killed.success(), "no lifeline in the engine's group");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let second = loop {
+        let engine = started(&node.dir).await;
+        if engine["pid"] != first["pid"] {
+            break engine;
+        }
+        if Instant::now() > deadline {
+            let _ = Command::new("kill").args(["-KILL", &group]).status();
+            let log = std::fs::read_to_string(node.dir.join("serve.log")).unwrap_or_default();
+            panic!("the engine was not started again once its lifeline went; node log:\n{log}");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let log = node.logged("lifeline exited").await;
+    assert_eq!(log.matches("engine started").count(), 2, "{log}");
+    let first_runs = Command::new("kill").args(["-0", &group]).stderr(Stdio::null()).status().unwrap();
+    assert!(!first_runs.success(), "the first engine still runs");
+
+    through_the_node(&url).await;
+    assert!(node.stop("-KILL"), "the node did not die on -KILL");
+    goes(&second, "-KILL").await;
 }
 
 #[tokio::test]
