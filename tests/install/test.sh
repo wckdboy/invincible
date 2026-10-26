@@ -7,16 +7,18 @@
 #
 # Fresh install, the same again (nothing downloaded), set up with services, an upgrade (services
 # restarted once), again (not restarted), going back with --version, edge, a broken partial
-# download, two runs at once, a stale lock, a release signed with another key, uninstall (data
-# kept), uninstall --purge.
+# download, two runs at once (with and without a stale lock), a lock without its pid file, a
+# release signed with another key, uninstall (data kept), uninstall --purge.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 INSTALL="$ROOT/install.sh"
 T=$(mktemp -d "${TMPDIR:-/tmp}/invincible-install-test.XXXXXX")
 SERVER=""
+ROOT_UNIT=""
 cleanup() {
     if [ -n "$SERVER" ]; then kill "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true; fi
+    [ -z "$ROOT_UNIT" ] || rm -f "$ROOT_UNIT"
     rm -rf "$T"
 }
 trap cleanup EXIT
@@ -58,11 +60,24 @@ for tool in llama-server bwrap; do printf '#!/bin/sh\nexit 0\n' >"$T/fake/$tool"
 printf '#!/bin/sh\nexit 1\n' >"$T/fake/gh"
 chmod +x "$T/fake"/*
 export PATH="$T/fake:$PATH"
+# Which mkdir this is: the lock (install.sh) must hold with uutils' too, whose mkdir exits 0 for a
+# directory another run made a moment before.
+mkdir_is=$(mkdir --version 2>/dev/null | head -n 1)
+printf 'mkdir: %s\n' "${mkdir_is:-no --version (BSD)}"
 
 if [ "$(uname -s)" = Darwin ]; then
     SERVICE_FILE="$HOME/Library/LaunchAgents/sh.invincible.gateway.plist"
 elif [ "$(id -u)" = 0 ]; then
+    # As root the installer uses the system units, and its uninstall removes them: never run over
+    # real ones. The stand-in's unit is removed when the test ends, even when it fails.
+    for unit in invincible.service autobot.service invincible-update.service invincible-update.timer; do
+        # A link counts too, a dangling one included (-e follows it), since cleanup would remove it.
+        if [ -e "/etc/systemd/system/$unit" ] || [ -L "/etc/systemd/system/$unit" ]; then
+            fail "/etc/systemd/system/$unit is there; run the test as another user"
+        fi
+    done
     SERVICE_FILE="/etc/systemd/system/invincible.service"
+    ROOT_UNIT="$SERVICE_FILE"
 else
     SERVICE_FILE="$HOME/.config/systemd/user/invincible.service"
 fi
@@ -197,15 +212,40 @@ run --version 0.0.2 || fail "after an interrupted download"
 [ ! -e "$INVINCIBLE_HOME/cache/invincible-$PLATFORM.tar.gz.part" ] || fail "interrupted: partial left"
 pass "a broken partial download is replaced"
 
-# 9. Two runs at once, and a lock left by a run that was killed.
-sh -s -- --prefix "$PREFIX" --version 0.0.1 <"$INSTALL" >"$T/a" 2>&1 & a=$!
-sh -s -- --prefix "$PREFIX" --version 0.0.1 <"$INSTALL" >"$T/b" 2>&1 & b=$!
-wait "$a" || { cp "$T/a" "$T/out"; fail "concurrent run a"; }
-wait "$b" || { cp "$T/b" "$T/out"; fail "concurrent run b"; }
-[ "$(version invincible)" = 0.0.1 ] || fail "concurrent: not 0.0.1"
+# 9. Two runs at once: one downloads, the other waits and finds it installed. Then again with a
+# lock left by a run that was killed, and a lock directory left without its pid file.
+two_runs() { # two_runs <version> <name>
+    before=$(archives)
+    sh -s -- --prefix "$PREFIX" --version "$1" <"$INSTALL" >"$T/a" 2>&1 & a=$!
+    sh -s -- --prefix "$PREFIX" --version "$1" <"$INSTALL" >"$T/b" 2>&1 & b=$!
+    status_a=0 status_b=0
+    wait "$a" || status_a=$?
+    wait "$b" || status_b=$?
+    downloads=$(($(archives) - before))
+    # For any failure below: both runs, their pids (as "waiting … (pid N)" names them), what is
+    # left of the lock, and which mkdir this is.
+    {
+        echo "run a: pid $a, exit $status_a"; cat "$T/a"
+        echo "run b: pid $b, exit $status_b"; cat "$T/b"
+        echo "archives downloaded: $downloads"
+        if [ -d "$INVINCIBLE_HOME/.install.lock" ]; then
+            echo "lock left behind: pid $(cat "$INVINCIBLE_HOME/.install.lock/pid" 2>/dev/null || echo none), reclaim $(cat "$INVINCIBLE_HOME/.install.lock/reclaim" 2>/dev/null || echo none)"
+        else
+            echo "no lock left behind"
+        fi
+        echo "mkdir: $(mkdir --version 2>/dev/null | head -n 1)"
+    } >"$T/out"
+    if [ "$status_a" != 0 ] || [ "$status_b" != 0 ]; then fail "$2: a run failed"; fi
+    [ "$downloads" = 1 ] || fail "$2: $downloads downloads, not 1"
+    [ "$(version invincible)" = "$1" ] || fail "$2: not $1"
+}
+two_runs 0.0.1 "two runs at once"
 mkdir -p "$INVINCIBLE_HOME/.install.lock" && echo 999999 >"$INVINCIBLE_HOME/.install.lock/pid"
-run || fail "stale lock"
-pass "two runs at once; a stale lock"
+two_runs 0.0.2 "two runs at once, a stale lock"
+mkdir -p "$INVINCIBLE_HOME/.install.lock" && rm -f "$INVINCIBLE_HOME/.install.lock/pid"
+run || fail "a lock without its pid file"
+lacks "$T/out" "waiting for another install" "a lock without its pid file"
+pass "two runs at once; a stale lock; a lock without its pid file"
 
 # 10. Signed with another key: refused, nothing replaced.
 if run --version 0.0.3; then fail "another key: installed"; fi
