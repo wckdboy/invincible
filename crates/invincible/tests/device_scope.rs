@@ -134,6 +134,7 @@ async fn node_holding_in(dir: std::path::PathBuf, ceiling: u64) -> Node {
         name: "studio".into(),
         llama_server: std::path::PathBuf::from("/nonexistent/llama-server"),
         rpc_backend: None,
+        llama_build: None,
         peers: Vec::new(),
         device_key: None,
         runs: Vec::new(),

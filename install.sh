@@ -526,11 +526,11 @@ else
 fi
 
 # --- Write confinement for unattended commands (Linux: bubblewrap) ------------------------------
-# Scheduled tasks, board work and phone recipes run commands write-confined: a command's own writes
-# go only to its working directory and temp. Reads, the network and the programs it can talk to
-# (systemd or launchd, D-Bus, the node's and agent's local APIs, any socket) are not restricted
-# yet, so it can have one of them write elsewhere. Without bwrap they are refused. macOS has
-# sandbox-exec built in.
+# Scheduled tasks, board work, phone recipes and `autobot run` run commands write-confined: a
+# command's own writes go only to its working directory and temp. Reads, the network and the
+# programs it can talk to (systemd or launchd, D-Bus, the node's and agent's local APIs, any
+# socket) are not restricted yet, so it can have one of them write elsewhere. Without bwrap they
+# are refused. macOS has sandbox-exec built in.
 if [ "$OS" = Linux ] && ! have bwrap; then
     question="Install bubblewrap (write confinement for unattended agent commands) with sudo?"
     if have apt-get && ask_sudo "$question"; then
@@ -540,7 +540,7 @@ if [ "$OS" = Linux ] && ! have bwrap; then
     elif have apk && ask_sudo "$question"; then
         sudo apk add -q bubblewrap >&2 || warn "bubblewrap did not install"
     fi
-    have bwrap || warn "no bubblewrap: unattended agent commands are refused until it is installed (sudo apt install bubblewrap), or [agent] sandbox = \"off\""
+    have bwrap || warn "no bubblewrap: unattended agent commands (schedules, autobot run) are refused until it is installed (sudo apt install bubblewrap), or [agent] sandbox = \"off\""
 fi
 
 # The gateway finds llama-server on its PATH, unless told where it is.

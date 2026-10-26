@@ -217,9 +217,11 @@ Membership API).
 ## The tunnel
 
 `invincible tunnel` on a paired machine opens a plain-HTTP door on loopback; each request through
-it is its own session. The door asks for that machine's local token (`Authorization: Bearer`, the
-same file as a node's `invincible token`) and a loopback `Host` header, so a web page open in a
-browser on that machine cannot use it, by cross-site request or DNS rebinding.
+it is its own session. The door asks for that machine's local token (`Authorization: Bearer` or
+`x-api-key`, as on a node's own API, from the same file as a node's `invincible token`) and a
+loopback `Host` header, so a web page open in a browser on that machine cannot use it, by
+cross-site request or DNS rebinding. It removes both headers before the request enters the
+session: the node knows the device by its key, and the local token stays on that machine.
 
 ## Open questions
 

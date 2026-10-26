@@ -83,6 +83,12 @@ enum Command {
         /// there to ask). Nothing else is approved by it.
         #[arg(long)]
         cloud: bool,
+        /// Commands unconfined, for this run only: they can write anywhere you can. They run
+        /// write-confined otherwise, like a scheduled task's; this is for a machine you can throw
+        /// away (a CI container without bubblewrap). Said on standard error and in the action
+        /// log.
+        #[arg(long)]
+        no_sandbox: bool,
     },
     /// Serve every enabled bot: the agent API (for paired apps, through the gateway), their
     /// channels, schedules, board, heartbeat and hooks.
@@ -678,14 +684,22 @@ fn run(mut cli: Cli) -> Result<(), String> {
                 done
             })
         }
-        Command::Run { task, session, dir, model, approvals, json, cloud } => runtime()?.block_on(async {
+        Command::Run { task, session, dir, model, approvals, json, cloud, no_sandbox } => runtime()?.block_on(async {
             let mut config = config;
             if let Some(mode) = approvals {
                 config.approvals.mode = approval_mode(&mode)?;
             }
+            if no_sandbox {
+                config.agent.sandbox = autobot::sandbox::Mode::Off;
+            }
             let dir = dir.map(|d| d.canonicalize().map_err(|e| format!("{}: {e}", d.display()))).transpose()?;
             let coding = dir.is_some();
             let mut agent = autobot::agent_in(&config, &home, dir)?;
+            // Nobody watches a run: its commands are confined like a scheduled task's.
+            agent.tools = agent.tools.clone().unattended();
+            if let Some(warning) = run_sandbox_warning(&agent.tools, no_sandbox) {
+                eprintln!("{}", invincible::brand::warn(&warning));
+            }
             if coding {
                 autobot::for_coding(&mut agent);
             }
@@ -986,7 +1000,12 @@ fn run(mut cli: Cli) -> Result<(), String> {
                     (false, "unattended") => "refused (no one to ask)".to_owned(),
                     (false, by) => format!("denied on {by}"),
                 };
-                println!("{at}  {:<14} {:<30} {}", e.session, verdict, e.action);
+                // A command that ran also says where and how confined (`sandbox bwrap`, `sandbox off`).
+                let verdict = match &e.sandbox {
+                    Some(sandbox) => format!("{verdict}, sandbox {sandbox}"),
+                    None => verdict,
+                };
+                println!("{at}  {:<14} {:<44} {}", e.session, verdict, e.action);
             }
             Ok(())
         }
@@ -1477,6 +1496,26 @@ fn event_json(event: &Event) -> serde_json::Value {
         Event::Usage { input, output, cached } => {
             json!({ "type": "usage", "input": input, "output": output, "cached": cached })
         }
+    }
+}
+
+/// What `autobot run` says before it starts when its commands will not run confined: unconfined
+/// as asked, or refused for want of a sandbox (as a scheduled task's are).
+fn run_sandbox_warning(tools: &autobot::tools::Tools, no_sandbox: bool) -> Option<String> {
+    if !tools.offers("terminal") && !tools.offers("execute_code") {
+        return None;
+    }
+    match tools.confinement() {
+        "ssh" | "container" => None,
+        "off" => Some(format!(
+            "commands in this run are not sandboxed ({}): they can write anywhere you can",
+            if no_sandbox { "--no-sandbox" } else { "[agent] sandbox = \"off\"" }
+        )),
+        _ => autobot::sandbox::command(":", tools.workdir()).err().map(|e| {
+            format!(
+                "commands in this run will be refused: {e}; on a machine you can throw away (a CI container), --no-sandbox runs them unconfined"
+            )
+        }),
     }
 }
 

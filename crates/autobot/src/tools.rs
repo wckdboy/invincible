@@ -332,6 +332,21 @@ impl Tools {
         self
     }
 
+    /// Where commands run and how they are confined, as the action log says it: `ssh` or
+    /// `container` when they run there, this machine's sandbox ([crate::sandbox::name]) when
+    /// confined here, `off` otherwise.
+    pub fn confinement(&self) -> &'static str {
+        if self.ssh.is_some() {
+            "ssh"
+        } else if self.docker.is_some() {
+            "container"
+        } else if self.confined {
+            crate::sandbox::name()
+        } else {
+            "off"
+        }
+    }
+
     /// Offers and runs only [tools] (by name).
     pub fn only(mut self, tools: Vec<String>) -> Self {
         self.only = Some(tools);
@@ -2011,7 +2026,9 @@ mod tests {
             .unwrap()
             .join(format!(".autobot-sandbox-test-{}", rand()));
         let confined = tools.clone().with_sandbox(crate::sandbox::Mode::Unattended).unattended();
-        let command = format!("echo in > inside.txt; echo out > {}; echo done", outside.display());
+        assert_eq!(confined.confinement(), crate::sandbox::name());
+        assert_eq!(tools.clone().with_sandbox(crate::sandbox::Mode::Off).unattended().confinement(), "off");
+        let command = format!("echo in > inside.txt; echo out > '{}'; echo done", outside.display());
         let out = confined.run(&Call::Terminal { command: command.clone() }).await;
         if out.contains("bwrap") {
             // No usable sandbox here (not installed, or user namespaces disallowed): refused or
@@ -2024,6 +2041,7 @@ mod tests {
         assert!(out.contains("done"), "{out}");
         // Interactive turns are not confined unless the sandbox is \"always\".
         let plain = tools.with_sandbox(crate::sandbox::Mode::Unattended);
+        assert_eq!(plain.confinement(), "off");
         let out = plain.run(&Call::Terminal { command }).await;
         assert!(outside.exists(), "{out}");
         let _ = std::fs::remove_file(outside);
