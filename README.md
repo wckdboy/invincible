@@ -992,16 +992,29 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
   restarted with backoff, and stopping the node stops its engines.
 - An engine answers the node and nothing else on the machine. Each gets its own random key when
-  the node starts, in llama-server's `LLAMA_API_KEY` (its environment, not its command line, so
-  `ps` does not show it), and the node sends it with every request. Anything else that finds an
+  the node starts, in a file only your user can read (`~/.invincible/engines/<n>.key`, mode 0600) that
+  llama-server is given with `--api-key-file`: the path is on its command line, the key is not, so
+  `ps` does not show it. The node sends the key with every request. Anything else that finds an
   engine's loopback port (another user, a web page, a script) gets a 401, not an answer that skips
-  the receipts, redaction and audit; `/health` stays open, as llama-server keeps it. A process
-  running as your own user can still read an engine's environment, and so its key; confining
-  engines is planned.
+  the receipts, redaction and audit; `/health` stays open, as llama-server keeps it.
+- The node checks the key rather than trusting it: once an engine is healthy, and before it
+  serves anything, the node asks it for a chat completion without the key. Anything but a 401
+  stops the engine, and its model is not served until the node restarts; the node's log names the
+  model and says to use a llama-server that honours `--api-key-file`. llama.cpp's and
+  ik_llama.cpp's do; a wrapper that drops the flag would not, nor would a container the key file
+  is not mounted into (that one does not start at all). A process running as your own user can
+  still read the key file; confining engines is planned.
+- A shard's `ggml-rpc-server` takes no key: llama.cpp's RPC protocol has none. It listens on
+  loopback only, so from other machines only a shard link from a head you named reaches it, but
+  any process on this machine can connect to its port, as to a head's loopback doors
+  ([spec/cluster.md](spec/cluster.md), Known limits).
 - An engine starts with a clean environment: `PATH`, `HOME`, the temporary directory, the locale,
   the library paths, and the GPU runtimes' and ggml's own variables (`CUDA_*`, `HIP_*`, `ROCR_*`,
   `HSA_*`, `ROCM_*`, `VK_*`, `ONEAPI_*`, `SYCL_*`, `ZE_*`, `ZES_*`, `GGML_*`), never a name with
-  `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL` in it. Provider keys and `LLAMA_*`
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL` in it, and not the ggml variables that say
+  where to load code from (`GGML_BACKEND_PATH`, a backend library ggml would load, and
+  `GGML_ET_KERNELS_PATH`, `GGML_METAL_PATH_RESOURCES`, `GGML_OPENCL_KERNEL_CACHE_DIR`,
+  `GGML_OPENVINO_CACHE_DIR`, `GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`). Provider keys and `LLAMA_*`
   variables stay with the node: llama.cpp reads `LLAMA_ARG_*` as flags (`LLAMA_ARG_TOOLS` and
   `LLAMA_ARG_AGENT` turn on its file and shell tools), so llama-server options go in
   `[engine] extra_args` instead. The same holds for `ggml-rpc-server`, `llama-bench` and the

@@ -700,6 +700,8 @@ pays the network's round trips.
 
 - One head per shard at a time (`ggml-rpc-server` serves one client at a time).
 - The head's loopback doors accept any local process (as any loopback service does).
+- So does the shard's `ggml-rpc-server`: llama.cpp's RPC protocol has no key, and only its loopback
+  port keeps other machines out (they come in through shard links).
 - A peer that comes back is used at the model's next relaunch, not at once.
 - Byte counts in receipts are per link, so concurrent requests on one model share them.
 - Heads must have a GPU device of their own to anchor a split: `llama-server --list-devices` has to

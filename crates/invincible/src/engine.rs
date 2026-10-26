@@ -2,10 +2,12 @@
 //! engine cannot take the node down. v0 has one kind, llama.cpp's `llama-server`.
 //!
 //! An engine answers the node and no one else. Its port is on loopback, which every process and
-//! every user on the machine can reach, so each engine gets its own random key ([new_key]) and
-//! refuses requests without it; the node sends it on every request ([Engine::authorized]). And
-//! an engine gets only the environment it needs to run ([inherited_env]), never the node's
-//! secrets or llama.cpp settings the node did not choose.
+//! every user on the machine can reach, so each engine gets its own random key ([new_key]), in a
+//! file only the node's user can read ([Launch::llama_server]), and refuses requests without it;
+//! the node sends it on every request ([Engine::authorized]). An engine that answers without it
+//! is stopped and its model not served ([run_once]): the key is checked, not assumed. And an
+//! engine gets only the environment it needs to run ([inherited_env]), never the node's secrets
+//! or llama.cpp settings the node did not choose.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -37,7 +39,7 @@ pub struct Engine {
     pub vision: Option<bool>,
     /// For a model split across paired nodes: which devices hold it now (spec/cluster.md).
     pub cluster: Option<Arc<crate::cluster::ClusterRun>>,
-    /// The key the engine requires ([KEY_ENV]); None for one that requires none.
+    /// The key the engine requires ([KEY_FILE_FLAG]); None for one that requires none.
     key: Option<String>,
     healthy: Arc<AtomicBool>,
 }
@@ -109,10 +111,10 @@ impl std::fmt::Debug for Engine {
     }
 }
 
-/// Where llama-server reads its key from (`--api-key`'s variable in llama.cpp's `common/arg.cpp`).
-/// The environment, not the command line: every user on the machine can read a process's
-/// arguments (`ps`), and only its own user (and root) its environment.
-pub const KEY_ENV: &str = "LLAMA_API_KEY";
+/// How llama-server is given its key: the path of a file that holds it. Both llama.cpp and
+/// ik_llama.cpp read it (ik_llama.cpp reads no `LLAMA_API_KEY`), and the key is never on the
+/// command line, which every user on the machine can read (`ps`): the file is mode 0600.
+pub const KEY_FILE_FLAG: &str = "--api-key-file";
 
 /// A fresh key for one engine: 32 random bytes, hex.
 pub fn new_key() -> Result<String, String> {
@@ -128,11 +130,21 @@ pub struct Launch {
     pub log: PathBuf,
     /// Its environment beyond what it inherits ([inherited_env]).
     pub env: Vec<(String, String)>,
+    /// A key and the file it goes in ([KEY_FILE_FLAG]), written (mode 0600) before each start.
+    pub key_file: Option<(PathBuf, String)>,
 }
 
 impl Launch {
-    /// `llama-server` for [model] on loopback [port], answering only requests that carry [key].
-    pub fn llama_server(engine: &EngineConfig, model: &ModelConfig, port: u16, key: &str, logs: &Path) -> Self {
+    /// `llama-server` for [model] on loopback [port], answering only requests that carry [key],
+    /// which it reads from [key_file].
+    pub fn llama_server(
+        engine: &EngineConfig,
+        model: &ModelConfig,
+        port: u16,
+        key: &str,
+        key_file: &Path,
+        logs: &Path,
+    ) -> Self {
         let mut args = vec![
             "--model".to_owned(),
             model.path.display().to_string(),
@@ -144,6 +156,8 @@ impl Launch {
             port.to_string(),
             "--n-gpu-layers".to_owned(),
             model.gpu_layers.to_string(),
+            KEY_FILE_FLAG.to_owned(),
+            key_file.display().to_string(),
         ];
         if let Some(context) = model.context {
             args.extend(["--ctx-size".to_owned(), context.to_string()]);
@@ -156,12 +170,19 @@ impl Launch {
             program: engine.llama_server.clone(),
             args,
             log: logs.join(format!("{}.log", model.id)),
-            env: vec![(KEY_ENV.to_owned(), key.to_owned())],
+            env: Vec::new(),
+            key_file: Some((key_file.to_owned(), key.to_owned())),
         }
     }
 }
 
-// By hand, so the key never reaches a log: the environment's names only.
+/// Where the key of the [n]th configured model's engine goes: in the node's home, one file per
+/// engine.
+pub fn key_file(home: &Path, n: usize) -> PathBuf {
+    home.join("engines").join(format!("{n}.key"))
+}
+
+// By hand, so the key never reaches a log: the environment's names only, the key file's path.
 impl std::fmt::Debug for Launch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let env: Vec<&str> = self.env.iter().map(|(name, _)| name.as_str()).collect();
@@ -170,6 +191,7 @@ impl std::fmt::Debug for Launch {
             .field("args", &self.args)
             .field("log", &self.log)
             .field("env", &env)
+            .field("key_file", &self.key_file.as_ref().map(|(path, _)| path))
             .finish()
     }
 }
@@ -203,9 +225,10 @@ const INHERITED: &[&str] = &[
 /// Prefixes an engine inherits: the locale's parts, and which devices the GPU runtimes use and
 /// where their drivers are (`CUDA_VISIBLE_DEVICES`; ROCm's `HIP_VISIBLE_DEVICES`,
 /// `HSA_OVERRIDE_GFX_VERSION`; Vulkan's `VK_ICD_FILENAMES`; oneAPI's `ONEAPI_DEVICE_SELECTOR`,
-/// `ZES_ENABLE_SYSMAN`), and ggml's own switches (`GGML_VK_VISIBLE_DEVICES`, `GGML_METAL_*`).
-/// The model, its flags and the key are the node's to give, on the command line or in
-/// [Launch::env].
+/// `ZES_ENABLE_SYSMAN`), and ggml's own switches (`GGML_VK_VISIBLE_DEVICES`, `GGML_METAL_*`), but
+/// not those that say where to load code from ([WITHHELD]).
+/// The model, its flags and the key are the node's to give, on the command line, in
+/// [Launch::env] or in the key file.
 const INHERITED_PREFIXES: &[&str] =
     &["LC_", "CUDA_", "HIP_", "ROCR_", "HSA_", "ROCM_", "VK_", "ONEAPI_", "SYCL_", "ZE_", "ZES_", "GGML_"];
 
@@ -213,11 +236,26 @@ const INHERITED_PREFIXES: &[&str] =
 /// provider key can be given any name in `api_key_env`.
 const SECRET_WORDS: &[&str] = &["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
 
-/// Whether an engine inherits the variable [name] ([INHERITED], [INHERITED_PREFIXES]).
+/// Names withheld even under a prefix above: ggml's own for where to load code from, since no
+/// engine needs code put into it (ggml as of b11887). `GGML_BACKEND_PATH` names a backend library
+/// ggml `dlopen()`s (`ggml_backend_load_all`); the others name a directory or file of compiled
+/// device code it loads: ET kernels, Metal shaders, cached OpenCL programs and OpenVINO models.
+const WITHHELD: &[&str] = &[
+    "GGML_BACKEND_PATH",
+    "GGML_ET_KERNELS_PATH",
+    "GGML_METAL_PATH_RESOURCES",
+    "GGML_OPENCL_KERNEL_CACHE_DIR",
+    "GGML_OPENVINO_CACHE_DIR",
+    "GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR",
+];
+
+/// Whether an engine inherits the variable [name] ([INHERITED], [INHERITED_PREFIXES], less
+/// [SECRET_WORDS] and [WITHHELD]).
 pub fn inherits(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     (INHERITED.contains(&name.as_str()) || INHERITED_PREFIXES.iter().any(|p| name.starts_with(p)))
         && !SECRET_WORDS.iter().any(|w| name.contains(w))
+        && !WITHHELD.contains(&name.as_str())
 }
 
 /// The part of the node's environment an engine inherits ([inherits]): what every engine child
@@ -234,7 +272,8 @@ pub fn free_port() -> std::io::Result<u16> {
 }
 
 /// Runs [launch] and keeps it running: restarts it when it exits, with backoff, and keeps
-/// [engine]'s health current by polling `GET /health` (200 once the model is loaded).
+/// [engine]'s health current by polling `GET /health` (200 once the model is loaded). An engine
+/// that does not enforce its key is not restarted ([Ended::Unkeyed]): its model stays unhealthy.
 /// Dropping or aborting the returned task kills the engine.
 pub fn supervise(engine: Engine, launch: Launch) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -242,7 +281,9 @@ pub fn supervise(engine: Engine, launch: Launch) -> JoinHandle<()> {
         let mut backoff = FIRST_BACKOFF;
         loop {
             let started = Instant::now();
-            run_once(&engine, &launch, &client).await;
+            if run_once(&engine, &launch, &client).await == Ended::Unkeyed {
+                return;
+            }
             if started.elapsed() >= STABLE_RUN {
                 backoff = FIRST_BACKOFF;
             }
@@ -261,32 +302,90 @@ pub fn health_client() -> reqwest::Client {
         .expect("HTTP client")
 }
 
+/// Why [run_once] returned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// The engine exited, or did not start: start it again.
+    Exited,
+    /// It answered a request without its key ([key_check]) and was stopped: it must not be
+    /// started again, since it would answer anything on the machine the same way.
+    Unkeyed,
+}
+
 /// Runs [launch] once, keeping [engine]'s health current, until it exits (or never starts). The
-/// probe carries the key too, though llama-server leaves `/health` open.
-pub async fn run_once(engine: &Engine, launch: &Launch, client: &reqwest::Client) {
+/// probe carries the key too, though llama-server leaves `/health` open. An engine with a key is
+/// not healthy until it has refused a request without it; one that answers is stopped.
+pub async fn run_once(engine: &Engine, launch: &Launch, client: &reqwest::Client) -> Ended {
     let health = format!("{}/health", engine.base_url);
-    match spawn(launch) {
-        Err(e) => tracing::error!(model = %engine.id, "engine did not start: {e}"),
-        Ok(mut child) => {
-            tracing::info!(model = %engine.id, url = %engine.base_url, "engine started");
-            loop {
-                tokio::select! {
-                    status = child.wait() => {
-                        engine.set_healthy(false);
-                        tracing::warn!(model = %engine.id, "engine exited: {status:?}");
-                        break;
-                    }
-                    _ = sleep(HEALTH_INTERVAL) => {
-                        let probe = engine.authorized(client.get(&health)).send().await;
-                        let ok = matches!(probe, Ok(r) if r.status().is_success());
-                        if ok != engine.healthy() {
-                            tracing::info!(model = %engine.id, healthy = ok, "engine health changed");
+    let mut child = match spawn(launch) {
+        Ok(child) => child,
+        Err(e) => {
+            tracing::error!(model = %engine.id, "engine did not start: {e}");
+            return Ended::Exited;
+        }
+    };
+    tracing::info!(model = %engine.id, url = %engine.base_url, "engine started");
+    // Asked once per start, when it is first healthy, and before it serves anything.
+    let mut keyed = engine.key().is_none();
+    loop {
+        tokio::select! {
+            status = child.wait() => {
+                engine.set_healthy(false);
+                tracing::warn!(model = %engine.id, "engine exited: {status:?}");
+                return Ended::Exited;
+            }
+            _ = sleep(HEALTH_INTERVAL) => {
+                let probe = engine.authorized(client.get(&health)).send().await;
+                let mut ok = matches!(probe, Ok(r) if r.status().is_success());
+                if ok && !keyed {
+                    match key_check(engine, client).await {
+                        KeyCheck::Enforced => keyed = true,
+                        KeyCheck::Unknown => ok = false,
+                        KeyCheck::Ignored(status) => {
+                            engine.set_healthy(false);
+                            tracing::error!(
+                                model = %engine.id,
+                                program = %launch.program.display(),
+                                answer = %status,
+                                "the engine does not enforce its key: it answered a request without it, \
+                                 so anything on this machine could call it past receipts, redaction and \
+                                 audit. It is stopped and this model is not served: use a llama-server \
+                                 that honours {KEY_FILE_FLAG}"
+                            );
+                            let _ = child.kill().await;
+                            return Ended::Unkeyed;
                         }
-                        engine.set_healthy(ok);
                     }
                 }
+                if ok != engine.healthy() {
+                    tracing::info!(model = %engine.id, healthy = ok, "engine health changed");
+                }
+                engine.set_healthy(ok);
             }
         }
+    }
+}
+
+/// What an engine did with a request that did not carry its key.
+enum KeyCheck {
+    /// Refused it (401): the key is enforced.
+    Enforced,
+    /// Answered it some other way: the key is not enforced.
+    Ignored(reqwest::StatusCode),
+    /// No answer yet, or not ready (503): ask again.
+    Unknown,
+}
+
+/// Asks [engine], without its key, for what the key is there to protect: a chat completion.
+/// Not `/v1/models`, which ik_llama.cpp leaves open as llama-server leaves `/health`. The body is
+/// empty, so an engine that lets the request through rejects it before running anything.
+async fn key_check(engine: &Engine, client: &reqwest::Client) -> KeyCheck {
+    let url = format!("{}/v1/chat/completions", engine.base_url);
+    match client.post(url).json(&serde_json::json!({})).send().await {
+        Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => KeyCheck::Enforced,
+        Ok(r) if r.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE => KeyCheck::Unknown,
+        Ok(r) => KeyCheck::Ignored(r.status()),
+        Err(_) => KeyCheck::Unknown,
     }
 }
 
@@ -318,6 +417,9 @@ pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
 fn spawn(launch: &Launch) -> std::io::Result<tokio::process::Child> {
     if let Some(dir) = launch.log.parent() {
         std::fs::create_dir_all(dir)?;
+    }
+    if let Some((path, key)) = &launch.key_file {
+        crate::fsutil::replace_private(path, &format!("{key}\n")).map_err(std::io::Error::other)?;
     }
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&launch.log)?;
     Command::new(&launch.program)
@@ -355,6 +457,8 @@ mod tests {
             "ONEAPI_DEVICE_SELECTOR",
             "ZES_ENABLE_SYSMAN",
             "GGML_VK_VISIBLE_DEVICES",
+            "GGML_METAL_DEVICES",
+            "GGML_RPC_NO_RDMA",
         ] {
             assert!(inherits(name), "{name}");
         }
@@ -378,6 +482,13 @@ mod tests {
             // Code put into the engine, and the node's own settings.
             "LD_PRELOAD",
             "DYLD_INSERT_LIBRARIES",
+            "GGML_BACKEND_PATH",
+            "ggml_backend_path",
+            "GGML_ET_KERNELS_PATH",
+            "GGML_METAL_PATH_RESOURCES",
+            "GGML_OPENCL_KERNEL_CACHE_DIR",
+            "GGML_OPENVINO_CACHE_DIR",
+            "GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR",
             "PYTHONPATH",
             "INVINCIBLE_HOME",
             "NOTIFY_SOCKET",
@@ -388,11 +499,16 @@ mod tests {
     }
 
     #[test]
-    fn the_key_goes_in_the_environment_and_on_every_request() {
+    fn the_key_goes_in_a_file_and_on_every_request() {
         let config = crate::config::Config::parse("[[models]]\nid = \"m\"\npath = \"/m.gguf\"\n").unwrap();
-        let launch = Launch::llama_server(&config.engine, &config.models[0], 4000, "k3y", Path::new("/logs"));
-        assert_eq!(launch.env, [(KEY_ENV.to_owned(), "k3y".to_owned())]);
-        assert!(!launch.args.iter().any(|a| a.contains("k3y") || a.starts_with("--api-key")), "{:?}", launch.args);
+        let file = key_file(Path::new("/home"), 0);
+        let launch = Launch::llama_server(&config.engine, &config.models[0], 4000, "k3y", &file, Path::new("/logs"));
+        let at = launch.args.iter().position(|a| a == KEY_FILE_FLAG).expect("--api-key-file");
+        assert_eq!(launch.args[at + 1], "/home/engines/0.key");
+        assert_eq!(launch.key_file, Some((file, "k3y".to_owned())));
+        // Never on the command line, and not in the environment either.
+        assert!(!launch.args.iter().any(|a| a.contains("k3y") || a == "--api-key"), "{:?}", launch.args);
+        assert!(launch.env.is_empty(), "{:?}", launch.env);
 
         let client = reqwest::Client::new();
         let keyed = Engine::attached("m", "http://127.0.0.1:4000", None, false).with_key("k3y");
@@ -404,10 +520,34 @@ mod tests {
         assert!(request.headers().get("authorization").is_none());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_key_file_is_written_for_the_owner_alone_before_each_start() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("invincible-key-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = key_file(&dir, 3);
+        let launch = Launch {
+            program: "/nonexistent/llama-server".into(),
+            args: vec![KEY_FILE_FLAG.into(), file.display().to_string()],
+            log: dir.join("logs/m.log"),
+            env: vec![],
+            key_file: Some((file.clone(), "k3y".into())),
+        };
+        // Written even when the program then cannot start, and again (whole) at the next start.
+        assert!(spawn(&launch).is_err());
+        std::fs::write(&file, "stale").unwrap();
+        assert!(spawn(&launch).is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "k3y\n");
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_key_is_never_printed() {
         let config = crate::config::Config::parse("[[models]]\nid = \"m\"\npath = \"/m.gguf\"\n").unwrap();
-        let launch = Launch::llama_server(&config.engine, &config.models[0], 4000, "k3y", Path::new("/logs"));
+        let file = key_file(Path::new("/home"), 0);
+        let launch = Launch::llama_server(&config.engine, &config.models[0], 4000, "k3y", &file, Path::new("/logs"));
         let engine = Engine::attached("m", "http://127.0.0.1:4000", None, false).with_key("k3y");
         for printed in [format!("{launch:?}"), format!("{engine:?}")] {
             assert!(!printed.contains("k3y"), "{printed}");

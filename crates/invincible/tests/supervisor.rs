@@ -47,6 +47,7 @@ async fn restarts_a_crashed_engine_and_tracks_its_health() {
         args: vec!["-I".into(), "-c".into(), STAND_IN.into(), port.to_string(), "1.5".into()],
         log: log.clone(),
         env: vec![],
+        key_file: None,
     };
     let engine = Engine::attached("stand-in", &format!("http://127.0.0.1:{port}"), None, false);
     let task = supervise(engine.clone(), launch);
@@ -63,12 +64,46 @@ async fn restarts_a_crashed_engine_and_tracks_its_health() {
 #[tokio::test]
 async fn an_engine_that_cannot_start_stays_unhealthy() {
     let dir = std::env::temp_dir().join(format!("invincible-missing-{}", std::process::id()));
-    let launch =
-        Launch { program: "/nonexistent/llama-server".into(), args: vec![], log: dir.join("x.log"), env: vec![] };
+    let launch = Launch {
+        program: "/nonexistent/llama-server".into(),
+        args: vec![],
+        log: dir.join("x.log"),
+        env: vec![],
+        key_file: None,
+    };
     let engine = Engine::attached("missing", "http://127.0.0.1:9", None, false);
     let task = supervise(engine.clone(), launch);
     sleep(Duration::from_millis(1500)).await;
     assert!(!engine.healthy());
     task.abort();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn an_engine_that_answers_without_its_key_is_stopped_for_good() {
+    // The stand-in takes no key: whatever it answers a chat completion without one (here 501), it
+    // is not a 401.
+    let port = free_port().unwrap();
+    let dir = std::env::temp_dir().join(format!("invincible-unkeyed-{}", std::process::id()));
+    let log = dir.join("stand-in.log");
+    let launch = Launch {
+        program: "python3".into(),
+        args: vec!["-I".into(), "-c".into(), STAND_IN.into(), port.to_string(), "600".into()],
+        log: log.clone(),
+        env: vec![],
+        key_file: Some((dir.join("engine.key"), "k3y".into())),
+    };
+    let engine = Engine::attached("unkeyed", &format!("http://127.0.0.1:{port}"), None, false).with_key("k3y");
+    let task = supervise(engine.clone(), launch);
+
+    // It answered /health, and it was still never healthy: the supervisor stopped it and gave up.
+    wait_until("the supervisor gives up", &log, || task.is_finished()).await;
+    assert!(!engine.healthy());
+    let stopped = std::net::TcpStream::connect(("127.0.0.1", port)).is_err();
+    // Not started again either, after the first restart's backoff.
+    sleep(Duration::from_millis(1500)).await;
+    assert!(stopped && std::net::TcpStream::connect(("127.0.0.1", port)).is_err(), "the engine is still running");
+    let printed = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(printed.matches("listening").count(), 1, "started more than once: {printed}");
     let _ = std::fs::remove_dir_all(dir);
 }

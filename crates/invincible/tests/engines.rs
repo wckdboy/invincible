@@ -4,7 +4,7 @@
 //!
 //! The node is started with secrets and llama.cpp flags in its environment, as a shell might give
 //! it: the engine must see none of them, must refuse whoever calls it without its key, and must
-//! still answer the node.
+//! still answer the node. An engine that does not take the key it is given is not served.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -12,18 +12,23 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-/// llama-server's key rule (tools/server/server-http.cpp, b11721): with keys set (`--api-key`, or
-/// `LLAMA_API_KEY`), every path but `/health` and `/v1/health` needs one, as `Authorization:
-/// Bearer` or `X-Api-Key`; anything else is a 401 `authentication_error`. On start it writes what
-/// it was given to the `--env-out` file: its port, whether its key is on its command line or is
-/// the shell's, and the names in its environment.
+/// llama-server's key rule (tools/server/server-http.cpp, b11887): with keys set
+/// (`--api-key-file`, one per line, or `LLAMA_API_KEY`), every path but `/health` and `/v1/health`
+/// needs one, as `Authorization: Bearer` or `X-Api-Key`; anything else is a 401
+/// `authentication_error`. Given `--ignore-api-key-file`, it stands in for an engine that does not
+/// take the key the node gives it, and answers everyone. On start it writes what it was given to
+/// the `--env-out` file: its port, whether its key is on its command line or is the shell's, its
+/// key file's mode, and the names in its environment.
 const STAND_IN: &str = r#"#!/usr/bin/env python3
 import http.server, json, os, socketserver, sys
 args = sys.argv[1:]
 def arg(name):
     return args[args.index(name) + 1] if name in args else None
 port, alias = int(arg("--port")), arg("--alias")
+key_file = arg("--api-key-file")
 keys = [k for k in os.environ.get("LLAMA_API_KEY", "").split(",") if k]
+if key_file and "--ignore-api-key-file" not in args:
+    keys += [line for line in open(key_file).read().splitlines() if line]
 PUBLIC = {"/health", "/v1/health"}
 class H(http.server.BaseHTTPRequestHandler):
     def reply(self, status, body):
@@ -72,6 +77,7 @@ with open(out + ".tmp", "w") as f:
     json.dump({
         "port": port,
         "key_in_argv": any(k in a for k in keys for a in args),
+        "key_file_mode": oct(os.stat(key_file).st_mode & 0o777) if key_file else None,
         "shell_key": "a-key-from-the-shell" in keys,
         "env": sorted(os.environ),
     }, f)
@@ -80,12 +86,14 @@ server.serve_forever()
 "#;
 
 /// Set in the node's environment, never to reach an engine: a provider key named in `api_key_env`,
-/// another the shell happens to hold, and llama.cpp flags that turn on its file and shell tools.
+/// another the shell happens to hold, llama.cpp flags that turn on its file and shell tools, and a
+/// library ggml would load into the engine.
 const SECRETS: &[(&str, &str)] = &[
     ("INVINCIBLE_TEST_PROVIDER_KEY", "sk-provider"),
     ("OPENAI_API_KEY", "sk-openai"),
     ("LLAMA_ARG_TOOLS", "all"),
     ("LLAMA_ARG_AGENT", "1"),
+    ("GGML_BACKEND_PATH", "/tmp/not-a-backend.so"),
 ];
 
 /// A key of the shell's own for llama-server, which must not become the engine's.
@@ -116,9 +124,9 @@ fn port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
-/// `invincible serve` with one model on the stand-in and a cloud model whose key is in the
-/// environment, offline (the default), with [SECRETS] and [env] in its environment.
-fn serve(tag: &str, env: &[(&str, &str)]) -> (Node, String) {
+/// `invincible serve` with one model on the stand-in (given [args] too) and a cloud model whose
+/// key is in the environment, offline (the default), with [SECRETS] and [env] in its environment.
+fn serve(tag: &str, env: &[(&str, &str)], args: &[&str]) -> (Node, String) {
     let dir = std::env::temp_dir().join(format!("invincible-engines-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
@@ -136,7 +144,7 @@ fn serve(tag: &str, env: &[(&str, &str)]) -> (Node, String) {
         "listen = \"{listen}\"\n\
          [engine]\n\
          llama_server = {program:?}\n\
-         extra_args = [\"--env-out\", {out:?}]\n\
+         extra_args = [\"--env-out\", {out:?}{args}]\n\
          [[models]]\n\
          id = \"small\"\n\
          path = {model:?}\n\
@@ -147,6 +155,7 @@ fn serve(tag: &str, env: &[(&str, &str)]) -> (Node, String) {
          data_policy = \"no-retention\"\n",
         program = program.display().to_string(),
         out = dir.join("engine.json").display().to_string(),
+        args = args.iter().map(|a| format!(", {a:?}")).collect::<String>(),
         model = dir.join("small.gguf").display().to_string(),
     );
     std::fs::write(dir.join("config.toml"), config).unwrap();
@@ -203,7 +212,7 @@ async fn through_the_node(url: &str) -> Value {
 
 #[tokio::test]
 async fn an_engine_answers_the_node_and_no_one_else() {
-    let (node, url) = serve("door", &[]);
+    let (node, url) = serve("door", &[], &[]);
     let engine = started(&node.dir).await;
     let engine_url = format!("http://127.0.0.1:{}", engine["port"]);
     let client = reqwest::Client::new();
@@ -229,17 +238,57 @@ async fn an_engine_answers_the_node_and_no_one_else() {
         .unwrap();
     assert_eq!(guessed.status(), 401);
 
-    // The node itself is answered, and the key went through the environment, not the command
-    // line `ps` shows.
+    // The node itself is answered, and the key went in a file only the node's user can read, not
+    // on the command line `ps` shows.
     let answer = through_the_node(&url).await;
     assert_eq!(answer["choices"][0]["message"]["content"], "from the engine");
     assert_eq!(engine["key_in_argv"], false);
+    assert_eq!(engine["key_file_mode"], "0o600");
+    drop(node);
+}
+
+#[tokio::test]
+async fn an_engine_that_does_not_take_its_key_is_not_served() {
+    // As ik_llama.cpp would be given the key only in LLAMA_API_KEY, or a wrapper that drops
+    // --api-key-file: the engine starts, is healthy, and answers anyone.
+    let (node, url) = serve("unkeyed", &[], &["--ignore-api-key-file"]);
+    let engine = started(&node.dir).await;
+    let engine_url = format!("http://127.0.0.1:{}", engine["port"]);
+    let client = reqwest::Client::new();
+
+    // The node finds out, says so, and stops the engine.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let log = loop {
+        let log = std::fs::read_to_string(node.dir.join("serve.log")).unwrap_or_default();
+        if log.contains("does not enforce its key") {
+            break log;
+        }
+        assert!(Instant::now() < deadline, "the node served an engine that ignores its key; node log:\n{log}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert!(log.contains("small") && log.contains("use a llama-server that honours --api-key-file"), "{log}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while client.get(format!("{engine_url}/health")).send().await.is_ok() {
+        assert!(Instant::now() < deadline, "the engine that ignores its key is still running");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // And does not serve the model, now or after a restart's backoff would have passed.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(client.get(format!("{engine_url}/health")).send().await.is_err(), "the engine was started again");
+    let models: Value =
+        client.get(format!("{url}/v1/models")).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap();
+    let small = models["data"].as_array().unwrap().iter().find(|m| m["id"] == "small").unwrap();
+    assert_eq!(small["invincible"]["healthy"], false, "{models}");
+    let answer =
+        client.post(format!("{url}/v1/chat/completions")).bearer_auth(TOKEN).json(&chat()).send().await.unwrap();
+    assert_ne!(answer.status(), 200, "{}", answer.text().await.unwrap());
     drop(node);
 }
 
 #[tokio::test]
 async fn an_engine_inherits_no_secret_and_no_llama_flag() {
-    let (node, url) = serve("env", &[SHELL_KEY]);
+    let (node, url) = serve("env", &[SHELL_KEY], &[]);
     let engine = started(&node.dir).await;
     let names: Vec<&str> = engine["env"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
     for (name, _) in SECRETS {
@@ -248,11 +297,12 @@ async fn an_engine_inherits_no_secret_and_no_llama_flag() {
     assert!(!names.iter().any(|n| n.starts_with("LLAMA_ARG_")), "{names:?}");
     // The node's own settings stay with the node.
     assert!(!names.contains(&"INVINCIBLE_HOME"), "{names:?}");
-    // What the engine needs does reach it: a key (the node's, not the shell's), where programs
-    // are, and which GPU to use.
-    for name in ["LLAMA_API_KEY", "PATH", "HOME", "CUDA_VISIBLE_DEVICES"] {
+    // What the engine needs does reach it: where programs are, and which GPU to use. Its key is
+    // in its key file, and the shell's is not added to it.
+    for name in ["PATH", "HOME", "CUDA_VISIBLE_DEVICES"] {
         assert!(names.contains(&name), "{name} is missing: {names:?}");
     }
+    assert!(!names.contains(&"LLAMA_API_KEY"), "{names:?}");
     assert_eq!(engine["shell_key"], false, "the shell's LLAMA_API_KEY became the engine's");
     // A shell's key for llama-server does not lock the node out of its own engine.
     let answer = through_the_node(&url).await;

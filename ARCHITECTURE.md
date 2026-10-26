@@ -53,7 +53,9 @@ Invariants the control plane keeps, whatever grows around it:
 - **Local is the default.** Every request runs on hardware you own unless the route says otherwise.
 - **Nothing is exposed.** Listens on loopback and paired interfaces; engines on loopback only; no
   port of an engine is ever reachable from another machine except through a Noise session, and
-  an engine answers only requests that carry the key the node gave it.
+  an engine answers only requests that carry the key the node gave it: the node checks that it
+  refuses a request without the key before it serves, and serves no model whose engine does not.
+  (A shard's `ggml-rpc-server` takes no key; any process on its own machine can connect to it.)
 - **Codes, never content.** Receipts, audit lines, reasons and errors carry stable codes, not
   prompt text.
 - **Fail closed.** An unknown mode is offline, an unknown policy is never, an unknown tier is
@@ -70,7 +72,7 @@ kill. It is never linked in. Today there is one kind; the target is one contract
 | Part | What the node asks of an engine |
 |---|---|
 | Manifest | modalities (text, speech-in, speech-out, image, video, embedding, train), formats (GGUF, safetensors, Core ML, ONNX), devices it can use, the API shape it speaks |
-| Launch | a command line from the model entry and the tune profile; a loopback port the node chose; the node's own working directory and cache; a random key of its own, in the environment and never on the command line, that every request but the health probe must carry (today: `LLAMA_API_KEY`); a clean environment, only what the runtime needs (`PATH`, `HOME`, temporary directory, locale, library paths, GPU runtime and ggml variables), never a secret or a `LLAMA_*` setting the node did not choose |
+| Launch | a command line from the model entry and the tune profile; a loopback port the node chose; the node's own working directory and cache; a random key of its own, in a file only the node's user can read and never on the command line, that every request but the health probe must carry (today: `--api-key-file`), checked once the engine is healthy: anything but a 401 to a request without it stops the engine, and its model is not served; a clean environment, only what the runtime needs (`PATH`, `HOME`, temporary directory, locale, library paths, GPU runtime and ggml variables), never a secret, a `LLAMA_*` setting the node did not choose, or a ggml variable that says where to load code from (`GGML_BACKEND_PATH`) |
 | Health | a readiness probe, a liveness probe, a bounded silence rule (an engine that sends nothing for too long is hung, and the answer ends with an error the client can tell from a cut connection) |
 | Supervision | restart with back-off, crash counted, the model marked unavailable after too many; stopping leaves nothing running |
 | Metrics | tokens or frames per second, time to first token, memory, per request; written to the receipt and the tune store |

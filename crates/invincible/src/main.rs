@@ -1225,14 +1225,14 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     let hardware =
         invincible::tune::hardware_tag(&invincible::tune::machine_now(), &head_devices, llama_build.as_deref());
     let mut runs = Vec::new();
-    for model in &config.models {
+    for (n, model) in config.models.iter().enumerate() {
         let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
         // Its own key: the engine answers the node, not whatever else on the machine finds its port.
         let key = engine::new_key()?;
         let mut engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
             .with_vision(model.vision(&config.engine))
             .with_key(&key);
-        let launch = Launch::llama_server(&config.engine, model, port, &key, &logs);
+        let launch = Launch::llama_server(&config.engine, model, port, &key, &engine::key_file(&home, n), &logs);
         if model.cluster.is_empty() {
             supervisors.push(engine::supervise(engine.clone(), launch));
         } else {
