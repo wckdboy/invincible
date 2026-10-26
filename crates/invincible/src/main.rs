@@ -1461,9 +1461,10 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     tracing::info!("serving on http://{} ({})", config.listen, invincible::version::VERSION);
     invincible::watchdog::spawn("gateway", config.listen, logs.clone());
     // Answers in flight may finish, for 15 s: then the engine supervisors are aborted, which stops
-    // the engines and ends the answers they were giving. A cloud, dispatched or remote answer still
-    // in flight is not ended by it: the node waits for it, its engines stopped, until a service
-    // manager's SIGKILL (at 20 s) if need be.
+    // the engines and ends the answers they were giving. An answer this node is getting from
+    // elsewhere (a cloud model, a node it dispatched to) is not ended by it: the node waits for it,
+    // its engines stopped, until a service manager's SIGKILL (at 20 s) if need be. Paired devices'
+    // sessions (`remote::serve`, spawned above) are not waited for: they end with the node.
     let stop_engines: Vec<_> = supervisors.iter().map(|s| s.abort_handle()).collect();
     axum::serve(listener, server::app(state))
         .with_graceful_shutdown(async move {
@@ -2281,7 +2282,7 @@ fn hangup_ignored() -> bool {
     *IGNORED.get_or_init(|| {
         // A shell started from here inherits an ignored SIGHUP, and sends it to itself: it lives
         // only if it is ignored. Asked so as the node has no unsafe code to ask `sigaction`; not
-        // known, and so false, when no shell runs.
+        // known, and so false, when no shell runs or its status cannot be had (SIGCHLD ignored).
         std::process::Command::new("/bin/sh")
             .args(["-c", "kill -HUP $$"])
             .env_clear()

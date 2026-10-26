@@ -381,6 +381,7 @@ async fn what_an_engine_started_stops_with_the_node() {
         // (a_node_started_with_nohup_outlives_its_terminal), as one started from here does when the
         // test runs under `nohup`.
         if signal == "-HUP" && ignored("HUP") {
+            eprintln!("skipped -HUP: SIGHUP is ignored here (nohup?)");
             continue;
         }
         let (mut node, url) = serve(&format!("stop{signal}"), &[], &[], Run::Wrapped);
@@ -401,6 +402,7 @@ async fn what_an_engine_started_goes_when_the_node_dies() {
         // A node that ignores SIGQUIT is not quit by it: one started from here does when the test
         // runs as a background job of a non-interactive shell.
         if signal == "-QUIT" && ignored("QUIT") {
+            eprintln!("skipped -QUIT: SIGQUIT is ignored here (a background job?)");
             continue;
         }
         let (mut node, url) = serve(&format!("die{signal}"), &[], &[], Run::Wrapped);

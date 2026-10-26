@@ -244,8 +244,9 @@ impl Service {
                 // Never give up restarting (the default stops after 5 starts in 10 s).
                 unit.push_str("StartLimitIntervalSec=0\n");
                 // Stopping signals the gateway alone, which stops its engines once answers in
-                // flight have finished or had 15 s; what is left at TimeoutStopSec is killed. By
-                // default systemd signals the engines at the same moment, ending those answers.
+                // flight have finished or had 15 s; what is left is killed when it exits, or at
+                // TimeoutStopSec if it has not. By default (`control-group`) systemd signals the
+                // engines at the same moment, ending those answers.
                 let kill_mode = if self.name == GATEWAY { "KillMode=mixed\n" } else { "" };
                 format!(
                     "{unit}\n[Service]\nType=simple\nExecStart={exec}\n{env}Restart=always\nRestartSec=5\nWatchdogSec={WATCHDOG_SECS}\nTimeoutStopSec=20\n{kill_mode}LimitNOFILE=65536\nStandardOutput=append:{log}\nStandardError=append:{log}\n\n[Install]\nWantedBy={target}\n",

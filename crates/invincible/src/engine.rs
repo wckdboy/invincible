@@ -600,8 +600,9 @@ fn spawn(launch: &Launch) -> std::io::Result<Running> {
 /// close-on-exec at once (`pipe2`); macOS creates it, then marks it, and a process started in
 /// between keeps it open: an engine holding another's lifeline open would outlive a node that
 /// dies, and two holding each other's would keep each other alive. What starts outside it is
-/// short-lived (the device probes): it can hold a lifeline open only until it exits, and an engine
-/// starting with it can hold its output open until its timeout.
+/// short-lived (the device probes; on macOS, `sysctl` for the cluster's capabilities): it can hold
+/// a lifeline open only until it exits, and an engine started meanwhile can hold its output open,
+/// a probe's until its timeout and `sysctl`'s until that engine exits.
 static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]

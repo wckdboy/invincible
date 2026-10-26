@@ -995,9 +995,11 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
   restarted with backoff. Stopping the node (Ctrl-C, `kill`, its service stopping, its terminal
   closing unless it was started with `nohup`) stops its engines and whatever they started, once
   answers in flight have finished or had 15 s. Under systemd that takes `KillMode=mixed`, which
-  the unit `autobot setup` writes has; a unit of your own without it stops the engines at the
-  same moment as the node. A node that dies instead (`kill -9`, a crash, `Ctrl-\`) takes them
-  with it as its process ends: after a crash, once the crash reporter (ReportCrash,
+  the unit `autobot setup` or `autobot service install` writes has; rerunning the installer, or
+  `invincible update` run by hand, writes the unit again, but the daily update leaves it as it is.
+  With systemd's default kill mode, a unit an earlier release wrote, or one of your own, stops the
+  engines at the same moment as the node. A node that dies instead (`kill -9`, a crash, `Ctrl-\`)
+  takes them with it as its process ends: after a crash, once the crash reporter (ReportCrash,
   systemd-coredump) lets it go.
 - An engine answers the node and nothing else on the machine. Each gets its own random key when
   the node starts, in a file only your user can read (`~/.invincible/engines/<n>.key`, mode 0600) that
