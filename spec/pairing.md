@@ -109,7 +109,7 @@ pairing ([Capabilities](#capabilities)):
 | `GET /v1/node` | `shard` | The node's name and receipt key: the probe a peer makes before listing it as reachable. |
 | `GET /v1/cluster/node` | `shard` | What this node can give a cluster, so a head can size a split here; a device this node does not name in `[cluster] heads` is told `shard: false`. |
 | `POST /v1/cluster/meter` | `shard` | Times the link: small round trips, then one bulk payload ([cluster.md](cluster.md), Capabilities). |
-| `GET /v1/audit` | `audit` | Every caller's records ([audit.md](audit.md)). |
+| `GET /v1/audit` | `audit` | That device's own entries in the audit log, and no one else's ([audit.md](audit.md), Reading it). |
 | `GET /v1/dispatch`, `POST /v1/dispatch/chat/completions` | `dispatch` | The peers the operator owns, and a hop into them ([dispatch.md](dispatch.md)). |
 | `/v1/agent`, `/v1/agent/{path}` (any method) | `agent` | The Autobot Agent proxy, which runs with the node's own token (spec/agent.md). |
 
@@ -123,28 +123,40 @@ device cannot tell an operator route from no route at all, nor whether another d
 ## Capabilities
 
 What a device may reach is a small closed set, recorded **at pairing** with the device in
-`devices.json` on the node it paired with, and changed only by the operator ([cluster.md](cluster.md),
-Membership API).
+`devices.json` on the node it paired with, and changed only by the operator. A node that joined
+this one — a cluster head, a dispatcher — is a paired device in the same file, with a set of its
+own.
 
 | Code | What it grants |
 |---|---|
 | `shard` | The six routes a head needs of this node: models, chat completions, receipts, node, cluster/node, meter. |
 | `agent` | `/v1/agent*`: the Autobot proxy on this machine, with this node's token — agent turns with its tools, schedules, bots. |
-| `audit` | `GET /v1/audit`: every caller's records. |
+| `audit` | `GET /v1/audit`: that device's own audit entries, found by the key recorded in each as `caller_key` ([audit.md](audit.md)). |
 | `dispatch` | `GET /v1/dispatch` and `POST /v1/dispatch/chat/completions`: the operator's other nodes. |
 
 - **The default is `shard`, and only `shard`.** A code minted with no capabilities grants it, and
   every answer that hands out a code says which set it carries, so the default is visible where the
   decision is made. A device that pairs and is granted nothing else is exactly what a paired device
   was before capabilities existed.
+- **A set is the whole set**, never an addition to `shard`: `["agent"]` is a device that reaches the
+  agent and not chat. The Autobot app's chat, agent and activity screens need
+  `["shard", "agent", "audit"]`.
 - **A code may pre-grant a set** — `POST /v1/cluster/pair {"capabilities": ["shard", "agent"]}` on
-  the node's own API, `{"capabilities": ["shard", "agent"]}` on `POST /v1/admin/pairing`. Only
-  there: the device API has no route that mints a code, and the pairing hello cannot add to what
-  the code grants. A code that grants less resets the device to less if it pairs again.
-- **Grants and revocations need no re-pairing.** `PATCH /v1/cluster/nodes/{name}
-  {"capabilities": [...]}` on the node replaces the set of the device that node hosts under that
-  name; the next request is admitted by the new set. `GET /v1/admin/devices` and `GET
-  /v1/cluster/nodes` report the sets, and a pairing reply says what the joining device got.
+  the node's own API, `{"capabilities": ["shard", "agent"]}` on `POST /v1/admin/pairing`
+  (`invincible pair --capabilities shard,agent`). Only there: the device API has no route that
+  mints a code, and the pairing hello cannot add to what the code grants. A code that grants less
+  resets the device to less if it pairs again.
+- **Grants and revocations need no re-pairing.** `PATCH /v1/admin/devices/{name}
+  {"capabilities": [...]}` on the node's own API (`invincible devices grant <name> <codes>`)
+  replaces the set of the device of that name and answers `{"device", "capabilities", "was",
+  "changed"}`; the next request is admitted by the new set. `PATCH /v1/cluster/nodes/{name}` with
+  the same `capabilities` is the same write, with the same refusals (`400 invalid_capabilities`,
+  `404 not_found` for a name the node hosts no device under) and the same answer, for the node
+  that joined under that name ([cluster.md](cluster.md), Membership API). Neither is a device
+  route. `GET /v1/admin/devices` (`invincible devices`) reports the sets this node grants, the
+  record both routes write, and a pairing reply says what the joining device got. `GET
+  /v1/cluster/nodes` reports the other direction: what each peer granted this machine when it
+  joined.
 - **A missing set is `shard`.** A `devices.json` written before capabilities existed has no set for
   its devices, and the safe reading of "nothing recorded" is the least: `shard`, which is what those
   devices could reach. Nothing is migrated ahead of time; the entry is written back with its set the
@@ -167,9 +179,11 @@ Membership API).
 - `invincible devices --remove <name>` on the node unpins a device. Its next handshake fails, and an
   open connection is dropped at the next frame in either direction (a stream the device is only
   reading stops too).
-- Revoking a capability (not the pairing) is `PATCH /v1/cluster/nodes/{name} {"capabilities":
-  [...]}`: the device stays paired, keeps its key and its sessions, and the route that capability
-  held answers as an unknown path from the next request. A grant is the same call with more.
+- Revoking a capability (not the pairing) is `invincible devices grant <name> <codes>` with fewer
+  codes (`PATCH /v1/admin/devices/{name}`, or `PATCH /v1/cluster/nodes/{name}`, with
+  `{"capabilities": [...]}`): the device stays paired, keeps its key and its sessions, and the route
+  that capability held answers as an unknown path from the next request. A grant is the same call
+  with more.
 - A panic wipe in Autobot deletes `device.key`, and with it every pairing.
 
 ## Limits

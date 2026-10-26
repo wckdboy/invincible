@@ -50,13 +50,15 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         capabilities: Vec<String>,
     },
-    /// List the paired devices, or unpair one.
+    /// List the paired devices and what each may reach, unpair one, or grant one a set.
     Devices {
-        #[arg(long)]
+        #[arg(long, global = true)]
         config: Option<PathBuf>,
         /// Unpair the device with this name.
         #[arg(long)]
         remove: Option<String>,
+        #[command(subcommand)]
+        action: Option<DevicesAction>,
     },
     /// Pair this machine, as a device, with a node, using the code the node showed.
     Join {
@@ -228,6 +230,22 @@ enum Command {
         /// The daily job: updates only when [update] auto is on.
         #[arg(long, hide = true)]
         scheduled: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DevicesAction {
+    /// Set exactly what a paired device may reach, from its next request on, with no re-pairing:
+    /// `invincible devices grant phone shard,agent,audit`. The list is the whole set, so a code
+    /// left out is revoked.
+    Grant {
+        /// The device, by the name `invincible devices` lists.
+        name: String,
+        /// Any of `shard` (chat, and what a cluster head needs of this node), `agent` (the
+        /// Autobot Agent, which runs with this node's token), `audit` (its own audit entries) and
+        /// `dispatch` (a hop into your other nodes), comma-separated.
+        #[arg(value_delimiter = ',', required = true)]
+        capabilities: Vec<String>,
     },
 }
 
@@ -659,7 +677,32 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("The device that joins reaches: {reaches}.");
             Ok(())
         }
-        Command::Devices { config, remove } => {
+        Command::Devices { remove: Some(_), action: Some(_), .. } => {
+            Err("`--remove` unpairs a device on its own; run it without `grant`".to_owned())
+        }
+        Command::Devices { config, remove: None, action: Some(DevicesAction::Grant { name, capabilities }) } => {
+            let capabilities: Vec<&str> = capabilities.iter().map(|c| c.trim()).filter(|c| !c.is_empty()).collect();
+            let reply = admin_with(
+                config,
+                reqwest::Method::PATCH,
+                &format!("/v1/admin/devices/{name}"),
+                Some(serde_json::json!({ "capabilities": capabilities })),
+            )?;
+            let set = |value: &serde_json::Value| {
+                value.as_array().map(|set| set.iter().filter_map(|c| c.as_str()).collect::<Vec<_>>().join(", "))
+            };
+            println!(
+                "{}",
+                brand::ok(&format!(
+                    "{} now reaches: {} (was: {})",
+                    reply["device"].as_str().unwrap_or(&name),
+                    set(&reply["capabilities"]).unwrap_or_default(),
+                    set(&reply["was"]).unwrap_or_else(|| "?".to_owned())
+                ))
+            );
+            Ok(())
+        }
+        Command::Devices { config, remove, action: None } => {
             if let Some(name) = remove {
                 admin(config, reqwest::Method::DELETE, &format!("/v1/admin/devices/{name}"))?;
                 println!("unpaired {name}");

@@ -527,6 +527,9 @@ the paired device of that name ([pairing.md](pairing.md), Capabilities). Either 
   written, so a refused body changes nothing.
 - The answer is the half that was asked for, or both under `device` and `node` when both keys were
   given. `was` is the set the device held, and `changed` says whether it differs.
+- The grant half is the same write as `PATCH /v1/admin/devices/{name}` (`invincible devices
+  grant`), with the same refusals and answer: a node that joined this one and a phone are both
+  paired devices in `devices.json` ([pairing.md](pairing.md), Capabilities).
 
 `GET /v1/admin/devices` reports every device this node hosts with its `capabilities`, which is the
 record the gate enforces.

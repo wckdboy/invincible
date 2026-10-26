@@ -14,8 +14,9 @@ The Autobot Agent keeps a second log, of its actions ([below](#the-agents-action
 is renamed `audit.1.jsonl` (replacing an older one) and a new file continues the chain. There is no
 telemetry: the log is read on the node, by `GET /v1/audit` on loopback with the token. A paired
 device reads it only when the operator granted it `audit` ([pairing.md](pairing.md),
-Capabilities): it holds every caller's model, decision, tokens, egress hosts and the cluster's
-topology, so no device has it by default.
+Capabilities), which no device has by default, and then only its own entries, without `prev`
+([Reading it](#reading-it)): the log holds every caller's model, decision, tokens, egress hosts
+and the cluster's topology.
 
 ## An entry
 
@@ -27,19 +28,21 @@ topology, so no device has it by default.
   "api": "chat",
   "prev": "3f1c…",
   "receipt": { "receipt": { … }, "signature": "…" },
-  "request_id": "9f2c8a…"
+  "request_id": "9f2c8a…",
+  "caller_key": "q6ur…"
 }
 ```
 
 | Field | Present | Meaning |
 |---|---|---|
 | `at` | always | Unix seconds when the answer finished |
-| `caller` | always | `local` (the loopback API, with the token) or `device:<name>` (a paired device, by the name it was pinned under) |
+| `caller` | always | `local` (the loopback API, with the token) or `device:<name>` (a paired device, by the name it was pinned under; a node that sends work here, as a cluster head or a dispatcher, paired the same way and is one too) |
 | `client` | when sent | What the caller says it is, from the `invincible-client` request header (64 printable ASCII characters at most). The Autobot Agent sends `autobot-agent`. Not authenticated: `caller` is. |
 | `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
-| `prev` | always | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
+| `prev` | always, but not in a device's read | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written. A device reading its own entries is not given it ([Reading it](#reading-it)) |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
 | `request_id` | since ids were recorded | The request's id, the same one the client was given in the `invincible-request-id` response header and the same one inside its receipt's `request_id`. It is what `invincible receipt verify <id>` looks the entry up by. Entries written before this field existed carry no id: they still verify, but only the id inside their receipt (absent on a version 0 receipt) can reach them |
+| `caller_key` | a device's request, since 0.0.22 | The static key (base64url) the device was pinned with. The name in `caller` is a label a later device may take; this is the identity a device's own read of the log is filtered by. Not signed, like `caller`. Never on the operator's entries, and never taken from anything but the session the request came in on |
 
 Requests the router asked about or refused are logged too: their receipt's decision says so.
 
@@ -61,10 +64,10 @@ The chain is plain SHA-256, not keyed, and the node's receipt key lives on the s
   what left the node, and — since [receipts.md](receipts.md) version 1 — the request and answer
   hashes, the caller and the time) holds for any entry that verifies, and a device that kept its own
   receipts can check them against the log.
-- **The entry's `at` and `caller` fields are not signed** — the receipt's own `at` and `caller` are
-  (version 1), and those are the ones to read. Someone who can write the log can change the entry's
-  fields, or delete entries, and recompute every later `prev`; `--verify` then still passes.
-  Removing the newest entries, or the rotated file, is never caught by the chain.
+- **The entry's `at`, `caller` and `caller_key` fields are not signed** — the receipt's own `at` and
+  `caller` are (version 1), and those are the ones to read. Someone who can write the log can
+  change the entry's fields, or delete entries, and recompute every later `prev`; `--verify` then
+  still passes. Removing the newest entries, or the rotated file, is never caught by the chain.
 
 The log is a record kept for the owner, protected by the machine's file permissions; it is not
 evidence against someone who controls the machine. Sending checkpoints of the chain's head to a
@@ -77,9 +80,19 @@ paired device (so a later rewrite shows) is a planned addition.
 - `GET /v1/audit?since=<unix seconds>&limit=<n>` on the loopback API (behind the token) and the
   device API: `{"entries": [...], "summary": {...}, "kept": true}`. The newest `limit` entries at or
   after `since` (default 100, at most 500), oldest first. On a device session this needs the
-  `audit` capability (spec/pairing.md, Capabilities): every entry is every caller's — model,
-  decision, tokens, egress hosts, topology — so it is read by a device only when the operator
-  granted it, and a device without it is answered as though the route did not exist.
+  `audit` capability (spec/pairing.md, Capabilities), and a device without it is answered as though
+  the route did not exist. A device that holds it reads **its own entries only**: those whose
+  `caller_key` is the key it was pinned with. Not the operator's, not another device's, not those
+  of an earlier device that went by the same name, and none written before entries carried the key
+  (0.0.21 and earlier, and edge builds from before it). `limit`, `since` and `summary` count those
+  entries alone: `limit=1` is the device's newest entry, not the log's. A completion a device had
+  this node dispatch is its own entry (with `dispatch` on it); a request a head dispatched here is
+  the head's, since the head is the paired device that sent it. A device's entries come without
+  `prev`, and are otherwise as the log holds them: `prev` is the hash of whichever line came
+  before, often another caller's, so a device that hashed its own entry and compared it with the
+  next one's `prev` would learn whether anyone used the node in between. It could not check the
+  chain with it anyway, never seeing the lines it links. The operator's read, on loopback, is every
+  caller's, with the chain.
 
 `summary` is:
 
