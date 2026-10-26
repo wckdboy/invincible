@@ -54,7 +54,11 @@ Invariants the control plane keeps, whatever grows around it:
 
 - **Local is the default.** Every request runs on hardware you own unless the route says otherwise.
 - **Nothing is exposed.** Listens on loopback and paired interfaces; engines on loopback only; no
-  port of an engine is ever reachable from another machine except through a Noise session.
+  port of an engine is ever reachable from another machine except through a Noise session, and
+  an engine answers no inference request without the key the node gave it (what stays open is
+  llama-server's `/health` and web page, and ik_llama.cpp's model list): the node checks that it
+  refuses a request without the key before it serves, and serves no model whose engine does not.
+  (A shard's `ggml-rpc-server` takes no key; any process on its own machine can connect to it.)
 - **Codes, never content.** Receipts, audit lines, reasons and errors carry stable codes, not
   prompt text.
 - **Fail closed.** An unknown mode is offline, an unknown policy is never, an unknown tier is
@@ -71,9 +75,9 @@ kill. It is never linked in. Today there is one kind; the target is one contract
 | Part | What the node asks of an engine |
 |---|---|
 | Manifest | modalities (text, speech-in, speech-out, image, video, embedding, train), formats (GGUF, safetensors, Core ML, ONNX), devices it can use, the API shape it speaks |
-| Launch | a command line from the model entry and the tune profile; a loopback port the node chose; the node's own working directory and cache |
+| Launch | a command line from the model entry and the tune profile; a loopback port the node chose; the node's own working directory and cache; a random key of its own, in a file only the node's user can read and never on the command line, that every inference request must carry (today: `--api-key-file`), checked once the engine is healthy with a chat completion sent without it: a 401 lets it serve, a 503 or no answer keeps its model unserved and is asked again, anything else stops the engine with its process group and its model is not served (what still answers on its port, a container say, is logged, to be stopped by hand); a clean environment, only what the runtime needs (`PATH`, `HOME`, temporary directory, locale, library paths, GPU runtime and ggml variables), never a secret, a `LLAMA_*` setting the node did not choose, or a variable that says where to load code from other than which driver to use and the library paths (`GGML_BACKEND_PATH`, `CUDA_INJECTION64_PATH`, `HSA_TOOLS_LIB`, `VK_LAYER_PATH`) |
 | Health | a readiness probe, a liveness probe, a bounded silence rule (an engine that sends nothing for too long is hung, and the answer ends with an error the client can tell from a cut connection) |
-| Supervision | restart with back-off, crash counted, the model marked unavailable after too many; stopping leaves nothing running |
+| Supervision | restart with back-off, crash counted, the model marked unavailable after too many; stopping leaves nothing of the engine's process group running, nor does the node dying (what left the group, a container or a process started with `setsid`, is not reached) |
 | Metrics | tokens or frames per second, time to first token, memory, per request; written to the receipt and the tune store |
 | Receipt fields | engine, version, devices, adapter |
 
@@ -195,10 +199,10 @@ These are the four properties the rest serves. Each has a mechanism today and a 
 
 | Property | Mechanism | Measured by |
 |---|---|---|
-| Security | Noise pairing with pinned keys; engines and RPC on loopback only; redaction before the cloud; signed receipts; a hash-chained audit log; reproducible, attested releases signed with a pinned key; `cargo deny` on licences and advisories; secrets in the OS keychain or TPM / Secure Enclave (planned) | the conformance vectors; the internal review (done); the independent review of pairing and remote access (planned, INV-21); a written threat model (planned) |
+| Security | Noise pairing with pinned keys; engines and RPC on loopback only, each engine keyed and started with a clean environment; redaction before the cloud; signed receipts; a hash-chained audit log; reproducible, attested releases signed with a pinned key; `cargo deny` on licences and advisories; secrets in the OS keychain or TPM / Secure Enclave (planned) | the conformance vectors; the internal review (done); the independent review of pairing and remote access (planned, INV-21); a written threat model (planned) |
 | Speed | the fastest engine build the machine has; `tune probe` and `tune bench` (edge), the tuned profile (planned); speculative decoding (planned); micro-batched prefill and speed-aware partitioning in the cluster (planned) | `bench/run.sh` every night, its numbers in that CI run's summary; tokens per second and time to first token in every receipt (planned) |
 | Anonymity | offline by default; Tor and SOCKS5 as routes with the kill switch as a shared, tested rule; no accounts, no telemetry; an onion service to reach home (not built) | the egress vectors; the audit log showing nothing left |
-| Stability | always on under launchd, systemd or Task Scheduler; health checks; self-update from signed releases; one-file backups with checksums; stopping leaves nothing running; alerts to your chat | the ten-minute soak test every night; the restart counters in the service status |
+| Stability | always on under launchd, systemd or Task Scheduler; health checks; self-update from signed releases; one-file backups with checksums; stopping leaves nothing of an engine's process group running; alerts to your chat | the ten-minute soak test every night; the restart counters in the service status |
 
 The threat model, written down (planned, with the independent review): who the attacker is (a
 device on your LAN, a compromised peer, a cloud provider, a malicious model file, a prompt

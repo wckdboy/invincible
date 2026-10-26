@@ -201,16 +201,23 @@ LOCK="$INV_HOME/.install.lock"
 cleanup() {
     [ -z "$WORK" ] || rm -rf "$WORK"
     [ -z "$STAGE" ] || rm -rf "$STAGE"
-    if [ -f "$LOCK/pid" ] && [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$LOCK"; fi
+    [ "$(cat "$LOCK/reclaim" 2>/dev/null)" != "$$" ] || rm -f "$LOCK/reclaim"
+    if [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ]; then rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir -p "$INV_HOME"
 waited=0
-while ! mkdir "$LOCK" 2>/dev/null; do
+# The lock is $LOCK/pid, made by the shell with noclobber (O_EXCL): only one run can make it.
+# The directory is not the lock: uutils mkdir before 0.11 (Ubuntu 26.04's default) exits 0 when
+# another run made it a moment before, and a run stopped right after making it would leave it.
+while ! { mkdir -p "$LOCK" 2>/dev/null && (set -C; echo "$$" >"$LOCK/pid") 2>/dev/null; }; do
     holder=$(cat "$LOCK/pid" 2>/dev/null || true)
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
-        rm -rf "$LOCK" # left by a run that was killed
+    # Left by a run that was killed: removed by one run at a time ($LOCK/reclaim), and only if it
+    # still names that run, so a run that just took the lock keeps it.
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && (set -C; echo "$$" >"$LOCK/reclaim") 2>/dev/null; then
+        [ "$(cat "$LOCK/pid" 2>/dev/null)" != "$holder" ] || rm -f "$LOCK/pid"
+        rm -f "$LOCK/reclaim"
         continue
     fi
     [ "$waited" = 0 ] && say "waiting for another install to finish (pid ${holder:-?})"
@@ -218,7 +225,6 @@ while ! mkdir "$LOCK" 2>/dev/null; do
     [ "$waited" -le 120 ] || die "another install (pid ${holder:-?}) is still running; remove $LOCK if it is not"
     sleep 1
 done
-echo "$$" >"$LOCK/pid"
 
 # --- Services: where their definitions are ----------------------------------------------------
 if [ "$OS" = Darwin ]; then
