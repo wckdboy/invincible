@@ -626,7 +626,11 @@ async fn a_device_granted_audit_reads_only_its_own_entries() {
     for entry in mine["entries"].as_array().unwrap() {
         assert_eq!(entry["caller"], "device:phone");
         assert_eq!(entry["caller_key"], base64_key(&phone.public));
+        // Without the chain: the operator's line sits between the phone's two, so the second's
+        // `prev` would tell the phone that someone used the node in between.
+        assert!(entry.get("prev").is_none(), "{entry}");
     }
+    assert!(operator_view["entries"].as_array().unwrap().iter().all(|entry| entry["prev"].is_string()));
     // The totals are over what the device may see, not the whole log.
     assert_eq!(mine["summary"]["requests"], 2);
     // `limit` counts the device's own entries: the newest of them, not the newest overall.

@@ -1107,7 +1107,8 @@ invincible audit --verify           # check the chain and every receipt's signat
 ```
 
 A paired device granted `audit` reads its own entries in the same log with `GET /v1/audit`, and
-no one else's. There is no telemetry: nothing about your requests leaves the node unless you send it.
+no one else's. They come without the hash of the line before each, which would tell the device when
+someone else used the node. There is no telemetry: nothing about your requests leaves the node unless you send it.
 
 ### Pairing other machines
 

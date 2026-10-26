@@ -36,7 +36,7 @@ the log holds every caller's model, decision, tokens and egress hosts.
 | `caller` | always | `local` (the loopback API, with the token) or `device:<name>` (a paired device, by the name it was pinned under) |
 | `client` | when sent | What the caller says it is, from the `invincible-client` request header (64 printable ASCII characters at most). The Autobot Agent sends `autobot-agent`. Not authenticated: `caller` is. |
 | `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
-| `prev` | always | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
+| `prev` | always, but not in a device's read | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
 | `caller_key` | a device's request, since 0.0.22 | The static key (base64url) the device was pinned with. The name in `caller` is a label a later device may take; this is the identity a device's own read of the log is filtered by. Not signed, like `caller` |
 
@@ -78,8 +78,12 @@ paired device (so a later rewrite shows) is a planned addition.
   the route did not exist. A device that holds it reads **its own entries only**: those whose
   `caller_key` is the key it was pinned with. Not the operator's, not another device's, not those
   of an earlier device that went by the same name, and none written before entries carried the key
-  (0.0.21 and earlier). `limit` and `summary` count those entries alone. The operator's read, on
-  loopback, is every caller's.
+  (0.0.21 and earlier). `limit` and `summary` count those entries alone. A device's entries come
+  without `prev`, and are otherwise as the log holds them: `prev` is the hash of whichever line
+  came before, often another caller's, so a device that hashed its own entry and compared it with
+  the next one's `prev` would learn whether anyone used the node in between. It could not check
+  the chain with it anyway, never seeing the lines it links. The operator's read, on loopback, is
+  every caller's, with the chain.
 
 `summary` is:
 
