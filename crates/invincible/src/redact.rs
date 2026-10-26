@@ -206,6 +206,7 @@ static LINK: LazyLock<Regex> =
 static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| re(r"(\[|%5[Bb])(PERSON|EMAIL|PHONE|ADDRESS|CARD|IBAN|ACCOUNT)_([0-9]{1,5})(?:\]|%5[Dd])"));
 static DIGIT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"\+?[0-9](?:[ \-./]?[0-9])*"));
+static LATIN: LazyLock<Regex> = LazyLock::new(|| re(r"\p{Latin}"));
 
 fn words(list: &'static str) -> HashSet<&'static str> {
     list.split_whitespace().collect()
@@ -710,12 +711,23 @@ fn word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Not part of a longer word or number. A JSON escape next to it counts as what it stands for: in
-/// `"Hi,\nHannah"` the `n` of `\n` is a line break, not a letter.
-fn bounded(text: &str, start: usize, end: usize) -> bool {
+/// Whether [c] next to a value of [kind] makes it part of a longer word or number: for phone, card
+/// and account numbers an ASCII letter, digit or `_`, as their patterns read it; for the rest a
+/// digit, `_` or a letter of the Latin script. A letter of another script does not: a particle or
+/// word in it may follow a value without a space (`010-1234-5678으로`, `bob@posteo.deまで`).
+fn joins(kind: Kind, c: char) -> bool {
+    if kind.numeric() {
+        return c.is_ascii_alphanumeric() || c == '_';
+    }
+    c.is_numeric() || c == '_' || (c.is_alphabetic() && LATIN.is_match(c.encode_utf8(&mut [0; 4])))
+}
+
+/// Not part of a longer word or number ([joins]). A JSON escape next to it counts as what it
+/// stands for: in `"Hi,\nHannah"` the `n` of `\n` is a line break, not a letter.
+fn bounded(text: &str, start: usize, end: usize, kind: Kind) -> bool {
     let before = escape_before(text, start).or_else(|| text[..start].chars().next_back()).unwrap_or(' ');
     let after = escape_at(text, end).map(|(c, _)| c).or_else(|| text[end..].chars().next()).unwrap_or(' ');
-    !word_char(before) && !word_char(after)
+    !joins(kind, before) && !joins(kind, after)
 }
 
 /// What the JSON escape at [at] stands for (`\n`, `\u00e9`), and its length in bytes. None where
@@ -744,6 +756,16 @@ fn escape_at(text: &str, at: usize) -> Option<(char, usize)> {
 /// What a JSON escape that ends at [at] stands for.
 fn escape_before(text: &str, at: usize) -> Option<char> {
     [2, 6].into_iter().find_map(|len| escape_at(text, at.checked_sub(len)?).filter(|&(_, l)| l == len).map(|(c, _)| c))
+}
+
+/// [at], or the end of the JSON escape it lies inside: an email's local part may begin with the `u`
+/// and hex digits of the `\u306f` before it.
+fn past_escape(text: &str, at: usize) -> usize {
+    (1..6)
+        .filter_map(|back| at.checked_sub(back))
+        .find_map(|start| escape_at(text, start).map(|(_, len)| start + len))
+        .filter(|&end| end > at)
+        .unwrap_or(at)
 }
 
 /// [text] as detection reads it: a JSON escape that stands for something other than a letter, a
@@ -864,16 +886,14 @@ impl Vault {
         }
     }
 
-    fn register(&mut self, kind: Kind, value: &str) {
+    /// The entry for a detected value, new or known. It gets its placeholder when it is replaced.
+    fn register(&mut self, kind: Kind, value: &str) -> usize {
         let k = key(kind, value);
         if let Some(&i) = self.index.get(&k) {
             if !self.entries[i].1.forms.iter().any(|f| f == value) {
                 self.entries[i].1.forms.push(value.to_owned());
             }
-            if self.entries[i].1.placeholder.is_none() {
-                self.number(i);
-            }
-            return;
+            return i;
         }
         let i = self.insert(
             k,
@@ -886,7 +906,6 @@ impl Vault {
                 literal: false,
             },
         );
-        self.number(i);
         // The parts of a full name get their own placeholders when they appear alone.
         if kind == Kind::Person {
             let parts: Vec<&str> = value
@@ -903,6 +922,7 @@ impl Vault {
                 }
             }
         }
+        i
     }
 
     fn candidate(&mut self, kind: Kind, raw: &str) {
@@ -1006,33 +1026,41 @@ impl Vault {
         // What is detected inside a known value written escaped (`12a,\n10115 Berlin`) is part of
         // that value, not a new one.
         let escaped = self.escaped_hits(text);
+        let mut found = Vec::new();
         for span in spans {
-            if !escaped.iter().any(|&(start, end)| start <= span.start && span.end <= end) {
-                self.register(span.kind, &text[span.start..span.end]);
+            let start = past_escape(text, span.start);
+            if start >= span.end {
+                continue;
             }
+            found.push(match escaped.iter().find(|&&(s, e, _)| s <= start && span.end <= e) {
+                Some(&hit) => hit,
+                None => (start, span.end, self.register(span.kind, &text[start..span.end])),
+            });
         }
-        self.replace(text)
+        self.replace(text, found)
     }
 
     /// Where a known value is written escaped for a JSON string, and differently from how it was
-    /// found (a value with a line break or a quote, echoed in JSON).
-    fn escaped_hits(&self, text: &str) -> Vec<(usize, usize)> {
+    /// found (a value with a line break or a quote, echoed in JSON): (start, end, entry).
+    fn escaped_hits(&self, text: &str) -> Vec<(usize, usize, usize)> {
         if !text.contains('\\') {
             return Vec::new();
         }
         let mut hits = Vec::new();
-        for (_, e) in &self.entries {
+        for (i, (_, e)) in self.entries.iter().enumerate() {
             for form in escaped_forms(e) {
-                let found = text.match_indices(form.as_str()).map(|(at, f)| (at, at + f.len()));
-                hits.extend(found.filter(|&(start, end)| bounded(text, start, end)));
+                let found = text.match_indices(form.as_str()).map(|(at, f)| (at, at + f.len(), i));
+                hits.extend(found.filter(|&(start, end, _)| bounded(text, start, end, e.kind)));
             }
         }
         hits
     }
 
-    /// Replaces every occurrence of a known value (longest first, no overlaps), also where it is
-    /// written escaped for a JSON string (a tool result, tool-call arguments).
-    fn replace(&mut self, text: &str) -> String {
+    /// Replaces what detection found in [text] ([detected]: start, end, entry) where it was found,
+    /// whatever is next to it, and every occurrence of a known value (earliest, then longest first,
+    /// no overlaps), also where it is written escaped for a JSON string (a tool result, tool-call
+    /// arguments). A known value that overlaps what was found is replaced only where it covers it.
+    fn replace(&mut self, text: &str, mut detected: Vec<(usize, usize, usize)>) -> String {
         let guards = Guards::new(text);
         let mut lower: Option<String> = None;
         let mut hits: Vec<(usize, usize, usize)> = Vec::new();
@@ -1060,7 +1088,7 @@ impl Vault {
                         hits.push((start, end, i));
                         continue;
                     }
-                    if !bounded(text, start, end) || (e.kind.wordy() && guards.blocked(start, end)) {
+                    if !bounded(text, start, end, e.kind) || (e.kind.wordy() && guards.blocked(start, end)) {
                         continue;
                     }
                     hits.push((start, end, i));
@@ -1078,22 +1106,40 @@ impl Vault {
                     // back: the value is restored as it was found).
                     let plus = m.as_str().starts_with('+') && !self.entries[i].1.value.starts_with('+');
                     let start = m.start() + usize::from(plus);
-                    if bounded(text, start, m.end()) {
+                    if bounded(text, start, m.end(), self.entries[i].1.kind) {
                         hits.push((start, m.end(), i));
                     }
                 }
             }
         }
-        if hits.is_empty() {
+        if hits.is_empty() && detected.is_empty() {
             return text.to_owned();
         }
+        // What was found, without overlaps (the spans inside a known value written escaped are all
+        // that value).
+        detected.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
+        detected.dedup_by(|next, kept| next.0 < kept.1);
         hits.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
-        let mut out = String::with_capacity(text.len());
-        let mut cursor = 0;
+        let mut taken: Vec<(usize, usize, usize)> = Vec::new();
+        let mut covered = vec![false; detected.len()];
         for (start, end, i) in hits {
-            if start < cursor {
+            if taken.last().is_some_and(|&(_, last, _)| start < last) {
                 continue;
             }
+            // The spans found that this hit overlaps (sorted, apart): it must cover each of them.
+            let from = detected.partition_point(|&(_, e, _)| e <= start);
+            let to = from + detected[from..].partition_point(|&(s, _, _)| s < end);
+            if detected[from..to].iter().any(|&(s, e, _)| s < start || e > end) {
+                continue;
+            }
+            covered[from..to].fill(true);
+            taken.push((start, end, i));
+        }
+        taken.extend(detected.into_iter().zip(covered).filter(|&(_, covered)| !covered).map(|(hit, _)| hit));
+        taken.sort_by_key(|&(start, _, _)| start);
+        let mut out = String::with_capacity(text.len());
+        let mut cursor = 0;
+        for (start, end, i) in taken {
             if self.entries[i].1.placeholder.is_none() {
                 self.number(i);
             }
@@ -1133,7 +1179,7 @@ impl Vault {
             .into_owned()
     }
 
-    /// Distinct personal values hidden, per kind tag.
+    /// Distinct personal values hidden, per kind tag: each value counts once it was replaced.
     pub fn found(&self) -> BTreeMap<&'static str, usize> {
         let mut found = BTreeMap::new();
         for (_, e) in &self.entries {
@@ -1880,8 +1926,75 @@ mod tests {
     }
 
     #[test]
+    fn a_value_beside_a_letter_of_another_script_is_hidden_and_counted() {
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "My number is +49 171 2345678, account number is 12345678" },
+            // JSON as Python's json.dumps writes it, non-ASCII escaped: "+49 171 2345678로 전화".
+            { "role": "tool", "tool_call_id": "c1", "content": r#"{"m":"+49 171 2345678\ub85c \uc804\ud654"}"# },
+            // JSON lines are not one JSON document: they are read as text.
+            { "role": "tool", "tool_call_id": "c2", "content": concat!(
+                r#"{"ok":1}"#, "\n", r#"{"m":"010-1234-5678\uc73c\ub85c"}"#, "\n",
+                r#"{"m":"\u30e1\u30fc\u30eb\u306fbob@posteo.de\u307e\u3067"}"#
+            ) },
+            { "role": "user", "content": "010-1234-5678으로 연락주세요" },
+            { "role": "user", "content": "카드 4111 1111 1111 1111로, 12345678번 계좌" }
+        ] });
+        let vault = redact_request(&mut body);
+        let messages = &body["messages"];
+        assert_eq!(messages[0]["content"], "My number is [PHONE_1], account number is [ACCOUNT_1]");
+        assert_eq!(messages[1]["content"], r#"{"m":"[PHONE_1]로 전화"}"#);
+        assert_eq!(
+            messages[2]["content"],
+            concat!(
+                r#"{"ok":1}"#,
+                "\n",
+                r#"{"m":"[PHONE_2]\uc73c\ub85c"}"#,
+                "\n",
+                r#"{"m":"\u30e1\u30fc\u30eb\u306f[EMAIL_1]\u307e\u3067"}"#
+            )
+        );
+        assert_eq!(messages[3]["content"], "[PHONE_2]으로 연락주세요");
+        assert_eq!(messages[4]["content"], "카드 [CARD_1]로, [ACCOUNT_1]번 계좌");
+        assert_eq!(vault.restore("[PHONE_2] [EMAIL_1]"), "010-1234-5678 bob@posteo.de");
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("CARD", 1), ("EMAIL", 1), ("PHONE", 2)]));
+    }
+
+    #[test]
+    fn names_and_addresses_are_still_hidden_only_as_whole_words() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("I am Anna Berg, Via Roma 10"), "I am [PERSON_1], [ADDRESS_1]");
+        // A Latin letter makes a longer word; a letter of another script does not.
+        assert_eq!(
+            vault.redact("Annabelle, Annaïs, Bergmann, Via Roma 10a; Anna와 Berg에게, Via Roma 10에서"),
+            "Annabelle, Annaïs, Bergmann, Via Roma 10a; [PERSON_2]와 [PERSON_3]에게, [ADDRESS_1]에서"
+        );
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1), ("PERSON", 3)]));
+    }
+
+    #[test]
+    fn what_was_found_is_hidden_where_it_was_found() {
+        let mut vault = Vault::default();
+        // The account rule reads on after `is`, where the number is not a whole word.
+        assert_eq!(vault.redact("My account number is12345678."), "My account number is[ACCOUNT_1].");
+        // The address rule finds `Weber Straße 5`, which the known `Hannah Weber` overlaps.
+        assert_eq!(
+            vault.redact("I am Hannah Weber. Ship to Hannah Weber Straße 5"),
+            "I am [PERSON_1]. Ship to [PERSON_2] [ADDRESS_1]"
+        );
+        assert_eq!(vault.restore("[PERSON_2] [ADDRESS_1]"), "Hannah Weber Straße 5");
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("ADDRESS", 1), ("PERSON", 2)]));
+
+        // The listed-name rule finds `Hannah Lisa` inside the known `Hannah Lisa Weber`: it is
+        // hidden with it, and not counted as a value of its own.
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my sister Hannah Lisa Weber"), "my sister [PERSON_1]");
+        assert_eq!(vault.redact("Hannah Lisa Weber called"), "[PERSON_1] called");
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 1)]));
+    }
+
+    #[test]
     fn json_escapes_are_read_as_what_they_stand_for() {
-        use super::{bounded, escape_at, spaced};
+        use super::{Kind, bounded, escape_at, spaced};
         let text = r#"a\nb\\nc\u00e9d\u000ae\ud83d\"f"#;
         assert_eq!(escape_at(text, 1), Some(('\n', 2)));
         assert_eq!(escape_at(text, 4), None);
@@ -1891,10 +2004,10 @@ mod tests {
         assert_eq!(escape_at(text, 22), Some((char::REPLACEMENT_CHARACTER, 6)));
         assert_eq!(escape_at(r"\uzzzz", 0), None);
         // `b` follows a line break; `c` an escaped backslash and an `n`; `d` an `é`.
-        assert!(bounded(text, 3, 4));
-        assert!(!bounded(text, 7, 8));
-        assert!(!bounded(text, 14, 15));
-        assert!(bounded(text, 21, 22));
+        assert!(bounded(text, 3, 4, Kind::Person));
+        assert!(!bounded(text, 7, 8, Kind::Person));
+        assert!(!bounded(text, 14, 15, Kind::Person));
+        assert!(bounded(text, 21, 22, Kind::Person));
         let spaced = spaced(text);
         assert_eq!(spaced.len(), text.len());
         assert_eq!(spaced, "a \nb\\\\nc\\u00e9d     \ne      \\\"f");
