@@ -358,6 +358,14 @@ async fn a_run_from_another_tool_confines_its_commands_like_a_scheduled_task() {
     assert!(stderr.contains("not sandboxed") && stderr.contains("--no-sandbox"), "{stderr}");
     assert_eq!(entry["action"], format!("run: {command}"), "{entry}");
     assert_eq!(entry["sandbox"], "off", "{entry}");
+    // `autobot actions` says so too.
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_autobot"))
+        .arg("actions")
+        .env("AUTOBOT_HOME", dir.join("autobot"))
+        .output()
+        .unwrap();
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains("allowed by the rules, sandbox off"), "{listed}");
 }
 
 #[tokio::test]

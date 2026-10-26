@@ -118,8 +118,8 @@ or `GET /v1/agent/actions?since=&limit=` ([agent.md](agent.md)).
 | `container` | in the `[agent.docker]` container |
 | `ssh` | on the `[agent.ssh]` machine |
 
-Commands with nobody watching (schedules, board work, recipes, hooks, the heartbeat,
-`autobot run`) are confined unless `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned
+Commands with nobody watching (schedules, board work, recipes, hooks, Home Assistant's
+conversation agent, the heartbeat, `autobot run`) are confined unless `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned
 that off, so `off` on one of them is that choice on record; interactive turns are unconfined
 unless `[agent] sandbox = "always"`. `bwrap` or `sandbox-exec` says the command was confined, not
 that it succeeded: where bubblewrap is missing or cannot run, it is refused or fails as it

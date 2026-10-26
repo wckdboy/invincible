@@ -554,7 +554,7 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
 - **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes, hooks,
-  the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
+  Home Assistant's voice requests, the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
   working directory and temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e.
   bubblewrap, which `install.sh` users may need to install). Without a sandbox they are
   refused, not run unconfined. `[agent] sandbox = "always"` confines interactive turns too;
@@ -924,7 +924,8 @@ OpenAI Conversation): `autobot hooks new homeassistant` makes its API key, and t
 `http://<this machine>:7794/hooks/homeassistant/v1` on the hooks listener (another bot's:
 `/hooks/<bot>/homeassistant/v1`). On this machine the agent API serves it too, at
 `/v1/agent/openai/v1` with the gateway's token (`model` names the bot). Its turns follow the
-unattended rules: what is allowlisted runs, the rest is refused.
+unattended rules: what is allowlisted runs, the rest is refused, and its commands are confined
+like a scheduled task's (**Sandbox** above).
 
 `autobot doctor` checks WhatsApp (its secrets, the number, the hooks listener) and Home Assistant
 (the token, how many entities the agent sees), and lists the bots `autobot serve` runs with any
