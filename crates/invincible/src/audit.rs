@@ -16,7 +16,8 @@ pub const GENESIS: &str = "00000000000000000000000000000000000000000000000000000
 /// The log is rotated (to `audit.1.jsonl`, replacing an older one) past this size.
 const ROTATE_AT: u64 = 16 * 1024 * 1024;
 
-/// Who sent a request: the local API (with the token) or a paired device over its session.
+/// Who sent a request: the local API (with the token) or a paired device over its session. A node
+/// that sends work here — a cluster head, a dispatcher — paired the same way and is a device too.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Caller {
     Local,
@@ -44,6 +45,14 @@ impl Caller {
         match self {
             Self::Local => "local".to_owned(),
             Self::Device { name, .. } => format!("device:{name}"),
+        }
+    }
+
+    /// A device's pinned key (base64url); `None` for the operator's own API.
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            Self::Local => None,
+            Self::Device { key, .. } => Some(key),
         }
     }
 }
@@ -115,9 +124,16 @@ impl AuditLog {
         if let Some(client) = client {
             entry["client"] = json!(client);
         }
+        // The device's pinned key, not its name: the name is a label a later device may take, and
+        // the key is what a device's own read of the log is filtered by ([AuditLog::read_where]).
+        // A cluster peer that sends work here is a paired device too, so its entries carry its key.
+        if let Some(key) = caller.key() {
+            entry["caller_key"] = json!(key);
+        }
         for (key, value) in extra.and_then(Value::as_object).into_iter().flatten() {
-            // Never over the entry's own fields: the chain and the receipt come first.
-            if entry.get(key).is_none() {
+            // Never over the entry's own fields: the chain and the receipt come first. Nor a
+            // `caller_key` the caller did not have: only the session says whose entry this is.
+            if entry.get(key).is_none() && key != "caller_key" {
                 entry[key] = value.clone();
             }
         }
@@ -139,11 +155,18 @@ impl AuditLog {
 
     /// Entries at or after [since] (unix seconds), newest last, at most [limit] (the newest ones).
     pub fn read(&self, since: u64, limit: usize) -> Vec<Value> {
+        self.read_where(since, limit, |_| true)
+    }
+
+    /// [AuditLog::read], of the entries [keep] accepts: the newest [limit] of those, so a filter
+    /// never comes back short because other callers' entries were newer.
+    pub fn read_where(&self, since: u64, limit: usize, keep: impl Fn(&Value) -> bool) -> Vec<Value> {
         let entries: Vec<Value> = self
             .lines()
             .iter()
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter(|e| e["at"].as_u64().unwrap_or(0) >= since)
+            .filter(|e| keep(e))
             .collect();
         let skip = entries.len().saturating_sub(limit);
         entries.into_iter().skip(skip).collect()
@@ -294,6 +317,72 @@ mod tests {
     }
 
     #[test]
+    fn a_device_entry_carries_its_key_and_no_extra_field_can_claim_one() {
+        // What a device's own read of the log is filtered by: the key it was pinned with, on the
+        // entry, whatever else rides on it (a dispatched request's `dispatch`, its `request_id`).
+        let home = std::env::temp_dir().join(format!("invincible-audit-key-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let key = ReceiptKey::from_seed(&[17; 32]);
+        let log = AuditLog::new(&home);
+        let phone = Caller::device("phone", &[7; 32]);
+        let laptop = Caller::device("laptop", &[8; 32]);
+        let forged = json!({ "caller_key": laptop.key().unwrap(), "dispatch": { "via": "studio", "node": "mini" } });
+        log.append_tagged(&phone, None, "dispatch", &receipt(&key, "p1", "qwen", json!([])), Some(&forged)).unwrap();
+        log.append_tagged(&Caller::Local, None, "chat", &receipt(&key, "o1", "qwen", json!([])), Some(&forged))
+            .unwrap();
+        log.append(&laptop, None, "chat", &receipt(&key, "l1", "qwen", json!([]))).unwrap();
+        let entries = log.read(0, 10);
+        assert_eq!(entries[0]["caller_key"], phone.key().unwrap(), "the session's key, not an extra's");
+        assert_eq!(entries[0]["dispatch"], json!({ "via": "studio", "node": "mini" }));
+        assert!(entries[1].get("caller_key").is_none(), "the operator's entry names no key, whatever rode on it");
+        assert_eq!(entries[2]["caller_key"], laptop.key().unwrap());
+
+        // The laptop's own entries are the one it made: neither the phone's nor the operator's,
+        // though both lines held its key in an extra.
+        let laptops = log.read_where(0, 10, |e| e["caller_key"].as_str() == laptop.key());
+        assert_eq!(laptops.len(), 1);
+        assert_eq!(laptops[0]["receipt"]["receipt"]["request_id"], "l1");
+        assert_eq!(log.verify(&key.public()), Ok(3));
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_filtered_read_takes_since_and_limit_over_the_entries_it_keeps() {
+        // Entries an hour apart, shaped as 0.0.22 writes them (`caller_key` beside `caller`, no
+        // `request_id`), the phone's and the laptop's interleaved, with one from before entries
+        // carried a key: `since` and `limit` count the phone's alone.
+        let home = std::env::temp_dir().join(format!("invincible-audit-since-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let line = |at: u64, key: Option<&str>| {
+            let mut entry = json!({ "at": at, "caller": "device:phone", "api": "chat", "receipt": {} });
+            if let Some(key) = key {
+                entry["caller_key"] = json!(key);
+            }
+            entry.to_string()
+        };
+        let lines = [
+            line(3_600, Some("phone")),
+            line(7_200, Some("laptop")),
+            line(10_800, Some("phone")),
+            line(14_400, None),
+            line(18_000, Some("laptop")),
+        ];
+        std::fs::write(home.join("audit.jsonl"), lines.join("\n") + "\n").unwrap();
+        let log = AuditLog::new(&home);
+        let phone = |e: &serde_json::Value| e["caller_key"] == "phone";
+        let at =
+            |entries: Vec<serde_json::Value>| entries.iter().map(|e| e["at"].as_u64().unwrap()).collect::<Vec<_>>();
+        assert_eq!(at(log.read_where(0, 10, phone)), [3_600, 10_800]);
+        assert_eq!(at(log.read_where(0, 1, phone)), [10_800], "the phone's newest, though two are newer");
+        assert_eq!(at(log.read_where(7_200, 10, phone)), [10_800]);
+        assert_eq!(at(log.read_where(10_801, 10, phone)), Vec::<u64>::new());
+        // Unfiltered, the same `limit` is the newest overall.
+        assert_eq!(at(log.read(0, 1)), [18_000]);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn finds_a_request_by_its_id_and_refuses_a_tie() {
         let home = std::env::temp_dir().join(format!("invincible-audit-find-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
@@ -358,6 +447,13 @@ mod tests {
         let entries = log.read(0, 2);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["caller"], "device:phone");
+        // A device's entry carries the key it was pinned with; the operator's carries none.
+        assert_eq!(entries[0]["caller_key"], Caller::device("phone", &[7; 32]).key().unwrap());
+        assert!(entries[1].get("caller_key").is_none());
+        // Filtered, the newest entries are the filter's, not whatever was newest overall.
+        let mine = log.read_where(0, 1, |e| e["caller"] == "device:phone");
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0]["receipt"]["receipt"]["request_id"], "a2");
         assert_eq!(entries[1]["receipt"]["receipt"]["request_id"], "a3");
         assert_eq!(log.read(0, 10)[0]["client"], "autobot-agent");
         assert_eq!(log.find("a2").unwrap().unwrap()["receipt"]["request_id"], "a2");
