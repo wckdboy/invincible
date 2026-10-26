@@ -125,9 +125,12 @@ For each text:
    make it part of a word. A JSON escape next to a value counts as what it stands for, so `\n`
    before `Hannah` is a line break, `\u00e9` a Latin letter and `\ub85c` (`로`) a letter of a script
    without case, while `\\n` is a backslash and an `n`. Names and addresses are not replaced inside
-   code or links, read as detection reads them (a link ends at `\n`). Emails match
-   case-insensitively. Numbers of 4+ digits also match when written with other spacing or
-   punctuation; the hex digits of a `\uXXXX` escape before one are not part of it
+   code or links, read as detection reads them (a link ends at `\n`). A known value matches as
+   it was written, case included (`ANNA BERG` is not `Anna Berg`), but emails match
+   case-insensitively, and phone, card and account numbers of 4+ digits also match with their
+   digits grouped differently: between two digits at most one space of any width (Unicode `Zs`,
+   so also a no-break or narrow no-break space), `-`, `.` or `/`, not two spaces, a tab or a line
+   break. The hex digits of a `\uXXXX` escape before such a number are not part of it
    (`\ud63801012345678` is `호` and `01012345678`), but a number it runs on into is
    (`2 4111111111111111` is not the card `4111 1111 1111 1111`). A value is also
    found where it is written escaped for a JSON string, in any text: tool results and tool-call

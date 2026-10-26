@@ -205,7 +205,10 @@ static LINK: LazyLock<Regex> =
     LazyLock::new(|| re(r#"(?i)\b(?:https?|ftp|file|wss?)://[^\s<>"'`)\]]+|\bwww\.[^\s<>"'`)\]]+"#));
 static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| re(r"(\[|%5[Bb])(PERSON|EMAIL|PHONE|ADDRESS|CARD|IBAN|ACCOUNT)_([0-9]{1,5})(?:\]|%5[Dd])"));
-static DIGIT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"\+?[0-9](?:[ \-./]?[0-9])*"));
+// Digits with at most one separator between two: a space of any width (also a no-break or narrow
+// no-break space, as web pages, office documents and contacts write it), `-`, `.` or `/`. Not a
+// tab or a line break: those separate cells and lines, not the groups of one number.
+static DIGIT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"\+?[0-9](?:[\p{Zs}\-./]?[0-9])*"));
 static LATIN: LazyLock<Regex> = LazyLock::new(|| re(r"\p{Latin}"));
 static CASED: LazyLock<Regex> = LazyLock::new(|| re(r"[\p{Latin}\p{Cased}]"));
 
@@ -1120,7 +1123,7 @@ impl Vault {
                 if from >= m.end() {
                     continue;
                 }
-                let run = text[from..m.end()].trim_start_matches([' ', '-', '.', '/']);
+                let run = text[from..m.end()].trim_start_matches(|c: char| !c.is_ascii_digit() && c != '+');
                 let digits: String = run.chars().filter(char::is_ascii_digit).collect();
                 if let Some(&i) = by_digits.get(digits.as_str()) {
                     // A `+` the value was found without stays in the text (it would not come
@@ -2073,6 +2076,27 @@ mod tests {
         let text = "Ивановка, Ивана и Петрова, `Иван Петров`";
         assert_eq!(vault.redact(text), text);
         assert_eq!(vault.found(), BTreeMap::from([("PERSON", 3), ("PHONE", 1)]));
+    }
+
+    #[test]
+    fn a_known_number_may_be_split_by_one_space_of_any_width() {
+        let mut vault = Vault::default();
+        assert_eq!(
+            vault.redact("I am Anna Berg, call +49 171 2345678, card 4111 1111 1111 1111"),
+            "I am [PERSON_1], call [PHONE_1], card [CARD_1]"
+        );
+        // A no-break or narrow no-break space, as web pages, office documents and contacts write it.
+        assert_eq!(
+            vault.redact("+49\u{a0}171\u{a0}2345678, 4111\u{202f}1111\u{202f}1111\u{202f}1111"),
+            "[PHONE_1], [CARD_1]"
+        );
+        // After a `\uXXXX` escape (`호`), the space stays in the text.
+        assert_eq!(vault.redact("\\ud638\u{a0}4111111111111111"), "\\ud638\u{a0}[CARD_1]");
+        // As the README says: not two spaces, a tab or a line break, and a name only with the same
+        // capitals.
+        let text = "+49  171  2345678, 4111\t1111\t1111\t1111, 4111\n1111\n1111\n1111, ANNA BERG, anna berg";
+        assert_eq!(vault.redact(text), text);
+        assert_eq!(vault.found(), BTreeMap::from([("CARD", 1), ("PERSON", 1), ("PHONE", 1)]));
     }
 
     #[test]
