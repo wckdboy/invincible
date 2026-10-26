@@ -1046,10 +1046,18 @@ fn run(cli: Cli) -> Result<(), String> {
                         .unwrap_or_else(|| "CPU".to_owned());
                     println!("measuring {model} on {device} with {program} (this takes a minute)…");
                     let bench = invincible::tune::bench(std::path::Path::new(&program), &entry.path, Some(&device))?;
-                    if let Some(measured) = bench.build.as_deref().filter(|measured| *measured != build) {
-                        return Err(format!(
-                            "{program} is llama.cpp {measured} and the engine {server} is {build}: its numbers would not be the engine's (use the llama-bench that came with it); nothing kept"
-                        ));
+                    match bench.build.as_deref() {
+                        Some(measured) if measured == build => {}
+                        Some(measured) => {
+                            return Err(format!(
+                                "{program} is llama.cpp {measured} and the engine {server} is {build}: its numbers would not be the engine's (use the llama-bench that came with it); nothing kept"
+                            ));
+                        }
+                        None => {
+                            return Err(format!(
+                                "{program} named no llama.cpp build, so its numbers could be another build's than the engine's {build} (use the llama-bench that came with it); nothing kept"
+                            ));
+                        }
                     }
                     let (pp, tg) = (bench.pp_tps, bench.tg_tps);
                     let profile = invincible::tune::Profile {
@@ -1199,9 +1207,11 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     } else {
         None
     };
-    // Asked once, and only when a split, a shard or a dispatcher over paired nodes reads it: the
-    // devices, the RPC backend, and the build that, with them, is what profiles are valid for.
-    let probed = heads_split || config.cluster.serve || !peers.is_empty();
+    // Asked once, and only when a split, a shard, a dispatcher over paired nodes or a measurement
+    // of this machine's reads it: the devices, the RPC backend, and the build that, with them, is
+    // what profiles are valid for.
+    let measured = config.models.iter().any(|model| invincible::tune::load(&home, &model.id).is_some());
+    let probed = heads_split || config.cluster.serve || !peers.is_empty() || measured;
     let (head_devices, rpc_backend, llama_build) = if probed {
         let llama = &config.engine.llama_server;
         tokio::join!(

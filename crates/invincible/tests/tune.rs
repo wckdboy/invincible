@@ -154,6 +154,12 @@ fn a_llama_bench_on_path_is_used_only_when_it_is_the_engines_build() {
     assert!(out.contains("b5999") && out.contains("b6000"), "both builds are named: {out}");
     assert!(!home.join("tune/m.json").exists(), "nothing is kept");
 
+    // One that names no build could be any build: its numbers are not kept either.
+    program(&path.join("llama-bench"), "#!/bin/sh\necho '[{\"n_prompt\":0,\"n_gen\":128,\"avg_ts\":42.0}]'\n");
+    let (ok, out) = invincible(&home, &path, &["tune", "bench", "m"]);
+    assert!(!ok && out.contains("named no llama.cpp build"), "{out}");
+    assert!(!home.join("tune/m.json").exists(), "nothing is kept");
+
     bench(&path, 6000, 42.0);
     let (ok, out) = invincible(&home, &path, &["tune", "bench", "m"]);
     assert!(ok, "{out}");
