@@ -160,20 +160,23 @@ mod tests {
     }
 
     /// A server that takes the connection and never answers: the handshake gives up, and the
-    /// channel's reconnect loop gets to run again.
-    #[tokio::test(start_paused = true)]
+    /// channel's reconnect loop gets to run again. The clock is paused only once the connection is
+    /// accepted: paused, it jumps to the next deadline whenever nothing is ready, and a connect
+    /// still in flight (loopback connects finish later on macOS) would meet the connect deadline.
+    #[tokio::test]
     async fn a_server_that_never_speaks_is_given_up_on() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let held = tokio::spawn(async move {
-            let mut kept = Vec::new();
-            while let Ok((stream, _)) = listener.accept().await {
-                kept.push(stream);
-            }
-        });
         let direct = invincible_policy::NetworkMode::Direct;
-        let error = super::websocket(&format!("ws://127.0.0.1:{port}/x"), &direct).await.unwrap_err();
+        let url = format!("ws://127.0.0.1:{port}/x");
+        let dial = super::websocket(&url, &direct);
+        tokio::pin!(dial);
+        let _held = tokio::select! {
+            accepted = listener.accept() => accepted.unwrap(),
+            dialled = &mut dial => panic!("the dial ended before it was accepted: {:?}", dialled.err()),
+        };
+        tokio::time::pause();
+        let error = dial.await.unwrap_err();
         assert!(error.contains("no websocket handshake in 30 seconds"), "{error}");
-        held.abort();
     }
 }
