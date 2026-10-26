@@ -857,6 +857,42 @@ async fn a_device_granted_audit_reads_only_its_own_entries() {
 }
 
 #[tokio::test]
+async fn a_device_reads_its_entries_without_the_chain_that_would_place_others_between_them() {
+    let node = node().await;
+    let (phone, dir) = device("phone-chain");
+    pair(&node, &phone).await;
+    assert_eq!(grant(&node, "phone", json!(["shard", "audit"])).await.0, 200);
+    let phone_door = door(&node, &phone).await;
+    let client = client();
+
+    // The phone, the operator, then the phone twice: the operator's entry is the line before the
+    // phone's second, so that entry's `prev` is the hash of a line the phone never sees.
+    let first = chat(&client, &phone_door).await;
+    completion(&operator(), &format!("{}/v1/chat/completions", node.url)).await;
+    let second = chat(&client, &phone_door).await;
+    let third = chat(&client, &phone_door).await;
+    let log = audited(&node, 4).await;
+    let logged = log["entries"].as_array().unwrap();
+    assert!(logged.iter().all(|entry| entry["prev"].as_str().is_some_and(|prev| prev.len() == 64)), "{log}");
+
+    // With `prev`, the phone could hash its own entry and compare it with the next one's: a match
+    // says no one used the node in between, a mismatch says someone did. So a device's read leaves
+    // the chain out, and the rest of each entry is the line the log holds.
+    let mine = read_audit(&client, &phone_door, "").await;
+    assert_eq!(ids(&mine), [first, second, third]);
+    for entry in mine["entries"].as_array().unwrap() {
+        assert!(entry.get("prev").is_none(), "{entry}");
+        let mut line = logged.iter().find(|logged| logged["request_id"] == entry["request_id"]).unwrap().clone();
+        line.as_object_mut().unwrap().remove("prev");
+        assert_eq!(entry, &line);
+    }
+    // The operator's read keeps it: the chain is what `invincible audit --verify` checks.
+    let log = invincible::audit::AuditLog::new(&node.dir);
+    assert_eq!(log.verify(&node.pairing.receipt_key), Ok(4));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn a_device_granted_dispatch_reads_its_dispatched_requests_and_no_one_elses() {
     let node = node().await;
     let (phone, phone_dir) = device("phone-dispatch");

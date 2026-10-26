@@ -96,7 +96,7 @@ Invincible is built for Autobot first, and shares its rules instead of re-implem
 |---|---|
 | Providers: presets with API keys (`ProviderPresets`) | A new **"My node"** provider kind, added by **pairing** (QR code, Noise handshake), never an API key |
 | Cascade: phone → cloud (`CascadePolicy`) | Phone → **node** → cloud. "Never" means "never beyond hardware I own", and the node counts as owned |
-| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN, WireGuard / Tailscale or a Tor onion service; its requests appear in the phone's audit log, and the node's own egress log is viewable from the phone |
+| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN, WireGuard / Tailscale or a Tor onion service; its requests appear in the phone's audit log, and the phone (granted `audit`) can read the node's record of its own requests, with what left the node for each |
 | Data policy per model (`ModelDataPolicy`) | Node models read as **owned · zero retention**, and the claim is checkable: it's your machine |
 | Redaction before cloud calls | Phone → node needs no redaction (you own both ends). Node → cloud passes the same redaction gateway, running a larger detection model than a phone can |
 | Receipts per answer | The node signs a receipt per request (tier, model, engine, tokens, whether anything left the node); Autobot merges it into its own receipt |
@@ -1130,8 +1130,10 @@ invincible audit --verify           # check the chain and every receipt's signat
 ```
 
 A paired device granted `audit` reads its own entries in the same log with `GET /v1/audit`, and
-no one else's: not yours, not another device's, not a device's that had its name before it. A node
-that sends work here (a cluster head, a dispatcher) is a paired device too, and reads the same way.
+no one else's: not yours, not another device's, not a device's that had its name before it. They
+come without the hash of the line before each, which would tell the device when someone else used
+the node. A node that sends work here (a cluster head, a dispatcher) is a paired device too, and
+reads the same way.
 There is no telemetry: nothing about your requests leaves the node unless you send it.
 
 ### Checking the node

@@ -153,8 +153,10 @@ own.
   the same `capabilities` is the same write, with the same refusals (`400 invalid_capabilities`,
   `404 not_found` for a name the node hosts no device under) and the same answer, for the node
   that joined under that name ([cluster.md](cluster.md), Membership API). Neither is a device
-  route. `GET /v1/admin/devices` (`invincible devices`) and `GET /v1/cluster/nodes` report the
-  sets, and a pairing reply says what the joining device got.
+  route. `GET /v1/admin/devices` (`invincible devices`) reports the sets this node grants, the
+  record both routes write, and a pairing reply says what the joining device got. `GET
+  /v1/cluster/nodes` reports the other direction: what each peer granted this machine when it
+  joined.
 - **A missing set is `shard`.** A `devices.json` written before capabilities existed has no set for
   its devices, and the safe reading of "nothing recorded" is the least: `shard`, which is what those
   devices could reach. Nothing is migrated ahead of time; the entry is written back with its set the

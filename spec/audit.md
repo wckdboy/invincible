@@ -37,7 +37,7 @@ the log holds every caller's model, decision, tokens, egress hosts and the clust
 | `caller` | always | `local` (the loopback API, with the token) or `device:<name>` (a paired device, by the name it was pinned under; a node that sends work here, as a cluster head or a dispatcher, paired the same way and is one too) |
 | `client` | when sent | What the caller says it is, from the `invincible-client` request header (64 printable ASCII characters at most). The Autobot Agent sends `autobot-agent`. Not authenticated: `caller` is. |
 | `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
-| `prev` | always | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written |
+| `prev` | always, but not in a device's read | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written. A device reading its own entries is not given it ([Reading it](#reading-it)) |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
 | `request_id` | since ids were recorded | The request's id, the same one the client was given in the `invincible-request-id` response header and the same one inside its receipt's `request_id`. It is what `invincible receipt verify <id>` looks the entry up by. Entries written before this field existed carry no id: they still verify, but only the id inside their receipt (absent on a version 0 receipt) can reach them |
 | `caller_key` | a device's request, since 0.0.22 | The static key (base64url) the device was pinned with. The name in `caller` is a label a later device may take; this is the identity a device's own read of the log is filtered by. Not signed, like `caller`. Never on the operator's entries, and never taken from anything but the session the request came in on |
@@ -85,8 +85,12 @@ paired device (so a later rewrite shows) is a planned addition.
   (0.0.21 and earlier, and edge builds from before it). `limit`, `since` and `summary` count those
   entries alone: `limit=1` is the device's newest entry, not the log's. A completion a device had
   this node dispatch is its own entry (with `dispatch` on it); a request a head dispatched here is
-  the head's, since the head is the paired device that sent it. The operator's read, on loopback,
-  is every caller's.
+  the head's, since the head is the paired device that sent it. A device's entries come without
+  `prev`, and are otherwise as the log holds them: `prev` is the hash of whichever line came
+  before, often another caller's, so a device that hashed its own entry and compared it with the
+  next one's `prev` would learn whether anyone used the node in between. It could not check the
+  chain with it anyway, never seeing the lines it links. The operator's read, on loopback, is every
+  caller's, with the chain.
 
 `summary` is:
 

@@ -545,7 +545,9 @@ struct AuditQuery {
 /// entries that carry the key it was pinned with, so neither another device's records nor the
 /// operator's, nor those of an earlier device that went by the same name, and none written before
 /// entries carried the key (spec/audit.md, Reading it). A cluster peer is a paired device here, so
-/// it reads the requests it sent this node and nothing else.
+/// it reads the requests it sent this node and nothing else. A device's entries come without
+/// `prev`: it is the hash of whichever line came before, often another caller's, so it would say
+/// whether someone used the node between two of the device's requests.
 async fn audit(
     State(state): State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
@@ -557,7 +559,17 @@ async fn audit(
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
     let device = caller.and_then(|Extension(caller)| caller.key().map(str::to_owned));
     let entries = tokio::task::spawn_blocking(move || match device {
-        Some(key) => log.read_where(q.since, limit, |entry| entry["caller_key"].as_str() == Some(key.as_str())),
+        Some(key) => {
+            let mut entries =
+                log.read_where(q.since, limit, |entry| entry["caller_key"].as_str() == Some(key.as_str()));
+            // The chain is the operator's to check: a device never sees the lines it links.
+            for entry in &mut entries {
+                if let Some(entry) = entry.as_object_mut() {
+                    entry.remove("prev");
+                }
+            }
+            entries
+        }
         None => log.read(q.since, limit),
     })
     .await
