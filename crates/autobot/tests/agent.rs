@@ -328,7 +328,7 @@ async fn a_run_from_another_tool_confines_its_commands_like_a_scheduled_task() {
     let outside = std::path::PathBuf::from(std::env::var("HOME").unwrap())
         .join(format!(".autobot-run-sandbox-test-{}", std::process::id()));
     let _ = std::fs::remove_file(&outside);
-    let command = format!("echo in > inside.txt; echo out > {}; echo done", outside.display());
+    let command = format!("echo in > inside.txt; echo out > '{}'; echo done", outside.display());
     // Nobody watches and every command is allowed (`--approvals trust`): still confined.
     let (ok, output, stderr, entry) = autobot_run(&dir, &command, &[]).await;
     assert!(ok, "{stderr}");

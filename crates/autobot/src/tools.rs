@@ -2028,7 +2028,7 @@ mod tests {
         let confined = tools.clone().with_sandbox(crate::sandbox::Mode::Unattended).unattended();
         assert_eq!(confined.confinement(), crate::sandbox::name());
         assert_eq!(tools.clone().with_sandbox(crate::sandbox::Mode::Off).unattended().confinement(), "off");
-        let command = format!("echo in > inside.txt; echo out > {}; echo done", outside.display());
+        let command = format!("echo in > inside.txt; echo out > '{}'; echo done", outside.display());
         let out = confined.run(&Call::Terminal { command: command.clone() }).await;
         if out.contains("bwrap") {
             // No usable sandbox here (not installed, or user namespaces disallowed): refused or

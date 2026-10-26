@@ -353,7 +353,7 @@ async fn a_voice_request_runs_its_commands_confined_like_a_scheduled_task() {
     let outside = std::path::PathBuf::from(std::env::var("HOME").unwrap())
         .join(format!(".autobot-ha-sandbox-test-{}", std::process::id()));
     let _ = std::fs::remove_file(&outside);
-    let command = format!("echo out > {}; echo done", outside.display());
+    let command = format!("echo out > '{}'; echo done", outside.display());
     let url = model(
         vec![tool_call("terminal", json!({ "command": command })), json!({ "role": "assistant", "content": "Done." })],
         Seen::default(),
