@@ -271,7 +271,8 @@ secrets = false
 ```sh
 autobot              # chat in the terminal
 autobot code         # code in this directory (see "Code with Autobot")
-autobot run "task"   # one task, no questions: anything not allowlisted is refused, commands on this machine write-confined
+autobot run "task"   # one task, no questions: anything not allowlisted is refused, and
+                     # commands on this machine are write-confined unless [agent] sandbox = "off"
 autobot doctor       # check everything, 24/7 readiness included
 ```
 
@@ -423,19 +424,21 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
-  Nobody watches such a run, so the commands it runs on this machine are write-confined like a
-  scheduled task's (see **Sandbox** below), whatever `--approvals` allows: `--approvals trust`
-  decides which commands run, the sandbox bounds what they can write themselves. A confined
-  command's own writes go only to `DIR` and temporary directories, so a build that writes caches in
-  your home (`~/.cargo`, `~/.npm`) fails there. On Linux without bubblewrap, commands are refused
-  and the run says so before it starts; where bubblewrap cannot make its namespaces (some
-  containers), each command fails with bubblewrap's error. Either way nothing runs unconfined:
-  install it (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine
-  you can throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack
-  bubblewrap or the namespaces it needs and are themselves the boundary. It is a flag for one run,
-  not a setting, so the workflow file shows it; the run prints it on standard error before it
-  starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks and the
-  board stay confined.
+  Nobody watches such a run, so unless `[agent] sandbox = "off"` in the config turns the sandbox
+  off, the commands it runs on this machine are write-confined like a scheduled task's (see
+  **Sandbox** below), whatever `--approvals` allows: `--approvals trust` decides which commands
+  run, the sandbox bounds what they can write themselves. A confined command's own writes go only
+  to `DIR` and temporary directories, so a build that writes caches in your home (`~/.cargo`,
+  `~/.npm`) fails there. With the sandbox on and no bubblewrap on Linux, commands are refused and
+  the run says so before it starts; where bubblewrap cannot make its namespaces (some containers),
+  each command fails with bubblewrap's error. Either way nothing runs unconfined: install it
+  (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine you can
+  throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack bubblewrap or
+  the namespaces it needs and are themselves the boundary. It is a flag for one run, not a setting,
+  so the workflow file shows it; the run prints it on standard error before it starts, and the
+  action log marks each of its commands `"sandbox": "off"`. With the flag, scheduled tasks and the
+  board stay confined. Under `[agent] sandbox = "off"` the run says the same on standard error,
+  naming the setting, and the action log marks its commands `"sandbox": "off"` too.
 
 ### In your editor: Zed and other ACP editors
 
@@ -546,14 +549,16 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     yes, always for this session, or no.
   - `edits`: like `ask`, but writes and edits in the working directory (not under dot names) run
     without asking; each is shown as a diff, and `/undo` puts it back. For coding.
-  - `allowlist`: for unattended use. Allowlisted commands and writes in the working directory (not
-    under dot names) run; everything else is refused without asking. Scheduled tasks (hooks too),
-    board work and the heartbeat use it unless the mode is `trust`. An allowlist entry matches the
-    whole command or the command plus arguments, never a chained one (`git status; rm -rf ~` does
-    not match `git status`). Arguments are not checked: an allowlisted `cat` reads any file you can,
-    so allow only commands that are safe with any arguments. Writes never follow symbolic links or
-    touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) are refused, since
-    they can make a later allowlisted command run something else.
+  - `allowlist`: for unattended use. Writes in the working directory (not under dot names) run, and
+    so does what the allowlist names: commands, `cloud`, MCP tools (`mcp:<server>/<tool>`), Home
+    Assistant services (`home:light.turn_on`, `home:light.*`) and sites (`https://docs.rs`).
+    Everything else is refused without asking. Scheduled tasks (hooks too), board work and the
+    heartbeat use it unless the mode is `trust`. A command matches an entry when it is the entry,
+    or the entry plus arguments; a chained one never does (`git status; rm -rf ~` does not match
+    `git status`). Arguments are not checked: an allowlisted `cat` reads any file you can, so allow
+    only commands that are safe with any arguments. Writes never follow symbolic links or touch
+    hard-linked files, and writes under dot names (`.git/config`, `.envrc`) are refused, since they
+    can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
 - **Sandbox (write confinement):** commands with nobody watching (scheduled tasks, board work, phone
   recipes, hooks, Home Assistant's voice requests, the heartbeat, `autobot run`) run write-confined:
@@ -568,16 +573,20 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   commands are refused, not run unconfined, unless `[agent] sandbox = "off"` or
   `autobot run --no-sandbox` turned it off; where bubblewrap is installed but cannot make its
   namespaces (some containers), each command fails with bubblewrap's error as it starts. And the
-  working directory is shared: a confined command can leave files there
-  (`core.hooksPath` or `core.fsmonitor` in `.git/config`, a `Makefile`, `node_modules/.bin`, an
-  `.envrc` once you `direnv allow` it) that run unconfined when a later interactive turn, or your
-  own shell, works in that directory. `[agent] sandbox = "always"` confines interactive turns too
-  (not your shell); `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run.
-  Commands in `[agent.docker]` or over `[agent.ssh]` run there instead, not confined by this
-  sandbox: the container or the other machine is what holds them. The container mounts the working
-  directory read-write, though, and with `[agent.docker]` set interactive turns run there too, so
-  what a command leaves in that directory can run unconfined when your own shell, or a turn without
-  `[agent.docker]`, works in it.
+  working directory is shared: a confined command can leave files there (`core.hooksPath` or
+  `core.fsmonitor` in `.git/config`, a `Makefile`, `node_modules/.bin`, an `.envrc` once you
+  `direnv allow` it) that run unconfined when a later interactive turn, or your own shell, works
+  in that directory. `[agent] sandbox = "always"` confines interactive turns too (not your shell);
+  `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run. Commands in
+  `[agent.docker]` or over `[agent.ssh]` run there instead, not confined by this sandbox: the
+  container or the other machine is what holds them. The container mounts the working directory
+  read-write, though, and with `[agent.docker]` set interactive turns run there too, so what a
+  command leaves in that directory can run unconfined when your own shell, or a turn without
+  `[agent.docker]`, works in it. Autobot's own `/diff` runs `git diff --no-color` and
+  `git ls-files --others --exclude-standard` in the working directory on this machine, unconfined
+  even with `[agent.docker]` set or `sandbox = "always"`, so a `core.fsmonitor`, diff driver or
+  filter left in `.git/config` (the last two named in a `.gitattributes`) runs when you type
+  `/diff`.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands
@@ -1430,13 +1439,12 @@ multi-step ones.
 
 On the project suite Qwen3.5 4B on the node scores 30/50 against DeepSeek's 45/50, so a 4B model is
 at two thirds of a frontier model on single-turn questions about this code. Separately, on the 40
-seed tasks DeepSeek passes 40/40 against Qwen3.5 4B's 34/40. The 4B model is level with it on
-extraction, shell and instructions; the gap is in multi-step reading and arithmetic. Each of
-DeepSeek's 90 requests went through the gateway like any other: confirmed, redacted, receipted, and
-listed by `invincible audit --summary` (62 KB sent to `api.deepseek.com` for both suites).
+seed tasks DeepSeek passes 40/40 against Qwen3.5 4B's 34/40. Each of DeepSeek's 90 requests
+went through the gateway like any other: confirmed, redacted, receipted, and listed by
+`invincible audit --summary` (62 KB sent to `api.deepseek.com` for both suites).
 
-The 4B model's misses are real ones, for example a glob whose `**/` needs a slash, a module
-resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254.
+The 4B model's misses on the project suite are real ones, for example a glob whose `**/` needs a
+slash, a module resolver that tries `.js` before `/index.*`, `2 in + 3 mm` answered as 254.
 
 ### Agent evals: whole tasks, not single answers
 

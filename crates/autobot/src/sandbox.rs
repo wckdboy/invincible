@@ -8,15 +8,20 @@
 //! run; the sandbox bounds what an allowed command can write itself (an allowlisted `git` cannot
 //! rewrite `~/.zshrc`).
 //!
-//! The working directory is writable and shared with interactive turns, which are unconfined
-//! unless the sandbox is `"always"`: a confined command can leave files there that a later
-//! interactive turn in that directory runs unconfined (`core.hooksPath` or `core.fsmonitor` in
-//! `.git/config`, a `Makefile`, `node_modules/.bin`, an `.envrc` once the owner runs
-//! `direnv allow`). The approval rules hold back the agent's own writes under dot names: `ask`
-//! and `edits` ask, `allowlist` refuses them and `trust` runs them. With nobody to ask they are
-//! refused unless the mode is `trust`: scheduled tasks (hooks too), board work and the heartbeat
-//! switch to `allowlist`, and the approver of `autobot run` or of Home Assistant's voice requests
-//! says no. The rules do not see what a command writes.
+//! The working directory is writable and shared with interactive turns, which run unconfined on
+//! this machine unless the sandbox is `"always"` (in `[agent.docker]` or over `[agent.ssh]` they
+//! run there): a confined command can leave files there that a later unconfined interactive turn
+//! in that directory runs (`core.hooksPath` or `core.fsmonitor` in `.git/config`, a `Makefile`,
+//! `node_modules/.bin`, an `.envrc` once the owner runs `direnv allow`). The TUI's `/diff` runs
+//! `git` there on this machine, unconfined whatever the sandbox and `[agent.docker]` say, so a
+//! `core.fsmonitor` left there, or a diff driver or filter a `.gitattributes` names, runs when
+//! the owner types `/diff`. The approval rules hold back the agent's own writes under dot names:
+//! `ask` and `edits` ask, `allowlist` refuses them and `trust` runs them. On the unattended paths
+//! above they are refused unless the mode is `trust`: scheduled tasks (hooks too), board work and
+//! the heartbeat switch to `allowlist`, and the approver of `autobot run` or of Home Assistant's
+//! voice requests says no. `autobot eval` has nobody to ask either, but its approver says yes:
+//! each task runs in a throwaway directory with every command confined ([crate::eval]). The
+//! rules do not see what a command writes.
 //!
 //! macOS: `sandbox-exec` with a write-deny profile. Linux: `bwrap` (bubblewrap) with the system
 //! read-only and the working directory writable. Where neither is available, a confined

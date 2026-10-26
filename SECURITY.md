@@ -65,7 +65,10 @@ describe is a finding.
   or one in the `[agent.docker]` container, can leave files there (`core.hooksPath` or
   `core.fsmonitor` in `.git/config`, a `Makefile`, `node_modules/.bin`, an `.envrc` once someone
   runs `direnv allow` on it) that a later unconfined interactive turn, or the owner's own shell,
-  runs in that directory ([README](README.md), Sandbox).
+  runs in that directory ([README](README.md), Sandbox). Autobot's `/diff` runs `git diff` and
+  `git ls-files` there on the agent's machine, unconfined even with `[agent.docker]` set or
+  `[agent] sandbox = "always"`, so a `core.fsmonitor` left in `.git/config`, or a diff driver or
+  filter there that a `.gitattributes` names, runs when the owner types `/diff`.
 - The node has had an internal security review, not yet an independent one; pairing, remote
   access and discovery are implemented and unaudited ([README](README.md#status)).
 - Data on disk is not encrypted at rest. Keys, tokens and the audit log are files only the owner's
