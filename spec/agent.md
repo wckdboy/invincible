@@ -10,8 +10,9 @@ bearer token, so a device that can call it takes agent turns with the node's too
 schedules on the node and spends its cloud models — operator-equivalent, not what pairing grants.
 A device without the capability is answered exactly as a path that does not exist (404, same body),
 so it cannot even learn the route is there. Granting is the operator's: `POST /v1/cluster/pair
-{"capabilities": ["shard", "agent"]}` pre-grants a code, `PATCH /v1/cluster/nodes/{name}
-{"capabilities": [...]}` grants or revokes a device already paired, and `GET /v1/admin/devices`
+{"capabilities": ["shard", "agent"]}` pre-grants a code, `PATCH /v1/admin/devices/{name}
+{"capabilities": [...]}` (`invincible devices grant <name> shard,agent`, or the same body on `PATCH
+/v1/cluster/nodes/{name}`) grants or revokes a device already paired, and `GET /v1/admin/devices`
 shows what each holds. A device cannot widen its own set: the pairing hello is not an input, and
 the device API has no route that changes it.
 
