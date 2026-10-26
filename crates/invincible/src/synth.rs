@@ -316,9 +316,7 @@ async fn handle(
                     }
                 }
             }
-            (Action::Ask, _) => {
-                error(StatusCode::CONFLICT, "confirmation_required", crate::server::ask_message(&decision))
-            }
+            (Action::Ask, _) => crate::server::ask(&decision),
             (Action::Block, _) => error(
                 crate::server::block_status(decision.reason),
                 "request_blocked",

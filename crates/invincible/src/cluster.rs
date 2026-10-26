@@ -93,6 +93,31 @@ pub fn rpc_backend_in(text: &str) -> bool {
     !(text.contains("RPC not supported") || text.contains("failed to find RPC backend"))
 }
 
+/// The llama.cpp build [llama_server] is, from `llama-server --version`. None: it did not run, or
+/// named no build.
+pub async fn probe_build(llama_server: &Path) -> Option<String> {
+    parse_build(&output(llama_server, &["--version"]).await?)
+}
+
+/// The build in `--version` output (`version: 6000 (abc1234)`), as [build_tag] names it.
+pub fn parse_build(text: &str) -> Option<String> {
+    let rest = text.lines().find_map(|line| line.trim().strip_prefix("version: "))?;
+    let (number, commit) = rest.split_once(' ').unwrap_or((rest, ""));
+    build_tag(number.parse().ok()?, commit.trim().trim_start_matches('(').trim_end_matches(')'))
+}
+
+/// A llama.cpp build as its release tag names it, with the commit when there is one:
+/// `b6000 (abc1234)`. None for a build made outside git (`0 (unknown)`), which cannot be told
+/// from the next one.
+pub fn build_tag(number: u64, commit: &str) -> Option<String> {
+    let commit = commit.trim();
+    match (number, !commit.is_empty() && commit != "unknown") {
+        (0, false) => None,
+        (number, false) => Some(format!("b{number}")),
+        (number, true) => Some(format!("b{number} ({commit})")),
+    }
+}
+
 /// The machine's memory in bytes.
 pub fn memory_bytes() -> Option<u64> {
     if cfg!(target_os = "macos") {
@@ -111,7 +136,13 @@ pub fn find_rpc_server(configured: Option<&Path>, llama_server: &Path) -> Option
     if let Some(path) = configured {
         return Some(path.to_owned());
     }
-    let names = ["ggml-rpc-server", "rpc-server"];
+    find_beside(llama_server, &["ggml-rpc-server", "rpc-server"])
+}
+
+/// The first of [names] in the directory of [llama_server] (a path, or a name found on PATH),
+/// else on PATH. llama.cpp's programs ship side by side, so the ones next to the configured
+/// engine are its build; the installer puts them off PATH, in `~/.invincible/llama.cpp`.
+pub fn find_beside(llama_server: &Path, names: &[&str]) -> Option<PathBuf> {
     let beside = llama_server.parent().filter(|p| !p.as_os_str().is_empty()).map(Path::to_owned).or_else(|| {
         std::env::var_os("PATH")
             .and_then(|path| std::env::split_paths(&path).find(|dir| dir.join(llama_server).is_file()))
@@ -120,7 +151,32 @@ pub fn find_rpc_server(configured: Option<&Path>, llama_server: &Path) -> Option
         .into_iter()
         .chain(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default())
         .collect();
-    dirs.iter().flat_map(|dir| names.iter().map(move |n| dir.join(n))).find(|p| p.is_file())
+    dirs.iter().flat_map(|dir| names.iter().map(move |n| dir.join(n))).find(|p| runnable(p))
+}
+
+/// A file this process could run: on Unix, one with an execute bit (a stray non-executable
+/// `llama-bench` beside the engine must not hide the one on PATH).
+fn runnable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
+}
+
+/// [program] as a file: itself when it is a path, else the first of that name on PATH, the way a
+/// shell would look it up.
+pub fn resolve_program(program: &Path) -> Option<PathBuf> {
+    let text = program.to_string_lossy();
+    if text.contains('/') {
+        return program.is_file().then(|| program.to_path_buf());
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|dir| dir.join(&*text)).find(|candidate| runnable(candidate))
 }
 
 /// What a node can give a cluster: `GET /v1/cluster/node`.
@@ -142,7 +198,8 @@ pub struct Capabilities {
     /// speed rather than only by memory.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<crate::tune::Set>,
-    /// The machine those profiles are valid for; a head ignores profiles from other hardware.
+    /// What those profiles are valid for: the machine, its accelerators and its llama.cpp build
+    /// ([crate::tune::hardware_tag]). A head ignores profiles from other hardware.
     #[serde(default)]
     pub hardware: String,
     /// How much this node will take (spec/dispatch.md). Absent on a node too old to say, which a
@@ -386,6 +443,8 @@ impl ClusterRun {
 pub struct Head {
     pub devices: Vec<Device>,
     pub rpc_backend: Option<bool>,
+    /// What this machine's own profiles must have been measured on ([crate::tune::hardware_tag]).
+    pub hardware: String,
     pub device_key: StaticKey,
     pub network: String,
     pub model_bytes: u64,
@@ -543,13 +602,7 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
             // This machine's own measurements, the links, and the split already running.
             let mut links = Vec::new();
             if let Ok(home) = crate::config::home() {
-                measured.extend(crate::tune::measured(
-                    &home,
-                    &run.model,
-                    &run.head,
-                    &crate::tune::hardware_now(),
-                    &head.devices,
-                ));
+                measured.extend(crate::tune::measured(&home, &run.model, &run.head, &head.hardware, &head.devices));
                 links = crate::tune::load_links(&home, 1);
                 for (peer_link, _) in &peers {
                     if links.iter().any(|l| l.node == peer_link.peer.name) {
@@ -617,6 +670,8 @@ pub struct ClusterState {
     pub name: String,
     pub llama_server: PathBuf,
     pub rpc_backend: Option<bool>,
+    /// The llama.cpp build of [llama_server] ([probe_build]), part of what profiles are valid for.
+    pub llama_build: Option<String>,
     /// Nodes this machine paired with as a device: the peers it may use.
     pub peers: Vec<KnownNode>,
     pub device_key: Option<StaticKey>,
@@ -632,15 +687,16 @@ pub struct ClusterState {
 impl ClusterState {
     /// This node's capabilities now (devices probed afresh: their free memory changes).
     pub async fn capabilities(&self) -> Capabilities {
+        let devices = probe_devices(&self.llama_server).await;
         Capabilities {
             name: self.name.clone(),
             version: crate::version::VERSION.to_owned(),
             memory_bytes: memory_bytes(),
-            devices: probe_devices(&self.llama_server).await,
+            hardware: crate::tune::hardware_tag(&crate::tune::machine_now(), &devices, self.llama_build.as_deref()),
+            devices,
             rpc_backend: self.rpc_backend,
             shard: self.shard,
             profiles: crate::config::home().map(|home| crate::tune::load_all(&home)).unwrap_or_default(),
-            hardware: crate::tune::hardware_now(),
             // One request at a time unless the node is configured otherwise; a shard advertises
             // nothing, because its capacity is spoken for by the model it splits.
             dispatch: (!self.shard).then_some(Dispatch { max_inflight: self.dispatch_max_inflight, queue: 0 }),
@@ -734,6 +790,17 @@ mod tests {
     fn knows_a_build_without_rpc() {
         assert!(!rpc_backend_in("error while handling argument \"--rpc\": RPC not supported in this build"));
         assert!(rpc_backend_in("ggml-rpc.cpp:650: Failed to connect to 127.0.0.1:9"));
+    }
+
+    #[test]
+    fn reads_the_llama_cpp_build() {
+        // CUDA builds load their backends, and say so, before they answer `--version`.
+        let text = "ggml_cuda_init: found 1 CUDA devices:\n  Device 0: NVIDIA GeForce RTX 4090\nversion: 6000 (abc1234)\nbuilt with cc (GCC) 13.3.0 for x86_64-linux-gnu\n";
+        assert_eq!(parse_build(text).as_deref(), Some("b6000 (abc1234)"));
+        assert_eq!(parse_build("version: 6000 (unknown)\n").as_deref(), Some("b6000"));
+        assert_eq!(parse_build("version: 0 (unknown)\n"), None, "a build made outside git names no build");
+        assert_eq!(parse_build("usage: llama-server [options]\n"), None);
+        assert_eq!(build_tag(6000, "abc1234"), parse_build("version: 6000 (abc1234)"), "llama-bench's fields agree");
     }
 
     #[test]
@@ -932,6 +999,7 @@ mod tests {
             name: "studio".into(),
             llama_server: PathBuf::from("/nonexistent/llama-server"),
             rpc_backend: None,
+            llama_build: None,
             peers: Vec::new(),
             device_key: None,
             runs: Vec::new(),

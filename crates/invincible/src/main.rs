@@ -304,6 +304,8 @@ enum TuneAction {
     Show {
         /// One model id; without it, every model measured here.
         model: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
     },
 }
 
@@ -1024,22 +1026,48 @@ fn run(cli: Cli) -> Result<(), String> {
                     })?;
                     let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
                     let probe = runtime.block_on(invincible::tune::probe(Some(&cfg.engine.llama_server)));
-                    let program = probe.llama_bench.clone().ok_or(
-                        "llama-bench not found: it ships with llama.cpp (`brew install llama.cpp`, or your CUDA build)",
-                    )?;
+                    let server = probe.llama_server.clone().ok_or_else(|| {
+                        format!(
+                            "the engine `{}` is not there: install llama.cpp (`brew install llama.cpp`, or your CUDA build) and set [engine] llama_server",
+                            cfg.engine.llama_server.display()
+                        )
+                    })?;
+                    let program = probe.llama_bench.clone().ok_or_else(|| {
+                        format!("llama-bench is not next to {server} or on PATH: it ships with llama.cpp, beside llama-server")
+                    })?;
+                    // A profile holds for one llama.cpp build: one that names none would be kept
+                    // for whichever build runs next.
+                    let build = probe
+                        .llama_build
+                        .clone()
+                        .ok_or_else(|| format!("`{server} --version` names no llama.cpp build, so a measurement could not say which build it holds for"))?;
                     let device = device
                         .or_else(|| probe.devices.first().map(|d| d.name.clone()))
                         .unwrap_or_else(|| "CPU".to_owned());
-                    println!("measuring {model} on {device} (this takes a minute)…");
-                    let (pp, tg) = invincible::tune::bench(std::path::Path::new(&program), &entry.path, Some(&device))?;
+                    println!("measuring {model} on {device} with {program} (this takes a minute)…");
+                    let bench = invincible::tune::bench(std::path::Path::new(&program), &entry.path, Some(&device))?;
+                    match bench.build.as_deref() {
+                        Some(measured) if measured == build => {}
+                        Some(measured) => {
+                            return Err(format!(
+                                "{program} is llama.cpp {measured} and the engine {server} is {build}: its numbers would not be the engine's (use the llama-bench that came with it); nothing kept"
+                            ));
+                        }
+                        None => {
+                            return Err(format!(
+                                "{program} named no llama.cpp build, so its numbers could be another build's than the engine's {build} (use the llama-bench that came with it); nothing kept"
+                            ));
+                        }
+                    }
+                    let (pp, tg) = (bench.pp_tps, bench.tg_tps);
                     let profile = invincible::tune::Profile {
                         device: device.clone(),
                         tg_tps: tg,
                         pp_tps: pp,
-                        engine: "llama-bench".to_owned(),
+                        engine: format!("llama-bench {build}"),
                         at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
                     };
-                    let set = invincible::tune::record(&home, &model, &invincible::tune::hardware_now(), profile)?;
+                    let set = invincible::tune::record(&home, &model, &probe.hardware_tag(), profile)?;
                     let prompt = pp.map(|p| format!(", prompt {p:.1} tok/s")).unwrap_or_default();
                     println!(
                         "{model} on {device}: {tg:.1} tok/s{prompt} — kept in {} ({} device(s) measured on this machine)",
@@ -1050,15 +1078,20 @@ fn run(cli: Cli) -> Result<(), String> {
                         "the cluster planner uses these numbers on the next plan; `invincible cluster status` shows it"
                     );
                 }
-                TuneAction::Show { model } => {
-                    let sets = match model {
+                TuneAction::Show { model, config: path } => {
+                    let sets: Vec<_> = match model {
                         Some(model) => invincible::tune::load(&home, &model).into_iter().collect(),
                         None => invincible::tune::load_all(&home),
                     };
                     if sets.is_empty() {
                         println!("{}", brand::ash("nothing measured yet (`invincible tune bench <model>`)"));
+                        return Ok(());
                     }
-                    let now = invincible::tune::hardware_now();
+                    // What a profile taken now would be valid for: the engine is asked its devices
+                    // and build, so a new GPU or llama.cpp shows as other hardware.
+                    let cfg = load(path)?;
+                    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+                    let now = runtime.block_on(invincible::tune::hardware_now(&cfg.engine.llama_server));
                     for set in sets {
                         let current = if set.hardware == now { "this machine" } else { "other hardware, ignored" };
                         println!("{} · {} · {current}", set.model, set.hardware);
@@ -1174,14 +1207,23 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     } else {
         None
     };
-    let (head_devices, rpc_backend) = if heads_split || config.cluster.serve {
+    // Asked once, and only when a split, a shard, a dispatcher over paired nodes or a measurement
+    // of this machine's reads it: the devices, the RPC backend, and the build that, with them, is
+    // what profiles are valid for.
+    let measured = config.models.iter().any(|model| invincible::tune::load(&home, &model.id).is_some());
+    let probed = heads_split || config.cluster.serve || !peers.is_empty() || measured;
+    let (head_devices, rpc_backend, llama_build) = if probed {
         let llama = &config.engine.llama_server;
-        let (devices, rpc) =
-            tokio::join!(invincible::cluster::probe_devices(llama), invincible::cluster::probe_rpc_backend(llama));
-        (devices, rpc)
+        tokio::join!(
+            invincible::cluster::probe_devices(llama),
+            invincible::cluster::probe_rpc_backend(llama),
+            invincible::cluster::probe_build(llama)
+        )
     } else {
-        (Vec::new(), None)
+        (Vec::new(), None, None)
     };
+    let hardware =
+        invincible::tune::hardware_tag(&invincible::tune::machine_now(), &head_devices, llama_build.as_deref());
     let mut runs = Vec::new();
     for model in &config.models {
         let port = engine::free_port().map_err(|e| format!("no free port: {e}"))?;
@@ -1214,6 +1256,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             let head = invincible::cluster::Head {
                 devices: head_devices.clone(),
                 rpc_backend,
+                hardware: hardware.clone(),
                 device_key: device,
                 network,
                 model_bytes: std::fs::metadata(&model.path).map(|m| m.len()).unwrap_or(0),
@@ -1286,6 +1329,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         device_key.clone(),
         config.node.settings().network.encode(),
     );
+    let dispatch = if probed { dispatch.with_hardware(hardware.clone()) } else { dispatch };
     let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&home.join("receipt.key"))?;
     let receipt_public = receipt_key.public();
     // The static key exists when either side of the node's network does: paired devices, or a
@@ -1346,6 +1390,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             name: config.remote.name(),
             llama_server: config.engine.llama_server.clone(),
             rpc_backend,
+            llama_build,
             peers,
             device_key,
             runs,

@@ -1,17 +1,30 @@
-//! Commands with nobody watching (scheduled tasks, board work, phone recipes) run confined:
-//! they can read what the user can, but write only in the working directory and temporary
-//! directories. The allowlist says which commands may run; the sandbox bounds what an allowed
-//! command can do (an allowlisted `git` cannot rewrite `~/.zshrc`).
+//! Commands with nobody watching (scheduled tasks, board work, phone recipes, `autobot run`) run
+//! confined: they can read what the user can, but write only in the working directory and
+//! temporary directories. The allowlist says which commands may run; the sandbox bounds what an
+//! allowed command can do (an allowlisted `git` cannot rewrite `~/.zshrc`).
 //!
 //! macOS: `sandbox-exec` with a write-deny profile. Linux: `bwrap` (bubblewrap) with the system
 //! read-only and the working directory writable. Where neither is available, a confined
 //! command is refused rather than run unconfined.
 //!
-//! `[agent] sandbox = "unattended"` (default), `"always"` (interactive turns too) or `"off"`.
+//! `[agent] sandbox = "unattended"` (default), `"always"` (interactive turns too) or `"off"`;
+//! `autobot run --no-sandbox` turns it off for one run. The action log records which ([name]).
 
 use std::path::Path;
 
 use serde::Deserialize;
+
+/// What confines commands on this machine, as the action log names it: `sandbox-exec` (macOS),
+/// `bwrap` (Linux), `none` elsewhere (where a confined command is refused).
+pub fn name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "sandbox-exec"
+    } else if cfg!(target_os = "linux") {
+        "bwrap"
+    } else {
+        "none"
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -48,7 +61,7 @@ pub fn command(shell: &str, workdir: &Path) -> Result<tokio::process::Command, S
     }
     if cfg!(target_os = "linux") {
         let bwrap = crate::find_on_path("bwrap")
-            .ok_or("unattended commands run sandboxed and bubblewrap (bwrap) is not installed; install it, or set [agent] sandbox = \"off\"")?;
+            .ok_or("unattended commands run sandboxed and bubblewrap (bwrap) is not installed: install the bubblewrap package (apt install bubblewrap, dnf install bubblewrap, apk add bubblewrap), or set [agent] sandbox = \"off\"")?;
         let mut command = tokio::process::Command::new(bwrap);
         command
             .args(["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"])
