@@ -164,7 +164,9 @@ pairing grants unless the operator says otherwise; over its session):
   `llama-server --list-devices` reports, with its description and total memory (not its free
   memory, which moves with what runs); and the llama.cpp build, from `llama-server --version`
   (`b6000 (abc1234)`). A changed machine, a swapped GPU or another llama.cpp build invalidates
-  them rather than being trusted.
+  them rather than being trusted. A build that names no number (`0 (unknown)`, built without
+  git) has no tag, so nothing is measured on it. A node keeps the build it started with, which
+  is the one its engines run.
 - `POST /v1/cluster/meter` (on the same API, so inside the same Noise session): answers
   `{"bytes": n}` for an `n`-byte body and nothing else, and holds none of it (the body is read and
   dropped a frame at a time — spec/pairing.md, Limits). A head times a link with it — five small

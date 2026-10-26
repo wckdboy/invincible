@@ -151,7 +151,21 @@ pub fn find_beside(llama_server: &Path, names: &[&str]) -> Option<PathBuf> {
         .into_iter()
         .chain(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default())
         .collect();
-    dirs.iter().flat_map(|dir| names.iter().map(move |n| dir.join(n))).find(|p| p.is_file())
+    dirs.iter().flat_map(|dir| names.iter().map(move |n| dir.join(n))).find(|p| runnable(p))
+}
+
+/// A file this process could run: on Unix, one with an execute bit (a stray non-executable
+/// `llama-bench` beside the engine must not hide the one on PATH).
+fn runnable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
 }
 
 /// [program] as a file: itself when it is a path, else the first of that name on PATH, the way a
@@ -162,7 +176,7 @@ pub fn resolve_program(program: &Path) -> Option<PathBuf> {
         return program.is_file().then(|| program.to_path_buf());
     }
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|dir| dir.join(&*text)).find(|candidate| candidate.is_file())
+    std::env::split_paths(&path).map(|dir| dir.join(&*text)).find(|candidate| runnable(candidate))
 }
 
 /// What a node can give a cluster: `GET /v1/cluster/node`.

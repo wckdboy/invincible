@@ -1206,7 +1206,12 @@ invincible cluster status     # devices, peers (probed now), heads served, where
   installer puts llama.cpp, `~/.invincible/llama.cpp`), else the one on PATH, and says which. A
   measurement holds for the machine, its GPUs (name and memory) and the llama.cpp build it was
   taken with: after a new GPU or a llama.cpp upgrade it is ignored until measured again
-  (`invincible tune show` says which). `invincible tune probe` shows what it would use.
+  (`invincible tune show` says which). A running node uses the build it started with, as its
+  engines do, so a measurement of a newer build counts from the next `invincible serve`.
+  Measurements from earlier versions named only the machine and are ignored: measure again.
+  `invincible tune probe` shows what it would use. A llama.cpp that names no build (`llama-server
+  --version` says `0 (unknown)`, as one built from a source archive without git does) cannot be
+  measured: build it from a git checkout, or use a release archive.
 - Shard links stay on the local network (private, link-local, Tailscale or `.local` addresses),
   never go through Tor or SOCKS5, and stop under `network = "offline"`.
 - A shard that leaves mid-answer ends that answer with an error event; the model is planned again

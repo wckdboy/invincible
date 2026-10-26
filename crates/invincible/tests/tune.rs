@@ -171,6 +171,15 @@ fn a_llama_bench_on_path_is_used_only_when_it_is_the_engines_build() {
     let (ok, out) = invincible(&home, &path, &["tune", "bench", "m"]);
     assert!(ok && out.contains(&engines.join("llama-bench").display().to_string()), "{out}");
     assert_eq!(kept(&home)["profiles"][0]["tg_tps"], 50.0);
+
+    // ... unless it cannot be run: then the one on PATH is.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(engines.join("llama-bench"), std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let (ok, out) = invincible(&home, &path, &["tune", "bench", "m"]);
+    assert!(ok && out.contains(&path.join("llama-bench").display().to_string()), "{out}");
+    assert_eq!(kept(&home)["profiles"][0]["tg_tps"], 42.0);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
