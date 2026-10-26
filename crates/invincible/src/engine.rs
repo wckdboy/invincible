@@ -236,10 +236,15 @@ const INHERITED_PREFIXES: &[&str] =
 /// provider key can be given any name in `api_key_env`.
 const SECRET_WORDS: &[&str] = &["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
 
-/// Names withheld even under a prefix above: ggml's own for where to load code from, since no
-/// engine needs code put into it (ggml as of b11887). `GGML_BACKEND_PATH` names a backend library
-/// ggml `dlopen()`s (`ggml_backend_load_all`); the others name a directory or file of compiled
-/// device code it loads: ET kernels, Metal shaders, cached OpenCL programs and OpenVINO models.
+/// Names withheld even under a prefix above: those that say where to load code from, since no
+/// engine needs code put into it. ggml's own (as of b11887): `GGML_BACKEND_PATH` names a backend
+/// library ggml `dlopen()`s (`ggml_backend_load_all`); the other `GGML_` names a directory or
+/// file of compiled device code it loads: ET kernels, Metal shaders, cached OpenCL programs and
+/// OpenVINO models. The runtimes': CUDA's `CUDA_INJECTION64_PATH` and ROCm's `HSA_TOOLS_LIB` name
+/// a library the runtime loads into the process; the `VK_` names are where the Vulkan loader
+/// finds layers, code it loads into the process (an implicit layer into every one, unasked).
+/// Which driver to use (`VK_ICD_FILENAMES`) is still inherited: some machines need it to find
+/// their GPU at all.
 const WITHHELD: &[&str] = &[
     "GGML_BACKEND_PATH",
     "GGML_ET_KERNELS_PATH",
@@ -247,6 +252,12 @@ const WITHHELD: &[&str] = &[
     "GGML_OPENCL_KERNEL_CACHE_DIR",
     "GGML_OPENVINO_CACHE_DIR",
     "GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR",
+    "CUDA_INJECTION64_PATH",
+    "HSA_TOOLS_LIB",
+    "VK_LAYER_PATH",
+    "VK_ADD_LAYER_PATH",
+    "VK_IMPLICIT_LAYER_PATH",
+    "VK_ADD_IMPLICIT_LAYER_PATH",
 ];
 
 /// Whether an engine inherits the variable [name] ([INHERITED], [INHERITED_PREFIXES], less
@@ -489,6 +500,13 @@ mod tests {
             "GGML_OPENCL_KERNEL_CACHE_DIR",
             "GGML_OPENVINO_CACHE_DIR",
             "GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR",
+            "CUDA_INJECTION64_PATH",
+            "HSA_TOOLS_LIB",
+            "VK_LAYER_PATH",
+            "VK_ADD_LAYER_PATH",
+            "VK_IMPLICIT_LAYER_PATH",
+            "VK_ADD_IMPLICIT_LAYER_PATH",
+            "vk_layer_path",
             "PYTHONPATH",
             "INVINCIBLE_HOME",
             "NOTIFY_SOCKET",

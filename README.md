@@ -1011,10 +1011,13 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
 - An engine starts with a clean environment: `PATH`, `HOME`, the temporary directory, the locale,
   the library paths, and the GPU runtimes' and ggml's own variables (`CUDA_*`, `HIP_*`, `ROCR_*`,
   `HSA_*`, `ROCM_*`, `VK_*`, `ONEAPI_*`, `SYCL_*`, `ZE_*`, `ZES_*`, `GGML_*`), never a name with
-  `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL` in it, and not the ggml variables that say
-  where to load code from (`GGML_BACKEND_PATH`, a backend library ggml would load, and
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL` in it, and not the variables that say
+  where to load code from: ggml's (`GGML_BACKEND_PATH`, a backend library ggml would load, and
   `GGML_ET_KERNELS_PATH`, `GGML_METAL_PATH_RESOURCES`, `GGML_OPENCL_KERNEL_CACHE_DIR`,
-  `GGML_OPENVINO_CACHE_DIR`, `GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`). Provider keys and `LLAMA_*`
+  `GGML_OPENVINO_CACHE_DIR`, `GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`), the libraries CUDA and
+  ROCm would load into the engine (`CUDA_INJECTION64_PATH`, `HSA_TOOLS_LIB`) and where Vulkan
+  finds layers (`VK_LAYER_PATH`, `VK_ADD_LAYER_PATH`, `VK_IMPLICIT_LAYER_PATH`,
+  `VK_ADD_IMPLICIT_LAYER_PATH`). Provider keys and `LLAMA_*`
   variables stay with the node: llama.cpp reads `LLAMA_ARG_*` as flags (`LLAMA_ARG_TOOLS` and
   `LLAMA_ARG_AGENT` turn on its file and shell tools), so llama-server options go in
   `[engine] extra_args` instead. The same holds for `ggml-rpc-server`, `llama-bench` and the
