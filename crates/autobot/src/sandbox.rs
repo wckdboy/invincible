@@ -7,6 +7,12 @@
 //! commands may run; the sandbox bounds what an allowed command can write itself (an allowlisted
 //! `git` cannot rewrite `~/.zshrc`).
 //!
+//! The working directory is writable and shared with interactive turns, which are unconfined
+//! unless the sandbox is `"always"`: a confined command can leave files there that a later
+//! interactive turn in that directory runs unconfined (`core.hooksPath` or `core.fsmonitor` in
+//! `.git/config`, an `.envrc`, a `Makefile`, `node_modules/.bin`). The approval rules make the
+//! agent's own writes under dot names ask; they do not see what a command writes.
+//!
 //! macOS: `sandbox-exec` with a write-deny profile. Linux: `bwrap` (bubblewrap) with the system
 //! read-only and the working directory writable. Where neither is available, a confined
 //! command is refused rather than run unconfined.

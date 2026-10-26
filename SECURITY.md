@@ -59,6 +59,10 @@ describe is a finding.
   D-Bus, Docker's socket, the node's and agent's local APIs, any other socket) are not restricted
   yet, so it can read what the owner can, reach any host and have a program outside the sandbox
   write for it ([README](README.md), Sandbox).
+- The working directory is shared between unattended and interactive work. A confined command
+  can leave files there (`core.hooksPath` or `core.fsmonitor` in `.git/config`, an `.envrc`, a
+  `Makefile`, `node_modules/.bin`) that a later unconfined interactive turn in that directory
+  runs ([README](README.md), Sandbox).
 - The node has had an internal security review, not yet an independent one; pairing, remote
   access and discovery are implemented and unaudited ([README](README.md#status)).
 - Data on disk is not encrypted at rest. Keys, tokens and the audit log are files only the owner's

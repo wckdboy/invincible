@@ -551,14 +551,16 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   phone recipes, hooks, Home Assistant's voice requests, the heartbeat, `autobot run`) run
   write-confined: a command's own writes go only to its working directory and temporary
   directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users may
-  need to install). That is the whole boundary today. Reads, the network and the programs the
-  command can talk to are not restricted yet: it can read any file you can (keys and tokens
-  included), reach any host, and have a program outside the sandbox write for it
-  (`systemd-run --user` or `launchctl`, D-Bus, Docker's socket, the node's and agent's local
-  APIs, any other socket). Without a sandbox they are refused, not run unconfined.
-  `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off;
-  `autobot run --no-sandbox` turns it off for one run. Commands in `[agent.docker]` or over
-  `[agent.ssh]` run there instead.
+  need to install). Reads, the network and the programs the command can talk to are not
+  restricted yet: it can read any file you can (keys and tokens included), reach any host, and
+  have a program outside the sandbox write for it (`systemd-run --user` or `launchctl`, D-Bus,
+  Docker's socket, the node's and agent's local APIs, any other socket). And the working directory
+  is shared: a confined command can leave files there (`core.hooksPath` or `core.fsmonitor` in
+  `.git/config`, an `.envrc`, a `Makefile`, `node_modules/.bin`) that run unconfined when a later
+  interactive turn, or your own shell, works in that directory. Without a sandbox they are
+  refused, not run unconfined. `[agent] sandbox = "always"` confines interactive turns too (not
+  your shell); `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run.
+  Commands in `[agent.docker]` or over `[agent.ssh]` run there instead.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands
