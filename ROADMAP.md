@@ -22,7 +22,7 @@ What ships today and is being finished.
 | | Item | Plane |
 |---|---|---|
 | ✅ | Gateway, routing, redaction, receipts, audit, pairing, always-on, bots, channels, evals, backups, alerts | shipped through v0.0.21 |
-| 🔶 | Cluster phase 1: one model split across two paired nodes, merged to main (edge, not yet in a stable release), off unless a model's `cluster` list (on a head) or `[cluster] serve` (on a shard) turns it on, measured; left: clean numbers on a quiet machine, review, a stable release | INV-58, INV-59 |
+| 🔶 | Cluster phase 1: one model split across two paired nodes, merged to main (edge, not yet in a stable release), off unless a model's `cluster` list (on a head) or `[cluster] serve` (on a shard, which also needs `[remote] listen` and the heads it allows in `[cluster] heads`) turns it on, measured; left: clean numbers on a quiet machine, review, a stable release | INV-58, INV-59 |
 | 🔶 | Windows: builds, Task Scheduler services, `install.ps1`, CI on windows-latest (PR #14); left: the full test run, release builds, ACLs, a real install | INV-50 |
 | ✅ | `invincible doctor`: every subsystem, with what to do about each, `✗` exits 1 | made plain |
 | ⬜ | Independent security review of pairing and remote access | INV-21 |

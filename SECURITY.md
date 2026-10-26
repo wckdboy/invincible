@@ -54,16 +54,18 @@ Not in scope here:
 **Limits that are already documented.** These are known; a way around them that the docs do not
 describe is a finding.
 
-- Unattended commands are write-confined only, and only on the agent's own machine (over
-  `[agent.ssh]` or in `[agent.docker]` the other machine or the container is what holds them): a
-  command's own writes go only to its working directory and temp. Reads, the network and the programs it can talk to (systemd or launchd,
-  D-Bus, Docker's socket, the node's and agent's local APIs, any other socket) are not restricted
-  yet, so it can read what the owner can, reach any host and have a program outside the sandbox
-  write for it ([README](README.md), Sandbox).
-- The working directory is shared between unattended and interactive work. A confined command
-  can leave files there (`core.hooksPath` or `core.fsmonitor` in `.git/config`, an `.envrc`, a
-  `Makefile`, `node_modules/.bin`) that a later unconfined interactive turn in that directory
-  runs ([README](README.md), Sandbox).
+- Unattended commands are write-confined only, and only on the agent's own machine: a command's
+  own writes go only to its working directory and temp. Reads, the network and the programs it
+  can talk to (systemd or launchd, D-Bus, Docker's socket, the node's and agent's local APIs, any
+  other socket) are not restricted yet, so it can read what the owner can, reach any host and
+  have a program outside the sandbox write for it ([README](README.md), Sandbox). Over
+  `[agent.ssh]` the other machine is what holds a command, and in `[agent.docker]` the
+  container, which mounts the working directory read-write.
+- The working directory is shared between unattended and interactive work. A confined command,
+  or one in the `[agent.docker]` container, can leave files there (`core.hooksPath` or
+  `core.fsmonitor` in `.git/config`, a `Makefile`, `node_modules/.bin`, an `.envrc` once someone
+  runs `direnv allow` on it) that a later unconfined interactive turn, or the owner's own shell,
+  runs in that directory ([README](README.md), Sandbox).
 - The node has had an internal security review, not yet an independent one; pairing, remote
   access and discovery are implemented and unaudited ([README](README.md#status)).
 - Data on disk is not encrypted at rest. Keys, tokens and the audit log are files only the owner's

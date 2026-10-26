@@ -291,10 +291,11 @@ publishes only if the bytes match
 list gives it, in one directory ([SECURITY.md](SECURITY.md#the-release-signing-key) downloads them):
 
 ```sh
+archive=invincible-linux-x64.tar.gz   # or invincible-linux-arm64.tar.gz, invincible-macos-arm64.tar.gz
 echo 'invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPGy6kHVQQ+W282VFPR/Qo' > allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I invincible-release -n invincible-release -s SHA256SUMS.sig < SHA256SUMS
-shasum -a 256 -c SHA256SUMS --ignore-missing   # must print "invincible-linux-x64.tar.gz: OK"
-gh attestation verify invincible-linux-x64.tar.gz --repo wckdboy/invincible
+shasum -a 256 -c SHA256SUMS --ignore-missing   # must print your archive's name, then ": OK"
+gh attestation verify "$archive" --repo wckdboy/invincible
 ```
 
 Without a release for the machine, or with `INVINCIBLE_FROM_SOURCE=1`, the installer builds from
@@ -426,9 +427,9 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   **Sandbox** below), whatever `--approvals` allows: `--approvals trust` decides which commands
   run, the sandbox bounds what they can write themselves. A confined command's own writes go only
   to `DIR` and temporary directories, so a build that writes caches in your home (`~/.cargo`,
-  `~/.npm`) fails there. On Linux without bubblewrap, commands are refused and the run says so before it
-  starts; where bubblewrap cannot make its namespaces (some containers), each command fails
-  with bubblewrap's error. Either way nothing runs unconfined: install it
+  `~/.npm`) fails there. On Linux without bubblewrap, commands are refused and the run says so
+  before it starts; where bubblewrap cannot make its namespaces (some containers), each command
+  fails with bubblewrap's error. Either way nothing runs unconfined: install it
   (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine you can
   throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack
   bubblewrap or the namespaces it needs and are themselves the boundary. It is a flag for one
@@ -512,9 +513,11 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   sandbox applies, in the container, over SSH). In it, `search`, `read_file`, `find_files`,
   `list_dir`, `search_sessions`, `read_skill` and `web_fetch` are functions, so twenty searches
   and reads cost one step and only what the script prints comes back. They talk over the
-  script's own stdin and stdout; their reads outside the working directory are refused, a fetch
-  is asked for like any fetch, at most 200 calls per script. The script's own code is not held
-  to that: it can read any file a command can, and what it prints comes back.
+  script's own stdin and stdout; `search`, `read_file`, `find_files` and `list_dir` are refused
+  outside the working directory (`search_sessions` and `read_skill` read the agent's own sessions
+  and skills, in `~/.autobot`), a fetch is asked for like any fetch, at most 200 calls per script.
+  The script's own code is not held to that: it can read any file a command can, and what it
+  prints comes back.
 - **A browser:** where Chrome, Chromium, Edge or Brave is installed (or `AUTOBOT_BROWSER` names
   one), the `browser` tool drives it headless over the DevTools Protocol, for pages that need
   scripts, a login or a form, and for a dev server: `navigate`, `text`, `snapshot` (what can be
@@ -558,14 +561,16 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   need to install). Reads, the network and the programs the command can talk to are not
   restricted yet: it can read any file you can (keys and tokens included), reach any host, and
   have a program outside the sandbox write for it (`systemd-run --user` or `launchctl`, D-Bus,
-  Docker's socket, the node's and agent's local APIs, any other socket). And the working directory
-  is shared: a confined command can leave files there (`core.hooksPath` or `core.fsmonitor` in
-  `.git/config`, an `.envrc`, a `Makefile`, `node_modules/.bin`) that run unconfined when a later
-  interactive turn, or your own shell, works in that directory. Without a sandbox they are
-  refused, not run unconfined. `[agent] sandbox = "always"` confines interactive turns too (not
-  your shell); `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run.
-  Commands in `[agent.docker]` or over `[agent.ssh]` run there instead, not confined by this
-  sandbox: the container or the other machine is what holds them.
+  Docker's socket, the node's and agent's local APIs, any other socket). Without a sandbox,
+  unattended commands are refused, not run unconfined. And the working directory is shared: a
+  confined command can leave files there (`core.hooksPath` or `core.fsmonitor` in `.git/config`,
+  a `Makefile`, `node_modules/.bin`, an `.envrc` once you `direnv allow` it) that run unconfined
+  when a later interactive turn, or your own shell, works in that directory.
+  `[agent] sandbox = "always"` confines interactive turns too (not your shell); `"off"` turns it
+  off; `autobot run --no-sandbox` turns it off for one run. Commands in `[agent.docker]` or over
+  `[agent.ssh]` run there instead, not confined by this sandbox: the container or the other
+  machine is what holds them, except that the container mounts the working directory read-write,
+  so what a command there leaves in it is shared the same way.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands
@@ -596,8 +601,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
 - **Heartbeat:** put a checklist in `~/.autobot/HEARTBEAT.md` ("is the disk over 90%?", "did
   last night's backup run?") and every 30 minutes (`[agent] heartbeat`, or `off`) the agent works
-  through it, unattended (commands write-confined unless `[agent] sandbox = "off"`), and messages
-  you on Telegram only when something needs you; a quiet check stays quiet.
+  through it, unattended (commands on this machine write-confined unless
+  `[agent] sandbox = "off"`, as in **Sandbox**), and messages you on Telegram only when something
+  needs you; a quiet check stays quiet.
 - **Trajectories:** with `[agent] trajectories = true`, every finished turn is kept as the model
   saw it (system prompt, tool list, calls, results, answer) in `~/.autobot/trajectories`, as
   fine-tuning data for a local model (a frontier model's turns are
