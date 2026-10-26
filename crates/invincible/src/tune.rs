@@ -357,9 +357,11 @@ pub fn parse_bench(text: &str) -> Result<Bench, String> {
 }
 
 /// Run `llama-bench` on [model]. The node's own resource controls: one repetition, short runs,
-/// so a probe stays a probe.
+/// so a probe stays a probe. It runs with an engine's environment ([crate::engine::inherited_env]),
+/// so it measures what an engine would get.
 pub fn bench(program: &Path, model: &Path, device: Option<&str>) -> Result<Bench, String> {
     let mut command = std::process::Command::new(program);
+    command.env_clear().envs(crate::engine::inherited_env());
     command.args(["-m"]).arg(model).args(["-p", "512", "-n", "128", "-r", "1", "-ngl", "999", "-o", "json"]);
     if let Some(device) = device {
         command.args(["-dev", device]);

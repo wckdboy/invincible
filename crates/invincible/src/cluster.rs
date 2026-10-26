@@ -69,9 +69,16 @@ pub fn parse_devices(text: &str) -> Vec<Device> {
         .collect()
 }
 
+/// What [program] prints, run with an engine's environment ([crate::engine::inherited_env]): the
+/// devices it reports are then the ones the engine will see.
 async fn output(program: &Path, args: &[&str]) -> Option<String> {
-    let run =
-        tokio::process::Command::new(program).args(args).stdin(std::process::Stdio::null()).kill_on_drop(true).output();
+    let run = tokio::process::Command::new(program)
+        .args(args)
+        .env_clear()
+        .envs(crate::engine::inherited_env())
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
     let out = tokio::time::timeout(Duration::from_secs(30), run).await.ok()?.ok()?;
     Some(format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
 }
@@ -219,7 +226,10 @@ pub struct Dispatch {
     pub queue: u64,
 }
 
-/// `ggml-rpc-server` on loopback [port] only, caching the weights heads send in [cache].
+/// `ggml-rpc-server` on loopback [port] only, caching the weights heads send in [cache]. It takes
+/// no key (llama.cpp's RPC protocol has none): from other machines only shard links reach it, but
+/// any process on this machine can connect to its port, as to the head's doors (spec/cluster.md,
+/// Known limits).
 pub fn rpc_launch(program: &Path, port: u16, cache: Option<&Path>, logs: &Path) -> Launch {
     let mut args = vec!["--host".to_owned(), "127.0.0.1".to_owned(), "--port".to_owned(), port.to_string()];
     let mut env = Vec::new();
@@ -229,7 +239,7 @@ pub fn rpc_launch(program: &Path, port: u16, cache: Option<&Path>, logs: &Path) 
     }
     // TCP inside the tunnel: RDMA would go around it.
     env.push(("GGML_RPC_NO_RDMA".to_owned(), "1".to_owned()));
-    Launch { program: program.to_owned(), args, log: logs.join("ggml-rpc-server.log"), env }
+    Launch { program: program.to_owned(), args, log: logs.join("ggml-rpc-server.log"), env, key_file: None }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -546,7 +556,8 @@ fn peer_note(caps: &Capabilities, here: Option<&str>) -> Option<String> {
 
 /// Plans [run] over the head and the peers that answer, runs llama-server with that plan, and
 /// plans again whenever it exits: a peer that left is planned around (or the model waits,
-/// unhealthy, when the rest cannot hold it), so the router sends requests elsewhere meanwhile.
+/// unhealthy, when the rest cannot hold it), so the router sends requests elsewhere meanwhile. A
+/// llama-server that does not enforce its key is not run again ([crate::engine::Ended::Unkeyed]).
 pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head) -> JoinHandle<()> {
     tokio::spawn(async move {
         let client = crate::engine::health_client();
@@ -649,7 +660,11 @@ pub fn supervise(engine: Engine, base: Launch, run: Arc<ClusterRun>, head: Head)
             }
             run.set(RunState { plan: Some(plan.clone()), notes });
             let started = tokio::time::Instant::now();
-            crate::engine::run_once(&engine, &launch, &client).await;
+            if crate::engine::run_once(&engine, &launch, &client).await == crate::engine::Ended::Unkeyed {
+                let note = "llama-server does not enforce its key: not served (see the node's log)".to_owned();
+                run.set(RunState { plan: Some(plan), notes: vec![note] });
+                return;
+            }
             // Keep the plan: it is what the next replan compares against (spec/cluster.md,
             // Stability). Clearing it made hysteresis dead and resharded on every restart.
             run.set(after_run(plan));
