@@ -4,11 +4,13 @@
 
 Report it privately on GitHub: open this repository's **Security** tab and choose **Report a
 vulnerability** ([private vulnerability reporting](https://github.com/wckdboy/invincible/security/advisories/new)).
+If the Security tab has no **Report a vulnerability** button, open an issue titled
+`security contact` with no details; a maintainer will open a private advisory and invite you to it.
 Only the maintainers see the report, and the fix, the advisory and the credit are worked out with
 you there.
 
-Please do not open a public issue, pull request or discussion about it, and keep it private until
-the advisory is published.
+Please do not describe it in a public issue, pull request or discussion, and keep it private
+until the advisory is published.
 
 A useful report says:
 
