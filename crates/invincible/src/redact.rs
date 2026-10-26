@@ -2033,18 +2033,26 @@ mod tests {
     #[test]
     fn every_channel_restores_the_same_however_it_is_cut() {
         crate::testgen::cases("stream restore, every channel", |g| {
+            // An address with a line break, which JSON escapes.
             let make = || {
                 let mut vault = Vault::default();
-                for known in ["bob@posteo.de", "call +44 20 7946 0958"] {
+                for known in ["bob@posteo.de", "call +44 20 7946 0958", "to Hauptstraße 12a,\n10115 Berlin"] {
                     vault.redact(known);
                 }
                 vault
             };
             let vault = make();
             // Each channel's whole text, cut anywhere (placeholders too: only `[` tails are held
-            // back, so no percent-encoded ones), the pieces of the channels interleaved.
-            let pieces: Vec<&str> = PIECES.iter().copied().filter(|p| !p.contains('%')).collect();
-            let wanted: Vec<String> = (0..5).map(|_| g.assemble(&pieces, 6)).collect();
+            // back, so no percent-encoded ones), the pieces of the channels interleaved. A call's
+            // arguments are JSON: one of those texts in a string.
+            let mut pieces: Vec<&str> = PIECES.iter().copied().filter(|p| !p.contains('%')).collect();
+            pieces.push("[ADDRESS_1]");
+            let texts: Vec<String> = (0..5).map(|_| g.assemble(&pieces, 6)).collect();
+            let wanted: Vec<String> = texts
+                .iter()
+                .enumerate()
+                .map(|(channel, text)| if channel < 3 { text.clone() } else { json!({ "to": text }).to_string() })
+                .collect();
             let mut cuts: Vec<std::collections::VecDeque<String>> = wanted
                 .iter()
                 .map(|text| {
@@ -2095,11 +2103,12 @@ mod tests {
             assert_eq!(reasoning_content, vault.restore(&wanted[1]));
             assert_eq!(reasoning, vault.restore(&wanted[2]));
             for at in 0..2 {
-                assert_eq!(
-                    calls.get(&at).map_or("", String::as_str),
-                    vault.restore_json(&wanted[3 + at as usize]),
-                    "call {at}"
-                );
+                let args = calls.get(&at).map_or("", String::as_str);
+                assert_eq!(args, vault.restore_json(&wanted[3 + at as usize]), "call {at}");
+                // Put back together, the arguments are JSON again and hold the real values.
+                let parsed: serde_json::Value =
+                    serde_json::from_str(args).unwrap_or_else(|e| panic!("call {at}: {e} in {args:?}"));
+                assert_eq!(parsed["to"], vault.restore(&texts[3 + at as usize]), "call {at}");
             }
         });
     }
