@@ -1,9 +1,13 @@
 //! The engine supervisor against a stand-in engine (a small Python server that answers `/health`
 //! and then crashes), so the test needs neither llama.cpp nor a model.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use invincible::cluster::{self, ClusterRun, Head};
+use invincible::devices::StaticKey;
 use invincible::engine::{Engine, Launch, free_port, supervise};
+use invincible_policy::SplitMode;
 use tokio::time::{Instant, sleep};
 
 const STAND_IN: &str = r#"
@@ -103,6 +107,42 @@ async fn an_engine_that_answers_without_its_key_is_stopped_for_good() {
     // Not started again either, after the first restart's backoff.
     sleep(Duration::from_millis(1500)).await;
     assert!(stopped && std::net::TcpStream::connect(("127.0.0.1", port)).is_err(), "the engine is still running");
+    let printed = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(printed.matches("listening").count(), 1, "started more than once: {printed}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_split_model_whose_engine_answers_without_its_key_is_not_run_again() {
+    let port = free_port().unwrap();
+    let dir = std::env::temp_dir().join(format!("invincible-unkeyed-split-{}", std::process::id()));
+    let log = dir.join("stand-in.log");
+    let launch = Launch {
+        program: "python3".into(),
+        args: vec!["-I".into(), "-c".into(), STAND_IN.into(), port.to_string(), "600".into()],
+        log: log.clone(),
+        env: vec![],
+        key_file: Some((dir.join("engine.key"), "k3y".into())),
+    };
+    let engine = Engine::attached("unkeyed", &format!("http://127.0.0.1:{port}"), None, false).with_key("k3y");
+    // No peers and no GPU: the plan is to run on this machine alone.
+    let run = Arc::new(ClusterRun::new("unkeyed", SplitMode::Auto, "head", vec![]));
+    let head = Head {
+        devices: vec![],
+        rpc_backend: None,
+        hardware: String::new(),
+        device_key: StaticKey::load_or_create(&dir.join("device.key")).unwrap(),
+        network: "offline".into(),
+        model_bytes: 0,
+    };
+    let task = cluster::supervise(engine.clone(), launch, run.clone(), head);
+
+    // The cluster supervisor gives up as the single-engine one does, and says why where `cluster
+    // status` reads it.
+    wait_until("the supervisor gives up", &log, || task.is_finished()).await;
+    assert!(!engine.healthy());
+    let notes = run.state().notes;
+    assert!(notes.iter().any(|n| n.contains("does not enforce its key")), "{notes:?}");
     let printed = std::fs::read_to_string(&log).unwrap();
     assert_eq!(printed.matches("listening").count(), 1, "started more than once: {printed}");
     let _ = std::fs::remove_dir_all(dir);

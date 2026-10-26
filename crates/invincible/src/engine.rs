@@ -5,15 +5,15 @@
 //! every user on the machine can reach, so each engine gets its own random key ([new_key]), in a
 //! file only the node's user can read ([Launch::llama_server]), and refuses requests without it;
 //! the node sends it on every request ([Engine::authorized]). An engine that answers without it
-//! is stopped and its model not served ([run_once]): the key is checked, not assumed. And an
-//! engine gets only the environment it needs to run ([inherited_env]), never the node's secrets
-//! or llama.cpp settings the node did not choose.
+//! is stopped, with whatever it started ([Running]), and its model not served ([run_once]): the
+//! key is checked, not assumed. And an engine gets only the environment it needs to run
+//! ([inherited_env]), never the node's secrets or llama.cpp settings the node did not choose.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::process::Command;
@@ -285,7 +285,7 @@ pub fn free_port() -> std::io::Result<u16> {
 /// Runs [launch] and keeps it running: restarts it when it exits, with backoff, and keeps
 /// [engine]'s health current by polling `GET /health` (200 once the model is loaded). An engine
 /// that does not enforce its key is not restarted ([Ended::Unkeyed]): its model stays unhealthy.
-/// Dropping or aborting the returned task kills the engine.
+/// Dropping or aborting the returned task kills the engine and what it started ([Running]).
 pub fn supervise(engine: Engine, launch: Launch) -> JoinHandle<()> {
     tokio::spawn(async move {
         let client = health_client();
@@ -318,18 +318,20 @@ pub fn health_client() -> reqwest::Client {
 pub enum Ended {
     /// The engine exited, or did not start: start it again.
     Exited,
-    /// It answered a request without its key ([key_check]) and was stopped: it must not be
-    /// started again, since it would answer anything on the machine the same way.
+    /// It answered a request without its key ([key_check]) and was killed with its process group
+    /// ([Running]): it must not be started again, since it would answer anything on the machine the
+    /// same way.
     Unkeyed,
 }
 
 /// Runs [launch] once, keeping [engine]'s health current, until it exits (or never starts). The
 /// probe carries the key too, though llama-server leaves `/health` open. An engine with a key is
-/// not healthy until it has refused a request without it; one that answers is stopped.
+/// not healthy until it has refused a request without it; one that answers is killed with its
+/// process group, and the log says whether anything still answers on its port.
 pub async fn run_once(engine: &Engine, launch: &Launch, client: &reqwest::Client) -> Ended {
     let health = format!("{}/health", engine.base_url);
-    let mut child = match spawn(launch) {
-        Ok(child) => child,
+    let mut running = match spawn(launch) {
+        Ok(running) => running,
         Err(e) => {
             tracing::error!(model = %engine.id, "engine did not start: {e}");
             return Ended::Exited;
@@ -340,7 +342,7 @@ pub async fn run_once(engine: &Engine, launch: &Launch, client: &reqwest::Client
     let mut keyed = engine.key().is_none();
     loop {
         tokio::select! {
-            status = child.wait() => {
+            status = running.wait() => {
                 engine.set_healthy(false);
                 tracing::warn!(model = %engine.id, "engine exited: {status:?}");
                 return Ended::Exited;
@@ -354,16 +356,26 @@ pub async fn run_once(engine: &Engine, launch: &Launch, client: &reqwest::Client
                         KeyCheck::Unknown => ok = false,
                         KeyCheck::Ignored(status) => {
                             engine.set_healthy(false);
+                            running.kill().await;
+                            // Only said to be stopped once nothing answers there: a container, say,
+                            // outlives the `docker` client the node started.
+                            let outcome = if still_answers(engine, client).await {
+                                format!(
+                                    "This model is not served, but something the node did not start still \
+                                     answers at {} (a container, say) and must be stopped by hand",
+                                    engine.base_url
+                                )
+                            } else {
+                                "It is stopped and this model is not served".to_owned()
+                            };
                             tracing::error!(
                                 model = %engine.id,
                                 program = %launch.program.display(),
                                 answer = %status,
                                 "the engine does not enforce its key: it answered a request without it, \
                                  so anything on this machine could call it past receipts, redaction and \
-                                 audit. It is stopped and this model is not served: use a llama-server \
-                                 that honours {KEY_FILE_FLAG}"
+                                 audit. {outcome}: use a llama-server that honours {KEY_FILE_FLAG}"
                             );
-                            let _ = child.kill().await;
                             return Ended::Unkeyed;
                         }
                     }
@@ -383,7 +395,9 @@ enum KeyCheck {
     Enforced,
     /// Answered it some other way: the key is not enforced.
     Ignored(reqwest::StatusCode),
-    /// No answer yet, or not ready (503): ask again.
+    /// Not ready (503), or no answer: asked again at the next health probe, and meanwhile the engine
+    /// stays unhealthy, so its model is not served (this fails closed). It is not stopped for it:
+    /// what answers `/health` may still be loading the model.
     Unknown,
 }
 
@@ -400,8 +414,22 @@ async fn key_check(engine: &Engine, client: &reqwest::Client) -> KeyCheck {
     }
 }
 
+/// Whether anything still answers at [engine]'s address, asked without its key, once its
+/// processes were killed: for up to a second, while they go.
+async fn still_answers(engine: &Engine, client: &reqwest::Client) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        match client.get(format!("{}/health", engine.base_url)).send().await {
+            Err(e) if e.is_connect() => return false,
+            _ if Instant::now() >= deadline => return true,
+            _ => sleep(Duration::from_millis(100)).await,
+        }
+    }
+}
+
 /// Runs [launch] and restarts it whenever it exits, with backoff: for helpers with no health
-/// endpoint (`ggml-rpc-server`). Dropping or aborting the task kills the process.
+/// endpoint (`ggml-rpc-server`). Dropping or aborting the task kills the process and what it
+/// started.
 pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
     let name = name.to_owned();
     tokio::spawn(async move {
@@ -410,9 +438,9 @@ pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
             let started = Instant::now();
             match spawn(&launch) {
                 Err(e) => tracing::error!("{name} did not start: {e}"),
-                Ok(mut child) => {
+                Ok(mut running) => {
                     tracing::info!("{name} started");
-                    let status = child.wait().await;
+                    let status = running.wait().await;
                     tracing::warn!("{name} exited: {status:?}");
                 }
             }
@@ -425,7 +453,80 @@ pub fn keep_running(name: &str, launch: Launch) -> JoinHandle<()> {
     })
 }
 
-fn spawn(launch: &Launch) -> std::io::Result<tokio::process::Child> {
+/// An engine's process, and on Unix the process group it leads, which holds whatever it started
+/// too: the server a wrapper script runs without `exec`, say, which killing the script alone would
+/// leave running. The group is killed with the process ([Running::kill]), when this is dropped
+/// (the task aborted, the node stopping) and by [kill_all], until the process is reaped: its
+/// number may then go to another process.
+struct Running {
+    child: tokio::process::Child,
+    group: Option<u32>,
+}
+
+/// The process groups of the engines running now ([Running]).
+static GROUPS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Kills every engine's process group now, for a node that exits without stopping its tasks (the
+/// watchdog's restart): launchd then kills what is left in the node's own process group, and
+/// engines are not in it.
+pub fn kill_all() {
+    let groups = std::mem::take(&mut *GROUPS.lock().unwrap_or_else(PoisonError::into_inner));
+    for group in groups {
+        kill_group(group);
+    }
+}
+
+#[cfg(unix)]
+fn kill_group(group: u32) {
+    if let Some(pid) = rustix::process::Pid::from_raw(group as i32) {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+}
+
+/// Elsewhere an engine has no group of its own: the process alone is killed.
+#[cfg(not(unix))]
+fn kill_group(_: u32) {}
+
+impl Running {
+    fn new(child: tokio::process::Child) -> Self {
+        let group = child.id();
+        if let Some(group) = group {
+            GROUPS.lock().unwrap_or_else(PoisonError::into_inner).push(group);
+        }
+        Self { child, group }
+    }
+
+    async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        let status = self.child.wait().await;
+        self.forget();
+        status
+    }
+
+    /// Kills the process group, then waits for the process.
+    async fn kill(&mut self) {
+        if let Some(group) = self.forget() {
+            kill_group(group);
+        }
+        let _ = self.child.kill().await;
+    }
+
+    /// The group, taken out of [GROUPS]: it is being killed, or its process was reaped.
+    fn forget(&mut self) -> Option<u32> {
+        let group = self.group.take()?;
+        GROUPS.lock().unwrap_or_else(PoisonError::into_inner).retain(|g| *g != group);
+        Some(group)
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Some(group) = self.forget() {
+            kill_group(group);
+        }
+    }
+}
+
+fn spawn(launch: &Launch) -> std::io::Result<Running> {
     if let Some(dir) = launch.log.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -433,7 +534,8 @@ fn spawn(launch: &Launch) -> std::io::Result<tokio::process::Child> {
         crate::fsutil::replace_private(path, &format!("{key}\n")).map_err(std::io::Error::other)?;
     }
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&launch.log)?;
-    Command::new(&launch.program)
+    let mut command = Command::new(&launch.program);
+    command
         .args(&launch.args)
         .env_clear()
         .envs(inherited_env())
@@ -441,8 +543,12 @@ fn spawn(launch: &Launch) -> std::io::Result<tokio::process::Child> {
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
-        .kill_on_drop(true)
-        .spawn()
+        .kill_on_drop(true);
+    // A group of its own, numbered as the process is ([Running]). A terminal's Ctrl-C then reaches
+    // the node alone, which stops its engines as it shuts down.
+    #[cfg(unix)]
+    command.process_group(0);
+    Ok(Running::new(command.spawn()?))
 }
 
 #[cfg(test)]

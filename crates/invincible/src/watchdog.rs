@@ -154,6 +154,8 @@ pub fn spawn(name: &'static str, listen: SocketAddr, logs: PathBuf) {
                         "{name}: http://{addr}/healthz has not answered for {} s; exiting so the service manager restarts it (watchdog)",
                         STUCK.as_secs()
                     );
+                    // Its tasks are not stopped on the way out, so neither are the engines they run.
+                    crate::engine::kill_all();
                     std::process::exit(70);
                 }
                 Verdict::Stuck => {}

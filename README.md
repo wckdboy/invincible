@@ -990,20 +990,29 @@ token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <to
   is given up on with an `engine_stalled` error event (a 504 when not streamed, where 30 minutes
   is the whole answer's limit).
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
-  restarted with backoff, and stopping the node stops its engines.
+  restarted with backoff. Stopping the node (Ctrl-C, `kill`, its service stopping, its terminal
+  closing) stops its engines and whatever they started, once answers in flight have finished or
+  had 15 s.
 - An engine answers the node and nothing else on the machine. Each gets its own random key when
   the node starts, in a file only your user can read (`~/.invincible/engines/<n>.key`, mode 0600) that
   llama-server is given with `--api-key-file`: the path is on its command line, the key is not, so
   `ps` does not show it. The node sends the key with every request. Anything else that finds an
-  engine's loopback port (another user, a web page, a script) gets a 401, not an answer that skips
-  the receipts, redaction and audit; `/health` stays open, as llama-server keeps it.
+  engine's loopback port (another user, a web page, a script) gets a 401 for a completion or
+  anything else that runs the model, not an answer that skips the receipts, redaction and audit.
+  What llama-server keeps open stays open: `/health` and its web page, and in ik_llama.cpp also
+  `/models`, `/v1/models` and `/api/tags`, which name the model it serves.
 - The node checks the key rather than trusting it: once an engine is healthy, and before it
-  serves anything, the node asks it for a chat completion without the key. Anything but a 401
-  stops the engine, and its model is not served until the node restarts; the node's log names the
-  model and says to use a llama-server that honours `--api-key-file`. llama.cpp's and
-  ik_llama.cpp's do; a wrapper that drops the flag would not, nor would a container the key file
-  is not mounted into (that one does not start at all). A process running as your own user can
-  still read the key file; confining engines is planned.
+  serves anything, the node asks it for a chat completion without the key. A 401 lets it serve.
+  A 503 or no answer is asked again at the next health check, and until then its model is not
+  served: a model still loading is not stopped for it. Any other answer stops the engine, and its
+  model is not served until the node restarts; the node's log names the model and says to use a
+  llama-server that honours `--api-key-file`. llama.cpp's and ik_llama.cpp's do; a wrapper that
+  drops the flag would not, nor would a container the key file is not mounted into (that one does
+  not start at all). Stopping the engine stops what it started too (it runs in a process group of
+  its own), so the server a wrapper script runs goes with the script. What the node did not start
+  does not, such as a container `docker run` started: when something still answers on the
+  engine's port, the log says so and names the port, and it must be stopped by hand. A process
+  running as your own user can still read the key file; confining engines is planned.
 - A shard's `ggml-rpc-server` takes no key: llama.cpp's RPC protocol has none. It listens on
   loopback only, so from other machines only a shard link from a head you named reaches it, but
   any process on this machine can connect to its port, as to a head's loopback doors

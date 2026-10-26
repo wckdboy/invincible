@@ -4,7 +4,8 @@
 //!
 //! The node is started with secrets and llama.cpp flags in its environment, as a shell might give
 //! it: the engine must see none of them, must refuse whoever calls it without its key, and must
-//! still answer the node. An engine that does not take the key it is given is not served.
+//! still answer the node. An engine that does not take the key it is given is not served, and is
+//! stopped with what it started, as it is when the node stops.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -16,11 +17,13 @@ use serde_json::{Value, json};
 /// (`--api-key-file`, one per line, or `LLAMA_API_KEY`), every path but `/health` and `/v1/health`
 /// needs one, as `Authorization: Bearer` or `X-Api-Key`; anything else is a 401
 /// `authentication_error`. Given `--ignore-api-key-file`, it stands in for an engine that does not
-/// take the key the node gives it, and answers everyone. On start it writes what it was given to
-/// the `--env-out` file: its port, whether its key is on its command line or is the shell's, its
-/// key file's mode, and the names in its environment.
+/// take the key the node gives it, and answers everyone; given `--leave-group` too, for one the
+/// node cannot stop (a container), in a process group of its own, gone by itself after a minute.
+/// On start it writes what it was given to the `--env-out` file: its process and port, whether
+/// its key is on its command line or is the shell's, its key file's mode, and the names in its
+/// environment.
 const STAND_IN: &str = r#"#!/usr/bin/env python3
-import http.server, json, os, socketserver, sys
+import http.server, json, os, socketserver, sys, threading
 args = sys.argv[1:]
 def arg(name):
     return args[args.index(name) + 1] if name in args else None
@@ -72,9 +75,13 @@ class S(http.server.HTTPServer):
         socketserver.TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
 server = S(("127.0.0.1", port), H)
+if "--leave-group" in args:
+    os.setpgid(0, 0)
+    threading.Timer(60, lambda: os._exit(0)).start()
 out = arg("--env-out")
 with open(out + ".tmp", "w") as f:
     json.dump({
+        "pid": os.getpid(),
         "port": port,
         "key_in_argv": any(k in a for k in keys for a in args),
         "key_file_mode": oct(os.stat(key_file).st_mode & 0o777) if key_file else None,
@@ -106,36 +113,81 @@ struct Node {
     dir: PathBuf,
 }
 
+impl Node {
+    /// Sends the node [signal] (`-TERM`, as `kill` takes it), unless it has exited; whether it has
+    /// exited within 10 s.
+    fn stop(&mut self, signal: &str) -> bool {
+        if matches!(self.child.try_wait(), Ok(None)) {
+            let _ = Command::new("kill").args([signal, &self.child.id().to_string()]).status();
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    /// The node's log once it says [what].
+    async fn logged(&self, what: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let log = std::fs::read_to_string(self.dir.join("serve.log")).unwrap_or_default();
+            if log.contains(what) {
+                return log;
+            }
+            assert!(Instant::now() < deadline, "the node never said {what:?}; node log:\n{log}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
 impl Drop for Node {
     fn drop(&mut self) {
         // SIGTERM, so the node stops its engine with it.
-        let _ = Command::new("kill").arg(self.child.id().to_string()).status();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline && !matches!(self.child.try_wait(), Ok(Some(_))) {
-            std::thread::sleep(Duration::from_millis(50));
+        if !self.stop("-TERM") {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// How the node runs the stand-in: as its `llama-server`, or through a script that runs it without
+/// `exec`, as a wrapper might, so the server is the script's child and not the node's.
+#[derive(Clone, Copy)]
+enum Run {
+    Direct,
+    Wrapped,
 }
 
 fn port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
-/// `invincible serve` with one model on the stand-in (given [args] too) and a cloud model whose
-/// key is in the environment, offline (the default), with [SECRETS] and [env] in its environment.
-fn serve(tag: &str, env: &[(&str, &str)], args: &[&str]) -> (Node, String) {
+/// `invincible serve` with one model on the stand-in (given [args] too, and run as [run] says) and
+/// a cloud model whose key is in the environment, offline (the default), with [SECRETS] and [env]
+/// in its environment.
+fn serve(tag: &str, env: &[(&str, &str)], args: &[&str], run: Run) -> (Node, String) {
     let dir = std::env::temp_dir().join(format!("invincible-engines-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     let program = dir.join("bin/llama-server");
-    std::fs::write(&program, STAND_IN).unwrap();
+    let stand_in = match run {
+        Run::Direct => program.clone(),
+        Run::Wrapped => dir.join("bin/stand-in.py"),
+    };
+    std::fs::write(&stand_in, STAND_IN).unwrap();
+    if let Run::Wrapped = run {
+        let script = format!("#!/bin/sh\n{stand_in:?} \"$@\"\necho \"the stand-in exited: $?\"\n");
+        std::fs::write(&program, script).unwrap();
+    }
     #[cfg(unix)]
-    {
+    for file in [&program, &stand_in] {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     std::fs::write(dir.join("small.gguf"), b"GGUF").unwrap();
     std::fs::write(dir.join("token"), format!("{TOKEN}\n")).unwrap();
@@ -212,7 +264,7 @@ async fn through_the_node(url: &str) -> Value {
 
 #[tokio::test]
 async fn an_engine_answers_the_node_and_no_one_else() {
-    let (node, url) = serve("door", &[], &[]);
+    let (node, url) = serve("door", &[], &[], Run::Direct);
     let engine = started(&node.dir).await;
     let engine_url = format!("http://127.0.0.1:{}", engine["port"]);
     let client = reqwest::Client::new();
@@ -250,32 +302,25 @@ async fn an_engine_answers_the_node_and_no_one_else() {
 #[tokio::test]
 async fn an_engine_that_does_not_take_its_key_is_not_served() {
     // As ik_llama.cpp would be given the key only in LLAMA_API_KEY, or a wrapper that drops
-    // --api-key-file: the engine starts, is healthy, and answers anyone.
-    let (node, url) = serve("unkeyed", &[], &["--ignore-api-key-file"]);
+    // --api-key-file and runs the server without exec: the engine starts, is healthy, and answers
+    // anyone, and the server is not the node's own child.
+    let (node, url) = serve("unkeyed", &[], &["--ignore-api-key-file"], Run::Wrapped);
     let engine = started(&node.dir).await;
     let engine_url = format!("http://127.0.0.1:{}", engine["port"]);
     let client = reqwest::Client::new();
 
-    // The node finds out, says so, and stops the engine.
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let log = loop {
-        let log = std::fs::read_to_string(node.dir.join("serve.log")).unwrap_or_default();
-        if log.contains("does not enforce its key") {
-            break log;
-        }
-        assert!(Instant::now() < deadline, "the node served an engine that ignores its key; node log:\n{log}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    };
-    assert!(log.contains("small") && log.contains("use a llama-server that honours --api-key-file"), "{log}");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while client.get(format!("{engine_url}/health")).send().await.is_ok() {
-        assert!(Instant::now() < deadline, "the engine that ignores its key is still running");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    // The node finds out, says so, and stops the engine: the server too, not only the script.
+    let log = node.logged("does not enforce its key").await;
+    assert!(log.contains("small") && log.contains("It is stopped"), "{log}");
+    assert!(log.contains("use a llama-server that honours --api-key-file"), "{log}");
+    assert!(client.get(format!("{engine_url}/health")).send().await.is_err(), "the server is still running");
 
-    // And does not serve the model, now or after a restart's backoff would have passed.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert!(client.get(format!("{engine_url}/health")).send().await.is_err(), "the engine was started again");
+    // And does not serve the model, now or after a restart's backoff and first health probe
+    // would have passed: the engine was started once, and found out once.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let log = std::fs::read_to_string(node.dir.join("serve.log")).unwrap();
+    assert_eq!(log.matches("engine started").count(), 1, "{log}");
+    assert_eq!(log.matches("does not enforce its key").count(), 1, "{log}");
     let models: Value =
         client.get(format!("{url}/v1/models")).bearer_auth(TOKEN).send().await.unwrap().json().await.unwrap();
     let small = models["data"].as_array().unwrap().iter().find(|m| m["id"] == "small").unwrap();
@@ -286,9 +331,48 @@ async fn an_engine_that_does_not_take_its_key_is_not_served() {
     drop(node);
 }
 
+/// A process the node did not start, killed when the test ends, however it ends.
+struct Stray(u64);
+
+impl Drop for Stray {
+    fn drop(&mut self) {
+        let _ = Command::new("kill").args(["-KILL", &self.0.to_string()]).status();
+    }
+}
+
+#[tokio::test]
+async fn a_server_the_node_cannot_stop_is_not_said_to_be_stopped() {
+    // As a container would be, which killing the `docker` client the node started does not stop:
+    // the server is in a process group of its own.
+    let (node, _) = serve("stray", &[], &["--ignore-api-key-file", "--leave-group"], Run::Wrapped);
+    let engine = started(&node.dir).await;
+    let _server = Stray(engine["pid"].as_u64().unwrap());
+
+    let log = node.logged("does not enforce its key").await;
+    let still = format!("something the node did not start still answers at http://127.0.0.1:{}", engine["port"]);
+    assert!(log.contains(&still) && log.contains("must be stopped by hand"), "{log}");
+    assert!(!log.contains("It is stopped"), "{log}");
+    drop(node);
+}
+
+#[tokio::test]
+async fn what_an_engine_started_stops_with_the_node() {
+    // Ctrl-C in a terminal, `kill` or a service manager, the terminal closing: each reaches the
+    // node alone, as engines run in process groups of their own. Behind a script that runs it
+    // without exec, the server is not the node's child, and stops too.
+    for signal in ["-INT", "-TERM", "-HUP"] {
+        let (mut node, url) = serve(&format!("stop{signal}"), &[], &[], Run::Wrapped);
+        let engine = started(&node.dir).await;
+        through_the_node(&url).await;
+        assert!(node.stop(signal), "the node did not stop on {signal}");
+        let health = format!("http://127.0.0.1:{}/health", engine["port"]);
+        assert!(reqwest::get(health).await.is_err(), "the server outlived the node, stopped with {signal}");
+    }
+}
+
 #[tokio::test]
 async fn an_engine_inherits_no_secret_and_no_llama_flag() {
-    let (node, url) = serve("env", &[SHELL_KEY], &[]);
+    let (node, url) = serve("env", &[SHELL_KEY], &[], Run::Direct);
     let engine = started(&node.dir).await;
     let names: Vec<&str> = engine["env"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
     for (name, _) in SECRETS {

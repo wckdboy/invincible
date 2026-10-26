@@ -1414,8 +1414,20 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         tokio::net::TcpListener::bind(config.listen).await.map_err(|e| format!("listen on {}: {e}", config.listen))?;
     tracing::info!("serving on http://{} ({})", config.listen, invincible::version::VERSION);
     invincible::watchdog::spawn("gateway", config.listen, logs.clone());
+    // Answers in flight may finish, for 15 s: then the engines are stopped whatever still runs,
+    // before a service manager's SIGKILL (at 20 s) would leave them running. launchd then kills
+    // what is left in the node's own process group, and engines are in groups of their own.
+    let stop_engines: Vec<_> = supervisors.iter().map(|s| s.abort_handle()).collect();
     axum::serve(listener, server::app(state))
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                for supervisor in stop_engines {
+                    supervisor.abort();
+                }
+            });
+        })
         .await
         .map_err(|e| e.to_string())?;
     for supervisor in supervisors {
@@ -2180,21 +2192,21 @@ fn query_value(value: &str) -> String {
         .collect()
 }
 
-/// Ctrl-C, or SIGTERM: what launchd, systemd and `kill` send to stop a service. Both shut down
-/// cleanly, so the engines the node started are stopped with it.
+/// Ctrl-C; SIGTERM, what launchd, systemd and `kill` send to stop a service; or SIGHUP, the
+/// terminal it runs in closing. All shut down cleanly, so the engines the node started are stopped
+/// with it: they run in process groups of their own, which a terminal's signals do not reach.
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
-        let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(term) => term,
-            Err(_) => {
-                let _ = tokio::signal::ctrl_c().await;
-                return;
-            }
+        use tokio::signal::unix::{SignalKind, signal};
+        let (Ok(mut term), Ok(mut hangup)) = (signal(SignalKind::terminate()), signal(SignalKind::hangup())) else {
+            let _ = tokio::signal::ctrl_c().await;
+            return;
         };
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = term.recv() => {}
+            _ = hangup.recv() => {}
         }
     }
     #[cfg(not(unix))]
