@@ -526,11 +526,11 @@ else
 fi
 
 # --- Write confinement for unattended commands (Linux: bubblewrap) ------------------------------
-# Scheduled tasks, board work, phone recipes and `autobot run` run commands write-confined: a
-# command's own writes go only to its working directory and temp. Reads, the network and the
-# programs it can talk to (systemd or launchd, D-Bus, the node's and agent's local APIs, any
-# socket) are not restricted yet, so it can have one of them write elsewhere. Without bwrap they
-# are refused. macOS has sandbox-exec built in.
+# Scheduled tasks, board work, phone recipes and `autobot run` run commands on this machine
+# write-confined: a command's own writes go only to its working directory and temp. Reads, the
+# network and the programs it can talk to (systemd or launchd, D-Bus, the node's and agent's local
+# APIs, any socket) are not restricted yet, so it can have one of them write elsewhere. Without
+# bwrap they are refused. macOS has sandbox-exec built in.
 if [ "$OS" = Linux ] && ! have bwrap; then
     question="Install bubblewrap (write confinement for unattended agent commands) with sudo?"
     if have apt-get && ask_sudo "$question"; then

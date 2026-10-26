@@ -1,19 +1,22 @@
 //! Commands with nobody watching (scheduled tasks, board work, phone recipes, hooks, Home
-//! Assistant's voice requests, the heartbeat, `autobot run`) run write-confined: a command's own
-//! writes go only to the working directory and temporary directories. Reads, the network and the
-//! programs it can talk to are not restricted yet: it can read what the user can, reach any host,
-//! and have a program outside the sandbox write for it (`systemd-run --user`, `launchctl`, D-Bus,
-//! Docker's socket, the node's and agent's local APIs, any socket). The allowlist says which
-//! commands may run; the sandbox bounds what an allowed command can write itself (an allowlisted
-//! `git` cannot rewrite `~/.zshrc`).
+//! Assistant's voice requests, the heartbeat, `autobot run`) run write-confined on this machine
+//! (in `[agent.docker]` or over `[agent.ssh]` they run there instead): a command's own writes go
+//! only to the working directory and temporary directories. Reads, the network and the programs
+//! it can talk to are not restricted yet: it can read what the user can, reach any host, and have
+//! a program outside the sandbox write for it (`systemd-run --user`, `launchctl`, D-Bus, Docker's
+//! socket, the node's and agent's local APIs, any socket). The allowlist says which commands may
+//! run; the sandbox bounds what an allowed command can write itself (an allowlisted `git` cannot
+//! rewrite `~/.zshrc`).
 //!
 //! The working directory is writable and shared with interactive turns, which are unconfined
 //! unless the sandbox is `"always"`: a confined command can leave files there that a later
 //! interactive turn in that directory runs unconfined (`core.hooksPath` or `core.fsmonitor` in
 //! `.git/config`, a `Makefile`, `node_modules/.bin`, an `.envrc` once the owner runs
-//! `direnv allow`). The approval rules hold back the agent's own writes under dot names (they
-//! ask, and with nobody to ask they are refused; `trust` runs them); they do not see what a
-//! command writes.
+//! `direnv allow`). The approval rules hold back the agent's own writes under dot names: `ask`
+//! and `edits` ask, `allowlist` refuses them and `trust` runs them. With nobody to ask they are
+//! refused unless the mode is `trust`: scheduled tasks (hooks too), board work and the heartbeat
+//! switch to `allowlist`, and the approver of `autobot run` or of Home Assistant's voice requests
+//! says no. The rules do not see what a command writes.
 //!
 //! macOS: `sandbox-exec` with a write-deny profile. Linux: `bwrap` (bubblewrap) with the system
 //! read-only and the working directory writable. Where neither is available, a confined

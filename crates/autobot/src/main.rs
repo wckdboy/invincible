@@ -83,12 +83,12 @@ enum Command {
         /// there to ask). Nothing else is approved by it.
         #[arg(long)]
         cloud: bool,
-        /// Commands run on this machine unconfined, for this run only: they can write anywhere
-        /// you can, and standard error and the action log say so. Otherwise they are
-        /// write-confined, like a scheduled task's. A command run over `[agent.ssh]` or in
-        /// `[agent.docker]` is not confined by this machine's sandbox either way, so there the
-        /// flag changes nothing. For a machine you can throw away (a CI container without
-        /// bubblewrap).
+        /// Commands run on this machine unconfined, for this run only: they can write anywhere you
+        /// can, and standard error and the action log say so. Otherwise they are write-confined,
+        /// like a scheduled task's, unless `[agent] sandbox = "off"` already turns that off. A
+        /// command run over `[agent.ssh]` or in `[agent.docker]` is not confined by this machine's
+        /// sandbox either way, so there the flag changes nothing. For a machine you can throw away
+        /// (a CI container without bubblewrap).
         #[arg(long)]
         no_sandbox: bool,
     },
