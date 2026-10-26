@@ -1076,7 +1076,11 @@ data_policy = "retention:30"        # what the provider does with prompts
   account numbers become placeholders (`[PERSON_1]`, `[EMAIL_1]`), with the same rules as Autobot
   ([spec/redaction.md](spec/redaction.md)): in the messages, the model's earlier reasoning and tool
   calls, the tools' descriptions and the `user` field. Later mentions of a known value are hidden
-  too. A tool result or tool call that is JSON is read string by string, unescaped. Other text (JSON
+  too, as words of their own: a number also with other spacing or `-`, `.`, `/`, unless it runs on
+  into another number (`2 4111111111111111`); a name not inside a longer word of its script or
+  inflected (`Иван` in `Ивановка` or `Ивана`), and names and addresses not in code or links. A word
+  of a script without case may follow a value without a space (`Annaさん`, `010-1234-5678으로`). A
+  tool result or tool call that is JSON is read string by string, unescaped. Other text (JSON
   lines, JSON inside prose) is read as written: a known value is found where its line breaks or
   quotes are escaped, but not where its non-ASCII letters are (`Hauptstra\u00dfe`, as Python's
   `json.dumps` writes it). In tool descriptions only emails and numbers are looked for, so a tool's

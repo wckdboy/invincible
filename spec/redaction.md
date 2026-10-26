@@ -74,7 +74,9 @@ them only the rules that guess at no word run: `EMAIL`, `IBAN`, `CARD`, `ACCOUNT
 makes no value that every later text would then lose. Known values are replaced in them as in any
 text (step 3): once the messages are done, each description is redacted again from what it was, so a
 value the messages brought (`I am Hannah Weber`) is hidden in it too, and its own values keep the
-numbers they got first.
+numbers they got first. A value the first pass hid that the second covers with a longer one
+(`Hannah` in `Hannah Weberling`) is then shown nowhere: it is not counted, and its placeholder is
+not restored.
 
 **JSON texts.** A tool result (the `content` of a message whose `role` is `tool` or `function`, or
 the `text` of each of its parts) and a tool call's `arguments` are often JSON. When such a text
@@ -96,10 +98,10 @@ For each text:
    spaces of the same length, the last one the line break or tab it stands for: in
    `From:\nbob@posteo.de` it finds `bob@posteo.de`, not `nbob@posteo.de`. A span that begins inside
    a `\uXXXX` escape (an email's local part may take the `u` and hex digits of `\u306f`) begins
-   after it, and a span read across an escape is registered as what it stands for (`12a,\n10115
-   Berlin` with a line break). A new value gets the next number of its kind when it is first
-   replaced (step 3), `[KIND_N]` counting from 1, so the counts say what was hidden. Values are
-   compared:
+   after it. A span read across an escape is registered as it is written (`12a,\n10115 Berlin`
+   with the backslash and the `n`), so it comes back exactly as it was. A new value gets the next
+   number of its kind when it is first replaced (step 3), `[KIND_N]` counting from 1, so the counts
+   say what was hidden. Values are compared:
    - emails case-insensitively;
    - IBANs without spaces, in upper case;
    - phones, cards and account numbers with no letters by their digits only (`+49 30 1234567` and
@@ -115,15 +117,19 @@ For each text:
 3. **Replace what was detected where it was found, and every occurrence of every known value**,
    including values first seen in earlier texts. What step 2 detected in this text is replaced
    whatever is next to it. Elsewhere a known value counts only as a whole word: next to it there is
-   no digit, `_` or letter of the Latin script (for phones, cards and account numbers no ASCII
-   letter, digit or `_`, as their patterns read it). A letter of another script may follow a value
-   without a space (`010-1234-5678으로`, `bob@posteo.deまで`) and does not make it part of a word. A
-   JSON escape next to a value counts as what it stands for, so `\n` before `Hannah` is a line
-   break, `\u00e9` a Latin letter and `\ub85c` (`로`) a letter of another script, while `\\n` is a
-   backslash and an `n`. Names and addresses are not replaced inside code or links, read as
-   detection reads them (a link ends at `\n`). Emails match case-insensitively. Numbers of 4+ digits
-   also match when written with other spacing or punctuation; the hex digits of a `\uXXXX` escape
-   before one are not part of it (`\ud63801012345678` is `호` and `01012345678`). A value is also
+   no digit, `_` or letter of the Latin script; next to a name or an address, which are found by
+   their capitals, no letter of any other script with case either (Greek, Cyrillic: `Иван` is not
+   replaced in `Ивановка`, nor in `Ивана`); next to a phone, card or account number no ASCII letter,
+   digit or `_`, as their patterns read it. A letter of a script without case (Han, kana, Hangul)
+   may follow a value without a space (`010-1234-5678으로`, `Annaさん`, `bob@posteo.deまで`) and does not
+   make it part of a word. A JSON escape next to a value counts as what it stands for, so `\n`
+   before `Hannah` is a line break, `\u00e9` a Latin letter and `\ub85c` (`로`) a letter of a script
+   without case, while `\\n` is a backslash and an `n`. Names and addresses are not replaced inside
+   code or links, read as detection reads them (a link ends at `\n`). Emails match
+   case-insensitively. Numbers of 4+ digits also match when written with other spacing or
+   punctuation; the hex digits of a `\uXXXX` escape before one are not part of it
+   (`\ud63801012345678` is `호` and `01012345678`), but a number it runs on into is
+   (`2 4111111111111111` is not the card `4111 1111 1111 1111`). A value is also
    found where it is written escaped for a JSON string, in any text: tool results and tool-call
    arguments are often JSON, and a value given to a tool comes back that way. Escaped means as the
    answer's tool-call arguments are restored (below): `"` as `\"`, `\` as `\\`, `\n`, `\r`, `\t`,

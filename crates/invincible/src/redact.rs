@@ -207,6 +207,7 @@ static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| re(r"(\[|%5[Bb])(PERSON|EMAIL|PHONE|ADDRESS|CARD|IBAN|ACCOUNT)_([0-9]{1,5})(?:\]|%5[Dd])"));
 static DIGIT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"\+?[0-9](?:[ \-./]?[0-9])*"));
 static LATIN: LazyLock<Regex> = LazyLock::new(|| re(r"\p{Latin}"));
+static CASED: LazyLock<Regex> = LazyLock::new(|| re(r"[\p{Latin}\p{Cased}]"));
 
 fn words(list: &'static str) -> HashSet<&'static str> {
     list.split_whitespace().collect()
@@ -712,14 +713,17 @@ fn word_char(c: char) -> bool {
 }
 
 /// Whether [c] next to a value of [kind] makes it part of a longer word or number: for phone, card
-/// and account numbers an ASCII letter, digit or `_`, as their patterns read it; for the rest a
-/// digit, `_` or a letter of the Latin script. A letter of another script does not: a particle or
-/// word in it may follow a value without a space (`010-1234-5678으로`, `bob@posteo.deまで`).
+/// and account numbers an ASCII letter, digit or `_`, as their patterns read it; for names and
+/// addresses a digit, `_` or a letter of the Latin script or of another script with case (Greek,
+/// Cyrillic), the scripts they are found in by their capitals; for the rest a digit, `_` or a
+/// letter of the Latin script. A letter of a script without case does not: a particle or word in
+/// it may follow a value without a space (`010-1234-5678으로`, `Annaさん`, `bob@posteo.deまで`).
 fn joins(kind: Kind, c: char) -> bool {
     if kind.numeric() {
         return c.is_ascii_alphanumeric() || c == '_';
     }
-    c.is_numeric() || c == '_' || (c.is_alphabetic() && LATIN.is_match(c.encode_utf8(&mut [0; 4])))
+    let letters = if kind.wordy() { &CASED } else { &LATIN };
+    c.is_numeric() || c == '_' || (c.is_alphabetic() && letters.is_match(c.encode_utf8(&mut [0; 4])))
 }
 
 /// Not part of a longer word or number ([joins]). A JSON escape next to it counts as what it
@@ -804,15 +808,6 @@ fn spaced(text: &str) -> Cow<'_, str> {
         }
     }
     Cow::Owned(String::from_utf8(out).expect("only ASCII bytes replaced by ASCII"))
-}
-
-/// [raw] with its JSON escapes read as what they stand for (an address found across `\n`), where
-/// it reads as the inside of a JSON string; as it is where it does not.
-fn unescape(raw: &str) -> Cow<'_, str> {
-    if !raw.contains('\\') {
-        return Cow::Borrowed(raw);
-    }
-    serde_json::from_str::<String>(&format!("\"{raw}\"")).map_or(Cow::Borrowed(raw), Cow::Owned)
 }
 
 /// [value] as it is written inside a JSON string (a line break as `\n`).
@@ -1052,7 +1047,7 @@ impl Vault {
             }
             found.push(match escaped.iter().find(|&&(s, e, _)| s <= start && span.end <= e) {
                 Some(&hit) => hit,
-                None => (start, span.end, self.register(span.kind, &unescape(&text[start..span.end]))),
+                None => (start, span.end, self.register(span.kind, &text[start..span.end])),
             });
         }
         self.replace(text, &read, found)
@@ -1205,6 +1200,15 @@ impl Vault {
             .into_owned()
     }
 
+    /// Drops the placeholders [shown] does not hold: their values are neither counted nor restored.
+    fn keep_shown(&mut self, shown: &HashSet<&str>) {
+        for (_, e) in &mut self.entries {
+            if let Some(p) = e.placeholder.take_if(|p| !e.literal && !shown.contains(p.as_str())) {
+                self.by_placeholder.remove(&p);
+            }
+        }
+    }
+
     /// Distinct personal values hidden, per kind tag: each value counts once it was replaced.
     pub fn found(&self) -> BTreeMap<&'static str, usize> {
         let mut found = BTreeMap::new();
@@ -1338,8 +1342,14 @@ pub fn redact_request(body: &mut Value) -> Vault {
     }
     // The descriptions come first, for their numbers; written again from what they were, they also
     // lose the values the messages brought.
-    for (at, original) in descriptions {
-        *texts[at].0 = vault.redact_description(&original);
+    if !descriptions.is_empty() {
+        for (at, original) in descriptions {
+            *texts[at].0 = vault.redact_description(&original);
+        }
+        // A value the first pass hid that the second covers with a longer one is hidden nowhere.
+        let shown: HashSet<&str> =
+            texts.iter().flat_map(|(text, _)| PLACEHOLDER.find_iter(text).map(|m| m.as_str())).collect();
+        vault.keep_shown(&shown);
     }
     vault
 }
@@ -2026,12 +2036,43 @@ mod tests {
     fn names_and_addresses_are_still_hidden_only_as_whole_words() {
         let mut vault = Vault::default();
         assert_eq!(vault.redact("I am Anna Berg, Via Roma 10"), "I am [PERSON_1], [ADDRESS_1]");
-        // A Latin letter makes a longer word; a letter of another script does not.
+        // A Latin letter makes a longer word; a letter of a script without case does not.
         assert_eq!(
             vault.redact("Annabelle, Annaïs, Bergmann, Via Roma 10a; Anna와 Berg에게, Via Roma 10에서"),
             "Annabelle, Annaïs, Bergmann, Via Roma 10a; [PERSON_2]와 [PERSON_3]에게, [ADDRESS_1]에서"
         );
         assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1), ("PERSON", 3)]));
+    }
+
+    #[test]
+    fn a_known_name_is_a_whole_word_in_its_own_script() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my friend Иван Петров"), "my friend [PERSON_1]");
+        // A letter of its own script makes a longer word: a village, a park, a surname.
+        let text = "Ивановка и Петровский парк, Иванов";
+        assert_eq!(vault.redact(text), text);
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 1)]));
+
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my friend Νίκος Παππάς"), "my friend [PERSON_1]");
+        assert_eq!(vault.redact("Νίκοςς"), "Νίκοςς");
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 1)]));
+    }
+
+    #[test]
+    fn later_mentions_of_a_known_value_are_hidden_as_words_of_their_own() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my friend Иван Петров, +49 171 2345678"), "my friend [PERSON_1], [PHONE_1]");
+        // In a later text: a number with other spacing, a name with a word of a script without
+        // case right after it.
+        assert_eq!(
+            vault.redact("Иван Петров: +49-171-2345678, Иванに, Петров에게"),
+            "[PERSON_1]: [PHONE_1], [PERSON_2]に, [PERSON_3]에게"
+        );
+        // Not inside a longer word of its script, inflected, or in code.
+        let text = "Ивановка, Ивана и Петрова, `Иван Петров`";
+        assert_eq!(vault.redact(text), text);
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 3), ("PHONE", 1)]));
     }
 
     #[test]
@@ -2056,8 +2097,8 @@ mod tests {
     }
 
     #[test]
-    fn a_value_found_across_a_json_escape_comes_back_as_what_it_stands_for() {
-        // A tool result that is not one JSON document is read as text.
+    fn a_value_found_across_a_json_escape_comes_back_as_it_was_written() {
+        // A tool result that is not one JSON document is read as text, as written.
         let mut body = json!({ "messages": [
             { "role": "tool", "tool_call_id": "c1", "content": r#"Order 7: {"to":"Hauptstraße 12a,\n10115 Berlin"}"# }
         ] });
@@ -2069,10 +2110,29 @@ mod tests {
         } }] });
         restore_response(&vault, &mut answer);
         let message = &answer["choices"][0]["message"];
-        assert_eq!(message["content"], "It goes to Hauptstraße 12a,\n10115 Berlin.");
+        assert_eq!(message["content"], r"It goes to Hauptstraße 12a,\n10115 Berlin.");
         let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
-        assert_eq!(parsed["to"], "Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(parsed["to"], r"Hauptstraße 12a,\n10115 Berlin");
+    }
+
+    #[test]
+    fn a_value_comes_back_exactly_as_it_was_written() {
+        // Code in a message: the `\n` in its string is a backslash and an `n`, not a line break.
+        let text = r#"addr = "Hauptstraße 12a,\n10115 Berlin""#;
+        let mut body = json!({ "messages": [{ "role": "user", "content": text }] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], r#"addr = "[ADDRESS_1]""#);
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": r#"addr = "[ADDRESS_1]""#,
+            "tool_calls": [{ "function": { "name": "write", "arguments": r#"{"code":"addr = \"[ADDRESS_1]\""}"# } }]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        assert_eq!(message["content"], text);
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
+        assert_eq!(parsed["code"], text);
     }
 
     #[test]
@@ -2151,6 +2211,23 @@ mod tests {
             "Hauptstraße 12a, 10115 Berlin, or [PERSON_1], [PHONE_1]"
         );
         assert_eq!(vault.found(), BTreeMap::from([("EMAIL", 1), ("PERSON", 1), ("PHONE", 1)]));
+    }
+
+    #[test]
+    fn a_value_the_request_does_not_show_is_not_counted() {
+        // The description's first pass hides the known `Hannah`; its second hides the longer
+        // `Hannah Weberling` the message brought instead.
+        let mut body = json!({
+            "user": "my friend Hannah Weber",
+            "tools": [{ "type": "function", "function": { "name": "ask", "description": "ask Hannah Weberling" } }],
+            "messages": [{ "role": "user", "content": "my colleague Hannah Weberling" }]
+        });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["user"], "my friend [PERSON_1]");
+        assert_eq!(body["tools"][0]["function"]["description"], "ask [PERSON_3]");
+        assert_eq!(body["messages"][0]["content"], "my colleague [PERSON_3]");
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 2)]));
+        assert_eq!(vault.restore("[PERSON_1] [PERSON_2] [PERSON_3]"), "Hannah Weber [PERSON_2] Hannah Weberling");
     }
 
     #[test]
