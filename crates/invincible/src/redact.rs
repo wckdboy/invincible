@@ -782,6 +782,14 @@ fn spaced(text: &str) -> Cow<'_, str> {
             at += 1;
             continue;
         }
+        // A run of backslashes is read once: its pairs are `\\`, kept as written, and only an odd
+        // one out at its end can start an escape (asking [escape_at] at each pair would recount
+        // the run every time).
+        let run = out[at..].iter().take_while(|&&b| b == b'\\').count();
+        at += run - run % 2;
+        if run % 2 == 0 {
+            continue;
+        }
         match escape_at(text, at) {
             Some((c, len)) if !word_char(c) => {
                 out[at..at + len].fill(b' ');
@@ -791,7 +799,7 @@ fn spaced(text: &str) -> Cow<'_, str> {
                 at += len;
             }
             Some((_, len)) => at += len,
-            // `\\`, `\"`: kept as written.
+            // `\"`, or a backslash that escapes nothing: kept as written.
             None => at += 2,
         }
     }
@@ -2056,6 +2064,25 @@ mod tests {
         let spaced = spaced(text);
         assert_eq!(spaced.len(), text.len());
         assert_eq!(spaced, "a \nb\\\\nc\\u00e9d     \ne      \\\"f");
+    }
+
+    #[test]
+    fn a_run_of_backslashes_is_read_once() {
+        use super::spaced;
+        // Pairs are kept as written; only an odd one out at the end of a run escapes what follows.
+        assert_eq!(spaced(r"a\\\nb"), "a\\\\ \nb");
+        assert_eq!(spaced(r"a\\\\nb"), r"a\\\\nb");
+        // A request can hold a run as long as its body. Reading it takes time in its length, not
+        // its square: a million backslashes took minutes when each pair recounted the run.
+        let text = format!("{}n mail erin@posteo.de", "\\".repeat(1_000_001));
+        let started = std::time::Instant::now();
+        let read = spaced(&text);
+        assert_eq!(read.len(), text.len());
+        assert!(read.ends_with(" \n mail erin@posteo.de"));
+        let mut vault = Vault::default();
+        let redacted = vault.redact(&text);
+        assert!(redacted.ends_with("n mail [EMAIL_1]"), "{}", &redacted[redacted.len() - 40..]);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
     }
 
     #[test]
