@@ -950,14 +950,23 @@ cargo run --release -- token      # the API token (created on first run, mode 06
 ```
 
 Any OpenAI-compatible client on the same machine works against `http://127.0.0.1:7777/v1` with that
-token as the API key. `model: "auto"` (or no model) lets the router choose.
+token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <token>`.
+`model: "auto"` (or no model) lets the router choose.
 
 - Anthropic Messages clients can use `POST /v1/messages` the same way. It is served by the node's
   engines only (llama.cpp speaks it natively), so a Messages request never goes to the cloud.
 - Every response carries the routing decision in an `invincible-decision` header.
 - `invincible-private: 1` marks a request that must never leave hardware you own;
   `invincible-risk: health,personal` passes risk codes; `invincible-confirmed: 1` answers an `ask`.
-- Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
+- Blocked requests answer 403, 404 or 503 with the reason. An `ask` answers 409
+  `confirmation_required`, and its error body carries the same decision as the header
+  (`error.decision`) and the header that answers it (`error.confirm_header`:
+  `"invincible-confirmed"`), so a client whose SDK shows only error bodies can still act on it
+  ([spec/routing.md](spec/routing.md), Over HTTP).
+- `GET /v1/models` lists each model with its context window as top-level `context_length` when it
+  is known (absent when not, never guessed), and with an `invincible` block: `tier`, `healthy`,
+  `context`, `data_policy` and `vision`. There is no `max_completion_tokens`: the node does not
+  know a model's output limit.
 - A streamed answer from a local engine is kept alive while the engine reads a long prompt
   (`: keep-alive` comments every 20 s, which SSE clients skip); an engine silent for 30 minutes
   is given up on with an `engine_stalled` error event (a 504 when not streamed, where 30 minutes
@@ -973,6 +982,36 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
   `/v1/models` reports it (`"vision": true`, `false`, or `null` when not known), and a request
   with images for a model known not to see them answers `400 model_cannot_see_images` instead of
   being sent.
+
+### Use the node from other tools
+
+A tool that takes an OpenAI- or Anthropic-compatible base URL and a key works with the node as it
+is: give it the base URL and `invincible token` as the key.
+
+| The tool speaks | Base URL | The key goes in |
+|---|---|---|
+| OpenAI Chat Completions (OpenAI SDKs, Hermes Agent, Polykrom's OpenAI protocol) | `http://127.0.0.1:7777/v1` | `Authorization: Bearer <token>` |
+| Anthropic Messages (Anthropic SDKs, Polykrom's Anthropic protocol) | `http://127.0.0.1:7777` | `x-api-key: <token>` |
+
+```sh
+curl http://127.0.0.1:7777/v1/messages \
+     -H "x-api-key: $(invincible token)" -H "content-type: application/json" \
+     -d '{"model": "auto", "max_tokens": 256, "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+- Either header works on every route of the local API. When a request carries both,
+  `Authorization` is the one read, so an SDK that also sends your `ANTHROPIC_API_KEY` as
+  `x-api-key` still gets in with a bearer token; a wrong token in the header that is read is
+  refused (401 `invalid_api_key`).
+- Tools that size their context from `/v1/models` find `context_length` there, so they need no
+  setting for it when the node knows the model's window.
+- Messages requests run on the node's own models only (above), so pick Chat Completions in a tool
+  that should also reach your cloud backends.
+- A tool that cannot ask its user gets a 409 for an `ask`. Its body says why (`error.decision.reason`)
+  and what to send back (`invincible-confirmed: 1`), so a plugin can turn it into its own prompt.
+- From another machine, `invincible join` then `invincible tunnel`: `http://127.0.0.1:7780/v1` takes
+  that machine's token in either header and reaches what a paired device may (`/v1/models` and
+  Chat Completions, not Messages; [Pairing other machines](#pairing-other-machines)).
 
 ### Cloud backends (optional)
 
