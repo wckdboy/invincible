@@ -85,14 +85,13 @@ string in it, keys included, is redacted as a text of its own in its unescaped f
 changed it, written back as a JSON string (escaped as below); everything else stays byte for byte.
 So `"Recipient:\nHauptstraße 12a,\n10115 Berlin"` is read with a line break and `"Hauptstra\u00dfe"`
 as `Hauptstraße`, and the text stays JSON. A number is redacted as written (`12345678`), and becomes
-a JSON string if that changed it (`"[ACCOUNT_1]"`). A string in it that is itself a JSON object or
-array (an MCP tool's result passed on as text) is read the same way, at any depth, and written back
-into its string as JSON text: a `\n` in it is a line break too, and `\u00df` an `ß`, so a value read
-across one is registered with the line break. Any other string (a file's text, JSON lines) is
-redacted in its unescaped form as a message is: a `\n` still in it is a backslash and an `n`, and a
-value read across one is registered with them (step 2). A text that does not parse (JSON lines, JSON
-inside prose) is redacted as a text, except that a value found in it across an escape is taken as
-written inside a JSON string (step 2).
+a JSON string if that changed it (`"[ACCOUNT_1]"`). Each string is redacted as a message is: a `\n`
+still in it once unescaped is a backslash and an `n`, and a new value read across one is registered
+with them (step 2). So JSON text inside a string (an MCP tool's result passed on as text, a JSON
+file read whole) is read as text: a value first found there across an escape reaches a tool as
+written (see Restoring), and a number in it is replaced where it stands, not quoted. A text that
+does not parse (JSON lines, JSON inside prose) is redacted as a text, except that a value found in
+it across an escape is taken as written inside a JSON string (step 2).
 
 For each text:
 
@@ -160,14 +159,17 @@ in each choice's `content`, `reasoning_content` and `reasoning`, and escaped for
 its tool calls' `arguments` (so the arguments stay valid JSON, and the value reads there as it did).
 A value that stands for what it reads as inside a JSON string (step 2) goes into the arguments as it
 was written: `12a,\n10115 Berlin` from JSON lines reaches the next tool with a line break and comes
-back in the text with the backslash and the `n`. A value seen in more than one form comes back as it
-was first registered: the same characters written first in a message, a backslash and an `n`, reach
-the tool as those, also once JSON lines bring them, and the same address seen first with a line
-break comes back in the text with a line break. The arguments are one level of JSON: a placeholder
-in JSON text that is itself inside a string of the arguments gets the value escaped only once, so
-there a value with a line break leaves that inner text invalid JSON (as when a JSON file read whole
-is written back). A placeholder the vault does not know stays as it is, and a percent-encoded
-placeholder is restored percent-encoded (in the arguments, what the value reads as).
+back in the text with the backslash and the `n`. The same characters found first in a string of a
+JSON document once unescaped, as in JSON text inside it (an MCP tool's result, a JSON file read
+whole), reach the tool as a backslash and an `n`, so that JSON text written back into a string of
+the arguments comes back exactly as it was. A value seen in more than one form comes back as it was
+first registered: the same characters written first in a message, a backslash and an `n`, reach the
+tool as those, also once JSON lines bring them, and the same address seen first with a line break
+comes back in the text with a line break. The arguments are one level of JSON: a placeholder in JSON
+text that is itself inside a string of the arguments gets the value escaped only once, so there a
+value registered with a line break (from a message, say) leaves that inner text invalid JSON. A
+placeholder the vault does not know stays as it is, and a percent-encoded placeholder is restored
+percent-encoded (in the arguments, what the value reads as).
 
 When streaming, a placeholder can be split across chunks, so a trailing `[` that may still become a
 placeholder is held back until the next piece of the same text, or until that choice finishes. The

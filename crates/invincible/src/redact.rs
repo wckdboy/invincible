@@ -821,14 +821,6 @@ fn unescape(raw: &str) -> Option<String> {
     raw.contains('\\').then(|| serde_json::from_str(&format!("\"{raw}\"")).ok()).flatten()
 }
 
-/// Whether [text] is a JSON object or array: a string of a tool result may hold one (an MCP tool's
-/// result passed on as text), and a `\n` in it then stands for a line break. Other text in a string
-/// (code, JSON lines) is read as text: there a `\n` may be a backslash and an `n`. It is parsed as a
-/// [Value], as [Vault::redact_document] needs: text with a lone surrogate (`\ud800`) is not JSON.
-fn holds_json(text: &str) -> bool {
-    text.trim_start().starts_with(['{', '[']) && serde_json::from_str::<Value>(text).is_ok()
-}
-
 /// [value] as it is written inside a JSON string (a line break as `\n`).
 fn json_escape(value: &str) -> String {
     let quoted = Value::String(value.to_owned()).to_string();
@@ -1005,19 +997,17 @@ impl Vault {
     /// [Vault::redact] for a text that is often JSON (a tool result, tool-call arguments). When it
     /// parses, each string in it (keys too) is redacted as what it stands for, unescaped, and
     /// written back escaped; a number is redacted as written and becomes a string if it changes. So
-    /// a value right after a `\n` is found whole and the text stays JSON. A string in it that is
-    /// itself a JSON object or array ([holds_json]) is read the same way. Other text (JSON lines,
+    /// a value right after a `\n` is found whole and the text stays JSON. Each string is redacted
+    /// as a message is, so JSON text in one (an MCP tool's result) is read as text: a new value
+    /// found across its `\n` is registered with the backslash and the `n`. Other text (JSON lines,
     /// JSON inside prose) is redacted as text, and a value with an escape found in it is taken as
     /// written inside a JSON string ([Entry::unescaped]).
     pub fn redact_json(&mut self, text: &str) -> String {
+        // Parsed as a [Value], so each string below decodes: text with a lone surrogate (`\ud800`)
+        // is not JSON here.
         if serde_json::from_str::<Value>(text).is_err() {
             return self.redact_with(text, Form::Json);
         }
-        self.redact_document(text)
-    }
-
-    /// [Vault::redact_json] for a text that parses as a JSON [Value]: each string in it parses too.
-    fn redact_document(&mut self, text: &str) -> String {
         // As in a text, placeholder-shaped text anywhere in it comes first.
         for c in PLACEHOLDER.captures_iter(text) {
             self.literal(&c[1], &c[2], &c[3]);
@@ -1047,10 +1037,9 @@ impl Vault {
                 }
             };
             let token = &text[at..end];
-            let string = bytes[at] == b'"';
-            let value = if string { serde_json::from_str(token).expect("a JSON string") } else { token.to_owned() };
-            let redacted =
-                if string && holds_json(&value) { self.redact_document(&value) } else { self.redact(&value) };
+            let value =
+                if bytes[at] == b'"' { serde_json::from_str(token).expect("a JSON string") } else { token.to_owned() };
+            let redacted = self.redact(&value);
             if redacted != value {
                 out.push_str(&text[cursor..at]);
                 out.push_str(&Value::String(redacted).to_string());
@@ -1786,17 +1775,34 @@ mod tests {
     fn json_is_redacted_as_json_and_undone_exactly() {
         crate::testgen::cases("redact_json/restore_json", |g| {
             let list: Vec<String> = (0..g.below(4)).map(|_| g.assemble(PIECES, 8)).collect();
-            // A string that holds JSON text, as an MCP tool's result does.
-            let inner = json!({ "d": g.assemble(PIECES, 8), "e": [g.assemble(PIECES, 4)] }).to_string();
+            // A string that holds JSON text, as an MCP tool's result does. Its strings hold
+            // characters JSON escapes, in values too: a line break, a quote, an `ß` (half the time
+            // written `\u00df`, as Python's `json.dumps` writes it). It holds a number too.
+            let escaped = ["Hauptstraße 12a,\n10115 Berlin", "\"Zork Blax\"", "ß"];
+            let pieces: Vec<&str> = PIECES.iter().copied().chain(escaped).collect();
+            let mut inner =
+                json!({ "d": g.assemble(&pieces, 8), "e": [g.assemble(&pieces, 4)], "n": 4111111111111111u64 })
+                    .to_string();
+            if g.one_in(2) {
+                inner = inner.replace('ß', r"\u00df");
+            }
             let text = json!({ "a": g.assemble(PIECES, 12), "b": list, "c": inner, "n": -1.5e3 }).to_string();
             let mut vault = Vault::default();
             let redacted = vault.redact_json(&text);
-            serde_json::from_str::<serde_json::Value>(&redacted).expect("still JSON");
-            let restored = vault.restore_json(&redacted);
-            if text.contains("Bob@Posteo.DE") {
-                assert_eq!(restored.to_ascii_lowercase(), text.to_ascii_lowercase(), "redacted as {redacted:?}");
-            } else {
-                assert_eq!(restored, text, "redacted as {redacted:?}");
+            let parsed = serde_json::from_str::<serde_json::Value>(&redacted).expect("still JSON");
+            // Into tool-call arguments the document comes back as it was, and into the answer's
+            // text the JSON text in its string comes back as it was written.
+            let restored = [
+                (vault.restore_json(&redacted), &text),
+                (vault.restore(parsed["c"].as_str().expect("a string")), &inner),
+            ];
+            for (restored, original) in restored {
+                if text.contains("Bob@Posteo.DE") {
+                    let lower = original.to_ascii_lowercase();
+                    assert_eq!(restored.to_ascii_lowercase(), lower, "redacted as {redacted:?}");
+                } else {
+                    assert_eq!(&restored, original, "redacted as {redacted:?}");
+                }
             }
         });
     }
@@ -2273,9 +2279,12 @@ mod tests {
     }
 
     #[test]
-    fn a_json_text_in_a_string_of_a_tool_result_is_read_as_json() {
+    fn a_json_text_in_a_string_of_a_tool_result_is_read_as_text() {
         // An MCP tool's result passed on as text: a JSON document whose string holds JSON text.
+        // That text is read as a message is, so a value found across its `\n` is the backslash and
+        // the `n` as written there.
         let address = "Hauptstraße 12a,\n10115 Berlin";
+        let written = r"Hauptstraße 12a,\n10115 Berlin";
         let inner = json!({ "to": address }).to_string();
         let content = json!([{ "type": "text", "text": inner }]).to_string();
         let hidden = json!([{ "type": "text", "text": r#"{"to":"[ADDRESS_1]"}"# }]).to_string();
@@ -2284,34 +2293,45 @@ mod tests {
         assert_eq!(body["messages"][0]["content"], hidden);
         let mut answer = json!({ "choices": [{ "message": {
             "content": "It goes to [ADDRESS_1].",
-            "tool_calls": [{ "function": { "name": "label", "arguments": r#"{"to":"[ADDRESS_1]"}"# } }]
+            "tool_calls": [
+                { "function": { "name": "label", "arguments": r#"{"to":"[ADDRESS_1]"}"# } },
+                { "function": { "name": "write", "arguments": hidden } }
+            ]
         } }] });
         restore_response(&vault, &mut answer);
         let message = &answer["choices"][0]["message"];
-        // What its `\n` stands for, a line break, in the tool call and in the text.
+        // Text gets it back exactly as written.
+        assert_eq!(message["content"], format!("It goes to {written}."));
+        // A tool gets it as written too: a backslash and an `n`, not a line break.
         let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
-        assert_eq!(serde_json::from_str::<serde_json::Value>(args).expect("valid JSON")["to"], address);
-        assert_eq!(message["content"], format!("It goes to {address}."));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(args).expect("valid JSON")["to"], written);
+        // So the JSON text written back into a string comes back as it was, and is still JSON.
+        let args = message["tool_calls"][1]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(args, content);
+        let text = serde_json::from_str::<serde_json::Value>(args).unwrap()[0]["text"].as_str().unwrap().to_owned();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).expect("valid JSON")["to"], address);
 
-        // Its letters escaped too (`ß` as `\u00df`, as Python's `json.dumps` writes it), and
-        // then in a message: one value.
-        let ascii = json!([{ "type": "text", "text": inner.replace('ß', r"\u00df") }]).to_string();
+        // Written first in a message with a backslash and an `n`: one value.
+        let code = format!(r#"addr = "{written}""#);
         let mut body = json!({ "messages": [
-            { "role": "tool", "tool_call_id": "c1", "content": content },
-            { "role": "tool", "tool_call_id": "c2", "content": ascii },
-            { "role": "user", "content": format!("Ship to {address} please") }
+            { "role": "user", "content": code },
+            { "role": "tool", "tool_call_id": "c1", "content": content }
         ] });
         let vault = redact_request(&mut body);
-        assert_eq!(body["messages"][0]["content"], hidden);
         assert_eq!(body["messages"][1]["content"], hidden);
-        assert_eq!(body["messages"][2]["content"], "Ship to [ADDRESS_1] please");
         assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1)]));
+
+        // A number in that text is replaced where it is, not quoted, and comes back so.
+        let mut vault = Vault::default();
+        let text = json!({ "c": r#"{"n": 4111111111111111}"# }).to_string();
+        let redacted = vault.redact_json(&text);
+        assert_eq!(redacted, json!({ "c": r#"{"n": [CARD_1]}"# }).to_string());
+        assert_eq!(vault.restore_json(&redacted), text);
     }
 
     #[test]
     fn code_in_a_string_of_a_tool_result_reaches_a_tool_as_code() {
-        // A file read whole: its text is not JSON, and the `\n` in its string is a backslash and
-        // an `n`.
+        // A file read whole: a `\n` still in its string once unescaped is a backslash and an `n`.
         let code = r#"addr = "Hauptstraße 12a,\n10115 Berlin""#;
         let mut body = json!({ "messages": [
             { "role": "tool", "tool_call_id": "c1", "content": json!({ "content": code }).to_string() }
@@ -2331,12 +2351,10 @@ mod tests {
 
     #[test]
     fn json_text_with_a_lone_surrogate_is_read_as_text() {
-        // `\ud800` is not a character: JSON text holding it is redacted as text, at the top or
-        // inside a string.
+        // `\ud800` is not a character: JSON text holding it is redacted as text, not string by
+        // string.
         let mut vault = Vault::default();
         assert_eq!(vault.redact_json(r#"{"a":"\ud800 bob@posteo.de"}"#), r#"{"a":"\ud800 [EMAIL_1]"}"#);
-        let inner = json!({ "t": r#"{"a":"\ud800 bob@posteo.de"}"# }).to_string();
-        assert_eq!(vault.redact_json(&inner), json!({ "t": r#"{"a":"\ud800 [EMAIL_1]"}"# }).to_string());
     }
 
     #[test]
