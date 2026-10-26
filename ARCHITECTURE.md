@@ -127,7 +127,9 @@ cluster spec) and placement (which node runs a model whole).
 ## 4. Cluster plane: many nodes, one model
 
 Designed in [spec/cluster.md](spec/cluster.md); phase 1 is on main (edge), unaudited, and off
-unless `[cluster]` and a model's `cluster` list turn it on. The short form, so this document
+unless configured: a model's `cluster` list makes this node split that model across the paired
+nodes it names (a head), and `[cluster] serve = true` lends this node to the heads in
+`[cluster] heads` (a shard). Either works without the other. The short form, so this document
 stands on its own:
 
 - **Only paired devices**, and shards name the heads that may run work on them. llama.cpp's RPC

@@ -29,7 +29,7 @@ Early, and used daily. What is built, and what is not yet:
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
 | Discovery | Signed, expiring descriptors published to seeds and mDNS, so a node is found without a pasted code — and still only usable after pairing ([spec/discovery.md](spec/discovery.md)): implemented, unaudited |
-| Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
+| Cluster | **Phase 1 on edge** (on main, not yet in a stable release), **unaudited**, off unless configured: one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts (since [Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0); the latest is [1.14.0](https://github.com/wckdboy/autobot/releases/tag/v1.14.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come; how to report a vulnerability: [SECURITY.md](SECURITY.md) |
@@ -285,12 +285,13 @@ the workflow's token where the code it builds could read it. The Linux
 builds are reproducible: the workflow builds the x86_64 archive again on another machine and
 publishes only if the bytes match
 (to check one yourself, build the commit from `/tmp/invincible-src` with the flags in
-`release.yml`). By hand:
+`release.yml`). By hand, with `SHA256SUMS`, `SHA256SUMS.sig` and the archive, under the name the
+list gives it, in one directory ([SECURITY.md](SECURITY.md#the-release-signing-key) downloads them):
 
 ```sh
 echo 'invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPGy6kHVQQ+W282VFPR/Qo' > allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I invincible-release -n invincible-release -s SHA256SUMS.sig < SHA256SUMS
-shasum -a 256 -c SHA256SUMS
+shasum -a 256 -c SHA256SUMS --ignore-missing   # must print "invincible-linux-x64.tar.gz: OK"
 gh attestation verify invincible-linux-x64.tar.gz --repo wckdboy/invincible
 ```
 
@@ -591,8 +592,8 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   router may use cloud models, and when its rules want a confirmation, the agent asks you.
 - **Heartbeat:** put a checklist in `~/.autobot/HEARTBEAT.md` ("is the disk over 90%?", "did
   last night's backup run?") and every 30 minutes (`[agent] heartbeat`, or `off`) the agent works
-  through it, unattended and write-confined, and messages you on Telegram only when something
-  needs you; a quiet check stays quiet.
+  through it, unattended (commands write-confined unless `[agent] sandbox = "off"`), and messages
+  you on Telegram only when something needs you; a quiet check stays quiet.
 - **Trajectories:** with `[agent] trajectories = true`, every finished turn is kept as the model
   saw it (system prompt, tool list, calls, results, answer) in `~/.autobot/trajectories`, as
   fine-tuning data for a local model (a frontier model's turns are

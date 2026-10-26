@@ -85,7 +85,8 @@ These are targets, not guarantees. If one slips, the advisory thread says so.
   so does the daily update for those who turned it on (`invincible update --auto stable`).
 - **A GitHub security advisory** on this repository, published once the release is out: what is
   affected, which versions, which version fixes it, and credit to the reporter unless they ask
-  for none. A vulnerability in a released version gets a CVE ID, requested through the advisory.
+  for none. When a vulnerability in a released version warrants a CVE ID, the project requests
+  one through the GitHub advisory and publishes it there once it is assigned.
 
 ## Supported versions
 
@@ -106,14 +107,25 @@ invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPG
 ```
 
 Its fingerprint is `SHA256:4i+8H37Nm9hiL/ce25aKi+QfYgXMzNfmd4fIidDqBIQ` (ED25519). To check a
-release by hand:
+release by hand, in an empty directory, with the archive for your platform under the name
+`SHA256SUMS` lists (`invincible-linux-x64.tar.gz`, `invincible-linux-arm64.tar.gz` or
+`invincible-macos-arm64.tar.gz`) next to `SHA256SUMS`:
 
 ```sh
+base=https://github.com/wckdboy/invincible/releases/latest/download   # or releases/download/<tag>
+curl -fLO "$base/SHA256SUMS"
+curl -fLO "$base/SHA256SUMS.sig"
+curl -fLO "$base/invincible-linux-x64.tar.gz"   # your platform's archive, as SHA256SUMS names it
 echo 'invincible-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII/0fXPq1j51BcfGY0Jp9QfPGy6kHVQQ+W282VFPR/Qo' > allowed_signers
 ssh-keygen -lf allowed_signers        # prints the fingerprint above
 ssh-keygen -Y verify -f allowed_signers -I invincible-release -n invincible-release -s SHA256SUMS.sig < SHA256SUMS
 shasum -a 256 -c SHA256SUMS --ignore-missing
 ```
+
+`ssh-keygen -Y verify` must print `Good "invincible-release" signature`, and `shasum` must print
+`invincible-linux-x64.tar.gz: OK` (with your archive's name). `--ignore-missing` skips every
+file the list names that is not in the directory, the other platforms' archives and an archive
+saved under another name alike, so without that `OK` line your archive was not checked.
 
 A release whose signature does not verify with this key is not ours: do not install it, and report
 it as above.
