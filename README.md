@@ -270,7 +270,9 @@ its public key and refuse anything else, then check the archive against the list
 signed-in GitHub CLI the installer also checks the archive's Sigstore build attestation. Releases
 are built by [`release.yml`](.github/workflows/release.yml): a `v*` tag publishes stable, every
 green push to main refreshes the `edge` prerelease. Every action the workflows run is pinned to a
-commit (the version in a comment beside it), so a tag moved upstream changes nothing. The Linux
+commit (the version in a comment beside it), so moving an action's tag upstream changes nothing
+(the CI-only `cargo-deny` action still downloads its binary by release tag), and no checkout keeps
+the workflow's token where the code it builds could read it. The Linux
 builds are reproducible: the workflow builds the x86_64 archive again on another machine and
 publishes only if the bytes match
 (to check one yourself, build the commit from `/tmp/invincible-src` with the flags in
