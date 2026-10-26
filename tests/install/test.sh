@@ -60,6 +60,10 @@ for tool in llama-server bwrap; do printf '#!/bin/sh\nexit 0\n' >"$T/fake/$tool"
 printf '#!/bin/sh\nexit 1\n' >"$T/fake/gh"
 chmod +x "$T/fake"/*
 export PATH="$T/fake:$PATH"
+# Which mkdir this is: the lock (install.sh) must hold with uutils' too, whose mkdir exits 0 for a
+# directory another run made a moment before.
+mkdir_is=$(mkdir --version 2>/dev/null | head -n 1)
+printf 'mkdir: %s\n' "${mkdir_is:-no --version (BSD)}"
 
 if [ "$(uname -s)" = Darwin ]; then
     SERVICE_FILE="$HOME/Library/LaunchAgents/sh.invincible.gateway.plist"
