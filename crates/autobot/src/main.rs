@@ -1000,7 +1000,12 @@ fn run(mut cli: Cli) -> Result<(), String> {
                     (false, "unattended") => "refused (no one to ask)".to_owned(),
                     (false, by) => format!("denied on {by}"),
                 };
-                println!("{at}  {:<14} {:<30} {}", e.session, verdict, e.action);
+                // A command that ran also says where and how confined (`sandbox bwrap`, `sandbox off`).
+                let verdict = match &e.sandbox {
+                    Some(sandbox) => format!("{verdict}, sandbox {sandbox}"),
+                    None => verdict,
+                };
+                println!("{at}  {:<14} {:<44} {}", e.session, verdict, e.action);
             }
             Ok(())
         }

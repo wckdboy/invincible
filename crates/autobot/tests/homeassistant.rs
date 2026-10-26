@@ -344,3 +344,42 @@ async fn home_assistants_conversation_agent_talks_to_a_bot() {
     std::fs::remove_dir_all(home).unwrap();
     std::fs::remove_dir_all(ops_home).unwrap();
 }
+
+#[tokio::test]
+async fn a_voice_request_runs_its_commands_confined_like_a_scheduled_task() {
+    let home = temp("confined");
+    std::fs::create_dir_all(home.join("work")).unwrap();
+    // Outside the working directory and the temporary directories.
+    let outside = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+        .join(format!(".autobot-ha-sandbox-test-{}", std::process::id()));
+    let _ = std::fs::remove_file(&outside);
+    let command = format!("echo out > {}; echo done", outside.display());
+    let url = model(
+        vec![tool_call("terminal", json!({ "command": command })), json!({ "role": "assistant", "content": "Done." })],
+        Seen::default(),
+    )
+    .await;
+    // Every command allowed: what bounds this one is the sandbox, as on a schedule.
+    let trust = ApprovalConfig { mode: ApprovalMode::Trust, allow: Vec::new() };
+    let mut agent = agent(&url, &home, None, trust);
+    // As a config without `[agent] sandbox` has it.
+    agent.tools = agent.tools.with_sandbox(autobot::sandbox::Mode::Unattended);
+    let runtime = Runtime::standalone("default", &home, Arc::new(agent));
+    let secret = autobot::hooks::new_secret(&home, "homeassistant").unwrap();
+    let bots: Arc<dyn autobot::bots::Find> = Arc::new(vec![runtime]);
+    let hooks = listen(autobot::hooks::app(bots)).await;
+    let response = reqwest::Client::new()
+        .post(format!("{hooks}/hooks/homeassistant/v1/chat/completions"))
+        .bearer_auth(&secret)
+        .json(&json!({ "model": "autobot", "messages": [{ "role": "user", "content": "clean up" }] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let wrote_outside = outside.exists();
+    let _ = std::fs::remove_file(&outside);
+    assert!(!wrote_outside, "a voice request's command wrote outside its working directory");
+    let log = std::fs::read_to_string(home.join("actions.jsonl")).unwrap();
+    let entry: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(entry["sandbox"], autobot::sandbox::name(), "{entry}");
+}
