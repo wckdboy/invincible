@@ -1086,15 +1086,21 @@ data_policy = "retention:30"        # what the provider does with prompts
   `_` or a letter of a script with case (`Иван` in `Ивановка` or `Ивана`, `Anna` in `Annaй`), nor
   in code or links. A word of a script without case may follow a value without a space
   (`Annaさん`, `010-1234-5678으로`). A tool result or tool call that is JSON is read string by
-  string, unescaped. Other text (JSON lines, JSON inside prose) is read as written: a known value
-  is found where its line breaks or quotes are escaped, but not where its non-ASCII letters are
-  (`Hauptstra\u00dfe`, as Python's `json.dumps` writes it). A value found there across an escape
-  (`12a,\n10115 Berlin`) comes back in the answer's text as written, and in its tool calls as what
-  it stood for, a line break; seen both escaped and not, it is one value and comes back as first
-  written. In tool descriptions only emails and numbers are looked for, so a tool's
-  wording names no one, but known values are hidden there too. The answer gets the real values back
-  in its text, its reasoning and its tool calls' arguments, streams included, and the
-  `invincible-redacted` header counts what was hidden.
+  string, unescaped, and so is a string in it that is itself a JSON object or array (an MCP tool's
+  result passed on as text): a `\n` there is a line break, and a value first found across one comes
+  back with it, in tool calls too. In any other string in it (a file's text, say), a `\n` still
+  there once unescaped is a backslash and an `n`, and a value first found across one comes back with
+  them, in tool calls too. Other text (JSON lines, JSON inside prose) is read as written: a known
+  value is found where its line breaks or quotes are escaped, but not where its non-ASCII letters
+  are (`Hauptstra\u00dfe`, as Python's `json.dumps` writes it). A value first found there across an
+  escape (`12a,\n10115 Berlin`) comes back in the answer's text as written, and in its tool calls as
+  what it stood for, a line break; the same address read later with a line break is the same value.
+  A value seen in more than one form comes back as it was first seen, also once JSON lines bring it
+  again: written first in a message with a backslash and an `n`, it reaches a tool with them; seen
+  first with a line break, it comes back in the text with one. In tool descriptions only emails and
+  numbers are looked for, so a tool's wording names no one, but known values are hidden there too.
+  The answer gets the real values back in its text, its reasoning and its tool calls' arguments,
+  streams included, and the `invincible-redacted` header counts what was hidden.
 - A streamed request to OpenAI, Anthropic or DeepSeek asks for its token usage
   (`stream_options.include_usage`) when the client sets no `stream_options`, so the receipt counts
   the tokens; that usage is kept from a client that did not ask for it, whether it comes in a chunk
