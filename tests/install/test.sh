@@ -71,7 +71,10 @@ elif [ "$(id -u)" = 0 ]; then
     # As root the installer uses the system units, and its uninstall removes them: never run over
     # real ones. The stand-in's unit is removed when the test ends, even when it fails.
     for unit in invincible.service autobot.service invincible-update.service invincible-update.timer; do
-        [ ! -e "/etc/systemd/system/$unit" ] || fail "/etc/systemd/system/$unit is there; run the test as another user"
+        # A link counts too, a dangling one included (-e follows it), since cleanup would remove it.
+        if [ -e "/etc/systemd/system/$unit" ] || [ -L "/etc/systemd/system/$unit" ]; then
+            fail "/etc/systemd/system/$unit is there; run the test as another user"
+        fi
     done
     SERVICE_FILE="/etc/systemd/system/invincible.service"
     ROOT_UNIT="$SERVICE_FILE"
