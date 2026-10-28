@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use axum::Extension;
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use crate::audit::Caller;
 use crate::receipts::Draft;
-use crate::server::{AppState, CLIENT_HEADER, DECISION_HEADER, error};
+use crate::server::{AppState, Bounded, CLIENT_HEADER, DECISION_HEADER, error};
 
 /// The most text embedded in one request, in characters, over every input.
 pub const MAX_INPUT: usize = 1 << 20;
@@ -54,7 +54,7 @@ pub async fn embeddings(
     State(state): State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Bounded,
 ) -> Response {
     let Ok(parsed) = serde_json::from_slice::<Value>(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body is not JSON");
@@ -83,7 +83,7 @@ pub async fn embeddings(
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
-    draft.api = "embeddings";
+    draft.bind_request("embeddings", &parsed);
     draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
     draft.client = headers
         .get(CLIENT_HEADER)

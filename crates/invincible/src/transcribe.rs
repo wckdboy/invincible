@@ -22,10 +22,11 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use invincible_policy::{Action, Model, RouteInput, Tier, decide};
+use sha2::{Digest, Sha256};
 
 use crate::audit::Caller;
 use crate::receipts::Draft;
-use crate::server::{AppState, CLIENT_HEADER, DECISION_HEADER, error};
+use crate::server::{AppState, Bounded, CLIENT_HEADER, DECISION_HEADER, error};
 use crate::synth::Backend;
 
 /// The largest recording taken: an hour of speech in a compressed format, with room.
@@ -35,7 +36,7 @@ pub async fn transcriptions(
     State(state): State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Bounded,
 ) -> Response {
     let Some(content_type) = headers.get(header::CONTENT_TYPE).cloned() else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "send the audio as multipart/form-data");
@@ -68,7 +69,15 @@ pub async fn transcriptions(
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
-    draft.api = "transcriptions";
+    // The audio is bound by its hash, never kept: the receipt says which request it is for.
+    draft.bind_request(
+        "transcriptions",
+        &serde_json::json!({
+            "content_type": content_type.to_str().unwrap_or_default(),
+            "bytes": body.len(),
+            "audio_sha256": crate::token::hex(&Sha256::digest(&body.0)),
+        }),
+    );
     draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
     draft.client = headers
         .get(CLIENT_HEADER)
@@ -90,7 +99,7 @@ pub async fn transcriptions(
         Action::Run => {
             let backend = backends.iter().find(|b| Some(&b.id) == decision.model.as_ref()).expect("decided");
             draft.data_policy = Some(crate::server::data_policy_code(backend.data_policy));
-            match send(&state.client, backend, content_type, body).await {
+            match send(&state.client, backend, content_type, body.0).await {
                 Ok(response) => response,
                 Err(why) => {
                     tracing::warn!(backend = %backend.id, "transcription backend failed ({why})");
