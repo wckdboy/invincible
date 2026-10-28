@@ -47,6 +47,7 @@ pub mod personality;
 pub mod procs;
 pub mod profile;
 pub mod recall;
+pub mod repo_map;
 pub mod sandbox;
 pub mod script;
 pub mod search;
@@ -157,6 +158,18 @@ pub fn persona(config: &Config) -> Option<agent::Persona> {
 pub fn for_coding(agent: &mut agent::Agent) {
     agent.max_steps = agent.max_steps.max(100);
     agent.team = std::sync::Arc::new((*agent.team).clone().with_explorer());
+    agent.options.repo_map = crate::repo_map::render(agent.tools.workdir(), 4096);
+}
+
+/// Reviewing a change (`autobot review`): read-only tools, no team, no edits, and the review
+/// instructions in the system prompt.
+pub fn for_review(agent: &mut agent::Agent) {
+    agent.max_steps = 24;
+    agent.team = std::sync::Arc::new(team::Team::default());
+    agent.tools = agent.tools.clone().only(tools::tools_for(&["files-read".to_owned()]));
+    agent.approvals.mode = config::ApprovalMode::Ask;
+    agent.options.repo_map = crate::repo_map::render(agent.tools.workdir(), 4096);
+    agent.options.review = true;
 }
 
 /// Switches [agent] to the model [id] of [models] (what the gateway serves): a cloud model lets

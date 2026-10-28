@@ -15,7 +15,7 @@ use serde::Deserialize;
 /// max_steps = 24                     # model calls per turn, tool rounds included
 ///
 /// [approvals]
-/// mode = "ask"                       # ask, edits, allowlist, trust
+/// mode = "ask"                       # ask, edits, auto, allowlist, trust
 /// allow = ["git status", "ls"]       # commands that run without asking (exact or prefix + space)
 ///
 /// [telegram]
@@ -297,6 +297,10 @@ pub enum ApprovalMode {
     /// without asking: for coding, where every change is shown as a diff and `/undo` puts it
     /// back.
     Edits,
+    /// Commands and writes in the working directory run without asking; reads and writes
+    /// outside it, hidden files, cloud, fetch, MCP and Home Assistant still ask. The autonomous
+    /// coding mode.
+    Auto,
     /// Run allowlisted commands and writes in the working directory; refuse everything else
     /// without asking (unattended use).
     Allowlist,

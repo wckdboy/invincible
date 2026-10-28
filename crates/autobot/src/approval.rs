@@ -181,6 +181,13 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
     {
         return Verdict::Run;
     }
+    if config.mode == ApprovalMode::Auto {
+        return match action {
+            Action::Command(_) => Verdict::Run,
+            Action::Write { inside: true, hidden: false, .. } => Verdict::Run,
+            _ => Verdict::Ask,
+        };
+    }
     match (config.mode, action) {
         // Unattended, the agent may still work in its own directory.
         (ApprovalMode::Allowlist | ApprovalMode::Edits, Action::Write { inside: true, hidden: false, .. }) => {
@@ -282,5 +289,11 @@ mod tests {
         assert_eq!(check(&config(ApprovalMode::Edits), &hidden), Verdict::Ask);
         assert_eq!(check(&config(ApprovalMode::Edits), &outside), Verdict::Ask);
         assert_eq!(check(&config(ApprovalMode::Edits), &command), Verdict::Ask);
+        // Auto: commands and project writes run; everything beyond the project asks.
+        assert_eq!(check(&config(ApprovalMode::Auto), &command), Verdict::Run);
+        assert_eq!(check(&config(ApprovalMode::Auto), &write), Verdict::Run);
+        assert_eq!(check(&config(ApprovalMode::Auto), &hidden), Verdict::Ask);
+        assert_eq!(check(&config(ApprovalMode::Auto), &outside), Verdict::Ask);
+        assert_eq!(check(&config(ApprovalMode::Auto), &Action::Cloud("x".into())), Verdict::Ask);
     }
 }

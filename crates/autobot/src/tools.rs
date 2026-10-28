@@ -1264,8 +1264,7 @@ impl Tools {
 
     /// The git branch, when the working directory is a repository.
     pub fn git_branch(&self) -> Option<String> {
-        let head = std::fs::read_to_string(self.workdir.join(".git/HEAD")).ok()?;
-        Some(head.trim().strip_prefix("ref: refs/heads/").unwrap_or("(detached)").to_owned())
+        git_branch_at(&self.workdir)
     }
 
     /// [path] relative to the working directory, with `~` expanded and `.`/`..` folded.
@@ -1889,6 +1888,24 @@ fn ceil(s: &str, mut i: usize) -> usize {
     i
 }
 
+/// The branch of the repository at [workdir]. In a linked worktree `.git` is a file holding
+/// `gitdir: …`; the branch's HEAD lives in that directory, not in the worktree.
+fn git_branch_at(workdir: &Path) -> Option<String> {
+    let dot = workdir.join(".git");
+    let head = if dot.is_dir() {
+        dot.join("HEAD")
+    } else {
+        let text = std::fs::read_to_string(&dot).ok()?;
+        let dir = text.trim().strip_prefix("gitdir:")?.trim();
+        let dir = Path::new(dir);
+        let dir = if dir.is_absolute() { dir.to_path_buf() } else { workdir.join(dir) };
+        dir.join("HEAD")
+    };
+    let text = std::fs::read_to_string(head).ok()?;
+    let text = text.trim();
+    Some(text.strip_prefix("ref: refs/heads/").unwrap_or("(detached)").to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Call, RESULT_LIMIT, Tools, cut};
@@ -2131,5 +2148,24 @@ mod tests {
         let cut = cut(text);
         assert!(cut.starts_with("start") && cut.ends_with("end") && cut.contains("bytes cut"));
         assert!(cut.len() < RESULT_LIMIT + 100);
+    }
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::git_branch_at;
+
+    #[test]
+    fn reads_the_branch_from_a_linked_worktree() {
+        let base = std::env::temp_dir().join(format!("autobot-worktree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        let wt = base.join("wt");
+        std::fs::create_dir_all(repo.join(".git/worktrees/wt")).unwrap();
+        std::fs::write(repo.join(".git/worktrees/wt/HEAD"), "ref: refs/heads/feature/dev\n").unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: ../repo/.git/worktrees/wt\n").unwrap();
+        assert_eq!(git_branch_at(&wt).as_deref(), Some("feature/dev"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

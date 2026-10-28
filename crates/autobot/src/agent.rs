@@ -44,6 +44,11 @@ pub struct Options {
     /// The model that summarizes earlier conversations for `search_sessions` (None: the agent's
     /// own; `off`: no summaries) ([crate::recall]).
     pub recall_model: Option<String>,
+    /// A compact map of the coding project, built when the session starts ([crate::repo_map]).
+    /// None outside a coding session.
+    pub repo_map: Option<String>,
+    /// Reviewing a change rather than making one: read-only, findings only ([crate::for_review]).
+    pub review: bool,
 }
 
 /// A bot's name.
@@ -1148,7 +1153,14 @@ impl Agent {
             );
             prompt.push_str(&self.team.prompt());
         }
-        if let Some(branch) = self.tools.git_branch() {
+        if self.options.review {
+            prompt.push_str(
+                "\n\nReview mode: you are reviewing a change, not making one. You have read-only tools. Do not \
+                 edit, write, commit, or run commands that change anything. Read files when the diff is not \
+                 enough. Report only actionable findings, most severe first, each with file:line and a concrete \
+                 fix; say \"No actionable findings\" when there are none. Do not restate the diff.",
+            );
+        } else if let Some(branch) = self.tools.git_branch() {
             prompt.push_str(&format!(
                 "\n\nThe working directory is a git repository (branch {branch}). Work on it like a careful \
                  senior engineer: find your way with `search` and `find_files`, read the code before you change \
@@ -1156,6 +1168,13 @@ impl Agent {
                  build, linter and tests and fix what you broke. Never commit, push, or rewrite history unless \
                  the owner asks. When done, say what you changed and how you checked it, briefly."
             ));
+        }
+        if let Some(map) = &self.options.repo_map {
+            prompt.push_str(
+                "\n\nA map of the project, to orient you (a snapshot; use `search`, `find_files` and `read_file` \
+                 for the current truth):\n",
+            );
+            prompt.push_str(map);
         }
         if let Some(notes) = self.tools.project_notes() {
             prompt.push_str("\n\nThe project's instructions for agents (follow them):\n");

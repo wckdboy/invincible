@@ -234,6 +234,7 @@ where
 const MODES: &[(&str, &str, &str)] = &[
     ("ask", "Ask", "Ask before commands, writes and reads outside the project"),
     ("edits", "Edits", "Changes in the project without asking; ask for the rest"),
+    ("auto", "Auto", "Commands and project changes without asking; network and outside reads ask"),
     ("allowlist", "Allowlist", "Allowlisted commands and project changes; refuse the rest"),
     ("trust", "Trust", "Everything without asking"),
 ];
@@ -242,6 +243,7 @@ fn mode_name(mode: ApprovalMode) -> &'static str {
     match mode {
         ApprovalMode::Ask => "ask",
         ApprovalMode::Edits => "edits",
+        ApprovalMode::Auto => "auto",
         ApprovalMode::Allowlist => "allowlist",
         ApprovalMode::Trust => "trust",
     }
@@ -251,6 +253,7 @@ fn mode_of(name: &str) -> Result<ApprovalMode, Failure> {
     Ok(match name {
         "ask" => ApprovalMode::Ask,
         "edits" => ApprovalMode::Edits,
+        "auto" => ApprovalMode::Auto,
         "allowlist" => ApprovalMode::Allowlist,
         "trust" => ApprovalMode::Trust,
         other => return Err((INVALID_PARAMS, format!("no mode {other:?}"))),

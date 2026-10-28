@@ -293,6 +293,16 @@ autobot code --model anthropic --approvals edits   # the first time
 autobot                                            # after that, in any git repository
 ```
 
+From this checkout, without replacing the installed binaries or restarting the services:
+
+```sh
+cargo build --release -p invincible -p autobot
+./target/release/autobot doctor    # the node on 127.0.0.1:7777
+./target/release/autobot map       # what a coding session starts with
+./target/release/autobot code      # in a project
+./target/release/autobot review    # the current diff, read-only
+```
+
 Naming a provider the gateway does not have yet (`anthropic`, `deepseek`, …) sets it up there and
 then: the key is asked for (not shown), added with `invincible cloud add`, and the gateway
 service restarted. The model and approvals are remembered (`~/.autobot/code.json`), and plain
@@ -361,8 +371,17 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   in small edits, run the build and tests, never commit unless asked). `search` (regular
   expressions over the files, `.gitignore` respected) and `find_files` (globs) find code without a
   shell command to approve; `read_file` reads long files in parts.
+- **The map:** a coding session starts with a compact map of the project: its code directories,
+  the files with the most top-level symbols and those symbols, built from the files git tracks
+  (or a filtered walk outside git). It is a snapshot for orientation; `search`, `find_files` and
+  `read_file` are the current truth. It is built once per session, balanced across crates and
+  apps, and capped at 4 KiB. `autobot map` prints the same map for the current project.
+- **Review:** `autobot review` takes the current diff (`--staged` for staged changes, `--base <ref>`
+  against a branch) and sends it to a separate, read-only reviewer session. `--model <id>` chooses
+  a second model through the gateway. It changes nothing and prints only actionable findings.
 - **Control:** `edits` approvals let changes in the project run without asking (commands still
-  ask); `/undo` puts back every file the last turn changed and hands its request back to edit.
+  ask); `auto` lets commands and changes run in the project, closer to an unattended coding
+  agent; `/undo` puts back every file the last turn changed and hands its request back to edit.
   `@path` attaches a file (typing `@` lists the project's files, matched as you type; tab
   completes), `!command` runs one yourself and hands its output to the next message.
 - **Commands:** typing `/` opens a list of them with a line about each, narrowed as you type
@@ -433,7 +452,7 @@ opened, with the same gateway, model, receipts and memory:
   task list is Zed's plan.
 - **Approvals:** what your approval mode asks about becomes Zed's permission prompt: allow once,
   always allow (for the session), or reject. The modes are the approval modes (`ask`, `edits`,
-  `allowlist`, `trust`), switched from Zed's mode menu; the model is picked there too, from
+  `auto`, `allowlist`, `trust`), switched from Zed's mode menu; the model is picked there too, from
   the gateway's models.
 - **Files and commands through the editor:** reads and edits go through Zed's open buffers
   (unsaved changes included), so the agent's edits land in the editor and its undo. Commands
@@ -510,6 +529,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     yes, always for this session, or no.
   - `edits`: like `ask`, but writes and edits in the working directory (not under dot names) run
     without asking; each is shown as a diff, and `/undo` puts it back. For coding.
+  - `auto`: for autonomous coding. Commands and writes in the working directory run without
+    asking; reads and writes outside it, hidden files, cloud, fetch, MCP and Home Assistant still
+    ask. Commands can reach outside the directory, so use it in a project you trust; `/undo`
+    still puts back file changes. `autobot code --approvals auto` is the one-flag version.
   - `allowlist`: for unattended use. Allowlisted commands and writes in the working directory run;
     everything else is refused without asking. An allowlist entry matches the whole command or the
     command plus arguments, never a chained one (`git status; rm -rf ~` does not match
@@ -1274,6 +1297,12 @@ machine; `autobot` grew with the editor protocol, Home Assistant and WhatsApp.)
 ## Open questions
 
 - Region tier: trusted operators only, or a design that is safe with strangers' compute?
+
+## Where this fits
+
+Invincible is the compute brick: one node, every model, one endpoint, a signed receipt for every call. It is a separate product from Autobot, joined by one protocol; neither is a feature of the other. The node is the natural host for the rest of the stack's state, including the world layer while its shape is still open.
+
+[The brick map](https://wckd.ai/architecture/) · WCKD
 
 ## License
 
