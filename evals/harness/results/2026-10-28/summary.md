@@ -82,7 +82,8 @@ framework, not another executor. It was installed and run here:
 
 The pinned OpenCode 1.14.18 cannot parse this machine's newer global OpenCode config
 (`mcp.servers`), so the run used an isolated `XDG_CONFIG_HOME` and an `OPENCODE_CONFIG_CONTENT`
-DeepSeek provider. That is a setup detail, not a Harness² result.
+DeepSeek provider. That is a setup detail, not a Harness² result. The exact labels and outputs are
+in `harness2.md`.
 
 ## The local evolution loop
 
