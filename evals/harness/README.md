@@ -17,7 +17,8 @@ python3 evals/harness/run.py --agents autobot --only write-exact,fix-failing-tes
 ```
 
 The report is printed and written to `evals/harness/runs/<timestamp>/report.md`, with each run's
-`stdout.log`, `stderr.log`, final project tree and `results.json`. `runs/` is ignored.
+`stdout.log`, `stderr.log`, final project tree and `results.json`. `runs/` is ignored. A
+recorded first run is in [`results/2026-10-28/summary.md`](results/2026-10-28/summary.md).
 
 Agents run with their permission checks bypassed, in directories under the run folder. Use a
 disposable machine or container for an agent you do not trust. Claude Code spends subscription or
@@ -77,9 +78,18 @@ repository, but they are cheap enough to run after every harness change.
 The fair harness comparison holds the model fixed and changes only the loop around it. Two ways:
 
 1. **Use Invincible as the model backend.** Invincible serves `/v1/chat/completions` and
-   `/v1/messages` on `127.0.0.1:7777`. Claude Code accepts `ANTHROPIC_BASE_URL` and a model name;
-   OpenCode and Hermes accept OpenAI-compatible providers. Put the same `qwen3.8-27b` behind each
-   and rerun. Tool-call and long-context differences are then properties of the harness.
+   `/v1/messages` on `127.0.0.1:7777`. OpenCode is wired for this:
+
+   ```sh
+   python3 evals/harness/run.py --agents opencode --opencode-invincible
+   ```
+
+   It sets a private OpenCode provider to the node's `qwen3.8-27b` with a 32768 context and an
+   8192-token output limit, using `invincible token`. Claude Code accepts `ANTHROPIC_BASE_URL`
+   and a model name, but this node's current chat template refuses the mid-conversation system
+   message Claude Code sends; a template that accepts one is needed. Hermes accepts
+   OpenAI-compatible providers through its config. Put the same model behind each and rerun;
+   tool-call and long-context differences are then properties of the harness.
 2. **Use the same cloud model everywhere.** Set `HARNESS_CLAUDE_MODEL` and the provider configs to
    the same model, then rerun all agents.
 
