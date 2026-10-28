@@ -19,6 +19,8 @@ python3 evals/harness/run.py --agents autobot --only write-exact,fix-failing-tes
 The report is printed and written to `evals/harness/runs/<timestamp>/report.md`, with each run's
 `stdout.log`, `stderr.log`, final project tree and `results.json`. `runs/` is ignored. A
 recorded first run is in [`results/2026-10-28/summary.md`](results/2026-10-28/summary.md).
+Every task gets a fresh directory and, for Autobot, a fresh session (`--session` includes the run
+and task); otherwise the previous task's conversation leaks into the next one.
 
 Agents run with their permission checks bypassed, in directories under the run folder. Use a
 disposable machine or container for an agent you do not trust. Claude Code spends subscription or

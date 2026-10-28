@@ -428,7 +428,8 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   file:line references, so the main conversation keeps what it found and not every file it
   read; reads in one reply run at the same time.
 - **From other tools:** `autobot run -C DIR --model M --approvals edits --cloud "task"` does one
-  task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
+  task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else). Each run
+  starts a fresh conversation; `--session NAME` continues one on purpose. `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
   Nobody watches such a run, so its commands run sandboxed like a scheduled task's (see

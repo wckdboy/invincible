@@ -65,8 +65,9 @@ enum Command {
     /// Do one task and print the answer. Anything that needs approval is refused unless allowlisted.
     Run {
         task: String,
-        #[arg(long, default_value = "run")]
-        session: String,
+        /// Continue this conversation instead of starting a fresh one.
+        #[arg(long)]
+        session: Option<String>,
         /// Work in this directory (a project: its AGENTS.md, search tools, undo).
         #[arg(long, short = 'C')]
         dir: Option<PathBuf>,
@@ -729,6 +730,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
                 let models = agent.gateway.model_info().await.unwrap_or_default();
                 autobot::use_model(&mut agent, &config, &models, model)?;
             }
+            let session = session.unwrap_or_else(fresh_run_session);
             let mut session = Session::open(&home.join("sessions"), &session)?;
             let streamed = std::sync::atomic::AtomicBool::new(false);
             // Streamed text that has not ended its line yet.
@@ -1635,6 +1637,12 @@ fn approval_mode(mode: &str) -> Result<config::ApprovalMode, String> {
 }
 
 /// [event] as a JSON line (`autobot run --json`).
+/// A fresh conversation for one `autobot run`: it must not see the last task's context.
+fn fresh_run_session() -> String {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_nanos());
+    format!("run-{}-{nanos}", std::process::id())
+}
+
 fn event_json(event: &Event) -> serde_json::Value {
     use serde_json::json;
     match event {
@@ -2270,6 +2278,22 @@ fn hooks(action: Option<HooksAction>, config: &Config, home: &std::path::Path) -
             }
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::fresh_run_session;
+
+    #[test]
+    fn one_shot_runs_get_fresh_valid_session_names() {
+        let first = fresh_run_session();
+        let second = fresh_run_session();
+        assert_ne!(first, second);
+        assert!(
+            first.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "not a session name: {first}"
+        );
     }
 }
 
