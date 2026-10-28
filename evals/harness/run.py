@@ -414,6 +414,11 @@ def main() -> int:
     parser.add_argument("--only", default="", help="comma-separated task ids")
     parser.add_argument("--out", type=Path, default=None, help="run directory (default: runs/<timestamp>)")
     parser.add_argument("--timeout-scale", type=float, default=1.0, help="multiply each task's timeout")
+    parser.add_argument(
+        "--opencode-invincible",
+        action="store_true",
+        help="run OpenCode through this node's model (a controlled harness comparison)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="print the commands; run nothing")
     parser.add_argument("--list-agents", action="store_true", help="show which agents are ready and exit")
     args = parser.parse_args()
@@ -448,6 +453,31 @@ def main() -> int:
     if not ready:
         print("No agent is ready:", "; ".join(f"{name}: {why}" for name, why in skipped.items()), file=sys.stderr)
         return 1
+    if args.opencode_invincible:
+        if "opencode" not in ready:
+            print("--opencode-invincible needs a ready OpenCode", file=sys.stderr)
+            return 1
+        try:
+            token = subprocess.check_output(["invincible", "token"], text=True).strip()
+        except (OSError, subprocess.CalledProcessError) as why:
+            print(f"could not read the node token (`invincible token`): {why}", file=sys.stderr)
+            return 1
+        os.environ["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {
+                    "invincible": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "name": "Invincible",
+                        "options": {"baseURL": "http://127.0.0.1:7777/v1", "apiKey": token},
+                        "models": {"qwen3.8-27b": {"limit": {"context": 32768, "output": 8192}}},
+                    }
+                },
+            }
+        )
+        AGENTS["opencode"]["model"] = "invincible/qwen3.8-27b"
+        ready["opencode"]["model"] = "invincible/qwen3.8-27b"
+        print("OpenCode: through this node (qwen3.8-27b); other agents keep their own models.")
     if args.dry_run:
         for name in ready:
             example = Path("/tmp/example")

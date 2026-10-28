@@ -454,7 +454,7 @@ It is not graded by a model, and each agent's model and version are kept with th
 
 ```sh
 python3 evals/harness/run.py --agents autobot
-python3 evals/harness/run.py --agents autobot,claude,hermes,opencode,pi
+python3 evals/harness/run.py --agents autobot,claude,codex,hermes,opencode,pi
 ```
 
 Missing or signed-out agents are skipped. A report (`report.md`) and each run's logs and final

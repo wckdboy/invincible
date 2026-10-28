@@ -12,7 +12,7 @@ point the agents at the same model first (see [Same model](#same-model)).
 
 ```sh
 python3 evals/harness/run.py --agents autobot
-python3 evals/harness/run.py --agents autobot,claude,hermes,opencode,pi
+python3 evals/harness/run.py --agents autobot,claude,codex,hermes,opencode,pi
 python3 evals/harness/run.py --agents autobot --only write-exact,fix-failing-test
 ```
 
