@@ -73,6 +73,33 @@ single-purpose: write exact bytes, fix a sign bug, add and export a function, re
 files, respect a one-file constraint, fix an off-by-one. They are not a substitute for a real
 repository, but they are cheap enough to run after every harness change.
 
+## Harder tasks and fixtures
+
+`tasks-hard.jsonl` holds three tasks that take longer and need more than one step: a change buried
+in a 177-line module, an implementation against a written specification, and a bug that crosses
+two files. Their starting projects live in `fixtures/` and are copied in before the run; a task
+can also use an inline `setup` object.
+
+```sh
+python3 evals/harness/run.py --agents autobot --tasks evals/harness/tasks-hard.jsonl --timeout-scale 2
+```
+
+## Evolving the harness
+
+`evolve.py` runs the Harness² loop locally: it takes the failures and slow passes, gives them to
+Autobot as `feedback.md` plus a copy of each failed project, and asks for a general `AGENTS.md`.
+It then reruns the suite with that file in every project and keeps the profile only when it passes
+more tasks, or passes the same number at least 10% faster.
+
+```sh
+python3 evals/harness/evolve.py --tasks evals/harness/tasks-hard.jsonl --rounds 1
+python3 evals/harness/evolve.py --baseline evals/harness/runs/hard-baseline --slow-seconds 180
+```
+
+The generated `AGENTS.md` is a normal file; read it, edit it, or reject it. Every round's feedback,
+runs and the kept profile stay under `evals/harness/runs/evolve-<timestamp>/`. `--baseline` reuses
+an existing run's `results.json` instead of paying for the baseline again.
+
 ## Same model
 
 The fair harness comparison holds the model fixed and changes only the loop around it. Two ways:

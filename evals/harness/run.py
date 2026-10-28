@@ -160,7 +160,7 @@ def detect(name: str) -> tuple[bool, str, str]:
     return True, "", version
 
 
-def command_for(name: str, prompt: str, workdir: Path) -> tuple[list[str], dict[str, str]]:
+def command_for(name: str, prompt: str, workdir: Path, session: str) -> tuple[list[str], dict[str, str]]:
     exe = shutil.which(AGENTS[name]["exe"]) or AGENTS[name]["exe"]
     model = AGENTS[name]["model"]
     env = dict(os.environ)
@@ -168,7 +168,8 @@ def command_for(name: str, prompt: str, workdir: Path) -> tuple[list[str], dict[
     # `cwd=` changes the real cwd but not PWD; some agents (OpenCode) read PWD as the workspace.
     env["PWD"] = str(workdir)
     if name == "autobot":
-        command = [exe, "run", "-C", str(workdir), "--approvals", "auto", "--session", "harness"]
+        # A session per task and run: a shared session leaks the last task's context into this one.
+        command = [exe, "run", "-C", str(workdir), "--approvals", "auto", "--session", session]
         if model:
             command += ["--model", model]
         command.append(prompt)
@@ -303,13 +304,26 @@ def checks_for(task: dict, workdir: Path, before: dict[str, str]) -> list[dict]:
 
 # --- running --------------------------------------------------------------------------------
 
-def run_one(agent: str, task: dict, out: Path, timeout_scale: float) -> dict:
+def run_one(
+    agent: str, task: dict, out: Path, timeout_scale: float, profile: Path | None = None, run_id: str = ""
+) -> dict:
     workdir = (out / "work").resolve()
     if workdir.exists():
         shutil.rmtree(workdir)
     workdir.mkdir(parents=True)
-    before = write_setup(workdir, task.get("setup", {}))
-    command, env = command_for(agent, task["prompt"], workdir)
+    before = {}
+    if task.get("fixture"):
+        fixture = (ROOT / task["fixture"]).resolve()
+        if not fixture.is_dir():
+            raise SystemExit(f"task {task['id']}: fixture {fixture} is not a directory")
+        shutil.copytree(fixture, workdir, dirs_exist_ok=True)
+        for path in fixture.rglob("*"):
+            if path.is_file():
+                before[path.relative_to(fixture).as_posix()] = sha256(path)
+    before.update(write_setup(workdir, task.get("setup", {})))
+    if profile:
+        shutil.copytree(profile, workdir, dirs_exist_ok=True)
+    command, env = command_for(agent, task["prompt"], workdir, f"harness-{run_id}-{task['id']}")
     timeout = max(30, int(task.get("timeout", 300) * timeout_scale))
     started = time.monotonic()
     timed_out = False
@@ -374,9 +388,13 @@ def run_one(agent: str, task: dict, out: Path, timeout_scale: float) -> dict:
     }
 
 
-def markdown_report(results: list[dict], agents: dict[str, dict], tasks: list[dict], skipped: dict[str, str]) -> str:
+def markdown_report(
+    results: list[dict], agents: dict[str, dict], tasks: list[dict], skipped: dict[str, str], profile: Path | None = None
+) -> str:
     lines = ["# Coding-agent harness comparison", ""]
     lines.append(f"Run: {datetime.now().astimezone().isoformat(timespec='seconds')}")
+    if profile:
+        lines.append(f"Harness profile: `{profile}`")
     lines.append("")
     lines.append("| Agent | Model | Version | Passed | Total | Time |")
     lines.append("| --- | --- | --- | ---: | ---: | ---: |")
@@ -413,6 +431,7 @@ def main() -> int:
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS, help="JSON Lines task file")
     parser.add_argument("--only", default="", help="comma-separated task ids")
     parser.add_argument("--out", type=Path, default=None, help="run directory (default: runs/<timestamp>)")
+    parser.add_argument("--profile", type=Path, default=None, help="copy this harness profile into every task directory")
     parser.add_argument("--timeout-scale", type=float, default=1.0, help="multiply each task's timeout")
     parser.add_argument(
         "--opencode-invincible",
@@ -481,11 +500,12 @@ def main() -> int:
     if args.dry_run:
         for name in ready:
             example = Path("/tmp/example")
-            command, _ = command_for(name, "<task prompt>", example)
+            command, _ = command_for(name, "<task prompt>", example, "harness-dry-run")
             print(f"{name}: {' '.join(command)}")
         return 0
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     out = args.out or (ROOT / "runs" / stamp)
     out.mkdir(parents=True, exist_ok=True)
     print(f"run: {out}")
@@ -498,14 +518,24 @@ def main() -> int:
         for task in tasks:
             run_dir = out / name / task["id"]
             print(f"  {AGENTS[name]['label']:14} {task['id']:20} ", end="", flush=True)
-            result = run_one(name, task, run_dir, args.timeout_scale)
+            result = run_one(name, task, run_dir, args.timeout_scale, args.profile, run_id)
             results.append(result)
             print(f"{result['status']:7} {result['duration']:6.1f}s  {result['summary'][:90]}")
 
-    report = markdown_report(results, ready, tasks, skipped)
+    report = markdown_report(results, ready, tasks, skipped, args.profile)
     (out / "report.md").write_text(report, encoding="utf-8")
     (out / "results.json").write_text(
-        json.dumps({"agents": ready, "skipped": skipped, "tasks": [task["id"] for task in tasks], "results": results}, indent=2),
+        json.dumps(
+            {
+                "agents": ready,
+                "skipped": skipped,
+                "tasks": [task["id"] for task in tasks],
+                "profile": str(args.profile) if args.profile else None,
+                "run_id": run_id,
+                "results": results,
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     print()

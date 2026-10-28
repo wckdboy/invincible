@@ -458,12 +458,15 @@ python3 evals/harness/run.py --agents autobot,claude,codex,hermes,opencode,pi
 ```
 
 Missing or signed-out agents are skipped. A report (`report.md`) and each run's logs and final
-tree are written under `evals/harness/runs/`. To compare harnesses rather than models, point the
-agents at the same model first (Invincible serves both `/v1/chat/completions` and
-`/v1/messages`); the README in that directory shows how. [Harness²](https://github.com/google-research/harness2)
-is not another row: it improves a harness around a frozen model, and can be used to evolve an
-OpenCode/Codex executor before running it here, or the same failure-driven loop can add project
-skills and `AGENTS.md` to Autobot and rerun this suite.
+tree are written under `evals/harness/runs/`. `tasks-hard.jsonl` adds a buried edit, a
+specification implementation and a cross-file bug, with their projects in `fixtures/`. To compare
+harnesses rather than models, point the agents at the same model first (Invincible serves both
+`/v1/chat/completions` and `/v1/messages`); the README in that directory shows how.
+[Harness²](https://github.com/google-research/harness2) is not another row: it improves a harness
+around a frozen model. It ran its local demo here; a model-backed JobBench task runs through
+OpenCode with DeepSeek. `evals/harness/evolve.py` applies the same loop to Autobot: failures and
+slow passes become a general `AGENTS.md`, the suite is rerun, and the profile is kept only when
+it passes more checks or is at least 10% faster. `--baseline` reuses an existing run.
 
 ### In your editor: Zed and other ACP editors
 
