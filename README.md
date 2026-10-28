@@ -32,7 +32,7 @@ Early, and used daily. What is built, and what is not yet:
 | Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
-| Control panel | A zero-dependency authenticated panel for the node and agent: sessions, approvals, streamed tasks, history, audit log and receipts; scrypt, signed sessions, CSRF, CSP; no provider keys in the browser. Working on the alpha stack (gateway + Autobot + panel behind Traefik); the Docker Compose with Caddy is in [platform/services/agent](https://github.com/WCKDai/platform/tree/main/services/agent) |
+| Control panel | A zero-dependency authenticated panel with rooms for chat, workspaces, bots, integrations, usage and settings: live sessions and transcripts, approvals, a thread with its own worktree and one-click PR, a connector matrix and token files, today's tokens and cost, model/approval/tool settings and advanced dotted keys; scrypt, signed sessions, CSRF, CSP; no provider keys in the browser. Working on the alpha stack (gateway + Autobot + panel behind Traefik); the Docker Compose with Caddy is in [platform/services/agent](https://github.com/WCKDai/platform/tree/main/services/agent) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code and 26 agent tasks, on local models and a frontier one (DeepSeek V3): 30/50 against 45/50 on the code tasks; every run kept, so the gap is followed over time |
 
@@ -311,6 +311,12 @@ cargo build --release -p invincible -p autobot
 ./target/release/autobot map       # what a coding session starts with
 ./target/release/autobot code      # in a project
 ./target/release/autobot review    # the current diff, read-only
+
+autobot thread start --name "fix checkout"   # a worktree and branch of its own
+autobot thread list
+autobot thread diff t-… --stat
+autobot thread pr t-… --title "Fix checkout" # gh, GH_TOKEN or a compare link
+autobot thread remove t-… --force
 ```
 
 Naming a provider the gateway does not have yet (`anthropic`, `deepseek`, …) sets it up there and
@@ -446,6 +452,20 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   run, not a setting, so the workflow file shows it; the run prints it on standard error before
   it starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks
   and the board stay confined.
+
+### Threads and pull requests
+
+A thread is a conversation with a checkout of its own. `autobot thread start` runs
+`git worktree add` from the project, on a branch `autobot/<id>`, and records the session id with
+it; every turn in that session uses the worktree, so two agents can work in parallel without
+touching each other's files. The registry is `$AUTOBOT_HOME/threads.json`; a removed thread leaves
+a tombstone, so its old session cannot silently fall back to the main checkout.
+
+`autobot thread diff` stages the worktree and shows it against its base, new files included.
+`autobot thread pr` commits, pushes, and opens a pull request: it uses `gh` when it is installed
+and signed in, otherwise the GitHub API with `GH_TOKEN` or `GITHUB_TOKEN`, otherwise it returns
+the compare link after the push. The panel's **Workspaces** room does the same with clicks; **Use**
+puts the thread's session in **Chat**.
 
 ### Compare harnesses
 
@@ -865,10 +885,16 @@ The node and the agent share one operator surface: a zero-dependency Node panel,
 gateway and Autobot in the same stack. It has a scrypt password, signed HttpOnly
 `SameSite=Strict` sessions, CSRF tokens, login rate limiting and a strict CSP. The browser talks
 only to the panel, which proxies the gateway and agent calls it needs with the node's token, so
-provider keys never reach it. It shows gateway health, models, sessions, approvals, the audit log
-and receipts; a task streams as text, tool calls and receipts, and the history is readable
-afterwards. The alpha runs it behind Coolify's Traefik; the Docker Compose with Caddy is in
-[`platform/services/agent`](https://github.com/WCKDai/platform/tree/main/services/agent).
+provider keys never reach it.
+
+The rooms are **Overview** (gateway, agent, today's tokens and cost, approvals), **Chat** (a
+transcript, a streamed turn, a new conversation), **Workspaces** (a thread's worktree, diff and
+pull request), **Bots** (list, add, enable, disable, reload), **Integrations** (the connector
+matrix, write-only token files, MCP servers), **Usage** (tokens, cost, models, tools, failures,
+the gateway audit) and **Settings** (providers, the bot's model, approvals, tool groups and any
+advanced dotted key). Provider keys stay in the gateway; the panel shows the models and the
+policy, never a key. The alpha runs it behind Coolify's Traefik; the Docker Compose with Caddy is
+in [`platform/services/agent`](https://github.com/WCKDai/platform/tree/main/services/agent).
 
 ## Bots and channels
 

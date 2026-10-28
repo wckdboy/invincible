@@ -61,6 +61,8 @@ pub struct BotApi {
     open: Mutex<HashMap<String, (Shared, std::time::Instant)>>,
     /// Messages for a session's running turn (`…/steer`).
     inboxes: Mutex<HashMap<String, crate::tools::Inbox>>,
+    /// Threads in this bot's home: the session-to-worktree map.
+    threads: Arc<crate::threads::Threads>,
 }
 
 /// The questions turns are waiting on, by id: where to send the answer, and the question as
@@ -78,11 +80,42 @@ struct Open {
 
 impl BotApi {
     fn new(runtime: Arc<Runtime>, info: Value) -> Arc<Self> {
-        Arc::new(Self { runtime, info, open: Mutex::default(), inboxes: Mutex::default() })
+        let threads = Arc::new(crate::threads::Threads::new(runtime.home.clone()));
+        Arc::new(Self { runtime, info, open: Mutex::default(), inboxes: Mutex::default(), threads })
     }
 
     fn agent(&self) -> Arc<Agent> {
         self.runtime.agent()
+    }
+
+    /// The bot as the settings editor sees it: its file, home and current configuration.
+    fn def(&self) -> crate::bots::Def {
+        crate::bots::Def {
+            name: self.runtime.name.clone(),
+            root: self.runtime.root.clone(),
+            home: self.runtime.home.clone(),
+            config: self.runtime.config.clone(),
+            default: self.runtime.default,
+        }
+    }
+
+    /// The agent for [session]: the bot's own, or a copy whose tools and project map run in a
+    /// thread's worktree.
+    fn agent_for(&self, session: &str) -> Result<Arc<Agent>, String> {
+        let base = self.agent();
+        let Some(thread) = self.threads.get(session)? else {
+            if self.threads.is_removed(session)? {
+                return Err(format!("thread {session} was removed; its worktree is gone"));
+            }
+            return Ok(base);
+        };
+        if !thread.worktree.is_dir() {
+            return Err(format!("the worktree for thread {} is gone ({})", thread.id, thread.worktree.display()));
+        }
+        let mut agent = (*base).clone();
+        agent.tools = agent.tools.clone().with_workdir(thread.worktree.clone());
+        agent.options.repo_map = crate::repo_map::render(&thread.worktree, 4096);
+        Ok(Arc::new(agent))
     }
 
     fn home(&self) -> &std::path::Path {
@@ -384,7 +417,7 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/healthz", get(|| async { Json(json!({ "status": "ok", "version": invincible::version::VERSION })) }));
     let guarded = Router::new()
         .route("/v1/agent", get(info))
-        .route("/v1/agent/bots", get(bots))
+        .route("/v1/agent/bots", get(bots).post(add_bot))
         .route("/v1/agent/bots/{name}/enable", post(enable_bot))
         .route("/v1/agent/bots/{name}/disable", post(disable_bot))
         .route("/v1/agent/bots/reload", post(reload_bots))
@@ -398,6 +431,14 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/sessions/{id}/reset", post(reset))
         .route("/v1/agent/sessions/{id}/steer", post(steer))
         .route("/v1/agent/sessions/{id}/fork", post(fork))
+        .route("/v1/agent/threads", get(list_threads).post(new_thread))
+        .route("/v1/agent/threads/{id}", get(thread_info).delete(remove_thread))
+        .route("/v1/agent/threads/{id}/diff", get(thread_diff))
+        .route("/v1/agent/threads/{id}/pr", post(thread_pr))
+        .route("/v1/agent/settings", get(settings).post(set_setting))
+        .route("/v1/agent/model", post(set_model))
+        .route("/v1/agent/tools", post(set_tool))
+        .route("/v1/agent/secrets", post(set_secret))
         .route("/v1/agent/approvals", get(approvals))
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
@@ -490,6 +531,226 @@ async fn info(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot) -> Json<Valu
     info["bot"] = json!(bot.runtime.name);
     info["bots"] = json!(state.bots().iter().map(|b| b.runtime.name.clone()).collect::<Vec<_>>());
     Json(info)
+}
+
+/// `GET /v1/agent/settings`: what an operator can change, without any secret value.
+async fn settings(Bot(bot, _): Bot) -> Json<Value> {
+    let config = &bot.runtime.config;
+    let home = &bot.runtime.home;
+    let channels: Vec<Value> = [
+        ("telegram", config.telegram.enabled),
+        ("discord", config.discord.enabled),
+        ("slack", config.slack.enabled),
+        ("email", config.email.enabled),
+        ("signal", config.signal.enabled),
+        ("matrix", config.matrix.enabled),
+        ("whatsapp", config.whatsapp.enabled),
+    ]
+    .into_iter()
+    .map(|(name, on)| json!({ "name": name, "on": on }))
+    .collect();
+    let tools: Vec<Value> = crate::settings::tool_states(config)
+        .into_iter()
+        .map(|(group, on, items)| {
+            json!({
+                "group": group,
+                "on": on,
+                "tools": items.into_iter().map(|(name, on)| json!({ "name": name, "on": on })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Json(json!({
+        "bot": bot.runtime.name,
+        "default": bot.runtime.default,
+        "description": config.bot.description,
+        "gateway": {
+            "url": config.gateway.url,
+            "model": config.gateway.model,
+            "private": config.gateway.private,
+        },
+        "agent": {
+            "workdir": config.agent.workdir(home).display().to_string(),
+            "max_steps": config.agent.max_steps,
+            "sandbox": config.agent.sandbox,
+            "context_kib": config.agent.context_kib,
+            "tools": tools,
+            "disabled_tools": config.agent.disabled_tools,
+        },
+        "approvals": { "mode": config.approvals.mode, "allow": config.approvals.allow },
+        "personality": crate::personality::active(home),
+        "channels": channels,
+        "mcp": config.mcp.keys().collect::<Vec<_>>(),
+        "serve": config.serve.listen.to_string(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SettingBody {
+    key: String,
+    #[serde(default)]
+    value: String,
+    /// Store the value as a string, even when it looks like a number or an array (a token).
+    #[serde(default)]
+    literal: bool,
+}
+
+/// `POST /v1/agent/settings {"key", "value", "literal"?}`: a dotted configuration key. The
+/// result is checked as a whole before it is written; `autobot serve` reloads it within seconds.
+async fn set_setting(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Json(body): Json<SettingBody>) -> Response {
+    let key = body.key.trim();
+    if key.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the key is empty");
+    }
+    let item = if body.literal { crate::settings::literal(&body.value) } else { crate::settings::value(&body.value) };
+    match crate::settings::change(&bot.def(), key, Some(item)) {
+        Ok(_) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let effective = crate::settings::effective(&bot.def(), key).ok();
+            let mut answer = json!({ "ok": true, "key": key });
+            if let Some((value, from)) = effective {
+                answer["value"] = json!(value);
+                answer["from"] = json!(from);
+            }
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_config", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ModelBody {
+    model: String,
+}
+
+/// `POST /v1/agent/model {"model"}`: the model this bot uses (a gateway id, or `auto`).
+async fn set_model(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Json(body): Json<ModelBody>) -> Response {
+    let models = bot.agent().gateway.model_info().await.unwrap_or_default();
+    match crate::settings::set_model(&bot.def(), body.model.trim(), Some(&models)) {
+        Ok(said) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let mut answer = json!({ "ok": true, "model": body.model.trim(), "said": said });
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ToolBody {
+    target: String,
+    on: bool,
+}
+
+/// `POST /v1/agent/tools {"target", "on"}`: turn a tool group or a tool on or off.
+async fn set_tool(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Json(body): Json<ToolBody>) -> Response {
+    match crate::settings::set_tool(&bot.def(), body.target.trim(), body.on) {
+        Ok(said) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let mut answer = json!({ "ok": true, "said": said });
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct NewBotBody {
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    soul: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    tools: Option<Vec<String>>,
+    #[serde(default)]
+    approvals: Option<String>,
+    #[serde(default)]
+    workdir: Option<std::path::PathBuf>,
+    #[serde(default)]
+    telegram_token: Option<String>,
+    #[serde(default)]
+    discord_token: Option<String>,
+    #[serde(default)]
+    slack_app_token: Option<String>,
+    #[serde(default)]
+    slack_bot_token: Option<String>,
+}
+
+/// `POST /v1/agent/bots`: add a bot; it starts with the next fleet reload.
+async fn add_bot(State(state): State<Arc<ApiState>>, Json(body): Json<NewBotBody>) -> Response {
+    let Some(root) = &state.root else {
+        return error(StatusCode::CONFLICT, "not_configurable", "this agent has no bot configuration to change");
+    };
+    let new = crate::bots::NewBot {
+        description: body.description,
+        soul: body.soul,
+        model: body.model,
+        tools: body.tools,
+        approvals: body.approvals,
+        workdir: body.workdir,
+        telegram_token: body.telegram_token,
+        discord_token: body.discord_token,
+        slack_app_token: body.slack_app_token,
+        slack_bot_token: body.slack_bot_token,
+    };
+    match crate::bots::add(root, body.name.trim(), &new) {
+        Ok(path) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let mut answer = json!({ "ok": true, "name": body.name.trim(), "path": path.display().to_string() });
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct SecretBody {
+    /// A file name in the bot's home: `telegram.token`, `slack-bot.token`, `email.password`.
+    file: String,
+    value: String,
+}
+
+/// `POST /v1/agent/secrets {"file", "value"}`: write a connector token (or password) into the
+/// bot's home with mode 0600. The value is never returned or logged. Only a plain file name is
+/// accepted: not a path, so it cannot leave the home.
+async fn set_secret(Bot(bot, _): Bot, Json(body): Json<SecretBody>) -> Response {
+    let file = body.file.trim();
+    if file.is_empty()
+        || file == "."
+        || file == ".."
+        || file.contains('/')
+        || file.contains('\\')
+        || file.contains('\0')
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "the file must be a name in the bot's home, like telegram.token",
+        );
+    }
+    let value = body.value.trim();
+    if value.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the value is empty");
+    }
+    let path = bot.home().join(file);
+    match invincible::fsutil::replace_private(&path, &format!("{value}\n")) {
+        Ok(()) => Json(json!({ "ok": true, "file": file })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 /// `GET /v1/agent/bots`: every bot, running or not, with how it is doing.
@@ -599,6 +860,138 @@ async fn openai_chat(State(state): State<Arc<ApiState>>, Bot(bot, chosen): Bot, 
         _ => bot,
     };
     crate::homeassistant::conversation(bot.runtime.clone(), &body).await
+}
+
+/// `GET /v1/agent/threads`: every thread in the bot's home.
+async fn list_threads(Bot(bot, _): Bot) -> Response {
+    match bot.threads.list() {
+        Ok(list) => Json(json!({
+            "threads": list.iter().map(|thread| bot.threads.view(thread)).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct NewThread {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    base: Option<String>,
+}
+
+/// `POST /v1/agent/threads`: a new worktree and conversation from the bot's project.
+async fn new_thread(Bot(bot, _): Bot, Json(body): Json<NewThread>) -> Response {
+    let agent = bot.agent();
+    if agent.tools.ssh().is_some() || agent.tools.docker().is_some() {
+        return error(
+            StatusCode::CONFLICT,
+            "not_supported",
+            "threads need a local project; this agent runs commands over SSH or in a container",
+        );
+    }
+    let repo = agent.tools.workdir().to_path_buf();
+    let threads = bot.threads.clone();
+    let name = body.name;
+    let base = body.base;
+    let made = tokio::task::spawn_blocking(move || threads.create(&repo, base.as_deref(), &name)).await;
+    match made {
+        Ok(Ok(thread)) => Json(bot.threads.view(&thread)).into_response(),
+        Ok(Err(e)) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the thread task: {e}")),
+    }
+}
+
+/// `GET /v1/agent/threads/<id>`.
+async fn thread_info(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    match bot.threads.get(&id) {
+        Ok(Some(thread)) => Json(bot.threads.view(&thread)).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {id:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `GET /v1/agent/threads/<id>/diff`: the worktree against its base, new files included.
+async fn thread_diff(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    let threads = bot.threads.clone();
+    let wanted = id.clone();
+    match bot.threads.get(&id) {
+        Ok(Some(_)) => {}
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {id:?}")),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+    let made = tokio::task::spawn_blocking(move || threads.diff(&wanted, false)).await;
+    match made {
+        Ok(Ok(diff)) => Json(json!({ "id": id, "diff": diff })).into_response(),
+        Ok(Err(e)) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the diff task: {e}")),
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct PrBody {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    base: Option<String>,
+}
+
+/// `POST /v1/agent/threads/<id>/pr`: stage, commit, push and open the pull request. A branch
+/// can be pushed without a PR (no remote, no `gh`, no token); the compare link comes back.
+async fn thread_pr(Bot(bot, _): Bot, Path(id): Path<String>, Json(body): Json<PrBody>) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    if let Ok(None) = bot.threads.get(&id) {
+        return error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {id:?}"));
+    }
+    let threads = bot.threads.clone();
+    let wanted = id.clone();
+    let prepared = tokio::task::spawn_blocking(move || {
+        threads.prepare_pr(&wanted, body.title.as_deref(), body.body.as_deref(), body.base.as_deref())
+    })
+    .await;
+    let prepared = match prepared {
+        Ok(Ok(prepared)) => prepared,
+        Ok(Err(e)) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the PR task: {e}")),
+    };
+    let outcome = crate::threads::open_pr(&prepared).await;
+    let warning = bot.threads.record_pr(&id, &outcome).err();
+    let mut value = serde_json::to_value(&outcome).unwrap_or_else(|_| json!({}));
+    if let Some(warning) = warning {
+        value["warning"] = json!(warning);
+    }
+    Json(value).into_response()
+}
+
+/// `DELETE /v1/agent/threads/<id>[?force=1]`: remove the worktree and the branch.
+async fn remove_thread(
+    Bot(bot, _): Bot,
+    Path(id): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    let force = query.get("force").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let threads = bot.threads.clone();
+    let wanted = id.clone();
+    let removed = tokio::task::spawn_blocking(move || threads.remove(&wanted, force)).await;
+    match removed {
+        Ok(Ok(_)) => Json(json!({ "removed": id })).into_response(),
+        Ok(Err(e)) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the remove task: {e}")),
+    }
 }
 
 /// `GET /v1/agent/sessions`: every bot's conversations, newest first; `?bot=` only one's.
@@ -855,18 +1248,17 @@ fn stream_turn(
 ) -> Response {
     let inbox = bot.inbox(&id);
     let (tx, rx) = mpsc::unbounded_channel::<Value>();
-    let agent = if personality.is_some() || vision.is_some() {
-        let mut agent = (*bot.agent()).clone();
-        if personality.is_some() {
-            agent.options.personality = personality;
-        }
-        if vision.is_some() {
-            agent.options.vision = vision;
-        }
-        Arc::new(agent)
-    } else {
-        bot.agent()
+    let mut agent = match bot.agent_for(&id) {
+        Ok(agent) => (*agent).clone(),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
+    if personality.is_some() {
+        agent.options.personality = personality;
+    }
+    if vision.is_some() {
+        agent.options.vision = vision;
+    }
+    let agent = Arc::new(agent);
     let with_images = !images.is_empty();
     let waiting = state.waiting.clone();
     let runtime = bot.runtime.clone();

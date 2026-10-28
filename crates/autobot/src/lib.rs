@@ -61,6 +61,7 @@ pub mod slack;
 pub mod ssh;
 pub mod team;
 pub mod telegram;
+pub mod threads;
 pub mod tools;
 pub mod trajectory;
 pub mod tui;

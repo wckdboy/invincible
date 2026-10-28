@@ -230,6 +230,11 @@ enum Command {
         #[command(subcommand)]
         action: Option<SessionsAction>,
     },
+    /// Threads: a conversation with a git worktree and a branch of its own.
+    Thread {
+        #[command(subcommand)]
+        action: Option<ThreadAction>,
+    },
     /// What the agent remembered between conversations (`remember`): list, or forget one.
     Memory {
         /// The id of a fact to forget.
@@ -389,6 +394,53 @@ enum SessionsAction {
         /// Only say which would go.
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ThreadAction {
+    /// Start a thread: a new worktree and branch in the project (default: here).
+    Start {
+        /// The project [default: the current directory].
+        #[arg(long, short = 'C')]
+        repo: Option<PathBuf>,
+        /// The branch or commit to start from [default: the checked-out branch].
+        #[arg(long)]
+        base: Option<String>,
+        /// A name for the thread.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// List the threads and their checkouts.
+    List,
+    /// Show one thread.
+    Show { id: String },
+    /// Show the worktree's changes against its base.
+    Diff {
+        id: String,
+        /// Only the summary.
+        #[arg(long)]
+        stat: bool,
+    },
+    /// Commit, push and open a pull request for the thread (or print the compare link).
+    Pr {
+        id: String,
+        /// The pull request title (default: the thread's name, or the branch).
+        #[arg(long)]
+        title: Option<String>,
+        /// The pull request body.
+        #[arg(long)]
+        body: Option<String>,
+        /// The base branch (default: the thread's base).
+        #[arg(long)]
+        base: Option<String>,
+    },
+    /// Remove the thread's worktree and branch.
+    Remove {
+        id: String,
+        /// Discard uncommitted changes.
+        #[arg(long, short)]
+        force: bool,
     },
 }
 
@@ -1232,6 +1284,71 @@ fn run(mut cli: Cli) -> Result<(), String> {
                     println!("{line}");
                 }
             }
+        }
+        Command::Thread { action } => {
+            let threads = autobot::threads::Threads::new(home.clone());
+            match action.unwrap_or(ThreadAction::List) {
+                ThreadAction::Start { repo, base, name } => {
+                    let repo = match repo {
+                        Some(dir) => dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?,
+                        None => std::env::current_dir().map_err(|e| format!("the current directory: {e}"))?,
+                    };
+                    let thread = threads.create(&repo, base.as_deref(), name.as_deref().unwrap_or(""))?;
+                    println!("thread {}  (session {})", thread.id, thread.session);
+                    println!("  repo      {}", thread.repo.display());
+                    println!("  worktree  {}", thread.worktree.display());
+                    println!("  branch    {} from {}", thread.branch, thread.base);
+                    println!();
+                    println!("next: autobot run -C '{}' --session {} \"…\"", thread.worktree.display(), thread.session);
+                    println!("      or open the control panel and pick the thread.");
+                }
+                ThreadAction::List => {
+                    let list = threads.list()?;
+                    if list.is_empty() {
+                        println!("no threads; start one with `autobot thread start`");
+                    } else {
+                        println!("{:<16} {:<28} {:<10} {:>5}  name", "id", "branch", "changes", "ahead");
+                        for thread in list {
+                            let view = threads.view(&thread);
+                            let changes = if view["dirty"].as_bool() == Some(true) { "dirty" } else { "clean" };
+                            let ahead = view["ahead"].as_u64().unwrap_or(0);
+                            println!(
+                                "{:<16} {:<28} {:<10} {:>5}  {}",
+                                thread.id, thread.branch, changes, ahead, thread.name
+                            );
+                        }
+                    }
+                }
+                ThreadAction::Show { id } => {
+                    let thread = threads.get(&id)?.ok_or_else(|| format!("there is no thread {id:?}"))?;
+                    println!("{}", serde_json::to_string_pretty(&threads.view(&thread)).map_err(|e| e.to_string())?);
+                }
+                ThreadAction::Diff { id, stat } => {
+                    println!("{}", threads.diff(&id, stat)?);
+                }
+                ThreadAction::Pr { id, title, body, base } => {
+                    let prepared = threads.prepare_pr(&id, title.as_deref(), body.as_deref(), base.as_deref())?;
+                    let outcome = runtime()?.block_on(autobot::threads::open_pr(&prepared));
+                    let _ = threads.record_pr(&id, &outcome);
+                    println!("branch  {}", outcome.branch);
+                    if let Some(commit) = &outcome.commit {
+                        println!("commit  {commit}");
+                    }
+                    println!("pushed  {}", outcome.pushed);
+                    if let Some(url) = &outcome.pr_url {
+                        println!("pull request  {url}");
+                    }
+                    if let Some(url) = &outcome.compare_url {
+                        println!("compare  {url}");
+                    }
+                    println!("{}", outcome.message);
+                }
+                ThreadAction::Remove { id, force } => {
+                    threads.remove(&id, force)?;
+                    println!("removed thread {id}");
+                }
+            }
+            Ok(())
         }
         Command::Sessions { action: None | Some(SessionsAction::List) } => {
             for (name, modified) in autobot::session::list(&home.join("sessions")) {

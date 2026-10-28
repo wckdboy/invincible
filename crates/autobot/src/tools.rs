@@ -372,6 +372,12 @@ impl Tools {
         &self.workdir
     }
 
+    /// The same tools in another checkout (a thread's worktree).
+    pub fn with_workdir(mut self, workdir: PathBuf) -> Self {
+        self.workdir = workdir;
+        self
+    }
+
     pub fn home(&self) -> Option<&Path> {
         self.home.as_deref()
     }

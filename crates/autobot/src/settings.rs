@@ -32,6 +32,12 @@ pub fn value(text: &str) -> toml_edit::Item {
     }
 }
 
+/// [text] as a TOML string, always: for a token that is all digits, or a value that starts
+/// with a bracket but is meant literally.
+pub fn literal(text: &str) -> toml_edit::Item {
+    toml_edit::value(text)
+}
+
 /// The item at [key] in [doc], if it is set there.
 fn lookup<'a>(doc: &'a toml_edit::DocumentMut, key: &[&str]) -> Option<&'a toml_edit::Item> {
     let mut item = doc.as_item();
