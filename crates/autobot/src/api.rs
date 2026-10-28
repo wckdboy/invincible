@@ -1237,6 +1237,53 @@ async fn retry(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Path(id): P
     stream_turn(&state, bot, id, guard, text, crate::images::of(&request), Overrides::default())
 }
 
+/// One event in the stable turn stream (`spec/agent.md`, Turn events). Text and reasoning arrive
+/// as deltas; a diff and a tool result are capped so one event cannot flood a client.
+fn stream_event(event: Event) -> Value {
+    let mut value = match event {
+        Event::Text(text) => json!({ "type": "text", "delta": text }),
+        Event::Reasoning(text) => json!({ "type": "reasoning", "delta": text }),
+        Event::Tool(text) => json!({ "type": "tool", "text": text }),
+        Event::Refused(text) => json!({ "type": "refused", "text": text }),
+        Event::Diff(diff) => json!({ "type": "diff", "text": cap_event(diff, 64 * 1024) }),
+        Event::Change { path, before, after } => json!({
+            "type": "change",
+            "path": path.display().to_string(),
+            "before_bytes": before.len(),
+            "after_bytes": after.len(),
+        }),
+        Event::Output { name, text } => json!({
+            "type": "tool_output",
+            "name": name,
+            "text": cap_event(text, 8 * 1024),
+        }),
+        Event::Usage { input, output, cached } => {
+            json!({ "type": "usage", "input": input, "output": output, "cached": cached })
+        }
+        Event::Receipt { id, model, tier } => {
+            json!({ "type": "receipt", "id": id, "model": model, "tier": tier })
+        }
+        Event::Member { name, text } => json!({ "type": "member", "agent": name, "text": text }),
+    };
+    value["v"] = json!(1);
+    value
+}
+
+fn cap_event(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut cut = max;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}\n… {} bytes more (truncated in the event; the full result is in the conversation)",
+        &text[..cut],
+        text.len() - cut
+    )
+}
+
 /// Runs a turn of [bot] on its own task and streams its events.
 fn stream_turn(
     state: &Arc<ApiState>,
@@ -1263,39 +1310,28 @@ fn stream_turn(
     let with_images = !images.is_empty();
     let waiting = state.waiting.clone();
     let runtime = bot.runtime.clone();
+    let _ = tx.send(json!({ "v": 1, "type": "turn.started", "session": id }));
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
         let approver = ApiApprover { events: tx.clone(), waiting, session: id.clone(), bot: bot.runtime.name.clone() };
         let events = {
             let tx = tx.clone();
             move |event: Event| {
-                let _ = tx.send(match event {
-                    // The app shows the answer when it is done, and tool lines.
-                    Event::Text(_)
-                    | Event::Reasoning(_)
-                    | Event::Diff(_)
-                    | Event::Change { .. }
-                    | Event::Output { .. }
-                    | Event::Usage { .. } => return,
-                    Event::Tool(text) => json!({ "type": "tool", "text": text }),
-                    Event::Refused(text) => json!({ "type": "refused", "text": text }),
-                    Event::Receipt { id, model, tier } => {
-                        json!({ "type": "receipt", "id": id, "model": model, "tier": tier })
-                    }
-                    Event::Member { name, text } => json!({ "type": "member", "agent": name, "text": text }),
-                });
+                let _ = tx.send(stream_event(event));
             }
         };
         let Open { session, grants } = &mut *guard;
         let context = crate::tools::TurnContext { inbox: Some(inbox), ..Default::default() };
         let turn = agent.turn_with(session, &text, &images, &approver, grants, &events);
         let last = match crate::tools::TURN.scope(context, turn).await {
-            Ok(outcome) => json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts }),
+            Ok(outcome) => json!({
+                "v": 1, "type": "answer", "text": outcome.text, "receipts": outcome.receipts
+            }),
             // The router picked a model that cannot see, found out only now.
             Err(e) if with_images && crate::images::refuses_images(&e) => {
-                json!({ "type": "error", "code": "model_cannot_see_images", "text": e })
+                json!({ "v": 1, "type": "error", "code": "model_cannot_see_images", "text": e })
             }
-            Err(e) => json!({ "type": "error", "text": e }),
+            Err(e) => json!({ "v": 1, "type": "error", "text": e }),
         };
         // The nudge, when it is time, on its own copy: the conversation is free again; what it
         // kept follows the answer as `kept` events before the stream ends.
@@ -1306,7 +1342,7 @@ fn stream_turn(
             && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
         {
             for line in kept {
-                let _ = tx.send(json!({ "type": "kept", "text": line }));
+                let _ = tx.send(json!({ "v": 1, "type": "kept", "text": line }));
             }
         }
     });
@@ -1599,6 +1635,7 @@ impl Approver for ApiApprover {
             let id = invincible::token::hex(&bytes);
             let (tx, rx) = oneshot::channel();
             let mut event = json!({
+                "v": 1,
                 "type": "approval",
                 "id": id,
                 "text": format!("{}{}", crate::approval::asker(), action.describe()),
@@ -1643,5 +1680,38 @@ pub fn describe(action: &Action) -> Value {
         Action::Home { service, entities, data } => {
             json!({ "kind": "home", "service": service, "entities": entities, "data": data })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn events_are_versioned_and_typed() {
+        let text = stream_event(Event::Text("hi"));
+        assert_eq!(text["v"], 1);
+        assert_eq!(text["type"], "text");
+        assert_eq!(text["delta"], "hi");
+
+        let usage = stream_event(Event::Usage { input: 1, output: 2, cached: 3 });
+        assert_eq!(usage["v"], 1);
+        assert_eq!(usage["type"], "usage");
+        assert_eq!(usage["cached"], 3);
+
+        let change = stream_event(Event::Change { path: Path::new("a.txt"), before: "x", after: "xy" });
+        assert_eq!(change["type"], "change");
+        assert_eq!(change["before_bytes"], 1);
+        assert_eq!(change["after_bytes"], 2);
+    }
+
+    #[test]
+    fn a_large_tool_result_is_capped() {
+        let text = "x".repeat(9_000);
+        let event = stream_event(Event::Output { name: "read_file", text: &text });
+        let output = event["text"].as_str().unwrap();
+        assert!(output.len() < 9_000);
+        assert!(output.contains("truncated in the event"));
     }
 }

@@ -121,16 +121,24 @@ only>` (delivered only within 24 hours of that person's last message). A schedul
 ## Turn events
 
 `text/event-stream`: one `data: <json>` line per event, each followed by a blank line. Every event
-has a `type`:
+has `v` (the grammar version, currently `1`) and `type`. The grammar is additive: a client ignores
+types and fields it does not know; a field is never repurposed.
 
 | `type` | Fields | Meaning |
 |---|---|---|
+| `turn.started` | `session` | The turn began; the first event |
+| `text` | `delta` | Part of the answer, as the model streams it. `answer` repeats the complete text at the end, so a client can render live and replace it |
+| `reasoning` | `delta` | Part of the model's reasoning, when it streams it |
 | `tool` | `text` | A tool is about to run (`run: ls -la`, `write 120 bytes to /…`) |
+| `tool_output` | `name`, `text` | What a tool gave back, capped to 8 KiB in the event; the conversation has the full result |
+| `diff` | `text` | A change as a unified diff, before it is made, capped to 64 KiB |
+| `change` | `path`, `before_bytes`, `after_bytes` | The whole change, right after `diff`; byte lengths only (editors that hold files open use their own buffers) |
+| `usage` | `input`, `output`, `cached` | Tokens one model call used |
 | `refused` | `text` | A tool call was refused, by policy or by the owner |
 | `receipt` | `id`, `model`, `tier` | A model call finished; its signed receipt is at `GET /v1/receipts/{id}` |
-| `approval` | `id`, `text`, `action` | The agent waits for the owner: answer with `POST /v1/agent/approvals/{id}` |
+| `approval` | `id`, `text`, `action`, `bot`, `agent`? | The agent waits for the owner: answer with `POST /v1/agent/approvals/{id}` |
 | `member` | `agent`, `text` | A team member finished the task it was handed; `text` is its answer to the lead |
-| `answer` | `text`, `receipts` | The turn's answer; the last event of the turn |
+| `answer` | `text`, `receipts` | The turn's complete answer; the last event of the turn |
 | `error` | `text`, `code`? | The turn failed; the last event. `code` is `model_cannot_see_images` when the model the router picked refused the turn's images |
 | `kept` | `text` | After `answer`, when the turn was at a nudge: what the agent kept on its own (`profile: …`, `memory: …`), one event each. The stream stays open for it at most 30 seconds; the conversation is free for the next turn already |
 

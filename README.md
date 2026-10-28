@@ -888,7 +888,7 @@ only to the panel, which proxies the gateway and agent calls it needs with the n
 provider keys never reach it.
 
 The rooms are **Overview** (gateway, agent, today's tokens and cost, approvals), **Chat** (a
-transcript, a streamed turn, a new conversation), **Workspaces** (a thread's worktree, diff and
+transcript, a live turn, a new conversation), **Workspaces** (a thread's worktree, diff and
 pull request), **Bots** (list, add, enable, disable, reload), **Integrations** (the connector
 matrix, write-only token files, MCP servers), **Usage** (tokens, cost, models, tools, failures,
 the gateway audit) and **Settings** (providers, the bot's model, approvals, tool groups and any

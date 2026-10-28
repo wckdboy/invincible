@@ -342,8 +342,8 @@ async fn an_api_turn_says_what_its_nudge_kept() {
         .map(|e| serde_json::from_str(e).unwrap())
         .collect();
     let types: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
-    assert_eq!(types, ["answer", "kept"], "{stream}");
-    assert_eq!(events[1]["text"], "profile: Works in Rust");
+    assert_eq!(types, ["turn.started", "answer", "kept"], "{stream}");
+    assert_eq!(events[2]["text"], "profile: Works in Rust");
     assert_eq!(autobot::profile::entries(&home), ["Works in Rust"]);
     std::fs::remove_dir_all(home).unwrap();
 }

@@ -139,7 +139,7 @@ async fn a_turn_through_the_gateway_with_an_approval() {
         })
         .await;
     let kinds: Vec<_> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["receipt", "approval", "tool", "receipt", "answer"]);
+    assert_eq!(kinds, ["turn.started", "receipt", "approval", "tool", "tool_output", "receipt", "answer"]);
     assert_eq!(events.last().unwrap()["text"], "Wrote out.txt.");
     assert_eq!(events.last().unwrap()["receipts"], json!(["r1", "r1"]));
     assert_eq!(std::fs::read_to_string(dir.join("work/out.txt")).unwrap(), "hi\n");
