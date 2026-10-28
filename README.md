@@ -464,10 +464,13 @@ specification implementation and a cross-file bug, with their projects in `fixtu
 harnesses rather than models, point the agents at the same model first (Invincible serves both
 `/v1/chat/completions` and `/v1/messages`); the README in that directory shows how.
 [Harness²](https://github.com/google-research/harness2) is not another row: it improves a harness
-around a frozen model. It ran its local demo here; a model-backed JobBench task runs through
-OpenCode with DeepSeek. `evals/harness/evolve.py` applies the same loop to Autobot: failures and
-slow passes become a general `AGENTS.md`, the suite is rerun, and the profile is kept only when
-it passes more checks or is at least 10% faster. `--baseline` reuses an existing run.
+around a frozen model. Its official local demo ran here (2 tasks, 0 failed); a model-backed
+JobBench task ran through OpenCode with DeepSeek, through base, invariant, domain and aggregate
+candidates. `evals/harness/evolve.py` applies the same loop to Autobot: failures and slow passes
+become a general `AGENTS.md`, the suite is rerun, and the profile is kept only when it passes more
+checks or is at least 10% faster. On `spec-implementation` that took a 450s timeout to a pass in
+156.8s; the distilled rule is now in Autobot's coding prompt, which passed the same task in 267.5s
+without a profile. `--baseline` reuses an existing run.
 
 ### In your editor: Zed and other ACP editors
 
