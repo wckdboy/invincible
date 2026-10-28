@@ -16,13 +16,17 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "signal", "sync", "time", "fs", "io-util"] }
 axum = "0.8"
+# Bodies: `BytesMut` for the one place the API buffers a request (a body limit read chunk by chunk).
+bytes = "1"
 # rustls with the system's trust roots; SOCKS for Tor and SOCKS5 egress.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "socks"] }
 toml = "0.9"
 getrandom = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-snow = "0.10"
+# ring's ChaCha20-Poly1305 (already here, under rustls): 3-5x the default backend on Apple silicon,
+# which matters for shard links (spec/cluster.md); the same algorithm, so the Noise vectors hold.
+snow = { version = "0.10", features = ["ring-accelerated"] }
 hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 qrcode = { version = "0.14", default-features = false }
@@ -32,6 +36,8 @@ toml_edit = "0.25"
 regex = "1"
 futures-util = { version = "0.3", default-features = false }
 ed25519-dalek = "3"
+# LAN discovery (spec/discovery.md): mDNS/DNS-SD, its own thread, no async runtime.
+mdns-sd = { version = "0.21", default-features = false }
 # Local time for scheduled agent tasks.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 

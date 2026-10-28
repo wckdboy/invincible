@@ -79,7 +79,7 @@ The models the node can use, **in order of preference**. Order matters: the firs
 | `redact` | only when `true` | Redaction must run before the request leaves. Always `true` on a `run` with tier `cloud`, never on `ask` |
 
 The client acts on `ask` by asking the user and, on approval, sending the same request again with
-`confirmed: true`.
+`confirmed: true` (on the node's API, the `invincible-confirmed: 1` header: [Over HTTP](#over-http)).
 
 ## Rules
 
@@ -135,6 +135,42 @@ applies to a model that trains on prompts and under `egress: ask`.
 | `trains`, `egress-ask`, `sensitive` | ask | Why the user must confirm |
 | `too-long`, `no-local-model` | run | Why auto routing went to the cloud |
 | `unknown-model`, `no-model` | block | Nothing to run |
+
+## Over HTTP
+
+Where the node's OpenAI- and Anthropic-compatible API carries the input and the decision. The rules
+above do not change here; this is how a client reaches them. It holds for every routed endpoint:
+`/v1/chat/completions`, `/v1/messages`, `/v1/audio/speech` and `/v1/images/generations`.
+
+- **`models`** is `GET /v1/models`. Each entry's `invincible` block carries `tier`, `healthy`,
+  `context` and `data_policy` as above, plus `vision` (and `cluster` for a model split across
+  nodes). A known `context` is also the entry's top-level `context_length`, where OpenAI-compatible
+  clients look for it. An unknown one is `null` in the block and absent at the top level, never
+  guessed. The node states no `max_completion_tokens`, because it does not know a model's output
+  limit.
+- **`private`**, **`risk`** and **`confirmed`** are the headers `invincible-private: 1`,
+  `invincible-risk: health,personal` and `invincible-confirmed: 1`.
+- **The decision** is the JSON in the `invincible-decision` header, on every answer the router
+  decided.
+- **`ask`** answers `409`, in OpenAI's error shape with two more fields:
+
+  ```json
+  {
+    "error": {
+      "message": "cloud use needs confirmation; send again with `invincible-confirmed: 1`",
+      "type": "confirmation_required",
+      "code": "confirmation_required",
+      "decision": { "action": "ask", "model": "claude", "tier": "cloud", "reason": "egress-ask" },
+      "confirm_header": "invincible-confirmed"
+    }
+  }
+  ```
+
+  `decision` is the header's decision, for clients whose SDK shows only the error body.
+  `confirm_header` names the header that answers it, sent with the value `1`. `message` is for
+  people and may change; a program acts on `decision.reason`.
+- **`block`** answers `404` for `unknown-model`, `503` for `model-unavailable` and `no-model`, and
+  `403` for the rest, with type `request_blocked`.
 
 ## Not in v0
 

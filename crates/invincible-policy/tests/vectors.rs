@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use invincible_policy::{EgressInput, RouteInput, decide, decide_egress};
+use invincible_policy::{EgressInput, LinkInput, PlanInput, RouteInput, decide, decide_egress, decide_link, plan};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -64,6 +64,36 @@ fn egress() {
     assert!(
         failures.is_empty(),
         "{} of {} egress cases failed:\n{}",
+        failures.len(),
+        file.cases.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn cluster() {
+    let file = load("cluster");
+    let failures: Vec<String> = file
+        .cases
+        .iter()
+        .filter_map(|case| {
+            let got = match case.input["kind"].as_str() {
+                Some("link") => {
+                    let input: LinkInput = serde_json::from_value(case.input.clone()).expect(&case.name);
+                    serde_json::to_value(decide_link(&input)).expect(&case.name)
+                }
+                Some("plan") => {
+                    let input: PlanInput = serde_json::from_value(case.input.clone()).expect(&case.name);
+                    serde_json::to_value(plan(&input)).expect(&case.name)
+                }
+                other => panic!("{}: unknown kind {other:?}", case.name),
+            };
+            (got != case.expect).then(|| format!("{}\n  expected {}\n  got      {}", case.name, case.expect, got))
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} of {} cluster cases failed:\n{}",
         failures.len(),
         file.cases.len(),
         failures.join("\n")

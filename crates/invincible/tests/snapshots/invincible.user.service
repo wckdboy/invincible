@@ -11,6 +11,7 @@ Restart=always
 RestartSec=5
 WatchdogSec=180
 TimeoutStopSec=20
+KillMode=mixed
 LimitNOFILE=65536
 StandardOutput=append:/home/me/.invincible/logs/gateway.log
 StandardError=append:/home/me/.invincible/logs/gateway.log

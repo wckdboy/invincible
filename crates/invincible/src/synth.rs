@@ -232,7 +232,7 @@ async fn handle(
         Ok(draft) => draft,
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
-    draft.api = kind.api();
+    draft.bind_request(kind.api(), &parsed);
     draft.caller = caller.map_or(Caller::Local, |Extension(c)| c);
     draft.client = headers
         .get(CLIENT_HEADER)
@@ -316,9 +316,7 @@ async fn handle(
                     }
                 }
             }
-            (Action::Ask, _) => {
-                error(StatusCode::CONFLICT, "confirmation_required", crate::server::ask_message(&decision))
-            }
+            (Action::Ask, _) => crate::server::ask(&decision),
             (Action::Block, _) => error(
                 crate::server::block_status(decision.reason),
                 "request_blocked",

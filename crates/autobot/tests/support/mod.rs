@@ -37,6 +37,8 @@ impl Default for Shape {
 struct MockState {
     shape: Shape,
     requests: Arc<AtomicU64>,
+    /// The key it requires, as llama-server given `--api-key-file` does.
+    key: Option<String>,
 }
 
 /// A stand-in OpenAI-compatible server on loopback.
@@ -70,7 +72,17 @@ pub async fn mock(addr: SocketAddr, shape: Shape) -> Mock {
 
 /// [mock], counting requests in [requests] (kept across restarts on the same port).
 pub async fn mock_counting(addr: SocketAddr, shape: Shape, requests: Arc<AtomicU64>) -> Mock {
-    let state = Arc::new(MockState { shape, requests: requests.clone() });
+    serve_mock(addr, shape, requests, None).await
+}
+
+/// [mock] as an engine the gateway runs: it answers a completion only with [key] (a 401
+/// without), and the gateway serves no engine that does not.
+pub async fn mock_keyed(addr: SocketAddr, shape: Shape, key: &str) -> Mock {
+    serve_mock(addr, shape, Arc::default(), Some(key.to_owned())).await
+}
+
+async fn serve_mock(addr: SocketAddr, shape: Shape, requests: Arc<AtomicU64>, key: Option<String>) -> Mock {
+    let state = Arc::new(MockState { shape, requests: requests.clone(), key });
     let app = axum::Router::new()
         .route("/health", axum::routing::get(|| async { Json(json!({ "status": "ok" })) }))
         .route("/healthz", axum::routing::get(|| async { Json(json!({ "status": "ok" })) }))
@@ -108,7 +120,13 @@ async fn models() -> Json<Value> {
     ] }))
 }
 
-async fn completions(State(state): State<Arc<MockState>>, body: Bytes) -> Response {
+async fn completions(State(state): State<Arc<MockState>>, headers: axum::http::HeaderMap, body: Bytes) -> Response {
+    if let Some(key) = &state.key
+        && headers.get("authorization").and_then(|v| v.to_str().ok()) != Some(format!("Bearer {key}").as_str())
+    {
+        let refusal = json!({ "error": { "message": "Invalid API Key", "type": "authentication_error", "code": 401 } });
+        return (axum::http::StatusCode::UNAUTHORIZED, Json(refusal)).into_response();
+    }
     state.requests.fetch_add(1, Ordering::Relaxed);
     let request: Value = serde_json::from_slice(&body).unwrap_or_default();
     let shape = state.shape;

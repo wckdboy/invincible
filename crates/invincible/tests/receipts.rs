@@ -10,7 +10,7 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use invincible::cloud::CloudModel;
 use invincible::engine::Engine;
-use invincible::receipts::{REQUEST_ID_HEADER, ReceiptKey, verify};
+use invincible::receipts::{REQUEST_ID_HEADER, ReceiptKey, answer_hash, inspect, request_hash, verify};
 use invincible::server::{AppState, app};
 use invincible_policy::{DataPolicy, Egress, NetworkMode, NodeSettings};
 use serde_json::{Value, json};
@@ -123,12 +123,111 @@ async fn the_audit_log_keeps_every_receipt_with_who_asked() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The id the client was given in the header is the id in the log — one id, not two — and
+/// `invincible receipt verify <id>` finds the receipt from it.
+#[tokio::test]
+async fn the_requests_id_is_in_the_audit_line_and_finds_its_receipt() {
+    let dir = std::env::temp_dir().join(format!("invincible-audit-id-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let engine = Engine::attached("local", &engine().await, Some(64), true);
+    // The key the node signs with is the one in its home, so the CLI resolves it without `--key`.
+    let key = ReceiptKey::load_or_create(&dir.join("receipt.key")).unwrap();
+    let public = key.public();
+    let state =
+        AppState::new(vec![engine], NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto }, "t".into())
+            .with_receipt_key("studio", key)
+            .with_audit(invincible::audit::AuditLog::new(&dir));
+    let node = serve(app(Arc::new(state))).await;
+    let response = client()
+        .post(format!("{node}/v1/chat/completions"))
+        .bearer_auth("t")
+        .json(&say("auto", "hi"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let id = response.headers()[REQUEST_ID_HEADER].to_str().unwrap().to_owned();
+    // Reading the body to its end finishes the receipt, and the audit line with it.
+    let _ = response.bytes().await.unwrap();
+    let text = std::fs::read_to_string(dir.join("audit.jsonl")).unwrap();
+    let entry: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    assert_eq!(entry["request_id"].as_str(), Some(id.as_str()), "the id the client holds is on the line");
+    assert_eq!(entry["receipt"]["receipt"]["request_id"].as_str(), Some(id.as_str()));
+    let found =
+        invincible::audit::AuditLog::new(&dir).find(&id).unwrap().expect("the log resolves the id the client holds");
+    assert_eq!(found["receipt"]["request_id"].as_str(), Some(id.as_str()));
+    assert!(verify(&public, &found["receipt"], found["signature"].as_str().unwrap()));
+    // The client that holds the id runs this, and it finds the receipt.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_invincible"))
+        .args(["receipt", "verify", id.as_str()])
+        .env("INVINCIBLE_HOME", &dir)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(out.contains(&format!("receipt {id}: version 1")), "{out}");
+    assert!(out.contains("signature: valid"), "{out}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A receipt outlives the memory it was made in: after a restart (a fresh store, the same audit log)
+/// `GET /v1/receipts/<id>` still answers with it, resolved from the id its entry records.
+#[tokio::test]
+async fn a_receipt_is_found_in_the_audit_log_after_a_restart() {
+    let dir = std::env::temp_dir().join(format!("invincible-audit-restart-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let first = AppState::new(
+        vec![Engine::attached("local", &engine().await, Some(64), true)],
+        NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto },
+        "t".into(),
+    )
+    .with_receipt_key("studio", ReceiptKey::from_seed(&[9; 32]))
+    .with_audit(invincible::audit::AuditLog::new(&dir));
+    let node = serve(app(Arc::new(first))).await;
+    let response = client()
+        .post(format!("{node}/v1/chat/completions"))
+        .bearer_auth("t")
+        .json(&say("auto", "hi"))
+        .send()
+        .await
+        .unwrap();
+    let id = response.headers()[REQUEST_ID_HEADER].to_str().unwrap().to_owned();
+    let _ = response.bytes().await.unwrap();
+    drop(node);
+
+    // Restarted: the same log, an empty store.
+    let second = AppState::new(
+        vec![Engine::attached("local", &engine().await, Some(64), true)],
+        NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto },
+        "t".into(),
+    )
+    .with_receipt_key("studio", ReceiptKey::from_seed(&[9; 32]))
+    .with_audit(invincible::audit::AuditLog::new(&dir));
+    let restarted = serve(app(Arc::new(second))).await;
+    let found: Value = client()
+        .get(format!("{restarted}/v1/receipts/{id}"))
+        .bearer_auth("t")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(found["receipt"]["request_id"].as_str(), Some(id.as_str()));
+    assert!(verify(&ReceiptKey::from_seed(&[9; 32]).public(), &found["receipt"], found["signature"].as_str().unwrap()));
+    // An id the log does not have is still not found.
+    let missing =
+        client().get(format!("{restarted}/v1/receipts/{}", "0".repeat(32))).bearer_auth("t").send().await.unwrap();
+    assert_eq!(missing.status(), 404);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn client() -> reqwest::Client {
     reqwest::Client::new()
 }
 
-/// Sends [body], reads the whole answer, and returns the verified receipt.
-async fn receipt_for(node: &str, body: Value, headers: &[(&str, &str)]) -> Value {
+/// Sends [body], reads the whole answer, and returns the verified receipt and the answer's bytes.
+async fn answered(node: &str, body: Value, headers: &[(&str, &str)]) -> (Value, Vec<u8>) {
     let mut request = client().post(format!("{node}/v1/chat/completions")).bearer_auth("t").json(&body);
     for (name, value) in headers {
         request = request.header(*name, *value);
@@ -136,19 +235,42 @@ async fn receipt_for(node: &str, body: Value, headers: &[(&str, &str)]) -> Value
     let response = request.send().await.unwrap();
     let id = response.headers()[REQUEST_ID_HEADER].to_str().unwrap().to_owned();
     assert_eq!(id.len(), 32);
-    let _ = response.bytes().await.unwrap();
+    let answer = response.bytes().await.unwrap().to_vec();
     let envelope: Value =
         client().get(format!("{node}/v1/receipts/{id}")).bearer_auth("t").send().await.unwrap().json().await.unwrap();
-    let key: Value =
-        client().get(format!("{node}/v1/node")).bearer_auth("t").send().await.unwrap().json().await.unwrap();
-    assert_eq!(key["name"], "studio");
+    let key = public_key(node).await;
     assert!(
-        verify(key["receipt_key"].as_str().unwrap(), &envelope["receipt"], envelope["signature"].as_str().unwrap()),
+        verify(&key, &envelope["receipt"], envelope["signature"].as_str().unwrap()),
         "signature does not verify: {envelope}"
     );
     assert_eq!(envelope["receipt"]["request_id"], id);
-    assert_eq!(envelope["receipt"]["node"], key["receipt_key"]);
-    envelope["receipt"].clone()
+    assert_eq!(envelope["receipt"]["node"], key);
+    // Version 1 binds the exchange: this request, this answer, now, from here.
+    let receipt = &envelope["receipt"];
+    assert_eq!(receipt["version"], json!(1));
+    assert_eq!(receipt["api"], "chat");
+    assert_eq!(receipt["caller"], json!({ "kind": "local" }));
+    assert_eq!(receipt["request_sha256"], json!(request_hash("chat", &body).unwrap()));
+    assert_eq!(receipt["answer_sha256"], json!(answer_hash(&answer)));
+    assert_eq!(receipt["answer_bytes"], json!(answer.len()));
+    assert_eq!(receipt["answer_complete"], json!(true));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let at = receipt["at"].as_u64().expect("a version 1 receipt carries `at`");
+    assert!(at <= now + 5 && now - at < 60, "at {at}, now {now}");
+    (envelope, answer)
+}
+
+/// Sends [body] and returns the verified receipt.
+async fn receipt_for(node: &str, body: Value, headers: &[(&str, &str)]) -> Value {
+    answered(node, body, headers).await.0["receipt"].clone()
+}
+
+/// The node's receipt public key, as `/v1/node` publishes it.
+async fn public_key(node: &str) -> String {
+    let key: Value =
+        client().get(format!("{node}/v1/node")).bearer_auth("t").send().await.unwrap().json().await.unwrap();
+    assert_eq!(key["name"], "studio");
+    key["receipt_key"].as_str().unwrap().to_owned()
 }
 
 fn say(model: &str, text: &str) -> Value {
@@ -179,6 +301,60 @@ async fn a_streamed_run_counts_tokens_from_the_last_chunk() {
     body["stream"] = json!(true);
     let receipt = receipt_for(&node, body, &[]).await;
     assert_eq!(receipt["tokens"], json!({ "input": 7, "output": 2 }));
+}
+
+/// A streamed answer is bound by the bytes on the wire: the events' text in order, de-chunked —
+/// not a re-serialisation of the events, and not an approximation of them.
+#[tokio::test]
+async fn a_streamed_answer_is_bound_by_its_exact_bytes() {
+    let (url, _) = provider(false).await;
+    let node = node(&url).await;
+    let mut body = say("auto", "hi");
+    body["stream"] = json!(true);
+    let (envelope, answer) = answered(&node, body, &[]).await;
+    let key = public_key(&node).await;
+    assert!(answer.starts_with(b"data: {"), "the answer is the SSE text: {:?}", String::from_utf8_lossy(&answer));
+    assert_eq!(envelope["receipt"]["answer_sha256"], json!(answer_hash(&answer)));
+    // The client's own copy of the bytes checks out; one byte different does not.
+    assert_eq!(inspect(&key, &envelope, None, Some(&answer)).unwrap()["bound"], json!(true));
+    let mut changed = answer.clone();
+    let last = changed.len() - 1;
+    changed[last] ^= 0x01;
+    let error = inspect(&key, &envelope, None, Some(&changed)).unwrap_err();
+    assert!(error.contains("the answer is not the one this receipt binds"), "{error}");
+}
+
+/// The offline check (spec/receipts.md, "Verifying"): with the node's public key and nothing else,
+/// the receipt stands on its own; with the request and the answer, they are checked against it.
+#[tokio::test]
+async fn a_receipt_verifies_offline_with_only_the_public_key() {
+    let (url, _) = provider(false).await;
+    let node = node(&url).await;
+    let body = say("claude", "mail alice@proton.me");
+    let (envelope, answer) = answered(&node, body.clone(), &[]).await;
+    let key = public_key(&node).await;
+
+    let report = inspect(&key, &envelope, Some(&body), Some(&answer)).unwrap();
+    assert_eq!(report["bound"], json!(true));
+    assert_eq!(report["caller"], json!({ "kind": "local" }));
+    let checked: Vec<&str> = report["checked"].as_array().unwrap().iter().map(|i| i.as_str().unwrap()).collect();
+    assert!(checked.iter().any(|c| c.contains("signature")));
+    assert!(checked.iter().any(|c| c.contains("request body given hashes")));
+    assert!(checked.iter().any(|c| c.contains("answer bytes given hash")));
+
+    // Without the request and the answer, it says what it did not check.
+    let partial = inspect(&key, &envelope, None, None).unwrap();
+    let unchecked: Vec<&str> = partial["not_checked"].as_array().unwrap().iter().map(|i| i.as_str().unwrap()).collect();
+    assert!(unchecked.iter().any(|c| c.starts_with("the request:")));
+    assert!(unchecked.iter().any(|c| c.starts_with("the answer:")));
+    assert!(unchecked.iter().any(|c| c.contains("that the answer is correct")));
+
+    // Another node's key does not verify it, and neither does another request.
+    let other = ReceiptKey::from_seed(&[1; 32]).public();
+    assert!(inspect(&other, &envelope, None, None).is_err());
+    let mut other_body = body.clone();
+    other_body["messages"][0]["content"] = json!("bye");
+    assert!(inspect(&key, &envelope, Some(&other_body), Some(&answer)).is_err());
 }
 
 #[tokio::test]

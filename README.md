@@ -28,6 +28,8 @@ Early, and used daily. What is built, and what is not yet:
 | Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs, embeddings from an embedding model the node serves, speech to text and text to speech and images through backends on this machine; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
+| Discovery | Signed, expiring descriptors published to seeds and mDNS, so a node is found without a pasted code — and still only usable after pairing ([spec/discovery.md](spec/discovery.md)): implemented, unaudited |
+| Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
@@ -82,8 +84,9 @@ middle tier**, and later the regional one.
 
 ### Not in v1
 
-Model training, a chat UI, identity systems, federation between strangers. Each may come later or
-become its own project.
+A chat UI, identity systems, federation between strangers. Each may come later or become its own
+project. Training (LoRA fine-tuning on your devices, then across them) is planned in
+[spec/cluster.md](spec/cluster.md).
 
 ## Deep integration with Autobot
 
@@ -93,7 +96,7 @@ Invincible is built for Autobot first, and shares its rules instead of re-implem
 |---|---|
 | Providers: presets with API keys (`ProviderPresets`) | A new **"My node"** provider kind, added by **pairing** (QR code, Noise handshake), never an API key |
 | Cascade: phone → cloud (`CascadePolicy`) | Phone → **node** → cloud. "Never" means "never beyond hardware I own", and the node counts as owned |
-| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN, WireGuard / Tailscale or a Tor onion service; its requests appear in the phone's audit log, and the node's own egress log is viewable from the phone |
+| Network policy: Offline / Direct / Tor / SOCKS5, kill switch, audit log | The node is reached over LAN, WireGuard / Tailscale or a Tor onion service; its requests appear in the phone's audit log, and the phone (granted `audit`) can read the node's record of its own requests, with what left the node for each |
 | Data policy per model (`ModelDataPolicy`) | Node models read as **owned · zero retention**, and the claim is checkable: it's your machine |
 | Redaction before cloud calls | Phone → node needs no redaction (you own both ends). Node → cloud passes the same redaction gateway, running a larger detection model than a phone can |
 | Receipts per answer | The node signs a receipt per request (tier, model, engine, tokens, whether anything left the node); Autobot merges it into its own receipt |
@@ -126,7 +129,9 @@ A privacy fix starts as a spec change with a new vector, and neither side is don
 1. `invincible pair` on the node shows a QR code (the node's static public key plus addresses).
 2. Autobot scans it; the two complete a Noise handshake and pin each other's keys.
 3. The node appears in Autobot under Providers as **My node** with its live model list.
-4. Unpairing from either side revokes the key. A panic wipe on the phone forgets the node.
+4. The phone reaches what the node granted it: chat (`shard`) unless the code or
+   `invincible devices grant` said more (`shard,agent,audit` for the agent and activity screens).
+5. Unpairing from either side revokes the key. A panic wipe on the phone forgets the node.
 
 There are no accounts, no passwords and no third-party relay.
 
@@ -257,7 +262,7 @@ secrets = false
 ```sh
 autobot              # chat in the terminal
 autobot code         # code in this directory (see "Code with Autobot")
-autobot run "task"   # one task, no questions: anything not allowlisted is refused
+autobot run "task"   # one task, no questions: anything not allowlisted is refused, commands sandboxed
 autobot doctor       # check everything, 24/7 readiness included
 ```
 
@@ -266,8 +271,12 @@ the release key, which lives only as a GitHub secret; the installer and `invinci
 its public key and refuse anything else, then check the archive against the list. With a
 signed-in GitHub CLI the installer also checks the archive's Sigstore build attestation. Releases
 are built by [`release.yml`](.github/workflows/release.yml): a `v*` tag publishes stable, every
-green push to main refreshes the `edge` prerelease. The Linux builds are reproducible: the
-workflow builds the x86_64 archive again on another machine and publishes only if the bytes match
+green push to main refreshes the `edge` prerelease. Every action the workflows run is pinned to a
+commit (the version in a comment beside it), so moving an action's tag upstream changes nothing
+(the CI-only `cargo-deny` action still downloads its binary by release tag), and no checkout keeps
+the workflow's token where the code it builds could read it. The Linux
+builds are reproducible: the workflow builds the x86_64 archive again on another machine and
+publishes only if the bytes match
 (to check one yourself, build the commit from `/tmp/invincible-src` with the flags in
 `release.yml`). By hand:
 
@@ -422,6 +431,19 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
+  Nobody watches such a run, so its commands run sandboxed like a scheduled task's (see
+  **Sandbox** below), whatever `--approvals` allows: `--approvals trust` decides which commands
+  run, the sandbox bounds what they can change. A confined command writes only in `DIR` and
+  temporary directories, so a build that writes caches in your home (`~/.cargo`, `~/.npm`)
+  fails there. On Linux without bubblewrap, commands are refused and the run says so before it
+  starts; where bubblewrap cannot make its namespaces (some containers), each command fails
+  with bubblewrap's error. Either way nothing runs unconfined: install it
+  (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine you can
+  throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack
+  bubblewrap or the namespaces it needs and are themselves the boundary. It is a flag for one
+  run, not a setting, so the workflow file shows it; the run prints it on standard error before
+  it starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks
+  and the board stay confined.
 
 ### In your editor: Zed and other ACP editors
 
@@ -541,11 +563,14 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
-- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes) run
-  sandboxed: they read what you can, but write only in the working directory and temporary
-  directories (macOS `sandbox-exec`; Linux `bwrap`, i.e. bubblewrap, which `install.sh` users
-  may need to install). Without a sandbox they are refused, not run unconfined.
-  `[agent] sandbox = "always"` confines interactive turns too; `"off"` turns it off.
+- **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes, hooks,
+  Home Assistant's voice requests, the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
+  working directory and temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e.
+  bubblewrap, which `install.sh` users may need to install). Without a sandbox they are
+  refused, not run unconfined. `[agent] sandbox = "always"` confines interactive turns too;
+  `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run. Commands in
+  `[agent.docker]` or over `[agent.ssh]` run there instead. The sandbox does not limit reads or
+  the network.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands
@@ -759,8 +784,9 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
 - **Receipts:** each model call shows its model, tier and receipt id.
 - **Action log:** every command, file write, outside read and cloud send the agent asked for, whether
   it ran, and who decided (the rules, an "always" earlier in the session, or you on the CLI, the
-  app or Telegram), in `~/.autobot/actions.jsonl`. `autobot actions` shows it; the app reads it
-  through the agent API.
+  app or Telegram), in `~/.autobot/actions.jsonl`; for a command that ran, where and how confined
+  (`bwrap` or `sandbox-exec`, `off`, `container`, `ssh`). `autobot actions` shows it; the app
+  reads it through the agent API.
 - **Telegram:** `autobot serve` answers direct messages through long polling, so the machine needs
   no public address. Strangers get a one-time code, and nobody gets in until you run
   `autobot telegram approve <code>` on the machine. Approvals arrive as buttons, and only the chat
@@ -795,11 +821,15 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `[approvals]` says yes ahead of time.
 - **Agent API** ([spec/agent.md](spec/agent.md)): `autobot serve` also listens on loopback
   (`127.0.0.1:7792`), and the gateway passes `/v1/agent` through to it with its token. A paired
-  device can therefore start turns, watch their events (tool runs, receipts, approval questions,
-  the answer) and answer approvals, all inside its Noise session. A turn may carry up to four
+  device granted the `agent` capability can therefore start turns, watch their events (tool runs,
+  receipts, approval questions, the answer) and answer approvals, all inside its Noise session.
+  Granting it is explicit — `invincible pair --capabilities shard,agent` (the list is the whole
+  set, so keep `shard` for chat), or `invincible devices grant <name> shard,agent` for a device
+  already paired — because the proxy speaks with the node's own token: a device not granted it
+  reaches a 404 there, exactly as for a route that does not exist. A turn may carry up to four
   images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
   that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
-  agent is reachable only from this machine and from devices you paired.
+  agent is reachable from this machine, and over a device session only where you granted it.
 
 ## Bots and channels
 
@@ -903,7 +933,8 @@ OpenAI Conversation): `autobot hooks new homeassistant` makes its API key, and t
 `http://<this machine>:7794/hooks/homeassistant/v1` on the hooks listener (another bot's:
 `/hooks/<bot>/homeassistant/v1`). On this machine the agent API serves it too, at
 `/v1/agent/openai/v1` with the gateway's token (`model` names the bot). Its turns follow the
-unattended rules: what is allowlisted runs, the rest is refused.
+unattended rules: what is allowlisted runs, the rest is refused, and its commands are confined
+like a scheduled task's (**Sandbox** above).
 
 `autobot doctor` checks WhatsApp (its secrets, the number, the hooks listener) and Home Assistant
 (the token, how many entities the agent sees), and lists the bots `autobot serve` runs with any
@@ -962,20 +993,78 @@ cargo run --release -- token      # the API token (created on first run, mode 06
 ```
 
 Any OpenAI-compatible client on the same machine works against `http://127.0.0.1:7777/v1` with that
-token as the API key. `model: "auto"` (or no model) lets the router choose.
+token as the API key, sent as `Authorization: Bearer <token>` or `x-api-key: <token>`.
+`model: "auto"` (or no model) lets the router choose.
 
 - Anthropic Messages clients can use `POST /v1/messages` the same way. It is served by the node's
   engines only (llama.cpp speaks it natively), so a Messages request never goes to the cloud.
 - Every response carries the routing decision in an `invincible-decision` header.
 - `invincible-private: 1` marks a request that must never leave hardware you own;
   `invincible-risk: health,personal` passes risk codes; `invincible-confirmed: 1` answers an `ask`.
-- Blocked requests answer 403, 404 or 503 with the reason, an `ask` answers 409.
+- Blocked requests answer 403, 404 or 503 with the reason. An `ask` answers 409
+  `confirmation_required`, and its error body carries the same decision as the header
+  (`error.decision`) and the header that answers it (`error.confirm_header`:
+  `"invincible-confirmed"`), so a client whose SDK shows only error bodies can still act on it
+  ([spec/routing.md](spec/routing.md), Over HTTP).
+- `GET /v1/models` lists each model with its context window as top-level `context_length` when it
+  is known (absent when not, never guessed), and with an `invincible` block: `tier`, `healthy`,
+  `context`, `data_policy` and `vision`. There is no `max_completion_tokens`: the node does not
+  know a model's output limit.
 - A streamed answer from a local engine is kept alive while the engine reads a long prompt
   (`: keep-alive` comments every 20 s, which SSE clients skip); an engine silent for 30 minutes
   is given up on with an `engine_stalled` error event (a 504 when not streamed, where 30 minutes
   is the whole answer's limit).
 - Engines run as child processes with their logs in `~/.invincible/logs/`. A crashed engine is
-  restarted with backoff, and stopping the node stops its engines.
+  restarted with backoff. Stopping the node (Ctrl-C, `kill`, its service stopping, its terminal
+  closing unless it was started with `nohup`) stops its engines and whatever they started, once
+  answers in flight have finished or had 15 s. Under systemd that takes `KillMode=mixed`, which
+  the unit `autobot setup` or `autobot service install` writes has; rerunning the installer, or
+  `invincible update` run by hand, writes the unit again, but the daily update leaves it as it is.
+  With systemd's default kill mode, a unit an earlier release wrote, or one of your own, stops the
+  engines at the same moment as the node. A node that dies instead (`kill -9`, a crash, `Ctrl-\`)
+  takes them with it as its process ends: after a crash, once the crash reporter (ReportCrash,
+  systemd-coredump) lets it go.
+- An engine answers the node and nothing else on the machine. Each gets its own random key when
+  the node starts, in a file only your user can read (`~/.invincible/engines/<n>.key`, mode 0600) that
+  llama-server is given with `--api-key-file`: the path is on its command line, the key is not, so
+  `ps` does not show it. The node sends the key with every request. Anything else that finds an
+  engine's loopback port (another user, a web page, a script) gets a 401 for a completion or
+  anything else that runs the model, not an answer that skips the receipts, redaction and audit.
+  What llama-server keeps open stays open: `/health` and its web page, and in ik_llama.cpp also
+  `/models`, `/v1/models` and `/api/tags`, which name the model it serves.
+- The node checks the key rather than trusting it: once an engine is healthy, and before it
+  serves anything, the node asks it for a chat completion without the key. A 401 lets it serve.
+  A 503 or no answer is asked again at the next health check, and until then its model is not
+  served: a model still loading is not stopped for it. Any other answer stops the engine, and its
+  model is not served until the node restarts; the node's log names the model and says to use a
+  llama-server that honours `--api-key-file`. llama.cpp's and ik_llama.cpp's do; a wrapper that
+  drops the flag would not, nor would a container the key file is not mounted into (that one does
+  not start at all). Stopping the engine stops what it started too (it runs in a process group of
+  its own), so the server a wrapper script runs goes with the script. What the node did not start
+  does not, such as a container `docker run` started: when something still answers on the
+  engine's port, the log says so and names the port, and it must be stopped by hand. A process
+  running as your own user can still read the key file; confining engines is planned.
+- A shard's `ggml-rpc-server` takes no key: llama.cpp's RPC protocol has none. It listens on
+  loopback only, so from other machines only a shard link from a head you named reaches it, but
+  any process on this machine can connect to its port, as to a head's loopback doors
+  ([spec/cluster.md](spec/cluster.md), Known limits).
+- An engine starts with a clean environment: `PATH`, `HOME`, the temporary directory, the locale,
+  the library paths, and the GPU runtimes' and ggml's own variables (`CUDA_*`, `HIP_*`, `ROCR_*`,
+  `HSA_*`, `ROCM_*`, `VK_*`, `ONEAPI_*`, `SYCL_*`, `ZE_*`, `ZES_*`, `GGML_*`), never a name with
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL` in it, and not the variables that say
+  where to load code from: ggml's (`GGML_BACKEND_PATH`, a backend library ggml would load, and
+  `GGML_ET_KERNELS_PATH`, `GGML_METAL_PATH_RESOURCES`, `GGML_OPENCL_KERNEL_CACHE_DIR`,
+  `GGML_OPENVINO_CACHE_DIR`, `GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`), the libraries CUDA and
+  ROCm would load into the engine (`CUDA_INJECTION64_PATH`, `HSA_TOOLS_LIB`), where CUDA and
+  SYCL cache compiled kernels (`CUDA_CACHE_PATH`, `SYCL_CACHE_DIR`) and where Vulkan
+  finds layers (`VK_LAYER_PATH`, `VK_ADD_LAYER_PATH`, `VK_IMPLICIT_LAYER_PATH`,
+  `VK_ADD_IMPLICIT_LAYER_PATH`). Provider keys and `LLAMA_*`
+  variables stay with the node: llama.cpp reads `LLAMA_ARG_*` as flags (`LLAMA_ARG_TOOLS` and
+  `LLAMA_ARG_AGENT` turn on its file and shell tools), so llama-server options go in
+  `[engine] extra_args` instead. The same holds for `ggml-rpc-server`, `llama-bench` and the
+  device probes. A server you run yourself and name in `[[cloud]]`, `[[speech]]` or `[[images]]`
+  is not one of the node's engines: it gets the key you configure for it, and its port is as open
+  as you leave it.
 - Images (OpenAI `image_url` parts, Messages `image` blocks) pass through to the model as they
   came; a request may be up to 32 MiB. A local model sees images when it has its multimodal
   projector: `mmproj = "/models/mmproj-….gguf"` in its `[[models]]` entry (passed to
@@ -985,6 +1074,36 @@ token as the API key. `model: "auto"` (or no model) lets the router choose.
   `/v1/models` reports it (`"vision": true`, `false`, or `null` when not known), and a request
   with images for a model known not to see them answers `400 model_cannot_see_images` instead of
   being sent.
+
+### Use the node from other tools
+
+A tool that takes an OpenAI- or Anthropic-compatible base URL and a key works with the node as it
+is: give it the base URL and `invincible token` as the key.
+
+| The tool speaks | Base URL | The key goes in |
+|---|---|---|
+| OpenAI Chat Completions (OpenAI SDKs, Hermes Agent, Polykrom's OpenAI protocol) | `http://127.0.0.1:7777/v1` | `Authorization: Bearer <token>` |
+| Anthropic Messages (Anthropic SDKs, Polykrom's Anthropic protocol) | `http://127.0.0.1:7777` | `x-api-key: <token>` |
+
+```sh
+curl http://127.0.0.1:7777/v1/messages \
+     -H "x-api-key: $(invincible token)" -H "content-type: application/json" \
+     -d '{"model": "auto", "max_tokens": 256, "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+- Either header works on every route of the local API. When a request carries both,
+  `Authorization` is the one read, so an SDK that also sends your `ANTHROPIC_API_KEY` as
+  `x-api-key` still gets in with a bearer token; a wrong token in the header that is read is
+  refused (401 `invalid_api_key`).
+- Tools that size their context from `/v1/models` find `context_length` there, so they need no
+  setting for it when the node knows the model's window.
+- Messages requests run on the node's own models only (above), so pick Chat Completions in a tool
+  that should also reach your cloud backends.
+- A tool that cannot ask its user gets a 409 for an `ask`. Its body says why (`error.decision.reason`)
+  and what to send back (`invincible-confirmed: 1`), so a plugin can turn it into its own prompt.
+- From another machine, `invincible join` then `invincible tunnel`: `http://127.0.0.1:7780/v1` takes
+  that machine's token in either header and reaches what a paired device may (`/v1/models` and
+  Chat Completions, not Messages; [Pairing other machines](#pairing-other-machines)).
 
 ### Cloud backends (optional)
 
@@ -1095,8 +1214,8 @@ answer text; images are listed by SHA-256, size and type (`"images": [{"sha256",
 
 Every request the node answered is also written to `~/.invincible/audit.jsonl`
 ([spec/audit.md](spec/audit.md)): its signed receipt, when, and who asked (`local`, or the paired
-device by name). Each entry carries the hash of the one before it, so an entry removed or edited
-later breaks the chain.
+device by name, with the key it was pinned with). Each entry carries the hash of the one before
+it, so an entry removed or edited later breaks the chain.
 
 ```sh
 invincible audit                    # the newest requests: when, who, where it ran, tokens, what left
@@ -1104,8 +1223,30 @@ invincible audit --since 7d --summary   # totals per model, and every host anyth
 invincible audit --verify           # check the chain and every receipt's signature
 ```
 
-Paired devices read the same log with `GET /v1/audit`. There is no telemetry: nothing about your
-requests leaves the node unless you send it.
+A paired device granted `audit` reads its own entries in the same log with `GET /v1/audit`, and
+no one else's: not yours, not another device's, not a device's that had its name before it. They
+come without the hash of the line before each, which would tell the device when someone else used
+the node. A node that sends work here (a cluster head, a dispatcher) is a paired device too, and
+reads the same way.
+There is no telemetry: nothing about your requests leaves the node unless you send it.
+
+### Checking the node
+
+```sh
+invincible doctor                   # every subsystem: engines, devices, links, models, receipts
+invincible doctor --json            # the same, for a script
+```
+
+One line per subsection, in the order that breaks a node: the engine and its RPC backend, the
+devices llama.cpp can use, each model file, the pairing key, the network setting, the shard
+contract, dispatch capacity, the receipt key, the audit log, whether the API is answering, and the
+space left. Each line that needs something says what to do about it.
+
+The glyphs mean what they mean everywhere else: `✓` is fine, `!` is something to look at (a fresh
+install with no config, a node that is not running yet), and `✗` is a thing that was configured and
+cannot work — a model file that is not readable, a config that does not parse, an engine that is not
+installed. `✗` exits 1, so a service unit or a CI step can lean on it. The doctor never creates
+state: no key, token or config is written, so it is safe on a machine that is serving.
 
 ### Pairing other machines
 
@@ -1121,10 +1262,12 @@ advertise = ["192.168.1.20:7778", "100.101.102.103:7778"]   # LAN, Tailscale, �
 
 ```sh
 invincible pair                      # on the node: prints a QR code and a one-time code (10 minutes)
+invincible pair --capabilities shard,agent,audit   # …granting exactly these to the device that joins
 invincible join '<code>' --name laptop   # on the other machine: pairs, pins the node's key
 invincible tunnel                    # on that machine: http://127.0.0.1:7780 now leads to the node
                                      # (with that machine's token, `invincible token`: web pages cannot use it)
-invincible devices                   # on the node: who is paired
+invincible devices                   # on the node: who is paired, and what each may reach
+invincible devices grant laptop shard,agent   # set what it may reach, from its next request
 invincible devices --remove laptop   # unpair: refused at the next handshake or frame
 ```
 
@@ -1132,11 +1275,119 @@ On macOS with the application firewall on, the first remote connection can wait 
 incoming connections?" prompt for `invincible` (or `System Settings › Network › Firewall`): allow it,
 or pairing hangs until it times out.
 
-Paired devices reach the inference API with no token (their key authenticates them) and never the
-admin endpoints. Autobot pairs by scanning the same QR code: its protocol layer is in
+Every paired device is granted a small set of capabilities when it pairs
+([spec/pairing.md](spec/pairing.md), Capabilities). `shard` (the default, and the least) is the six
+routes above: `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
+cluster's `/v1/cluster/node` and `/v1/cluster/meter`, with no token (the device's key
+authenticates it). `agent` adds `/v1/agent` — the Autobot proxy, which runs with the node's own
+token — `audit` adds that device's own entries in the audit log, and `dispatch` adds
+`/v1/dispatch`, a hop into your other nodes. Nothing else is reachable, and a route the device was
+not granted answers exactly as a path that does not exist, so a device cannot even learn it is
+there. Past that check, each route takes only the body it needs (32 MiB for a chat completion,
+5 MiB for the meter), and the node holds at most `[node] max_buffered_bytes` of device request
+bodies at once — 256 MiB unless set, refusing with 503 and `Retry-After: 2` past it instead of
+running itself out of memory. A device outside its grant never reaches either check, so its 404
+says nothing about them ([spec/pairing.md](spec/pairing.md), Limits). Grant and revoke on the
+node, from the device's next request, with no re-pairing; the list is the whole set, not an
+addition to `shard`:
+
+```sh
+invincible devices                                 # who is paired, and what each may reach
+invincible devices grant phone shard,agent,audit   # what the Autobot app's chat, agent and activity screens need
+invincible devices grant laptop shard              # back to chat only
+```
+
+That is `PATCH /v1/admin/devices/<name> {"capabilities": [...]}` on the node's own API, and
+`PATCH /v1/cluster/nodes/<name>` with the same body is the same write: a node that joined this one
+is a paired device like any other.
+
+The list is in [spec/pairing.md](spec/pairing.md) (Transport). Autobot
+pairs by scanning the same QR code: its protocol layer is in
 [autobot#2](https://github.com/wckdboy/autobot/pull/2), and the screens are INV-14. The protocol is in
 [spec/pairing.md](spec/pairing.md). It is tested, including the refusal cases, but it has **not been
 independently reviewed yet**.
+
+### Finding a node without a pasted code
+
+Pairing starts from a code, which means a human pastes or scans it. Discovery removes *that* step
+and nothing else: a node can publish a small signed record of where it is, and another machine can
+look for it. Finding a node does not trust it; the first connection still needs the node's code.
+
+```toml
+[discovery]
+announce = true                        # off by default: publishing is a decision
+addresses = ["192.168.1.20:7778"]      # what the record says; never detected for you
+seeds = ["https://seed.example"]       # optional: where `invincible announce` posts it
+lan = true                             # let `announce --lan` answer mDNS
+```
+
+```sh
+invincible announce                  # sign this node's descriptor; POST it to [discovery] seeds
+invincible announce --lan            # also answer mDNS on this network, until Ctrl-C
+invincible discover                  # ask the seeds (add --seed URL to ask another), verify, list
+invincible discover --lan            # also browse mDNS for ~3 s; --model ID filters
+invincible seed --listen 127.0.0.1:7789   # run a dumb seed yourself: it stores and returns records
+```
+
+Every record is signed by the node (Ed25519, `receipt.key`) and expires within 24 hours; a seed
+stores and returns it without verifying, so the consumer always checks the signature. `discover`
+prints fingerprints, addresses, model ids and expiry, and marks everything `unpaired` unless a
+pairing already exists. A seed learns who announces, from what address and when — that is the price
+of discovery, and a node that will not pay it leaves `announce = false`. Details and the request
+shapes: [spec/discovery.md](spec/discovery.md).
+
+### A cluster of your own devices
+
+A model too big for one machine can be split across nodes you paired, layer by layer, as exo
+does ([spec/cluster.md](spec/cluster.md)). llama.cpp's RPC server does the work on each shard; it
+has no authentication, so it only ever listens on loopback, and the head reaches it through an
+encrypted shard link (Noise, with the keys pairing pinned), never over the network directly.
+
+On the machine that lends its GPU (the shard), with `[remote]` set up as above:
+
+```toml
+[cluster]
+serve = true
+heads = ["studio"]            # the paired devices that may use this node as a shard
+```
+
+On the machine that serves the model (the head), pair with the shard (`invincible join '<its
+code>' --name studio`), then:
+
+```toml
+[[models]]
+id = "big"
+path = "/models/Big-70B-Q4_K_M.gguf"
+cluster = ["mini"]            # paired nodes it may be split across
+split = "auto"                # only when it does not fit here; "always" to split anyway
+```
+
+```sh
+invincible cluster status     # devices, peers (probed now), heads served, where each model runs
+```
+
+- The split is sized by each device's free memory, or by measured speed once every device taking
+  part has been benchmarked (`invincible tune bench <model>`); receipts list the nodes that took
+  part (`cluster`).
+- `invincible tune bench` runs the `llama-bench` next to the configured `llama-server` (where the
+  installer puts llama.cpp, `~/.invincible/llama.cpp`), else the one on PATH, and says which. A
+  measurement holds for the machine, its GPUs (name and memory) and the llama.cpp build it was
+  taken with: after a new GPU or a llama.cpp upgrade it is ignored until measured again
+  (`invincible tune show` says which). A running node uses the build it started with, as its
+  engines do, so a measurement of a newer build counts from the next `invincible serve`.
+  Measurements from earlier versions named only the machine and are ignored: measure again.
+  `invincible tune probe` shows what it would use. A llama.cpp that names no build (`llama-server
+  --version` says `0 (unknown)`, as one built from a source archive without git does) cannot be
+  measured: build it from a git checkout, or use a release archive.
+- Shard links stay on the local network (private, link-local, Tailscale or `.local` addresses),
+  never go through Tor or SOCKS5, and stop under `network = "offline"`.
+- A shard that leaves mid-answer ends that answer with an error event; the model is planned again
+  over what is left (or waits, unhealthy, while the router uses another model).
+- Every node needs the same llama.cpp build with the RPC backend: llama.cpp's release archives have
+  `ggml-rpc-server`; Homebrew's llama.cpp has no RPC backend.
+- A pipeline split needs a GPU device on the head: `llama-server --list-devices` has to report one.
+  Without it the model runs on the head alone, with a note saying why, and a CPU-only peer is kept
+  out of the split ([spec/cluster.md](spec/cluster.md), Known limits of phase 1).
 
 ## Evals: local against frontier, on your own work
 
