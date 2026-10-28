@@ -130,7 +130,11 @@ mod tests {
             std::future::pending::<()>().await;
         });
         let client = super::download_client(&NetworkMode::Direct).unwrap();
+        // The connect is real I/O: with the clock paused it would jump past the connect timeout
+        // while the kernel is still at work. Real time for the connect, paused for the wait.
+        tokio::time::resume();
         let response = client.get(&url).send().await.unwrap();
+        tokio::time::pause();
         let started = tokio::time::Instant::now();
         let error = response.bytes().await.unwrap_err();
         assert!(started.elapsed() >= super::DOWNLOAD_SILENCE, "{error}");
