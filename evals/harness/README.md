@@ -35,6 +35,7 @@ not counted as failures. `--dry-run` prints the commands.
 | `hermes` | `hermes -z --yolo --in DIR` | `glm-5.3-flash` | `TERMINAL_CWD` keeps its shell in the task directory |
 | `opencode` | `opencode run --standalone --auto` | `openai/gpt-6.1-terra` | A private server keeps its cwd in the task directory |
 | `pi` | `pi -p --approve --no-session` | `deepseek/deepseek-v4-pro` | Needs DeepSeek credentials |
+| `codex` | `codex exec --dangerously-bypass-approvals-and-sandbox` | account default | Needs `codex login`; one of Harness²'s executors |
 | `cursor` | `cursor-agent -p --force` | account default | Skipped until `cursor-agent login` |
 
 Override a model without editing the script:

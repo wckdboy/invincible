@@ -98,6 +98,11 @@ AGENTS = {
         "exe": "pi",
         "model": os.environ.get("HARNESS_PI_MODEL", "deepseek/deepseek-v4-pro"),
     },
+    "codex": {
+        "label": "Codex",
+        "exe": "codex",
+        "model": os.environ.get("HARNESS_CODEX_MODEL", "(account default)"),
+    },
     "cursor": {
         "label": "Cursor Agent",
         "exe": "cursor-agent",
@@ -129,6 +134,13 @@ def detect(name: str) -> tuple[bool, str, str]:
         if isinstance(status, Exception) or status.returncode != 0 or "not logged in" in clean(status.stdout).lower():
             return False, "not logged in", ""
         version = first_line(status.stdout)
+    elif name == "codex":
+        status = run_command([exe, "login", "status"], timeout=20)
+        text = clean(status.stdout + status.stderr).lower() if not isinstance(status, Exception) else ""
+        if isinstance(status, Exception) or status.returncode != 0 or "logged in" not in text:
+            return False, "not logged in", ""
+        result = run_command([exe, "--version"], timeout=20)
+        version = first_line(result.stdout if not isinstance(result, Exception) else "")
     elif name == "pi":
         status = run_command([exe, "auth", "check", "--provider", "deepseek", "--json"], timeout=20)
         if isinstance(status, Exception) or status.returncode != 0:
@@ -177,6 +189,18 @@ def command_for(name: str, prompt: str, workdir: Path) -> tuple[list[str], dict[
         command.append(prompt)
     elif name == "pi":
         command = [exe, "-p", prompt, "--provider", "deepseek", "--model", model, "--approve", "--no-session"]
+    elif name == "codex":
+        command = [
+            exe,
+            "exec",
+            "-C",
+            str(workdir),
+            "--skip-git-repo-check",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ]
+        if model and model != "(account default)":
+            command += ["-m", model]
+        command.append(prompt)
     else:
         command = [exe, "-p", "--force", prompt]
         if model and model != "(account default)":

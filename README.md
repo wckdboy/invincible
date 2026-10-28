@@ -448,7 +448,7 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
 ### Compare harnesses
 
 `evals/harness/` runs the same coding tasks through Autobot and other agent CLIs (Claude Code,
-Hermes Agent, OpenCode, Pi, Cursor Agent) in fresh directories, then checks the result by rule:
+Codex, Hermes Agent, OpenCode, Pi, Cursor Agent) in fresh directories, then checks the result by rule:
 exact file bytes, unchanged tests, a passing test command, JSON fields, text that must be gone.
 It is not graded by a model, and each agent's model and version are kept with the result.
 
