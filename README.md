@@ -445,6 +445,26 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   it starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks
   and the board stay confined.
 
+### Compare harnesses
+
+`evals/harness/` runs the same coding tasks through Autobot and other agent CLIs (Claude Code,
+Hermes Agent, OpenCode, Pi, Cursor Agent) in fresh directories, then checks the result by rule:
+exact file bytes, unchanged tests, a passing test command, JSON fields, text that must be gone.
+It is not graded by a model, and each agent's model and version are kept with the result.
+
+```sh
+python3 evals/harness/run.py --agents autobot
+python3 evals/harness/run.py --agents autobot,claude,hermes,opencode,pi
+```
+
+Missing or signed-out agents are skipped. A report (`report.md`) and each run's logs and final
+tree are written under `evals/harness/runs/`. To compare harnesses rather than models, point the
+agents at the same model first (Invincible serves both `/v1/chat/completions` and
+`/v1/messages`); the README in that directory shows how. [Harness²](https://github.com/google-research/harness2)
+is not another row: it improves a harness around a frozen model, and can be used to evolve an
+OpenCode/Codex executor before running it here, or the same failure-driven loop can add project
+skills and `AGENTS.md` to Autobot and rerun this suite.
+
 ### In your editor: Zed and other ACP editors
 
 `autobot acp` is Autobot as an editor's agent, over the

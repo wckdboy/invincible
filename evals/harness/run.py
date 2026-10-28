@@ -138,7 +138,8 @@ def detect(name: str) -> tuple[bool, str, str]:
                 return False, "deepseek credentials are not ready", ""
         except json.JSONDecodeError:
             return False, "pi auth check was not JSON", ""
-        version = first_line(run_command([exe, "--version"], timeout=20).stdout)  # type: ignore[union-attr]
+        result = run_command([exe, "--version"], timeout=20)
+        version = first_line(result.stdout if not isinstance(result, Exception) else "")
     else:
         result = run_command([exe, "--version"], timeout=20)
         if isinstance(result, Exception):
@@ -230,7 +231,8 @@ def check_one(check: dict, workdir: Path, before: dict[str, str]) -> tuple[bool,
             return False, f"{check['path']} was not in the setup"
         if not path.exists():
             return False, f"{check['path']} was deleted"
-        return (sha256(path) == wanted, "unchanged" if sha256(path) == wanted else f"{check['path']} was modified")
+        same = sha256(path) == wanted
+        return (same, "unchanged" if same else f"{check['path']} was modified")
     if kind == "json_fields":
         path = workdir / check["path"]
         if not path.exists():
