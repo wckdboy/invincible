@@ -1170,6 +1170,13 @@ impl Agent {
                  the owner asks. When done, say what you changed and how you checked it, briefly."
             ));
         }
+        if self.options.repo_map.is_some() {
+            prompt.push_str(
+                "\n\nWork in a tight loop: read the files and tests you need in one pass, make the smallest \
+                 change, run the relevant test once, and stop as soon as it passes. Re-read or re-run only \
+                 after a failure, and keep unrelated files unchanged.",
+            );
+        }
         if let Some(map) = &self.options.repo_map {
             prompt.push_str(
                 "\n\nA map of the project, to orient you (a snapshot; use `search`, `find_files` and `read_file` \
