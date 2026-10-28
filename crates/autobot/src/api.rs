@@ -265,6 +265,7 @@ pub fn info_of(runtime: &Runtime) -> Value {
     let agent = runtime.agent();
     json!({
         "name": if runtime.default { "Autobot".to_owned() } else { runtime.name.clone() },
+        "version": invincible::version::VERSION,
         "model": agent.gateway.model(),
         "workdir": agent.tools.workdir().display().to_string(),
         "approvals": format!("{:?}", agent.approvals.mode).to_lowercase(),
