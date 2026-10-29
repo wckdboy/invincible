@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::broker::{self, Cache};
 use super::preset::{Catalog, Preset};
-use super::provider::{Offer, Provider, ProviderError, ProvisionRequest, Query};
+use super::provider::{Instance, Offer, Provider, ProviderError, ProvisionRequest, Query};
 use super::secrets::scrub;
 use super::session::{self, Phase, Session, Store};
 use super::sync::ObjectStore;
@@ -258,22 +258,40 @@ impl Engine {
                         }
                         continue;
                     }
-                    session.offer = candidate.clone();
-                    if instance.cost_per_hour > session.offer.usd_per_hr {
-                        session.offer.usd_per_hr = instance.cost_per_hour;
-                        session.cost_estimate_usd = instance.cost_per_hour * session.hours;
+                    // Stop can land while the vendor call is in flight. It writes Stopped.
+                    // Saving this in-memory copy would put the session back to hydrating.
+                    let _guard = self.session_lock(&session.id).lock_owned().await;
+                    let mut current = match self.sessions.get(&session.id) {
+                        Ok(Some(current)) => current,
+                        Ok(None) => {
+                            let _ = self.provider.terminate(&instance.id).await;
+                            return Err(RentError::Unavailable("the session disappeared during create".into()));
+                        }
+                        Err(err) => {
+                            let _ = self.provider.terminate(&instance.id).await;
+                            return Err(RentError::Unavailable(self.scrubbed(err)));
+                        }
+                    };
+                    if matches!(current.phase, Phase::Stopped | Phase::Draining) {
+                        return self.discard_after_stop(&mut current, &instance).await;
                     }
-                    session.instance_id = instance.id.clone();
-                    session.pod_status = instance.status;
-                    session.data_center = instance.data_center;
-                    session.endpoints = instance.endpoints;
-                    session.error.clear();
-                    session
+                    current.offer = candidate.clone();
+                    if instance.cost_per_hour > current.offer.usd_per_hr {
+                        current.offer.usd_per_hr = instance.cost_per_hour;
+                        current.cost_estimate_usd = instance.cost_per_hour * current.hours;
+                    }
+                    current.instance_id = instance.id.clone();
+                    current.pod_status = instance.status;
+                    current.data_center = instance.data_center;
+                    current.endpoints = instance.endpoints;
+                    current.error.clear();
+                    current
                         .go(Phase::Hydrating, self.now(), format!("pod {} created", instance.id))
                         .map_err(RentError::Unavailable)?;
-                    if let Err(err) = self.sessions.save(&session) {
-                        return self.abandon(&session.instance_id, err).await;
+                    if let Err(err) = self.sessions.save(&current) {
+                        return self.abandon(&current.instance_id, err).await;
                     }
+                    session = current;
                     break;
                 }
                 Err(err) => {
@@ -313,6 +331,31 @@ impl Engine {
             return Err(RentError::Unavailable(session.error.clone()));
         }
         self.sessions.save(&session).map_err(|err| RentError::Unavailable(self.scrubbed(err)))?;
+        Ok(session.public())
+    }
+
+    /// A stop won while the vendor was still creating. Drain if we can, delete the pod, and
+    /// leave the session stopped. The in-memory hydrating copy is not written back.
+    async fn discard_after_stop(&self, session: &mut Session, instance: &Instance) -> Result<Value, RentError> {
+        let control = json!({ "action": "drain", "requested_at": self.now().to_rfc3339() });
+        if let Ok(bytes) = serde_json::to_vec(&control)
+            && let Err(err) = self.objects.put(&control_key(&session.id), &bytes).await
+        {
+            tracing::warn!(session = %session.id, "drain before discarding a late pod: {}", self.scrubbed(err));
+        }
+        if let Err(err) = self.provider.terminate(&instance.id).await {
+            session.error = format!("stopped during create (terminate: {})", self.scrubbed(err));
+        }
+        session.instance_id = instance.id.clone();
+        session.pod_status = instance.status.clone();
+        session.data_center = instance.data_center.clone();
+        session.endpoints = instance.endpoints.clone();
+        session.forced = true;
+        session.ended_at = Some(self.now());
+        session
+            .go(Phase::Stopped, self.now(), "stopped while the pod was still being created")
+            .map_err(RentError::Unavailable)?;
+        self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
         Ok(session.public())
     }
 

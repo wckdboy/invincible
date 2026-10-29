@@ -32,6 +32,8 @@ struct Mocks {
     hostile: bool,
     raise: bool,
     fail_create: bool,
+    hold_create: bool,
+    release_create: Arc<tokio::sync::Notify>,
     catalogs: Arc<Mutex<u32>>,
     pods: Arc<Mutex<Vec<String>>>,
     named: Arc<Mutex<Vec<Value>>>,
@@ -113,6 +115,8 @@ async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool, raise: bool)
         hostile,
         raise,
         fail_create: tag == "create-fail",
+        hold_create: tag == "hold-create",
+        release_create: Arc::new(tokio::sync::Notify::new()),
         catalogs: Arc::new(Mutex::new(0)),
         pods: Arc::new(Mutex::new(Vec::new())),
         named: Arc::new(Mutex::new(Vec::new())),
@@ -323,6 +327,10 @@ async fn create_pod(
         *seq += 1;
         format!("pod-{}", *seq)
     };
+    if mocks.hold_create {
+        mocks.log.lock().unwrap().push("runpod:create-waiting".into());
+        mocks.release_create.notified().await;
+    }
     mocks.log.lock().unwrap().push("runpod:create".into());
     if mocks.fail_create {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "unavailable"}))).into_response();
@@ -919,6 +927,63 @@ async fn a_create_error_is_not_retried() {
     assert!(status >= 500, "{status} {body}");
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 1, "{:?}", log_of(&stack.mocks));
+}
+
+#[tokio::test]
+async fn a_stop_during_create_is_not_revived_when_the_pod_appears() {
+    let (stack, _node) = stack("hold-create", "monthly_cap_usd = 50\n", false, false, false).await;
+    ready(&stack.url, &stack.dir).await;
+    let url = stack.url.clone();
+    let create = tokio::spawn(async move {
+        call(
+            &url,
+            reqwest::Method::POST,
+            "/v1/rent/sessions",
+            Some(create_body("comfyui-minimax-h3", 1.0, false)),
+            true,
+        )
+        .await
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !log_of(&stack.mocks).iter().any(|line| line == "runpod:create-waiting") {
+        assert!(Instant::now() < deadline, "create did not reach the vendor\n{}", log_of(&stack.mocks).join("\n"));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let session_id = loop {
+        let (status, body) = call(&stack.url, reqwest::Method::GET, "/v1/rent/sessions", None, false).await;
+        assert_eq!(status, 200, "{body}");
+        if let Some(id) = body["sessions"].as_array().and_then(|rows| rows.first()).and_then(|row| row["id"].as_str()) {
+            break id.to_owned();
+        }
+        assert!(Instant::now() < deadline, "the provisioning session was not saved");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    let (status, stopped) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        &format!("/v1/rent/sessions/{session_id}/stop"),
+        Some(json!({})),
+        false,
+    )
+    .await;
+    assert_eq!(status, 200, "{stopped}");
+    assert_eq!(stopped["phase"], "stopped", "{stopped}");
+    stack.mocks.release_create.notify_one();
+    let (status, created) = create.await.unwrap();
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["phase"], "stopped", "{created}");
+    assert_eq!(created["id"], session_id);
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !log_of(&stack.mocks).iter().any(|line| line.starts_with("runpod:delete:")) {
+        assert!(Instant::now() < deadline, "the late pod was not deleted\n{}", log_of(&stack.mocks).join("\n"));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (status, again) =
+        call(&stack.url, reqwest::Method::GET, &format!("/v1/rent/sessions/{session_id}"), None, false).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(again["phase"], "stopped", "the create path revived the session: {again}");
+    assert!(stack.mocks.pods.lock().unwrap().is_empty(), "the pod is still billed");
 }
 
 fn rewrite_session(dir: &Path, id: &str, deadline: &str, last_active: Option<&str>) {
