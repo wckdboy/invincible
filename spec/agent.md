@@ -194,8 +194,8 @@ what the agent may do:
 - **Budget.** One request runs at most 8 turns, whatever the nudges and limit waits.
 - **Webhook.** With `[delegate] webhook` set, one JSON POST goes out when the run finishes or
   stops: `{"v":1,"event":"delegate.finished"|"delegate.stopped","bot","session","text","nudges",
-  "declined","turns","seconds","waiting_on_owner","paused","retry_at","retry_at_local","receipts",
-  "at"}`. With `webhook_secret_file` (or `$AUTOBOT_HOME/delegate-webhook.secret`), the body is
+  "declined","turns","seconds","waiting_on_owner","owner_controls","paused","retry_at",
+  "retry_at_local","receipts","at"}`. With `webhook_secret_file` (or `$AUTOBOT_HOME/delegate-webhook.secret`), the body is
   signed as `X-Invincible-Signature: sha256=<HMAC-SHA256>`; the POST runs on its own task, so a
   slow endpoint never delays the answer.
 
@@ -203,14 +203,14 @@ The events are additive to the turn grammar:
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `delegate.started` | `max_nudges`, `stall_seconds`, `until`?, `approvals` | The run began; `approvals` is `"declined"` |
+| `delegate.started` | `max_nudges`, `stall_seconds`, `until`?, `approvals`, `questions` | The run began; `approvals` is `"declined"`; `questions` is `"routine"` or `"owner"` |
 | `delegate.nudge` | `number`, `of`, `reason`, `text` | The run added a turn; `text` is the user message |
 | `delegate.declined` | `text`, `action`, `reason`, `redirect`, `bot` | A safety check was declined |
 | `delegate.stalled` | `seconds` | A turn produced nothing for that long and was stopped |
 | `delegate.waiting` | `seconds`, `reason` | Waiting out a usage limit; sent again as time passes |
 | `delegate.paused` | `reason`, `retry_after_seconds`?, `retry_at`?, `retry_at_local`? | The limit is longer than the run waits |
 | `delegate.finished` | `nudges`, `declined`, `turns`, `seconds`, `waiting_on_owner` | The run's summary, before `answer` |
-| `delegate.stopped` | `reason`, `text`, `nudges`, `declined` | The run failed; followed by `error` |
+| `delegate.stopped` | `reason`, `text`, `nudges`, `declined` | The run failed; followed by `error`. `reason` is `stalled`, `usage_limit` or `error` |
 
 `answer` is still the last event of a successful run and `error` the last of a failed one. The
 receipts in `answer` cover every model call the run made.
