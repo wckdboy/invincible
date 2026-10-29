@@ -30,6 +30,25 @@ use serde::Deserialize;
 /// [terminal]
 /// notify = "auto"                    # a long turn ended, a question waits: auto, bell, off
 /// ```
+/// Delegated runs' outcome webhook: one POST when a run finishes or stops.
+///
+/// ```toml
+/// [delegate]
+/// webhook = "https://example.com/autobot"           # optional
+/// webhook_secret_file = "delegate-webhook.secret"   # optional HMAC key (default path below)
+/// ```
+///
+/// The body is JSON; with a secret, `X-Invincible-Signature: sha256=<hex>` is its HMAC-SHA256.
+/// The default secret file is `$AUTOBOT_HOME/delegate-webhook.secret` when it exists.
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegateConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_secret_file: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -65,6 +84,9 @@ pub struct Config {
     /// About this bot ([crate::bots]).
     #[serde(default)]
     pub bot: crate::bots::BotConfig,
+    /// Where a delegated run's outcome goes ([crate::delegate]).
+    #[serde(default)]
+    pub delegate: DelegateConfig,
     #[serde(default)]
     pub slack: crate::slack::SlackConfig,
     #[serde(default)]

@@ -53,8 +53,12 @@ fn temp(name: &str) -> std::path::PathBuf {
 
 /// The agent API on a stand-in model, and a gateway in front of it; returns the gateway's URL.
 async fn stack(name: &str, answers: Vec<Value>, delay: Duration) -> (String, String, std::path::PathBuf) {
+    stack_at(name, model(answers, delay).await).await
+}
+
+/// [stack], on a model that is already listening at [model].
+async fn stack_at(name: &str, model: String) -> (String, String, std::path::PathBuf) {
     let dir = temp(name);
-    let model = model(answers, delay).await;
     let agent = Arc::new(Agent {
         gateway: Gateway::new(&format!("{model}/v1"), TOKEN, "auto", true).unwrap(),
         tools: Tools::new(dir.join("work"), Duration::from_secs(5)).with_home(dir.clone()),
@@ -73,9 +77,32 @@ async fn stack(name: &str, answers: Vec<Value>, delay: Duration) -> (String, Str
     (listen(gateway).await, agent_url, dir)
 }
 
+/// A model that always fails with [status] and a `Retry-After` of [retry_after] seconds.
+async fn failing_model(status: u16, retry_after: &'static str) -> String {
+    use axum::http::StatusCode;
+    listen(axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move || async move {
+            (
+                [("retry-after", retry_after)],
+                (
+                    StatusCode::from_u16(status).unwrap(),
+                    Json(json!({ "error": { "message": "the usage limit is reached", "type": "rate_limit_error" } })),
+                ),
+            )
+        }),
+    ))
+    .await
+}
+
 /// The events of a turn's stream, as they come; [on] can act on each.
-async fn turn(client: &reqwest::Client, url: &str, text: &str, mut on: impl AsyncFnMut(&Value)) -> Vec<Value> {
-    let response = client.post(url).bearer_auth(TOKEN).json(&json!({ "text": text })).send().await.unwrap();
+async fn turn(client: &reqwest::Client, url: &str, text: &str, on: impl AsyncFnMut(&Value)) -> Vec<Value> {
+    turn_with(client, url, json!({ "text": text }), on).await
+}
+
+/// A turn's stream from its whole body (`text`, `delegated`, …).
+async fn turn_with(client: &reqwest::Client, url: &str, body: Value, mut on: impl AsyncFnMut(&Value)) -> Vec<Value> {
+    let response = client.post(url).bearer_auth(TOKEN).json(&body).send().await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     let mut stream = response.bytes_stream();
@@ -719,5 +746,112 @@ async fn idle_conversations_are_let_go_past_a_limit_and_stats_say_so() {
     // One let go is read again from disk, as it was.
     let history = get("/v1/agent/sessions/s0").await;
     assert_eq!(history["messages"][1]["content"], "answer 0", "{history}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_delegated_turn_nudges_questions_and_answers() {
+    let (gateway, _, dir) = stack(
+        "delegate",
+        vec![
+            json!({ "role": "assistant", "content": "Which file should I write?" }),
+            json!({ "role": "assistant", "content": "Should I use a new file?" }),
+            json!({ "role": "assistant", "content": "Wrote delegated.txt." }),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let url = format!("{gateway}/v1/agent/sessions/delegated/turns");
+    let events = turn_with(
+        &client,
+        &url,
+        json!({ "text": "do the task", "delegated": { "max_nudges": 2, "until": "until the tests pass" } }),
+        async |_: &Value| {},
+    )
+    .await;
+    let kinds: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
+    assert_eq!(kinds.first(), Some(&"turn.started"));
+    assert_eq!(kinds.get(1), Some(&"delegate.started"));
+    assert_eq!(kinds.iter().filter(|k| **k == "delegate.nudge").count(), 2, "{kinds:?}");
+    assert!(
+        kinds.iter().position(|k| *k == "delegate.finished").unwrap() < kinds.len() - 1,
+        "the summary comes before the answer: {kinds:?}"
+    );
+    assert_eq!(events.last().unwrap()["type"], "answer");
+    assert_eq!(events.last().unwrap()["text"], "Wrote delegated.txt.");
+    assert_eq!(events.last().unwrap()["receipts"].as_array().unwrap().len(), 3);
+    let nudges: Vec<&Value> = events.iter().filter(|e| e["type"] == "delegate.nudge").collect();
+    assert_eq!(nudges[0]["number"], 1);
+    assert!(nudges[0]["text"].as_str().unwrap().contains("until the tests pass"));
+    assert_eq!(events.last().unwrap()["receipts"].as_array().unwrap().len(), 3);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn delegated_mode_declines_an_approval_and_keeps_going() {
+    let (gateway, _, dir) = stack(
+        "delegate-approval",
+        vec![
+            json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": "c1", "type": "function",
+                "function": { "name": "terminal", "arguments": "{\"command\":\"echo hi > out.txt\"}" } }] }),
+            json!({ "role": "assistant", "content": "I used a safer path." }),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let url = format!("{gateway}/v1/agent/sessions/delegate-approval/turns");
+    let events =
+        turn_with(&client, &url, json!({ "text": "make a file", "delegated": true }), async |_: &Value| {}).await;
+    let kinds: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
+    assert!(kinds.contains(&"delegate.declined"), "{kinds:?}");
+    assert!(!kinds.contains(&"approval"), "no card waits for an absent owner: {kinds:?}");
+    assert!(kinds.contains(&"refused"), "{kinds:?}");
+    assert_eq!(events.last().unwrap()["type"], "answer");
+    assert_eq!(events.last().unwrap()["text"], "I used a safer path.");
+    assert_eq!(events.iter().find(|e| e["type"] == "delegate.finished").unwrap()["declined"], 1);
+    assert!(!dir.join("work/out.txt").exists(), "the declined command did not run");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_delegated_scope_is_checked_before_a_turn_starts() {
+    let (gateway, _, dir) = stack("delegate-scope", Vec::new(), Duration::ZERO).await;
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{gateway}/v1/agent/sessions/delegate-scope/turns"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "text": "do it", "delegated": { "max_nudges": 9 } }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    let body: Value = response.json().await.unwrap();
+    assert!(body["error"]["message"].as_str().unwrap().contains("max_nudges"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_long_usage_limit_pauses_a_delegated_run() {
+    let (gateway, _, dir) = stack_at("delegate-pause", failing_model(429, "3600").await).await;
+    let client = reqwest::Client::new();
+    let events = turn_with(
+        &client,
+        &format!("{gateway}/v1/agent/sessions/delegate-pause/turns"),
+        json!({ "text": "do the task", "delegated": true }),
+        async |_: &Value| {},
+    )
+    .await;
+    let kinds: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
+    assert!(kinds.contains(&"delegate.paused"), "{kinds:?}");
+    assert!(kinds.contains(&"delegate.stopped"), "{kinds:?}");
+    assert_eq!(events.last().unwrap()["type"], "error");
+    let paused = events.iter().find(|e| e["type"] == "delegate.paused").unwrap();
+    assert_eq!(paused["retry_after_seconds"], 3600);
+    assert!(paused["retry_at"].as_u64().is_some());
+    assert!(paused["retry_at_local"].as_str().unwrap().contains('T'));
+    assert_eq!(events.iter().find(|e| e["type"] == "delegate.stopped").unwrap()["reason"], "usage_limit");
+    assert!(!events.iter().any(|e| e["type"] == "answer"), "{kinds:?}");
     let _ = std::fs::remove_dir_all(dir);
 }

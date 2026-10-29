@@ -44,7 +44,7 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `POST /v1/agent/bots/reload` | `{}` | `{"started", "stopped", "restarted", "persona", "failed": [{"name", "error"}], "running"}` (names): the running bots brought in line with their configuration now, as `autobot serve` does on its own within seconds of a change. `persona`: bots whose `SOUL.md` changed (read at every turn; nothing restarts). `409` (`not_configurable`) without bots to reload, `400` (`invalid_config`) when `config.toml` does not load |
 | `GET /v1/agent/sessions?bot=` | | `{"sessions": [{"id", "modified", "bot"}]}`: every bot's conversations (only `bot`'s with it), newest first; `modified` in Unix seconds |
 | `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape; a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
-| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn), `"bot"` and `"images"` (below) | An event stream (below); `400` for an unknown personality, or images that are not taken (`model_cannot_see_images` when the model cannot see). `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
+| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn), `"bot"`, `"images"` (below) and `"delegated"` (below) | An event stream (below); `400` for an unknown personality, images that are not taken (`model_cannot_see_images` when the model cannot see), or a delegated scope out of bounds. `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
 | `POST /v1/agent/sessions/{id}/retry` | `{}` | An event stream, like a turn: the last turn leaves the conversation and its request (with its images) runs again; files it changed stay. `404` when there is no turn to retry, `409` while one runs |
 | `POST /v1/agent/sessions/{id}/fork` | `{"to"?, "at"?}` | `{"id", "messages"}`: a new conversation starting as this one did, up to message `at` (rounded to the end of that turn; all of it by default) |
 | `POST /v1/agent/sessions/{id}/steer` | `{"text": "..."}` | `{"ok": true}`: a message for the turn running in the session, taken in before the agent's next step; `409` (`no_turn`) when none is running |
@@ -167,6 +167,49 @@ Navigating the browser to a new site asks as a `fetch` of the site's origin.
 A question nobody answers within 10 minutes counts as `deny`. The turn goes on if the client
 disconnects. It is saved in the session, and its approvals can still be answered by id until they
 expire.
+
+## Delegated turns
+
+`"delegated": true` (or `{"max_nudges": 2, "stall_seconds": 900, "until": "…"}`) tells the agent
+it may keep the task moving while the owner is away. Delegation is bounded, and it never widens
+what the agent may do:
+
+- **Nudges.** When an answer asks a routine question (its last line is a question, or it asks the
+  owner to confirm), or stops with no answer, the run adds one user message telling the agent to
+  decide routine details itself and continue. `max_nudges` is 0–5 (default 2). An answer that
+  begins `DELEGATION: NEED_OWNER` stops the run for the owner instead.
+- **Approvals are declined, never accepted.** The approver returns the redirect "use a safer way
+  or skip this step and keep going"; the stream says `delegate.declined`. Once a run has declined
+  an approval it does not nudge the agent to work around it; it reports and stops for the owner.
+- **Stalls.** A turn that produces no event for `stall_seconds` (30–3600, default 900) is stopped
+  and nudged once; a running tool gets three times as long, because a build may be busy without
+  speaking. The stopped turn is closed cleanly (`close_dangling`) before the nudge.
+- **Usage limits.** A limit that clears within 300 seconds is waited out, with `delegate.waiting`
+  heartbeats every 30 seconds so the event stream stays open. A longer one ends the run with
+  `delegate.paused` (and `retry_at`), and the task can be sent again then.
+- **Budget.** One request runs at most 8 turns, whatever the nudges and limit waits.
+- **Webhook.** With `[delegate] webhook` set, one JSON POST goes out when the run finishes or
+  stops: `{"v":1,"event":"delegate.finished"|"delegate.stopped","bot","session","text","nudges",
+  "declined","turns","seconds","waiting_on_owner","paused","retry_at","retry_at_local","receipts",
+  "at"}`. With `webhook_secret_file` (or `$AUTOBOT_HOME/delegate-webhook.secret`), the body is
+  signed as `X-Invincible-Signature: sha256=<HMAC-SHA256>`; the POST runs on its own task, so a
+  slow endpoint never delays the answer.
+
+The events are additive to the turn grammar:
+
+| `type` | Fields | Meaning |
+|---|---|---|
+| `delegate.started` | `max_nudges`, `stall_seconds`, `until`?, `approvals` | The run began; `approvals` is `"declined"` |
+| `delegate.nudge` | `number`, `of`, `reason`, `text` | The run added a turn; `text` is the user message |
+| `delegate.declined` | `text`, `action`, `reason`, `redirect`, `bot` | A safety check was declined |
+| `delegate.stalled` | `seconds` | A turn produced nothing for that long and was stopped |
+| `delegate.waiting` | `seconds`, `reason` | Waiting out a usage limit; sent again as time passes |
+| `delegate.paused` | `reason`, `retry_after_seconds`?, `retry_at`?, `retry_at_local`? | The limit is longer than the run waits |
+| `delegate.finished` | `nudges`, `declined`, `turns`, `seconds`, `waiting_on_owner` | The run's summary, before `answer` |
+| `delegate.stopped` | `reason`, `text`, `nudges`, `declined` | The run failed; followed by `error` |
+
+`answer` is still the last event of a successful run and `error` the last of a failed one. The
+receipts in `answer` cover every model call the run made.
 
 ## Scheduled tasks
 

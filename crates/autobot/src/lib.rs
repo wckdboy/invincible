@@ -16,6 +16,7 @@ pub mod commands;
 pub mod config;
 pub mod context;
 pub mod cron;
+pub mod delegate;
 pub mod diff;
 pub mod discord;
 pub mod docker;

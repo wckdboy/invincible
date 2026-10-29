@@ -120,7 +120,7 @@ pub fn new_secret(home: &Path, name: &str) -> Result<String, String> {
 }
 
 /// HMAC-SHA256 of [body] with [key].
-fn hmac(key: &[u8], body: &[u8]) -> [u8; 32] {
+pub(crate) fn hmac(key: &[u8], body: &[u8]) -> [u8; 32] {
     let mut block = [0u8; 64];
     if key.len() > 64 {
         block[..32].copy_from_slice(&Sha256::digest(key));

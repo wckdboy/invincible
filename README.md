@@ -32,7 +32,7 @@ Early, and used daily. What is built, and what is not yet:
 | Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
-| Control panel | A zero-dependency authenticated panel with rooms for chat, workspaces, bots, integrations, usage and settings: live sessions and transcripts, approvals, a thread with its own worktree and one-click PR, a connector matrix and token files, today's tokens and cost, model/approval/tool settings and advanced dotted keys; scrypt, signed sessions, CSRF, CSP; no provider keys in the browser. Working on the alpha stack (gateway + Autobot + panel behind Traefik); the Docker Compose with Caddy is in [platform/services/agent](https://github.com/WCKDai/platform/tree/main/services/agent) |
+| Control panel | A zero-dependency authenticated panel with rooms for chat, workspaces, bots, integrations, usage and settings: live sessions and transcripts, delegated runs that report every nudge and declined approval, a thread with its own worktree and one-click PR, a connector matrix and token files, today's tokens and cost, model/approval/tool settings and advanced dotted keys; scrypt, signed sessions, CSRF, CSP; no provider keys in the browser. Working on the alpha stack (gateway + Autobot + panel behind Traefik); the Docker Compose with Caddy is in [platform/services/agent](https://github.com/WCKDai/platform/tree/main/services/agent) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code and 26 agent tasks, on local models and a frontier one (DeepSeek V3): 30/50 against 45/50 on the code tasks; every run kept, so the gap is followed over time |
 
@@ -253,6 +253,9 @@ secrets it left out, `work/`, the logs. The old home is kept as `~/.autobot.befo
 move it back to undo. Restart the service afterwards (`autobot service restart`).
 
 ```toml
+[delegate]                        # a delegated run's outcome, one JSON POST
+webhook = "https://example.com/autobot"
+webhook_secret_file = "delegate-webhook.secret"   # optional: signs the body
 [backup]                          # scheduled, while `autobot serve` runs
 every = "1d"                      # [default: off]
 keep = 7                          # the newest 7; older ones are removed
@@ -466,6 +469,19 @@ a tombstone, so its old session cannot silently fall back to the main checkout.
 and signed in, otherwise the GitHub API with `GH_TOKEN` or `GITHUB_TOKEN`, otherwise it returns
 the compare link after the push. The panel's **Workspaces** room does the same with clicks; **Use**
 puts the thread's session in **Chat**.
+
+### Delegated turns
+
+**Keep going** (or `"delegated": true` on a turn) hands the task over for a while. The agent may
+continue itself after a routine question, with at most 2 nudges by default (at most 5), and a
+stalled turn (15 quiet minutes, or 45 while a tool runs) is stopped and nudged once. A usage
+limit that clears within 5 minutes is waited out; a longer one pauses the run with the retry
+time. The one thing delegation never does is accept an approval: a safety check is declined with
+a redirect, the stream reports `delegate.declined`, and after a decline the run stops for you
+instead of finding a way around it. The panel shows every nudge and decline in the transcript.
+Set `[delegate] webhook` to get one signed JSON POST when the run finishes or stops, with its
+answer, nudges, declines and retry time. [`spec/agent.md`](spec/agent.md) has the event grammar,
+the webhook payload and every bound.
 
 ### Compare harnesses
 
@@ -888,8 +904,8 @@ only to the panel, which proxies the gateway and agent calls it needs with the n
 provider keys never reach it.
 
 The rooms are **Overview** (gateway, agent, today's tokens and cost, approvals), **Chat** (a
-transcript, a live turn, a new conversation), **Workspaces** (a thread's worktree, diff and
-pull request), **Bots** (list, add, enable, disable, reload), **Integrations** (the connector
+transcript, a live turn, **Keep going** for a delegated run, a new conversation), **Workspaces**
+(a thread's worktree, diff and pull request), **Bots** (list, add, enable, disable, reload), **Integrations** (the connector
 matrix, write-only token files, MCP servers), **Usage** (tokens, cost, models, tools, failures,
 the gateway audit) and **Settings** (providers, the bot's model, approvals, tool groups and any
 advanced dotted key). Provider keys stay in the gateway; the panel shows the models and the

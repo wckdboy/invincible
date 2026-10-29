@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -1065,6 +1066,10 @@ struct TurnBody {
     /// `{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,…"}}`.
     #[serde(default)]
     images: Vec<Value>,
+    /// Run the turn in delegated mode: `true`, or `{"max_nudges": 2, "stall_seconds": 600,
+    /// "until": "…"}` ([crate::delegate]).
+    #[serde(default)]
+    delegated: Option<crate::delegate::Request>,
 }
 
 /// The data: URL of an image part (`image_url` an object with `url`, or the URL itself).
@@ -1168,8 +1173,15 @@ async fn turn(
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let Ok(TurnBody { text, bot: named, personality, images }) = serde_json::from_slice(&body) else {
+    let Ok(TurnBody { text, bot: named, personality, images, delegated }) = serde_json::from_slice(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
+    };
+    let delegated = match delegated {
+        Some(request) => match request.scope() {
+            Ok(scope) => scope,
+            Err(e) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        },
+        None => None,
     };
     // A new conversation may name its bot; one that exists keeps the bot it has.
     let bot = match named.filter(|n| !n.is_empty()) {
@@ -1213,7 +1225,7 @@ async fn turn(
         Ok(images) => images,
         Err(e) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
     };
-    stream_turn(&state, bot, id, guard, text, images, Overrides { personality, vision })
+    stream_turn(&state, bot, id, guard, text, images, delegated, Overrides { personality, vision })
 }
 
 /// `POST …/retry`: the last turn leaves the conversation and its request runs again, streamed
@@ -1234,7 +1246,7 @@ async fn retry(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Path(id): P
         Err(e) => return error(StatusCode::NOT_FOUND, "not_found", &e),
     };
     let text = request["content"].as_str().unwrap_or_default().to_owned();
-    stream_turn(&state, bot, id, guard, text, crate::images::of(&request), Overrides::default())
+    stream_turn(&state, bot, id, guard, text, crate::images::of(&request), None, Overrides::default())
 }
 
 /// One event in the stable turn stream (`spec/agent.md`, Turn events). Text and reasoning arrive
@@ -1284,14 +1296,17 @@ fn cap_event(text: &str, max: usize) -> String {
     )
 }
 
-/// Runs a turn of [bot] on its own task and streams its events.
+/// Runs a turn of [bot] on its own task and streams its events. A delegated turn may run more
+/// than one turn ([crate::delegate]); its events use the same grammar.
+#[allow(clippy::too_many_arguments)]
 fn stream_turn(
     state: &Arc<ApiState>,
     bot: Arc<BotApi>,
     id: String,
-    mut guard: tokio::sync::OwnedMutexGuard<Open>,
+    guard: tokio::sync::OwnedMutexGuard<Open>,
     text: String,
     images: Vec<crate::images::Attachment>,
+    delegated: Option<crate::delegate::Scope>,
     Overrides { personality, vision }: Overrides,
 ) -> Response {
     let inbox = bot.inbox(&id);
@@ -1311,38 +1326,24 @@ fn stream_turn(
     let waiting = state.waiting.clone();
     let runtime = bot.runtime.clone();
     let _ = tx.send(json!({ "v": 1, "type": "turn.started", "session": id }));
+    if let Some(scope) = &delegated {
+        let _ = tx.send(scope.started());
+    }
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
-        let approver = ApiApprover { events: tx.clone(), waiting, session: id.clone(), bot: bot.runtime.name.clone() };
-        let events = {
-            let tx = tx.clone();
-            move |event: Event| {
-                let _ = tx.send(stream_event(event));
+        match delegated {
+            Some(scope) => {
+                let approver = DelegatedApprover {
+                    events: tx.clone(),
+                    bot: bot.runtime.name.clone(),
+                    declined: Arc::new(AtomicU32::new(0)),
+                };
+                run_delegated(agent, guard, text, images, scope, approver, tx, inbox, runtime, with_images).await;
             }
-        };
-        let Open { session, grants } = &mut *guard;
-        let context = crate::tools::TurnContext { inbox: Some(inbox), ..Default::default() };
-        let turn = agent.turn_with(session, &text, &images, &approver, grants, &events);
-        let last = match crate::tools::TURN.scope(context, turn).await {
-            Ok(outcome) => json!({
-                "v": 1, "type": "answer", "text": outcome.text, "receipts": outcome.receipts
-            }),
-            // The router picked a model that cannot see, found out only now.
-            Err(e) if with_images && crate::images::refuses_images(&e) => {
-                json!({ "v": 1, "type": "error", "code": "model_cannot_see_images", "text": e })
-            }
-            Err(e) => json!({ "v": 1, "type": "error", "text": e }),
-        };
-        // The nudge, when it is time, on its own copy: the conversation is free again; what it
-        // kept follows the answer as `kept` events before the stream ends.
-        let nudge = runtime.nudge(agent, &guard.session.messages);
-        drop(guard);
-        let _ = tx.send(last);
-        if let Some(nudge) = nudge
-            && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
-        {
-            for line in kept {
-                let _ = tx.send(json!({ "v": 1, "type": "kept", "text": line }));
+            None => {
+                let approver =
+                    ApiApprover { events: tx.clone(), waiting, session: id.clone(), bot: bot.runtime.name.clone() };
+                run_single(agent, guard, text, images, approver, tx, inbox, runtime, with_images).await;
             }
         }
     });
@@ -1355,6 +1356,285 @@ fn stream_turn(
     response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
+}
+
+/// One ordinary turn: the answer, then what the profile nudge kept.
+#[allow(clippy::too_many_arguments)]
+async fn run_single(
+    agent: Arc<Agent>,
+    mut guard: tokio::sync::OwnedMutexGuard<Open>,
+    text: String,
+    images: Vec<crate::images::Attachment>,
+    approver: ApiApprover,
+    tx: mpsc::UnboundedSender<Value>,
+    inbox: crate::tools::Inbox,
+    runtime: Arc<Runtime>,
+    with_images: bool,
+) {
+    let events = {
+        let tx = tx.clone();
+        move |event: Event| {
+            let _ = tx.send(stream_event(event));
+        }
+    };
+    let Open { session, grants } = &mut *guard;
+    let context = crate::tools::TurnContext { inbox: Some(inbox), ..Default::default() };
+    let turn = agent.turn_with(session, &text, &images, &approver, grants, &events);
+    let last = match crate::tools::TURN.scope(context, turn).await {
+        Ok(outcome) => json!({
+            "v": 1, "type": "answer", "text": outcome.text, "receipts": outcome.receipts
+        }),
+        // The router picked a model that cannot see, found out only now.
+        Err(e) if with_images && crate::images::refuses_images(&e) => {
+            json!({ "v": 1, "type": "error", "code": "model_cannot_see_images", "text": e })
+        }
+        Err(e) => json!({ "v": 1, "type": "error", "text": e }),
+    };
+    // The nudge, when it is time, on its own copy: the conversation is free again; what it
+    // kept follows the answer as `kept` events before the stream ends.
+    let nudge = runtime.nudge(agent, &guard.session.messages);
+    drop(guard);
+    let _ = tx.send(last);
+    if let Some(nudge) = nudge
+        && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
+    {
+        for line in kept {
+            let _ = tx.send(json!({ "v": 1, "type": "kept", "text": line }));
+        }
+    }
+}
+
+/// A delegated run: bounded turns, no accepted approvals, a stall limit and a short limit wait.
+#[allow(clippy::too_many_arguments)]
+async fn run_delegated(
+    agent: Arc<Agent>,
+    mut guard: tokio::sync::OwnedMutexGuard<Open>,
+    text: String,
+    images: Vec<crate::images::Attachment>,
+    scope: crate::delegate::Scope,
+    approver: DelegatedApprover,
+    tx: mpsc::UnboundedSender<Value>,
+    inbox: crate::tools::Inbox,
+    runtime: Arc<Runtime>,
+    with_images: bool,
+) {
+    let started = std::time::Instant::now();
+    let session_id = guard.session.id.clone();
+    let mut current = text;
+    let mut attempts = 0u8;
+    let mut nudges = 0u8;
+    let mut receipts: Vec<String> = Vec::new();
+    let mut fatal: Option<String> = None;
+    let mut code: Option<&'static str> = None;
+    let mut last_text = String::new();
+    let mut finished = false;
+    let mut waiting_for_owner = false;
+    let mut paused: Option<Value> = None;
+    while attempts < crate::delegate::MAX_ATTEMPTS {
+        attempts += 1;
+        let (activity, ticks) = mpsc::unbounded_channel();
+        let (stall_tx, mut stalled) = oneshot::channel();
+        let seconds = scope.stall_seconds;
+        let in_tool = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let watching = in_tool.clone();
+        let watchdog = tokio::spawn(async move {
+            crate::delegate::idle_limit(ticks, Duration::from_secs(seconds), watching).await;
+            let _ = stall_tx.send(());
+        });
+        let events = {
+            let tx = tx.clone();
+            let in_tool = in_tool.clone();
+            move |event: Event| {
+                match &event {
+                    Event::Tool(_) => in_tool.store(true, Ordering::Relaxed),
+                    Event::Output { .. } | Event::Refused(_) => in_tool.store(false, Ordering::Relaxed),
+                    _ => {}
+                }
+                let _ = activity.send(());
+                let _ = tx.send(stream_event(event));
+            }
+        };
+        let context = crate::tools::TurnContext { inbox: Some(inbox.clone()), ..Default::default() };
+        // The owner's images belong to the request, not to each resumed turn.
+        let sent = if attempts == 1 { images.as_slice() } else { &[] };
+        let outcome = {
+            let Open { session, grants } = &mut *guard;
+            let turn = agent.turn_with(session, &current, sent, &approver, grants, &events);
+            tokio::select! {
+                outcome = crate::tools::TURN.scope(context, turn) => Some(outcome),
+                _ = &mut stalled => None,
+            }
+        };
+        watchdog.abort();
+        let Some(outcome) = outcome else {
+            // The turn was stopped mid-step: give the session a coherent tail before the nudge.
+            if let Err(e) = guard.session.close_dangling() {
+                fatal = Some(e);
+                break;
+            }
+            let _ = tx.send(json!({
+                "v": 1, "type": "delegate.stalled", "seconds": scope.stall_seconds,
+            }));
+            if nudges >= scope.max_nudges {
+                fatal = Some(format!("the delegated turn produced nothing for {} s", scope.stall_seconds));
+                break;
+            }
+            nudges += 1;
+            current = crate::delegate::stall_nudge(scope.stall_seconds);
+            let _ = tx.send(json!({
+                "v": 1, "type": "delegate.nudge", "number": nudges, "of": scope.max_nudges,
+                "reason": "stalled", "text": current,
+            }));
+            continue;
+        };
+        match outcome {
+            Ok(outcome) => {
+                receipts.extend(outcome.receipts.iter().cloned());
+                let waiting = crate::delegate::waiting_reason(&outcome.text);
+                // A declined approval is the owner's decision, not a routine question: never nudge
+                // the agent to find a way around it. Stop and report it instead.
+                let declined = approver.declined.load(Ordering::Relaxed);
+                if let Some(reason) = waiting
+                    && nudges < scope.max_nudges
+                    && declined == 0
+                {
+                    nudges += 1;
+                    current = crate::delegate::nudge(&scope, nudges, reason);
+                    let _ = tx.send(json!({
+                        "v": 1, "type": "delegate.nudge", "number": nudges, "of": scope.max_nudges,
+                        "reason": reason, "text": current,
+                    }));
+                    continue;
+                }
+                waiting_for_owner = waiting.is_some() || crate::delegate::needs_owner(&outcome.text);
+                let _ = tx.send(json!({
+                    "v": 1, "type": "delegate.finished",
+                    "nudges": nudges,
+                    "declined": declined,
+                    "turns": attempts,
+                    "seconds": started.elapsed().as_secs(),
+                    "waiting_on_owner": waiting_for_owner,
+                }));
+                last_text = outcome.text.clone();
+                finished = true;
+                let _ = tx.send(json!({
+                    "v": 1, "type": "answer", "text": outcome.text, "receipts": receipts.clone(),
+                }));
+                break;
+            }
+            Err(e) => {
+                if with_images && crate::images::refuses_images(&e) {
+                    code = Some("model_cannot_see_images");
+                    fatal = Some(e);
+                    break;
+                }
+                if let Some(seconds) = crate::delegate::wait_seconds(&e) {
+                    if seconds <= crate::delegate::MAX_LIMIT_WAIT {
+                        let _ = tx.send(json!({
+                            "v": 1, "type": "delegate.waiting", "reason": "usage_limit", "seconds": seconds,
+                        }));
+                        wait_out(seconds, &tx).await;
+                        current = crate::delegate::resume_nudge();
+                        continue;
+                    }
+                    let event = crate::delegate::paused(Some(seconds));
+                    let at = event["retry_at_local"].as_str().unwrap_or("later").to_owned();
+                    paused = Some(event.clone());
+                    let _ = tx.send(event);
+                    fatal = Some(format!(
+                        "the provider's usage limit is reached; retry after {at} (or send the task again then)"
+                    ));
+                    break;
+                }
+                if crate::delegate::is_usage_limit(&e) {
+                    let event = crate::delegate::paused(None);
+                    paused = Some(event.clone());
+                    let _ = tx.send(event);
+                    fatal = Some(e);
+                    break;
+                }
+                fatal = Some(e);
+                break;
+            }
+        }
+    }
+    if fatal.is_none() && attempts >= crate::delegate::MAX_ATTEMPTS {
+        fatal = Some("the delegated run used its turn budget".to_owned());
+    }
+    // The report for the operator's webhook, if one is configured. It is sent on its own task,
+    // so a slow endpoint never delays the answer; a failure is logged, not retried.
+    let report = json!({
+        "v": 1,
+        "event": if finished { "delegate.finished" } else { "delegate.stopped" },
+        "bot": runtime.name,
+        "session": session_id,
+        "text": if finished { last_text.clone() } else { fatal.clone().unwrap_or_default() },
+        "nudges": nudges,
+        "declined": approver.declined.load(Ordering::Relaxed),
+        "turns": attempts,
+        "seconds": started.elapsed().as_secs(),
+        "waiting_on_owner": waiting_for_owner,
+        "paused": paused.is_some(),
+        "retry_at": paused.as_ref().map(|p| p["retry_at"].clone()).unwrap_or(Value::Null),
+        "retry_at_local": paused.as_ref().map(|p| p["retry_at_local"].clone()).unwrap_or(Value::Null),
+        "receipts": receipts,
+        "at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+    });
+    if let Some(url) = runtime.config.delegate.webhook.clone() {
+        let home = runtime.home.clone();
+        let config = runtime.config.delegate.clone();
+        let bot = runtime.name.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::delegate::post(&url, &home, &config, &report).await {
+                tracing::warn!(bot = %bot, "{e}");
+            }
+        });
+    }
+    // The profile/memory nudge, as a normal turn has; it is not part of the answer.
+    let nudge = runtime.nudge(agent, &guard.session.messages);
+    drop(guard);
+    if let Some(e) = fatal {
+        let reason = if crate::delegate::is_usage_limit(&e) {
+            "usage_limit"
+        } else if e.contains("stalled") || e.contains("produced nothing") {
+            "stalled"
+        } else {
+            "error"
+        };
+        let _ = tx.send(json!({
+            "v": 1, "type": "delegate.stopped", "reason": reason, "text": e,
+            "nudges": nudges, "declined": approver.declined.load(Ordering::Relaxed),
+        }));
+        let mut error = json!({ "v": 1, "type": "error", "text": e });
+        if let Some(code) = code {
+            error["code"] = json!(code);
+        }
+        let _ = tx.send(error);
+    }
+    if let Some(nudge) = nudge
+        && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
+    {
+        for line in kept {
+            let _ = tx.send(json!({ "v": 1, "type": "kept", "text": line }));
+        }
+    }
+}
+
+/// Waits out a short usage limit, keeping the event stream alive while it does.
+async fn wait_out(seconds: u64, tx: &mpsc::UnboundedSender<Value>) {
+    let mut left = seconds;
+    while left > 0 {
+        let step = left.min(30);
+        tokio::time::sleep(Duration::from_secs(step)).await;
+        left -= step;
+        if left > 0 {
+            let _ = tx.send(json!({
+                "v": 1, "type": "delegate.waiting", "reason": "usage_limit", "seconds": left,
+            }));
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1611,6 +1891,40 @@ async fn remove_schedule(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
         Ok(true) => Json(json!({ "ok": true })).into_response(),
         Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "no such scheduled task"),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// What a delegated run tells the agent when a safety check asks for permission. It never says
+/// yes, and it never waits: the run keeps moving on a safer path, and the owner sees the refusal.
+const DELEGATED_REDIRECT: &str = "Delegated mode: the owner did not approve this, so it is not allowed. \
+     Do not retry it or work around it; use a safer way or skip this step and keep going.";
+
+/// In a delegated run: never accept an approval, say why, and keep going.
+struct DelegatedApprover {
+    events: mpsc::UnboundedSender<Value>,
+    bot: String,
+    declined: Arc<AtomicU32>,
+}
+
+impl Approver for DelegatedApprover {
+    fn channel(&self) -> &'static str {
+        "delegated"
+    }
+
+    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        Box::pin(async move {
+            self.declined.fetch_add(1, Ordering::Relaxed);
+            let _ = self.events.send(json!({
+                "v": 1,
+                "type": "delegate.declined",
+                "text": format!("{}{}", crate::approval::asker(), action.describe()),
+                "action": describe(action),
+                "reason": "delegated mode never accepts approvals",
+                "redirect": DELEGATED_REDIRECT,
+                "bot": self.bot,
+            }));
+            Answer::Instead(DELEGATED_REDIRECT.to_owned())
+        })
     }
 }
 
