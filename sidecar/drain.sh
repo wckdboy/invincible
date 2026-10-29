@@ -11,11 +11,13 @@ invincible_rclone_env
 declare -a RCLONE_EXCLUDES=()
 if [[ -n "${INVINCIBLE_DRAIN_EXCLUDES:-}" ]]; then
   IFS=',' read -r -a _excludes <<<"${INVINCIBLE_DRAIN_EXCLUDES}"
-  for ex in "${_excludes[@]}"; do
-    if [[ -n "${ex}" ]]; then
-      RCLONE_EXCLUDES+=(--exclude "${ex}")
-    fi
-  done
+  if [[ ${#_excludes[@]} -gt 0 ]]; then
+    for ex in "${_excludes[@]}"; do
+      if [[ -n "${ex}" ]]; then
+        RCLONE_EXCLUDES+=(--exclude "${ex}")
+      fi
+    done
+  fi
 fi
 
 drain_one() {
@@ -26,7 +28,12 @@ drain_one() {
     mkdir -p "${src}"
   fi
   invincible_log "drain ${src} -> s3:${INVINCIBLE_BUCKET}/${dest}"
-  rclone sync "${src}" "invincible:${INVINCIBLE_BUCKET}/${dest}" --checksum "${RCLONE_EXCLUDES[@]}"
+  # Bash 3.2 (macOS /usr/bin/env bash) errors on "${empty[@]}" under set -u.
+  local -a sync_args=(rclone sync "${src}" "invincible:${INVINCIBLE_BUCKET}/${dest}" --checksum)
+  if [[ ${#RCLONE_EXCLUDES[@]} -gt 0 ]]; then
+    sync_args+=("${RCLONE_EXCLUDES[@]}")
+  fi
+  "${sync_args[@]}"
   rclone lsf -R "${src}" \
     | rclone rcat "invincible:${INVINCIBLE_BUCKET}/sessions/${INVINCIBLE_SESSION_ID}/drain-files.txt" || true
 }

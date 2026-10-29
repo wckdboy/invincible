@@ -27,6 +27,10 @@ async fn the_sidecar_hydrates_then_drains_when_the_deadline_has_passed() {
 
     let rclone = rclone_bin(&root);
     let scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sidecar");
+    let stdout_path = root.join("stdout.log");
+    let stderr_path = root.join("stderr.log");
+    let stdout_file = std::fs::File::create(&stdout_path).unwrap();
+    let stderr_file = std::fs::File::create(&stderr_path).unwrap();
     let mut child = Command::new("bash")
         .arg(scripts.join("bootstrap.sh"))
         .env("PATH", format!("{}:{}", rclone.parent().unwrap().display(), std::env::var("PATH").unwrap_or_default()))
@@ -46,33 +50,27 @@ async fn the_sidecar_hydrates_then_drains_when_the_deadline_has_passed() {
         .env("INVINCIBLE_POLL_SEC", "1")
         .env("INVINCIBLE_DRAIN_GRACE_SEC", "1")
         .current_dir(&scripts)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
         .spawn()
         .unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-    let out = std::thread::spawn(move || std::io::read_to_string(stdout).unwrap_or_default());
-    let err = std::thread::spawn(move || std::io::read_to_string(stderr).unwrap_or_default());
     let deadline = Instant::now() + Duration::from_secs(40);
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
             break status;
         }
         if Instant::now() > deadline {
+            let _ = Command::new("pkill").args(["-KILL", "-P", &child.id().to_string()]).status();
             let _ = child.kill();
             let _ = child.wait();
-            panic!(
-                "sidecar did not exit\nstdout:\n{}\nstderr:\n{}\nlog:\n{:?}",
-                out.join().unwrap_or_default(),
-                err.join().unwrap_or_default(),
-                store.log.lock().unwrap()
-            );
+            let stdout = std::fs::read_to_string(&stdout_path).unwrap_or_default();
+            let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+            panic!("sidecar did not exit\nstdout:\n{stdout}\nstderr:\n{stderr}\nlog:\n{:?}", store.log.lock().unwrap());
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
-    let stdout = out.join().unwrap_or_default();
-    let stderr = err.join().unwrap_or_default();
+    let stdout = std::fs::read_to_string(&stdout_path).unwrap_or_default();
+    let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
     assert!(status.success(), "status {status:?}\nstdout:\n{stdout}\nstderr:\n{stderr}");
     assert_eq!(std::fs::read_to_string(workspace.join("note.txt")).unwrap_or_default(), "kept\n", "{stderr}");
     assert_eq!(store.get("projects/demo/workspace/note.txt").as_deref(), Some(b"kept\n".as_slice()));

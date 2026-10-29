@@ -34,12 +34,12 @@ if [[ -n "${INVINCIBLE_WORKLOAD:-}" ]]; then
   sleep 1
   if ! kill -0 "${workload_pid}" 2>/dev/null; then
     invincible_log "workload exited; holding the session until drain"
-    sleep infinity &
+    invincible_hold &
     workload_pid=$!
   fi
 else
   invincible_log "no INVINCIBLE_WORKLOAD; holding the session until drain"
-  sleep infinity &
+  invincible_hold &
   workload_pid=$!
 fi
 
@@ -78,6 +78,12 @@ drain_and_exit() {
   draining=1
   invincible_log "draining session ${INVINCIBLE_SESSION_ID}"
   if [[ -n "${workload_pid}" ]]; then
+    # The hold is a background shell with `sleep` under it. Killing only the
+    # shell leaves that sleep running (it is not in the shell's process group
+    # when job control is off).
+    if command -v pkill >/dev/null 2>&1; then
+      pkill -TERM -P "${workload_pid}" 2>/dev/null || true
+    fi
     kill -TERM "${workload_pid}" 2>/dev/null || true
     local grace="${INVINCIBLE_DRAIN_GRACE_SEC:-20}"
     local i
@@ -87,6 +93,9 @@ drain_and_exit() {
       fi
       sleep 1
     done
+    if command -v pkill >/dev/null 2>&1; then
+      pkill -KILL -P "${workload_pid}" 2>/dev/null || true
+    fi
     kill -KILL "${workload_pid}" 2>/dev/null || true
     wait "${workload_pid}" 2>/dev/null || true
   fi

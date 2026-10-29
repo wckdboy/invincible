@@ -37,6 +37,14 @@ invincible_rclone_env() {
   fi
 }
 
+# Hold the session open. GNU sleep accepts `infinity`; the macOS sleep does not,
+# and CI runs these scripts on the host as well as in the Debian image.
+invincible_hold() {
+  while true; do
+    sleep 3600
+  done
+}
+
 # Split "a|b;;c|d" and call the given function with left and right.
 invincible_each_pair() {
   local spec="$1"
