@@ -43,7 +43,12 @@ Phases: `provisioning` → `hydrating` → `ready` → `draining` → `stopped`,
 (`quoting`) writes nothing: no session file, no object, no pod.
 
 A stop writes `sessions/<id>/control.json` (`action: drain`), waits for `drain-ok.json`, and only
-then deletes the pod. `force` deletes after that wait even when the marker never arrives. The
+then deletes the pod. `force` deletes after that wait even when the marker never arrives. A stop
+that lands before the pod id exists stays `draining` and remembers whether it was forced. When
+that pod appears, a forced stop deletes it immediately; a plain stop waits for the drain marker
+and, if it never arrives, stays `draining` with the instance id so the sweeper deletes it. A
+failed delete is not recorded as `stopped`. Create re-reads the session before each save, so a
+stop during hydrate is not overwritten by `ready`. The
 sweeper always deletes after the drain attempt: a pod does not outlive the hours it was paid for,
 and an idle ready or hydrating pod (no status read for `idle_minutes`) is stopped the same way.
 A `failed` session that still has a pod is deleted too. On startup and on each sweep, a pod
