@@ -219,6 +219,55 @@ def skipped_path(path):
     return any(part in SKIP_PARTS for part in parts)
 
 
+# Lockfile formats osv-scanner reads. Scanning by explicit lockfile keeps the check
+# honest inside a git worktree: the recursive source scan honours the parent
+# checkout's .gitignore, which normally lists .worktrees/, so the walker visits one
+# directory and the check reports "no package sources" instead of scanning.
+LOCKFILE_NAMES = {
+    "Cargo.lock", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml",
+    "yarn.lock", "go.mod", "requirements.txt", "poetry.lock", "Pipfile.lock",
+    "uv.lock", "Gemfile.lock", "composer.lock", "pubspec.lock",
+    "packages.lock.json", "mix.lock", "gradle.lockfile", "conan.lock",
+}
+
+
+def lockfiles(root):
+    """Tracked or working-tree lockfiles osv-scanner can scan, relative to root."""
+    found = [f for f in tracked_files(root, include_untracked=True)
+             if Path(f).name in LOCKFILE_NAMES]
+    return sorted(dict.fromkeys(found))
+
+
+def osv_scan_args(exe, root, outfile):
+    """First pass: the recursive source scan, unchanged, for full input coverage.
+
+    It discovers every format osv supports — lockfiles outside ``LOCKFILE_NAMES``,
+    SBOMs, git directories — and it is what the gate has always run.
+    """
+    return [exe, "scan", "source", "--recursive", "--format", "json",
+            "--output-file", str(outfile), str(root)]
+
+
+def osv_lockfile_args(exe, root, outfile):
+    """Fallback pass: name each known lockfile explicitly.
+
+    The recursive walk cannot see a worktree checkout, because the checkout sits
+    under a ``.worktrees/`` path that the parent repository ignores: the walker
+    visits one directory and reports "no package sources" — a silent skip in
+    exactly the case the kit recommends worktrees for. Naming lockfiles needs no
+    walk. A leading ``:`` makes osv read the argument as a path, so a directory
+    containing a colon is not mistaken for an explicit parser type. Returns None
+    when the repository has no lockfile to name.
+    """
+    found = lockfiles(root)
+    if not found:
+        return None
+    args = [exe, "scan", "source", "--format", "json", "--output-file", str(outfile)]
+    for lockfile in found:
+        args += ["-L", f":{lockfile}"]
+    return args
+
+
 def load_config(root):
     path = Path(root) / ".agents" / "engineering.json"
     if not path.exists():
@@ -976,11 +1025,19 @@ def run_scanner(root, cfg, name, outdir):
         return result
     if name == "osv-scanner":
         c = cfg.get("security", {})
-        args = [exe, "scan", "source", "--recursive", "--format", "json",
-                "--output-file", str(outfile), str(root)]
+        args = osv_scan_args(exe, root, outfile)
         res = sh(args, cwd=root, timeout=c.get("timeout", 900), env=env)
+        elapsed = res.dur
+        if "No package sources found" in (res.out + res.err):
+            # A worktree checkout is invisible to the walk. Name the lockfiles and
+            # retry once; keep the walk's result when it did find sources, so the
+            # set of scanned inputs never narrows.
+            fallback = osv_lockfile_args(exe, root, outfile)
+            if fallback is not None:
+                res = sh(fallback, cwd=root, timeout=c.get("timeout", 900), env=env)
+                elapsed += res.dur
         result["exit_code"] = res.code
-        result["duration_s"] = round(res.dur, 2)
+        result["duration_s"] = round(elapsed, 2)
         logfile.write_text(redact_secrets(res.out + res.err), encoding="utf-8")
         result["log"] = str(logfile.relative_to(outdir.parent))
         count = 0
