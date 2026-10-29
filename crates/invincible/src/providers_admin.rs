@@ -52,10 +52,19 @@ impl ProviderAdmin {
         self.lock.lock().map_err(|_| "the provider admin lock is poisoned".to_owned())
     }
 
+    /// The config as the gateway would read it; an absent file is the empty config, so the first
+    /// provider can be added before any `config.toml` exists.
+    fn config(&self) -> Result<Config, String> {
+        match crate::fsutil::read_optional(&self.config)? {
+            Some(text) => Config::parse(&text).map_err(|e| format!("{}: {e}", self.config.display())),
+            None => Config::parse(""),
+        }
+    }
+
     /// Every configured provider, without its key, and the node's egress policy.
     pub fn list(&self) -> Result<Value, String> {
         let _guard = self.guard()?;
-        let config = Config::load(&self.config)?;
+        let config = self.config()?;
         let providers: Vec<Value> = config.cloud.iter().map(|c| self.view(c)).collect();
         Ok(json!({
             "providers": providers,
@@ -109,7 +118,7 @@ impl ProviderAdmin {
         if !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || id == "." || id == ".." {
             return Err(format!("{id:?}: an id is letters, digits, -, _ and ."));
         }
-        let config = Config::load(&self.config)?;
+        let config = self.config()?;
         if config.models.iter().any(|m| m.id == id) {
             return Err(format!("a local model already uses the id {id:?}"));
         }
@@ -185,7 +194,7 @@ impl ProviderAdmin {
     /// Removes a provider and its key when the key lives in the gateway's `keys/` directory.
     pub fn remove(&self, id: &str) -> Result<bool, String> {
         let _guard = self.guard()?;
-        let config = Config::load(&self.config)?;
+        let config = self.config()?;
         let key = config.cloud.iter().find(|c| c.id == id).and_then(|c| c.api_key_file.clone());
         if !crate::cloud::remove_from_config(&self.config, id)? {
             return Ok(false);
@@ -202,7 +211,7 @@ impl ProviderAdmin {
     }
 
     fn reload(&self) -> Result<(), String> {
-        let config = Config::load(&self.config)?;
+        let config = self.config()?;
         self.clouds.replace(crate::cloud::models(&config, &self.home));
         Ok(())
     }
