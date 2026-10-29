@@ -8,8 +8,10 @@
 //! Every create is an ask until the request carries `invincible-confirmed: 1`. The caps are a
 //! ceiling, not a permission: under the cap still does not start a pod.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::body::Bytes;
@@ -46,8 +48,17 @@ pub struct Gateway {
     engine: Engine,
     limits: RentConfig,
     /// One create at a time, so two confirmations cannot both pass the monthly cap.
-    create: tokio::sync::Mutex<()>,
+    /// An `Arc` so the guard can outlive the HTTP request ([`lock_create`]).
+    create: Arc<tokio::sync::Mutex<()>>,
 }
+
+/// A quote, a list, or a health check. Short enough that a silent `wckd` cannot hold
+/// [`Gateway::create`] for the life of the process.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// The confirming create. Provisioning waits on the vendor, so it is allowed longer than a quote.
+const CREATE_TIMEOUT: Duration = Duration::from_secs(180);
+/// Stop waits out wckd's drain (two minutes by default) before the pod is deleted.
+const STOP_TIMEOUT: Duration = Duration::from_secs(180);
 
 impl std::fmt::Debug for Gateway {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -77,7 +88,7 @@ pub fn start(config: &RentConfig, home: &Path, logs: &Path) -> Result<Option<Sta
     std::fs::create_dir_all(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     let launch = wckd_launch(&program, port, &key, &key_path, &state, &work_dir(home), logs);
     let engine = Engine::attached("wckd", &format!("http://127.0.0.1:{port}"), None, false).with_key(&key);
-    let gateway = Arc::new(Gateway { engine, limits: config.clone(), create: tokio::sync::Mutex::new(()) });
+    let gateway = Arc::new(Gateway { engine, limits: config.clone(), create: Arc::new(tokio::sync::Mutex::new(())) });
     Ok(Some(Started { gateway, launch }))
 }
 
@@ -166,9 +177,10 @@ impl Gateway {
         method: Method,
         path: &str,
         body: Option<&Value>,
+        timeout: Duration,
     ) -> Result<(StatusCode, Value), ()> {
         let url = format!("{}{path}", self.engine.base_url);
-        let mut request = self.engine.authorized(state.client.request(method, &url));
+        let mut request = self.engine.authorized(state.client.request(method, &url)).timeout(timeout);
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -211,7 +223,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Response {
     let Some(rent) = state.rent.clone() else {
         return disabled();
     };
-    match rent.exchange(&state, Method::GET, "/v1/rent/health", None).await {
+    match rent.exchange(&state, Method::GET, "/v1/rent/health", None, READ_TIMEOUT).await {
         Err(()) => unavailable("wckd is not answering"),
         Ok((status, mut body)) if status.is_success() => {
             if let Some(object) = body.as_object_mut() {
@@ -234,7 +246,7 @@ pub async fn offers(State(state): State<Arc<AppState>>, request: Request) -> Res
         Ok(path) => path,
         Err(message) => return error(StatusCode::BAD_REQUEST, "bad_request", &message),
     };
-    match rent.exchange(&state, Method::GET, &path, None).await {
+    match rent.exchange(&state, Method::GET, &path, None, READ_TIMEOUT).await {
         Err(()) => unavailable("wckd is not answering"),
         Ok((status, body)) => json_response(status, body),
     }
@@ -299,6 +311,9 @@ fn regions_in_body(body: &Value) -> Result<Option<Vec<String>>, String> {
                     return Err("require_regions is a list of region names".to_owned());
                 };
                 let token = token.trim();
+                if token.contains(',') {
+                    return Err("require_regions is a list of region names, without commas".to_owned());
+                }
                 if !token.is_empty() {
                     tokens.push(token.to_owned());
                 }
@@ -374,8 +389,10 @@ fn split_mode(token: &str) -> (&str, bool) {
     }
 }
 
-fn pinned_offer(body: &Value) -> bool {
-    body.get("offer_id").and_then(Value::as_str).is_some_and(|id| !id.is_empty())
+/// A pinned offer id, with surrounding space removed. Whitespace alone is not an id: `wckd`
+/// would treat it as unset and might provision a dearer row than the preview.
+fn offer_id(body: &Value) -> Option<&str> {
+    body.get("offer_id").and_then(Value::as_str).map(str::trim).filter(|id| !id.is_empty())
 }
 
 fn session_over_cap(limits: &RentConfig, session: &Value, spent: Option<f64>) -> Option<CapBreach> {
@@ -411,7 +428,7 @@ async fn stop_over_cap(
     };
     let sent = json!({"force": true});
     let path = format!("/v1/rent/sessions/{id}/stop");
-    match rent.exchange(state, Method::POST, &path, Some(&sent)).await {
+    match rent.exchange(state, Method::POST, &path, Some(&sent), STOP_TIMEOUT).await {
         Ok((status, body)) if status.is_success() => {
             let response = json_response(status, body.clone());
             let extra = json!({
@@ -465,7 +482,7 @@ async fn proxy_get(state: Arc<AppState>, path: &str) -> Response {
     let Some(rent) = state.rent.clone() else {
         return disabled();
     };
-    match rent.exchange(&state, Method::GET, path, None).await {
+    match rent.exchange(&state, Method::GET, path, None, READ_TIMEOUT).await {
         Err(()) => unavailable("wckd is not answering"),
         Ok((status, body)) => json_response(status, body),
     }
@@ -522,7 +539,9 @@ pub async fn create(
         Ok(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "the body is a JSON object"),
         Err(err) => return body_error(err),
     };
-    // A client cannot confirm by talking to wckd's own flag. The node is the one that asks.
+    // The receipt binds this, before the node rewrites it. `confirm` is not approval, but it is
+    // what the client sent.
+    let original = request.clone();
     if let Some(object) = request.as_object_mut() {
         object.remove("confirm");
     }
@@ -541,11 +560,12 @@ pub async fn create(
     if let Some(object) = request.as_object_mut() {
         object.insert("require_regions".to_owned(), json!(regions));
     }
-    let _one = rent.create.lock().await;
-    let (status, preview) = match rent.exchange(&state, Method::POST, "/v1/rent/sessions", Some(&request)).await {
-        Err(()) => return unavailable("wckd is not answering"),
-        Ok(response) => response,
-    };
+    let guard = Arc::clone(&rent.create).lock_owned().await;
+    let (status, preview) =
+        match rent.exchange(&state, Method::POST, "/v1/rent/sessions", Some(&request), READ_TIMEOUT).await {
+            Err(()) => return unavailable("wckd is not answering"),
+            Ok(response) => response,
+        };
     if status != StatusCode::CONFLICT || preview["error"]["code"] != "confirmation_required" {
         return json_response(status, preview);
     }
@@ -554,7 +574,11 @@ pub async fn create(
             return cap_denied(&CapBreach::Unaccounted, preview.get("cost_estimate_usd").and_then(Value::as_f64));
         }
         return if confirmed(&headers) {
-            confirm_and_record(&state, &rent, &caller, &headers, &request, &preview, None).await
+            confirm_detached(
+                guard,
+                ConfirmWork { state, rent, caller, headers, original, request, preview, spent: None },
+            )
+            .await
         } else {
             ask_rent(preview)
         };
@@ -572,7 +596,40 @@ pub async fn create(
     if !confirmed(&headers) {
         return ask_rent(preview);
     }
-    confirm_and_record(&state, &rent, &caller, &headers, &request, &preview, spent).await
+    confirm_detached(guard, ConfirmWork { state, rent, caller, headers, original, request, preview, spent }).await
+}
+
+/// What the confirming task owns. The create lock is held beside it, not inside it, so the guard
+/// can be dropped only after the receipt is written.
+struct ConfirmWork {
+    state: Arc<AppState>,
+    rent: Arc<Gateway>,
+    caller: Option<axum::Extension<Caller>>,
+    headers: HeaderMap,
+    /// The body the client sent, which the receipt binds.
+    original: Value,
+    /// The body the node forwards: `confirm` removed, regions narrowed, offer not yet pinned.
+    request: Value,
+    preview: Value,
+    spent: Option<f64>,
+}
+
+/// The confirming call, and the audit entry for it, outlive the HTTP request. Dropping the
+/// handler (the client went away) drops the [`JoinHandle`] only: the task keeps the create lock
+/// until the pod's receipt is written.
+async fn confirm_detached(guard: tokio::sync::OwnedMutexGuard<()>, work: ConfirmWork) -> Response {
+    finish_in_background(async move {
+        let _hold = guard;
+        confirm_and_record(&work).await
+    })
+    .await
+}
+
+async fn finish_in_background(work: impl Future<Output = Response> + Send + 'static) -> Response {
+    match tokio::spawn(work).await {
+        Ok(response) => response,
+        Err(_) => unavailable("the rent request was interrupted"),
+    }
 }
 
 enum MonthError {
@@ -582,8 +639,10 @@ enum MonthError {
 }
 
 async fn month_spent(state: &AppState, rent: &Gateway) -> Result<f64, MonthError> {
-    let (status, body) =
-        rent.exchange(state, Method::GET, "/v1/rent/sessions", None).await.map_err(|()| MonthError::Down)?;
+    let (status, body) = rent
+        .exchange(state, Method::GET, "/v1/rent/sessions", None, READ_TIMEOUT)
+        .await
+        .map_err(|()| MonthError::Down)?;
     if !status.is_success() {
         return Err(MonthError::Upstream(status, body));
     }
@@ -599,40 +658,49 @@ fn month_error(err: MonthError) -> Response {
     }
 }
 
-async fn confirm_and_record(
-    state: &AppState,
-    rent: &Gateway,
-    caller: &Option<axum::Extension<Caller>>,
-    headers: &HeaderMap,
-    request: &Value,
-    preview: &Value,
-    spent: Option<f64>,
-) -> Response {
+async fn confirm_and_record(work: &ConfirmWork) -> Response {
+    let state = &*work.state;
+    let rent = &*work.rent;
+    let caller = &work.caller;
+    let headers = &work.headers;
+    let original = &work.original;
+    let request = &work.request;
+    let preview = &work.preview;
+    let spent = work.spent;
     let mut confirmed_body = request.clone();
     if let Some(object) = confirmed_body.as_object_mut() {
         object.insert("confirm".to_owned(), json!(true));
     }
-    // An empty offer id lets wckd re-rank between this preview and the create, and the new row
-    // can cost more than the window the caps were checked against. Pin the previewed offer.
-    if !pinned_offer(&confirmed_body) {
-        let Some(id) =
-            preview.get("offer").and_then(|offer| offer.get("id")).and_then(Value::as_str).filter(|id| !id.is_empty())
-        else {
-            return error(
-                StatusCode::BAD_GATEWAY,
-                "rent_unavailable",
-                "wckd did not name an offer, so the price cannot be locked",
-            );
-        };
-        if let Some(object) = confirmed_body.as_object_mut() {
-            object.insert("offer_id".to_owned(), json!(id));
+    // An empty or blank offer id lets wckd re-rank between this preview and the create, and the
+    // new row can cost more than the window the caps were checked against. Pin the previewed offer.
+    let pinned = match offer_id(&confirmed_body) {
+        Some(id) => id.to_owned(),
+        None => {
+            let Some(id) = preview
+                .get("offer")
+                .and_then(|offer| offer.get("id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+            else {
+                return error(
+                    StatusCode::BAD_GATEWAY,
+                    "rent_unavailable",
+                    "wckd did not name an offer, so the price cannot be locked",
+                );
+            };
+            id.to_owned()
         }
+    };
+    if let Some(object) = confirmed_body.as_object_mut() {
+        object.insert("offer_id".to_owned(), json!(pinned));
     }
     let url = format!("{}/v1/rent/sessions", rent.engine.base_url);
     let response = rent
         .engine
         .authorized(state.client.post(url).json(&confirmed_body))
         .header("X-Wckd-Confirm", "true")
+        .timeout(CREATE_TIMEOUT)
         .send()
         .await;
     let response = match response {
@@ -665,9 +733,14 @@ async fn confirm_and_record(
             "preset_id": body["preset_id"],
             "hours": body["hours"],
             "cost_estimate_usd": body["cost_estimate_usd"],
+        },
+        // What the node actually sent, beside the receipt of what the client sent.
+        "rewrite": {
+            "require_regions": request.get("require_regions").cloned().unwrap_or(Value::Null),
+            "offer_id": confirmed_body.get("offer_id").cloned().unwrap_or(Value::Null),
         }
     });
-    record(state, caller, headers, "rent.start", request, response, extra)
+    record(state, caller, headers, "rent.start", original, response, extra)
 }
 
 /// `POST /v1/rent/sessions/{id}/stop`. An empty body is `force: false`, as wckd reads it.
@@ -684,35 +757,44 @@ pub async fn stop(
     let Some(id) = session_id(&id) else {
         return error(StatusCode::BAD_REQUEST, "bad_request", "a session id is [A-Za-z0-9_-]+");
     };
-    let request = match read_body(&body) {
+    let original = match read_body(&body) {
         Ok(value) => value,
         Err(err) => return body_error(err),
     };
-    let force = match request.get("force") {
+    let force = match original.get("force") {
         None => false,
         Some(Value::Bool(force)) => *force,
         Some(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "force is a boolean"),
     };
-    let sent = json!({"force": force});
-    let path = format!("/v1/rent/sessions/{id}/stop");
-    let (status, body) = match rent.exchange(&state, Method::POST, &path, Some(&sent)).await {
-        Err(()) => return unavailable("wckd is not answering"),
-        Ok(response) => response,
-    };
-    let response = json_response(status, body.clone());
-    if !status.is_success() {
-        return response;
-    }
-    let extra = json!({
-        "rent": {
-            "action": "stop",
-            "session_id": body["id"].as_str().unwrap_or(id),
-            "forced": body["forced"],
-            "phase": body["phase"],
-            "cost_estimate_usd": body["cost_estimate_usd"],
+    let state = state.clone();
+    let rent = rent.clone();
+    let caller = caller.clone();
+    let headers = headers.clone();
+    let id = id.to_owned();
+    // Same as a confirming create: the stop, and its audit entry, finish if the client leaves.
+    finish_in_background(async move {
+        let sent = json!({"force": force});
+        let path = format!("/v1/rent/sessions/{id}/stop");
+        let (status, body) = match rent.exchange(&state, Method::POST, &path, Some(&sent), STOP_TIMEOUT).await {
+            Err(()) => return unavailable("wckd is not answering"),
+            Ok(response) => response,
+        };
+        let response = json_response(status, body.clone());
+        if !status.is_success() {
+            return response;
         }
-    });
-    record(&state, &caller, &headers, "rent.stop", &sent, response, extra)
+        let extra = json!({
+            "rent": {
+                "action": "stop",
+                "session_id": body["id"].as_str().unwrap_or(&id),
+                "forced": body["forced"],
+                "phase": body["phase"],
+                "cost_estimate_usd": body["cost_estimate_usd"],
+            }
+        });
+        record(&state, &caller, &headers, "rent.stop", &original, response, extra)
+    })
+    .await
 }
 
 fn record(
@@ -985,6 +1067,59 @@ mod tests {
         assert_eq!(accounted(&sessions, now).unwrap(), 0.34);
         let blind = vec![json!({"created_at": "2026-10-02T00:00:00Z"})];
         assert!(accounted(&blind, now).is_err());
+    }
+
+    #[test]
+    fn a_blank_offer_id_is_not_pinned_and_a_region_token_cannot_hold_a_comma() {
+        assert!(offer_id(&json!({"offer_id": " "})).is_none());
+        assert!(offer_id(&json!({"offer_id": ""})).is_none());
+        assert_eq!(offer_id(&json!({"offer_id": " runpod:1 "})), Some("runpod:1"));
+        let err = regions_in_body(&json!({"require_regions": ["EU-x,US"]})).unwrap_err();
+        assert!(err.contains("comma"), "{err}");
+        assert!(regions_in_body(&json!({"require_regions": ["EU-secure"]})).is_ok());
+    }
+
+    #[test]
+    fn a_quote_waits_less_long_than_a_create_or_a_stop() {
+        assert!(CREATE_TIMEOUT > READ_TIMEOUT);
+        assert!(STOP_TIMEOUT > READ_TIMEOUT);
+        // wckd's drain waits two minutes before it will delete the pod.
+        assert!(STOP_TIMEOUT >= Duration::from_secs(120));
+    }
+
+    #[tokio::test]
+    async fn a_silent_wckd_is_given_up_on() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let held = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let keep = held.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((socket, _)) = listener.accept().await {
+                    keep.lock().await.push(socket);
+                }
+            }
+        });
+        let state = crate::server::AppState::new(
+            Vec::new(),
+            invincible_policy::NodeSettings {
+                network: invincible_policy::NetworkMode::Offline,
+                egress: invincible_policy::Egress::Never,
+            },
+            "token".into(),
+        );
+        let gateway = Gateway {
+            engine: Engine::attached("wckd", &format!("http://{addr}"), None, true).with_key("k"),
+            limits: RentConfig::default(),
+            create: Arc::new(tokio::sync::Mutex::new(())),
+        };
+        let started = std::time::Instant::now();
+        let result = gateway.exchange(&state, Method::GET, "/v1/rent/health", None, Duration::from_millis(300)).await;
+        let elapsed = started.elapsed();
+        assert!(result.is_err(), "a silent wckd is not a healthy one");
+        assert!(elapsed >= Duration::from_millis(200), "gave up without waiting: {elapsed:?}");
+        assert!(elapsed < Duration::from_secs(2), "waited past the timeout: {elapsed:?}");
+        drop(held);
     }
 
     #[test]
