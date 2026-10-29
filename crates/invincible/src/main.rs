@@ -1596,10 +1596,20 @@ fn update_command(args: UpdateArgs) -> Result<(), String> {
                     let refreshed = std::process::Command::new(bin.join("autobot"))
                         .args(["service", "install"])
                         .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status();
-                    if !refreshed.is_ok_and(|s| s.success()) {
-                        say(brand::warn("the service definitions did not update (`autobot service install` says why)"));
+                        .stderr(std::process::Stdio::piped())
+                        .output();
+                    match refreshed {
+                        Ok(out) if out.status.success() => {}
+                        Ok(out) => {
+                            let why = String::from_utf8_lossy(&out.stderr);
+                            let why = why.lines().last().unwrap_or("no error text").trim();
+                            say(brand::warn(&format!(
+                                "the service definitions did not update: {why} (run `autobot service install`)"
+                            )));
+                        }
+                        Err(e) => say(brand::warn(&format!(
+                            "could not run the new autobot: {e} (run `autobot service install`)"
+                        ))),
                     }
                 }
                 let restarted = invincible::service::restart(
@@ -1609,6 +1619,8 @@ fn update_command(args: UpdateArgs) -> Result<(), String> {
                 );
                 if !restarted.is_empty() {
                     say(brand::ok(&format!("restarted {}", restarted.join(" and "))));
+                } else if installed {
+                    say(brand::warn("the services are installed but not running: `autobot service install`"));
                 }
             }
         }
