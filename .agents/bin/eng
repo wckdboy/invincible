@@ -1,0 +1,5 @@
+#!/bin/sh
+# Portable entry point. Resolves its own directory so it works from any cwd.
+set -eu
+SELF=$(cd -- "$(dirname -- "$0")" && pwd)
+exec python3 "$SELF/../lib/eng.py" "$@"

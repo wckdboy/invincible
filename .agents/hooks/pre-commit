@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fast pre-commit guard: staged credentials, conflict markers, oversize files.
+set -eu
+root=$(git rev-parse --show-toplevel)
+exec "$root/.agents/bin/eng" guard staged
