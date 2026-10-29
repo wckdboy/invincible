@@ -193,6 +193,64 @@ fn check_home(home: &Path) -> Check {
     }
 }
 
+/// `wckd`, when rent is on: the binary has to be there, and when the node is up its `/v1/rent/health`
+/// has to answer. The doctor never reads the bearer file, and it does not start the process.
+fn check_rent(home: &Path, cfg: &Config, node_up: bool) -> Check {
+    if !cfg.rent.enabled {
+        return Check::ok("rent", "off");
+    }
+    let Some(program) = crate::cluster::resolve_program(&cfg.rent.binary) else {
+        return Check::fail(
+            "rent",
+            format!("`{}` is not on PATH and not a file", cfg.rent.binary.display()),
+            Some("install wckd and set [rent] binary (spec/rent.md), or set enabled = false"),
+        );
+    };
+    if !node_up {
+        return Check::warn(
+            "rent",
+            format!("{} is installed; the node is not answering, so wckd's health was not checked", program.display()),
+            Some("invincible serve"),
+        );
+    }
+    let token = fsutil::read_optional(&home.join("token")).ok().flatten();
+    let Some(token) = token.filter(|token| !token.trim().is_empty()) else {
+        return Check::warn(
+            "rent",
+            format!("{} is installed; there is no API token, so wckd's health was not checked", program.display()),
+            Some("invincible serve"),
+        );
+    };
+    let token = token.trim().to_owned();
+    let listen = cfg.listen;
+    let runtime = tokio::runtime::Runtime::new();
+    let probe = runtime.ok().and_then(|runtime| {
+        runtime.block_on(async {
+            crate::engine::health_client()
+                .get(format!("http://{listen}/v1/rent/health"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .ok()
+        })
+    });
+    match probe {
+        Some(response) if response.status().is_success() => {
+            Check::ok("rent", format!("wckd is healthy ({})", program.display()))
+        }
+        Some(response) => Check::fail(
+            "rent",
+            format!("wckd health returned {}", response.status()),
+            Some("the node log and logs/wckd.log say why; credentials live in $INVINCIBLE_HOME/rent/.env"),
+        ),
+        None => Check::fail(
+            "rent",
+            "the node is up but /v1/rent/health did not answer",
+            Some("wckd may still be starting, or it refused to start (logs/wckd.log)"),
+        ),
+    }
+}
+
 /// `Ok(config)`, or the failed check's parts.
 fn check_config(path: &Path) -> Result<Config, (State, String, Option<String>)> {
     match fsutil::read_optional(path) {
@@ -386,6 +444,9 @@ fn check_node_state(home: &Path, cfg: &Config) -> Vec<Check> {
         Some(true) => checks.push(Check::ok("node", format!("answering on http://{listen}"))),
         _ => checks.push(Check::warn("node", format!("not answering on http://{listen}"), Some("invincible serve"))),
     }
+
+    // --- rent (wckd) -------------------------------------------------------------------------
+    checks.push(check_rent(home, cfg, health == Some(true)));
 
     // --- room to work ------------------------------------------------------------------------
     if let Some(free) = free_bytes(home) {

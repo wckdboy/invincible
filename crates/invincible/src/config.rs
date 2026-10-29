@@ -63,6 +63,10 @@ pub struct Config {
     /// them. Off unless the operator turns it on.
     #[serde(default)]
     pub discovery: DiscoveryConfig,
+    /// Cloud GPU rental through a supervised `wckd serve` (spec/rent.md). Off unless enabled:
+    /// starting it can spend money, and only after an explicit confirmation.
+    #[serde(default)]
+    pub rent: RentConfig,
 }
 
 /// ```toml
@@ -309,6 +313,109 @@ impl RemoteConfig {
     }
 }
 
+/// ```toml
+/// [rent]
+/// enabled = false
+/// binary = "wckd"                 # the wckd executable; the node supervises it, it is not linked
+/// max_usd_per_hour = 1.0          # omit: no hourly cap
+/// max_hours = 8                   # a single rental; at most 24, which is wckd's own ceiling
+/// monthly_cap_usd = 50            # omit: no monthly cap
+/// idle_minutes = 15               # recorded on the node; the deadline sweeper is wckd's
+/// require_regions = ["EU"]        # ceiling; a request may narrow it, not clear it
+/// ```
+///
+/// `enabled` defaults to false. A rental still needs `invincible-confirmed: 1` even when it is
+/// under these caps (spec/rent.md). Vendor credentials are wckd's: a `.env` in `$INVINCIBLE_HOME/rent`,
+/// which is the process's working directory. The node does not copy them into the environment.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RentConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// The `wckd` binary. A name is looked up on `PATH`; a path is used as given.
+    #[serde(default = "wckd_binary")]
+    pub binary: PathBuf,
+    /// Refuse an offer whose catalog price is above this, in USD per hour. Unset: no hourly cap.
+    #[serde(default)]
+    pub max_usd_per_hour: Option<f64>,
+    /// Refuse a rental longer than this. wckd itself refuses anything above 24.
+    #[serde(default = "default_max_hours")]
+    pub max_hours: f64,
+    /// Refuse a rental that would take this UTC month's estimates over this, in USD. Unset: no monthly cap.
+    #[serde(default)]
+    pub monthly_cap_usd: Option<f64>,
+    /// The owner's idle limit, in minutes. The node records it and reports it; wckd's sweeper
+    /// stops a pod at its deadline (`hours`), which is the stop this version can count on.
+    #[serde(default = "default_idle_minutes")]
+    pub idle_minutes: u64,
+    /// Hard region filter. Default `EU`. A request may only narrow this list; it cannot clear
+    /// it or name a region outside it. An explicit empty list here is the operator turning the
+    /// filter off. `any` or `*` must be the only token and does the same.
+    #[serde(default = "default_regions")]
+    pub require_regions: Vec<String>,
+}
+
+fn wckd_binary() -> PathBuf {
+    PathBuf::from("wckd")
+}
+
+fn default_max_hours() -> f64 {
+    24.0
+}
+
+fn default_idle_minutes() -> u64 {
+    15
+}
+
+fn default_regions() -> Vec<String> {
+    vec!["EU".to_owned()]
+}
+
+impl Default for RentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            binary: wckd_binary(),
+            max_usd_per_hour: None,
+            max_hours: default_max_hours(),
+            monthly_cap_usd: None,
+            idle_minutes: default_idle_minutes(),
+            require_regions: default_regions(),
+        }
+    }
+}
+
+impl RentConfig {
+    /// The caps and the region filter are numbers the node will enforce. A value it cannot
+    /// compare against is refused here, before a process is started.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(max) = self.max_usd_per_hour
+            && (!max.is_finite() || max <= 0.0)
+        {
+            return Err(format!("[rent] max_usd_per_hour = {max}: a positive finite number of USD"));
+        }
+        if !self.max_hours.is_finite() || self.max_hours <= 0.0 || self.max_hours > 24.0 {
+            return Err(format!("[rent] max_hours = {}: in (0, 24]", self.max_hours));
+        }
+        if let Some(max) = self.monthly_cap_usd
+            && (!max.is_finite() || max <= 0.0)
+        {
+            return Err(format!("[rent] monthly_cap_usd = {max}: a positive finite number of USD"));
+        }
+        if self.idle_minutes == 0 || self.idle_minutes > 7 * 24 * 60 {
+            return Err(format!("[rent] idle_minutes = {}: from 1 to 10080 (a week)", self.idle_minutes));
+        }
+        let wildcard = self.require_regions.iter().any(|region| region == "any" || region == "*");
+        if wildcard && self.require_regions.len() != 1 {
+            return Err("[rent] require_regions: \"any\" or \"*\" must be the only token".to_owned());
+        }
+        if self.require_regions.iter().any(|region| region.trim().is_empty()) {
+            return Err("[rent] require_regions: an empty token".to_owned());
+        }
+        Ok(())
+    }
+}
+
 fn default_listen() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7777))
 }
@@ -520,6 +627,7 @@ impl Config {
                 return Err(format!("[discovery] addresses: {address:?}: {problem}"));
             }
         }
+        self.rent.validate()?;
         for seed in &self.discovery.seeds {
             let parsed = reqwest::Url::parse(seed).map_err(|e| format!("[discovery] seeds: {seed:?}: {e}"))?;
             if !matches!(parsed.scheme(), "http" | "https") {
@@ -696,6 +804,37 @@ mod tests {
         let twice = "[[speech]]\nid = \"a\"\nbase_url = \"http://127.0.0.1:1\"\n[[speech]]\nid = \"a\"\nbase_url = \"http://127.0.0.1:2\"\n";
         assert!(Config::parse(twice).unwrap_err().contains("twice"));
         assert!(Config::parse("[[speech]]\nid = \"auto\"\nbase_url = \"http://127.0.0.1:1\"\n").is_err());
+    }
+
+    #[test]
+    fn rent_is_off_until_asked_and_defaults_to_the_eu() {
+        let config = Config::parse("").unwrap();
+        assert!(!config.rent.enabled);
+        assert_eq!(config.rent.binary, std::path::PathBuf::from("wckd"));
+        assert_eq!(config.rent.max_hours, 24.0);
+        assert_eq!(config.rent.idle_minutes, 15);
+        assert!(config.rent.max_usd_per_hour.is_none());
+        assert!(config.rent.monthly_cap_usd.is_none());
+        assert_eq!(config.rent.require_regions, vec!["EU"]);
+
+        let on = Config::parse(
+            "[rent]\nenabled = true\nmax_usd_per_hour = 0.4\nmax_hours = 2\nmonthly_cap_usd = 10\nidle_minutes = 20\nrequire_regions = [\"EU-secure\"]\n",
+        )
+        .unwrap();
+        assert!(on.rent.enabled);
+        assert_eq!(on.rent.max_usd_per_hour, Some(0.4));
+        assert_eq!(on.rent.require_regions, vec!["EU-secure"]);
+        // An explicit empty list is the operator clearing the filter, which the API allows.
+        assert!(Config::parse("[rent]\nrequire_regions = []\n").unwrap().rent.require_regions.is_empty());
+    }
+
+    #[test]
+    fn rent_refuses_a_cap_it_cannot_enforce() {
+        assert!(Config::parse("[rent]\nmax_hours = 48\n").unwrap_err().contains("max_hours"));
+        assert!(Config::parse("[rent]\nmax_usd_per_hour = 0\n").unwrap_err().contains("max_usd_per_hour"));
+        assert!(Config::parse("[rent]\nmonthly_cap_usd = -1\n").unwrap_err().contains("monthly_cap_usd"));
+        assert!(Config::parse("[rent]\nidle_minutes = 0\n").unwrap_err().contains("idle_minutes"));
+        assert!(Config::parse("[rent]\nrequire_regions = [\"any\", \"EU\"]\n").unwrap_err().contains("only token"));
     }
 
     #[test]
