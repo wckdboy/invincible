@@ -51,6 +51,9 @@ pub struct Options {
     pub review: bool,
     /// A command run once after files changed, before the turn may finish ([crate::config::AgentConfig::check]).
     pub check: Option<String>,
+    /// The project whose [crate::briefs] apply; None: the working directory. A thread sets it
+    /// to the repository it was branched from, so every worktree shares one brief.
+    pub project_root: Option<std::path::PathBuf>,
 }
 
 /// A bot's name.
@@ -1198,7 +1201,8 @@ impl Agent {
              again, write down how with create_skill before you answer; when a skill you followed was \
              wrong or out of date, fix it with improve_skill. When you learn how the owner likes to \
              work (a preference, their tools, their style), keep it with update_user_profile. \
-             Work step by step, check results, and answer briefly in plain text.",
+             Work step by step, check results, and answer briefly in plain text. For a job with \
+             several steps, use `todo` to keep one plan and mark items done as they are.",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
         );
@@ -1284,6 +1288,17 @@ impl Agent {
         if let Some(notes) = self.tools.project_notes() {
             prompt.push_str("\n\nThe project's instructions for agents (follow them):\n");
             prompt.push_str(&notes);
+        }
+        if let Some(home) = self.tools.home() {
+            let root = self.options.project_root.as_deref().unwrap_or_else(|| self.tools.workdir());
+            if let Some(brief) = crate::briefs::prompt(home, root) {
+                prompt.push_str("\n\nThe owner's brief for this project (standing context; keep to it):\n");
+                prompt.push_str(&brief);
+            }
+            if let Some(plan) = crate::plans::prompt(home, &crate::tools::current_session()) {
+                prompt.push_str("\n\n");
+                prompt.push_str(&plan);
+            }
         }
         if let Some(home) = self.tools.home()
             && let Some(variables) = crate::variables::prompt(home)

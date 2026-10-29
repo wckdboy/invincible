@@ -538,7 +538,7 @@ impl Tools {
             ),
             function(
                 "todo",
-                "Keep a task list for a job with several steps: send the whole list each time, with each item's status. Mark an item doing when you start it and done when it is finished. The owner sees it.",
+                "Keep the plan for a job with several steps: send the whole list each time, with each item's status. Mark an item doing when you start it and done when it is finished. It is saved with the conversation, carried into every step and every resumed run, and shown to the owner; an empty list clears it.",
                 json!({ "items": { "type": "array", "items": { "type": "object", "properties": {
                     "text": { "type": "string" },
                     "status": { "type": "string", "enum": ["pending", "doing", "done"] },
@@ -895,7 +895,13 @@ impl Tools {
                 }
             }
             Call::ReadFile { path, offset, limit } => read_lines(path, *offset, *limit, self.limit).await,
-            Call::Todo { items } => todo(items),
+            Call::Todo { items } => {
+                let saved = match &self.home {
+                    Some(home) => crate::plans::save(home, &current_session(), items).map(|_| ()),
+                    None => Ok(()),
+                };
+                saved.and_then(|()| todo(items))
+            }
             Call::WriteFile { path, content } => write(path, content).await,
             Call::EditFile { path, old, new, all } => edit(path, old, new, *all).await,
             Call::ListDir { path } => list(path).await,
@@ -1355,6 +1361,11 @@ impl Tools {
 
 fn turn_context() -> TurnContext {
     TURN.try_with(Clone::clone).unwrap_or_default()
+}
+
+/// The conversation this turn is for (`""` outside a turn).
+pub fn current_session() -> String {
+    turn_context().session
 }
 
 /// `schedule_task`: a schedule made by the agent, answering to the chat it was asked in.

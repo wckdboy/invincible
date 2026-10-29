@@ -43,7 +43,7 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `POST /v1/agent/bots/{name}/enable`, `POST /v1/agent/bots/{name}/disable` | | `{"ok": true, "enabled", "restart": false, "status": "running"\|"stopped"\|"error", "error"?}`: kept in the bot's config, and `autobot serve` starts or stops it at once (`restart: true` and no `status` from an agent that cannot). `404` (`unknown_bot`) |
 | `POST /v1/agent/bots/reload` | `{}` | `{"started", "stopped", "restarted", "persona", "failed": [{"name", "error"}], "running"}` (names): the running bots brought in line with their configuration now, as `autobot serve` does on its own within seconds of a change. `persona`: bots whose `SOUL.md` changed (read at every turn; nothing restarts). `409` (`not_configurable`) without bots to reload, `400` (`invalid_config`) when `config.toml` does not load |
 | `GET /v1/agent/sessions?bot=` | | `{"sessions": [{"id", "modified", "bot"}]}`: every bot's conversations (only `bot`'s with it), newest first; `modified` in Unix seconds |
-| `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape; a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
+| `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...], "plan"}`: the conversation in the OpenAI chat shape, and its plan (`null` when there is none); a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
 | `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn), `"bot"`, `"images"` (below) and `"delegated"` (below) | An event stream (below); `400` for an unknown personality, images that are not taken (`model_cannot_see_images` when the model cannot see), or a delegated scope out of bounds. `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
 | `POST /v1/agent/sessions/{id}/retry` | `{}` | An event stream, like a turn: the last turn leaves the conversation and its request (with its images) runs again; files it changed stay. `404` when there is no turn to retry, `409` while one runs |
 | `POST /v1/agent/sessions/{id}/fork` | `{"to"?, "at"?}` | `{"id", "messages"}`: a new conversation starting as this one did, up to message `at` (rounded to the end of that turn; all of it by default) |
@@ -75,6 +75,10 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/insights?days=&bot=` | | What the bot did over the last `days` (default 7), with `"bot"`: `{"days", "turns", "seconds", "calls", "tokens", "cost", "unpriced", "local_share": {"calls", "tokens"}, "tools": [{"name", "count"}], "projects": [{"name", "count"}], "models": [{"model", "calls", "tokens", "cloud"}], "failures": {"errors", "stopped", "tool_errors", "refused"}}` |
 | `GET /v1/agent/adapters` | | `{"adapters": [{"name", "label", "command", "installed", "version", "path", "auth", "login", "capabilities", "runnable", "note"}]}`: Autobot and the external coding CLIs detected on the machine; `runnable` is false for native Autobot. Detection is cached for five minutes |
 | `POST /v1/agent/adapters/{name}/run` | `{"task", "thread", "timeout_seconds"?, "stream"?}` | Runs the CLI in the thread's worktree with its own account and a scrubbed environment; the task is one argument, never a shell, and one run per worktree is allowed. Without `stream`: `{"adapter", "thread", "workdir", "exit_code", "seconds", "stdout", "stderr", "truncated"}` when it ends. With `"stream": true`: `adapter.started`, one `adapter.output` per complete line (`stream`: `stdout` or `stderr`, `delta`) and then `adapter.finished` (`exit_code`, `seconds`, `truncated`) or `adapter.error`. `409` when it is not installed, not logged in or busy; `504` after the timeout (30–7200 s, default 1800) |
+| `GET /v1/agent/plan?session=` | | `{"session", "items": [{"text", "status"}], "updated_at", "done", "total"}`: the task list the agent keeps with `todo` for that conversation; `items` is empty when there is none |
+| `GET /v1/agent/project?thread=` | | `{"root", "name", "brief", "characters", "updated_at", "check", "workdir"}`: the owner's brief for the thread's repository (or the agent's working directory without `thread`), and the configured verification command |
+| `POST /v1/agent/project` | `{"brief", "thread"?}` | The same view: writes or replaces the brief; empty text removes it; `400` for a missing root or more than 64 KiB |
+| `DELETE /v1/agent/project?thread=` | | `{"ok": true, "removed": bool, "root"}`: forgets the brief; repository files are untouched |
 | `GET /v1/agent/delegations` | | `{"delegations": [{"id", "session", "bot", "task", "state", "retry_at", "retry_at_local", "created_at", "updated_at", "resumes", "max_resumes", "owner_controls", "max_nudges", "until", "last_error", "final_text"}], "paused", "running", "max_resumes"}`: paused delegated runs, newest first |
 | `POST /v1/agent/delegations/{id}/resume` | `{}` | `{"ok": true}`: makes a paused run due now; it resumes in the same conversation and worktree within seconds. `409` (`not_paused`) |
 | `POST /v1/agent/delegations/{id}/cancel` | `{}` | `{"ok": true}`: drops a paused run; a running one is left to finish. `409` (`not_paused`) |
@@ -256,6 +260,25 @@ worktree keeps its changes.
 /v1/agent/secrets` returns their names, sizes, update times and kind, never their values;
 `POST /v1/agent/secrets` writes one (`{"file", "value"}`, a plain name, mode 0600) and `DELETE
 /v1/agent/secrets/{name}` removes one. A value is never returned or logged.
+
+## Project brief and plan
+
+A large repository needs context that outlives a conversation, and a long task needs a plan that
+outlives a turn.
+
+**The brief** is the owner's standing context for a project, stored in
+`$AUTOBOT_HOME/briefs.json` (mode 0600) and keyed by canonical root. A thread uses its repository
+root, so every worktree shares one brief even before it is committed; the default project is the
+agent's working directory. The brief is capped at 64 KiB and carried in the system prompt on
+every step, labelled as the owner's. The repository's `AGENTS.md`, `CLAUDE.md` and
+`.autobot/AGENTS.md` are still read from the checkout; a brief complements them rather than
+replacing them. The panel's **Project** page edits it per project.
+
+**The plan** is the latest `todo` list of a conversation, stored in
+`$AUTOBOT_HOME/sessions/<id>.plan.json` and replaced whole every time the tool is called (empty
+clears it, at most 100 items, 500 characters each). `todo` is in the `plan` tool group. The list
+is carried in the system prompt on every step, is shown beside the conversation, survives a
+restart and is seen again by a resumed delegated run. `…/reset` clears it; `…/fork` copies it.
 
 ## Scheduled tasks
 

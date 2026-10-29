@@ -118,6 +118,7 @@ impl BotApi {
         let mut agent = (*base).clone();
         agent.tools = agent.tools.clone().with_workdir(thread.worktree.clone());
         agent.options.repo_map = crate::repo_map::render(&thread.worktree, 4096);
+        agent.options.project_root = Some(thread.repo.clone());
         Ok(Arc::new(agent))
     }
 
@@ -531,6 +532,8 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/openai/v1/chat/completions", post(openai_chat))
         .route("/v1/agent/sessions", get(sessions))
         .route("/v1/agent/sessions/{id}", get(history))
+        .route("/v1/agent/plan", get(plan))
+        .route("/v1/agent/project", get(project).post(set_project).delete(remove_project))
         // A turn may carry images (base64: a third larger than they are).
         .route("/v1/agent/sessions/{id}/turns", post(turn).layer(axum::extract::DefaultBodyLimit::max(TURN_BODY_LIMIT)))
         .route("/v1/agent/sessions/{id}/retry", post(retry))
@@ -1428,7 +1431,111 @@ async fn history(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
             Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
         },
     };
-    Json(json!({ "id": id, "messages": messages })).into_response()
+    let plan = crate::plans::load(bot.home(), &id).ok().flatten().map(|plan| plan.view());
+    Json(json!({ "id": id, "messages": messages, "plan": plan })).into_response()
+}
+
+/// `GET /v1/agent/plan?session=`: the task list the agent keeps with `todo` for that
+/// conversation, or an empty one.
+async fn plan(Bot(bot, _): Bot, Query(query): Query<PlanQuery>) -> Response {
+    if !valid(&query.session) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
+    }
+    match crate::plans::load(bot.home(), &query.session) {
+        Ok(Some(plan)) => Json(plan.view()).into_response(),
+        Ok(None) => Json(json!({
+            "session": query.session, "items": [], "updated_at": null, "done": 0, "total": 0,
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct PlanQuery {
+    session: String,
+}
+
+#[derive(Deserialize)]
+struct ProjectQuery {
+    #[serde(default)]
+    thread: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProjectBody {
+    #[serde(default)]
+    thread: Option<String>,
+    brief: String,
+}
+
+/// The project a request is about: a thread's repository, or the agent's working directory.
+fn project_root(bot: &BotApi, thread: Option<&str>) -> Result<std::path::PathBuf, (StatusCode, &'static str, String)> {
+    match thread {
+        Some(id) => match bot.threads.get(id) {
+            Ok(Some(thread)) => Ok(crate::briefs::root_for(&thread.repo)),
+            Ok(None) => Err((StatusCode::NOT_FOUND, "unknown_thread", format!("there is no thread {id:?}"))),
+            Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, "internal_error", e)),
+        },
+        None => Ok(crate::briefs::root_for(bot.agent().tools.workdir())),
+    }
+}
+
+fn project_view(bot: &BotApi, root: &std::path::Path, brief: Option<crate::briefs::Brief>) -> Value {
+    let name =
+        root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string());
+    let mut view = match brief {
+        Some(brief) => brief.view(),
+        None => json!({
+            "root": root.display().to_string(),
+            "name": name,
+            "brief": "",
+            "characters": 0,
+            "updated_at": null,
+        }),
+    };
+    view["check"] = json!(bot.agent().options.check);
+    view["workdir"] = json!(bot.agent().tools.workdir().display().to_string());
+    view
+}
+
+/// `GET /v1/agent/project?thread=`: the owner's brief for the project (a thread's repository, or
+/// the agent's working directory), with the configured verification command.
+async fn project(Bot(bot, _): Bot, Query(query): Query<ProjectQuery>) -> Response {
+    let root = match project_root(&bot, query.thread.as_deref()) {
+        Ok(root) => root,
+        Err((status, code, message)) => return error(status, code, &message),
+    };
+    match crate::briefs::get(bot.home(), &root) {
+        Ok(brief) => Json(project_view(&bot, &root, brief)).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/project {"brief", "thread"?}`: writes the brief; empty text removes it.
+async fn set_project(Bot(bot, _): Bot, Json(body): Json<ProjectBody>) -> Response {
+    let root = match project_root(&bot, body.thread.as_deref()) {
+        Ok(root) => root,
+        Err((status, code, message)) => return error(status, code, &message),
+    };
+    match crate::briefs::set(bot.home(), &root, &body.brief) {
+        Ok(brief) => Json(project_view(&bot, &root, brief)).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/project?thread=`: forgets the brief; the project's files are untouched.
+async fn remove_project(Bot(bot, _): Bot, Query(query): Query<ProjectQuery>) -> Response {
+    let root = match project_root(&bot, query.thread.as_deref()) {
+        Ok(root) => root,
+        Err((status, code, message)) => return error(status, code, &message),
+    };
+    match crate::briefs::remove(bot.home(), &root) {
+        Ok(removed) => {
+            Json(json!({ "ok": true, "removed": removed, "root": root.display().to_string() })).into_response()
+        }
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 async fn reset(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
@@ -1446,6 +1553,9 @@ async fn reset(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
         return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e);
     }
     open.grants.clear();
+    if let Err(e) = crate::plans::remove(bot.home(), &id) {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e);
+    }
     Json(json!({ "id": id })).into_response()
 }
 
@@ -1538,7 +1648,14 @@ async fn fork(Bot(bot, _): Bot, Path(id): Path<String>, body: Bytes) -> Response
     let forked =
         crate::session::Session::open(&bot.sessions_dir(), &id).and_then(|s| s.fork(&bot.sessions_dir(), &to, at));
     match forked {
-        Ok(copy) => Json(json!({ "id": copy.id, "messages": copy.messages.len() })).into_response(),
+        Ok(copy) => {
+            // The plan is the work state, not a message: the fork starts with it too.
+            if let Ok(Some(plan)) = crate::plans::load(bot.home(), &id) {
+                let items = serde_json::to_value(&plan.items).unwrap_or_default();
+                let _ = crate::plans::save(bot.home(), &copy.id, &items);
+            }
+            Json(json!({ "id": copy.id, "messages": copy.messages.len() })).into_response()
+        }
         Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
     }
 }

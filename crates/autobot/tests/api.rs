@@ -983,3 +983,107 @@ async fn adapters_are_listed_with_their_auth_and_a_native_autobot() {
     assert!(codex["login"].as_str().unwrap().contains("codex login"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn a_todo_list_is_saved_with_the_conversation() {
+    let (gateway, _, dir) = stack(
+        "plan",
+        vec![
+            json!({ "role": "assistant", "content": "", "tool_calls": [{ "id": "t1", "type": "function",
+                "function": { "name": "todo", "arguments": "{\"items\":[{\"text\":\"read the parser\",\"status\":\"done\"},{\"text\":\"fix the test\",\"status\":\"doing\"}]}" } }] }),
+            json!({ "role": "assistant", "content": "Plan saved." }),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let events =
+        turn(&client, &format!("{gateway}/v1/agent/sessions/plan-test/turns"), "fix the parser", async |_: &Value| {})
+            .await;
+    assert_eq!(events.last().unwrap()["text"], "Plan saved.");
+    let plan: Value = client
+        .get(format!("{gateway}/v1/agent/plan?session=plan-test"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(plan["total"], 2, "{plan}");
+    assert_eq!(plan["done"], 1);
+    assert_eq!(plan["items"][1]["status"], "doing");
+    let history: Value = client
+        .get(format!("{gateway}/v1/agent/sessions/plan-test"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(history["plan"]["items"][0]["text"], "read the parser");
+    // A reset starts the work state over too.
+    let reset = client
+        .post(format!("{gateway}/v1/agent/sessions/plan-test/reset"))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reset.status(), 200);
+    let plan: Value = client
+        .get(format!("{gateway}/v1/agent/plan?session=plan-test"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(plan["total"], 0, "{plan}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_project_brief_is_edited_through_the_api() {
+    let (gateway, _, dir) = stack("brief", Vec::new(), Duration::ZERO).await;
+    std::fs::create_dir_all(dir.join("work")).unwrap();
+    let client = reqwest::Client::new();
+    let empty: Value = client
+        .get(format!("{gateway}/v1/agent/project"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(empty["brief"], "");
+    let saved = client
+        .post(format!("{gateway}/v1/agent/project"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "brief": "Rust workspace. Run cargo test before answering." }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), 200);
+    let saved: Value = saved.json().await.unwrap();
+    assert_eq!(saved["characters"], 48);
+    assert_eq!(saved["name"], "work");
+    let listed: Value = client
+        .get(format!("{gateway}/v1/agent/project"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed["brief"], "Rust workspace. Run cargo test before answering.");
+    let removed = client.delete(format!("{gateway}/v1/agent/project")).bearer_auth(TOKEN).send().await.unwrap();
+    assert_eq!(removed.status(), 200);
+    let removed: Value = removed.json().await.unwrap();
+    assert_eq!(removed["removed"], true);
+    let _ = std::fs::remove_dir_all(dir);
+}
