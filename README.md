@@ -1228,7 +1228,7 @@ binary = "wckd"
 max_usd_per_hour = 1.0
 max_hours = 8
 monthly_cap_usd = 50
-require_regions = ["EU"]    # the default
+require_regions = ["EU"]    # the ceiling; a client can narrow it, not clear it
 ```
 
 Put RunPod and S3 credentials in `~/.invincible/rent/.env` (mode 0600). The node does not copy

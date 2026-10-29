@@ -321,7 +321,7 @@ impl RemoteConfig {
 /// max_hours = 8                   # a single rental; at most 24, which is wckd's own ceiling
 /// monthly_cap_usd = 50            # omit: no monthly cap
 /// idle_minutes = 15               # recorded on the node; the deadline sweeper is wckd's
-/// require_regions = ["EU"]        # hard filter; "any" or "*" (alone) clears it
+/// require_regions = ["EU"]        # ceiling; a request may narrow it, not clear it
 /// ```
 ///
 /// `enabled` defaults to false. A rental still needs `invincible-confirmed: 1` even when it is
@@ -348,8 +348,9 @@ pub struct RentConfig {
     /// stops a pod at its deadline (`hours`), which is the stop this version can count on.
     #[serde(default = "default_idle_minutes")]
     pub idle_minutes: u64,
-    /// Hard region filter forwarded when a request does not set its own. Default `EU`.
-    /// An explicit empty list clears the filter. `any` or `*` must be the only token.
+    /// Hard region filter. Default `EU`. A request may only narrow this list; it cannot clear
+    /// it or name a region outside it. An explicit empty list here is the operator turning the
+    /// filter off. `any` or `*` must be the only token and does the same.
     #[serde(default = "default_regions")]
     pub require_regions: Vec<String>,
 }

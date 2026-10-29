@@ -224,29 +224,217 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-/// `GET /v1/rent/offers`. A missing `require_regions` becomes the node's filter (default `EU`).
+/// `GET /v1/rent/offers`. The node's `require_regions` is a ceiling: a missing query uses it, and a
+/// query may only narrow it.
 pub async fn offers(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let Some(rent) = state.rent.clone() else {
         return disabled();
     };
-    let path = offers_target(request.uri().query(), &rent.limits);
+    let path = match offers_target(request.uri().query(), &rent.limits) {
+        Ok(path) => path,
+        Err(message) => return error(StatusCode::BAD_REQUEST, "bad_request", &message),
+    };
     match rent.exchange(&state, Method::GET, &path, None).await {
         Err(()) => unavailable("wckd is not answering"),
         Ok((status, body)) => json_response(status, body),
     }
 }
 
-fn offers_target(query: Option<&str>, limits: &RentConfig) -> String {
-    let mut pairs: Vec<String> =
-        query.unwrap_or("").split('&').filter(|pair| !pair.is_empty()).map(str::to_owned).collect();
-    let set = pairs.iter().any(|pair| match pair.split_once('=') {
-        Some((key, _)) => key == "require_regions",
-        None => pair.as_str() == "require_regions",
-    });
-    if !set {
-        pairs.push(format!("require_regions={}", query_escape(&limits.require_regions.join(","))));
+fn offers_target(query: Option<&str>, limits: &RentConfig) -> Result<String, String> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut requested: Option<Vec<String>> = None;
+    for pair in query.unwrap_or("").split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = query_decode(key);
+        if key == "require_regions" {
+            let tokens = split_regions(&query_decode(value));
+            match &mut requested {
+                Some(have) => have.extend(tokens),
+                None => requested = Some(tokens),
+            }
+        } else {
+            pairs.push((key, query_decode(value)));
+        }
     }
-    if pairs.is_empty() { "/v1/rent/offers".to_owned() } else { format!("/v1/rent/offers?{}", pairs.join("&")) }
+    let regions = resolve_regions(requested.as_deref(), limits)?;
+    pairs.push(("require_regions".to_owned(), regions.join(",")));
+    let query = pairs
+        .iter()
+        .map(|(key, value)| format!("{}={}", query_escape(key), query_escape(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    Ok(format!("/v1/rent/offers?{query}"))
+}
+
+fn query_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn split_regions(value: &str) -> Vec<String> {
+    value.split(',').map(str::trim).filter(|token| !token.is_empty()).map(str::to_owned).collect()
+}
+
+fn regions_in_body(body: &Value) -> Result<Option<Vec<String>>, String> {
+    match body.get("require_regions") {
+        None => Ok(None),
+        Some(Value::Array(items)) => {
+            let mut tokens = Vec::with_capacity(items.len());
+            for item in items {
+                let Some(token) = item.as_str() else {
+                    return Err("require_regions is a list of region names".to_owned());
+                };
+                let token = token.trim();
+                if !token.is_empty() {
+                    tokens.push(token.to_owned());
+                }
+            }
+            // Present, including `[]` and `[""]`: the caller set the filter, and an empty result
+            // is a clear, which [resolve_regions] refuses unless the node itself has none.
+            Ok(Some(tokens))
+        }
+        Some(_) => Err("require_regions is a list of region names".to_owned()),
+    }
+}
+
+/// The node's `[rent] require_regions` is the ceiling. Omitted means that list. A request may
+/// name a subset (EU covers `EU-secure` and a finer `EU-…` token) and may not clear the filter
+/// or name a region the node did not allow.
+fn resolve_regions(requested: Option<&[String]>, limits: &RentConfig) -> Result<Vec<String>, String> {
+    let Some(requested) = requested else {
+        return Ok(limits.require_regions.clone());
+    };
+    let filter = if limits.require_regions.is_empty() {
+        "no region filter".to_owned()
+    } else {
+        limits.require_regions.join(", ")
+    };
+    if requested.is_empty() {
+        if unconstrained(&limits.require_regions) {
+            return Ok(limits.require_regions.clone());
+        }
+        return Err(format!("require_regions cannot be cleared; this node requires {filter}"));
+    }
+    let mut narrowed = Vec::with_capacity(requested.len());
+    for token in requested {
+        if !token_allowed(token, &limits.require_regions) {
+            return Err(format!(
+                "require_regions {token} is outside this node's filter ({filter}); a request may only narrow it"
+            ));
+        }
+        if !narrowed.iter().any(|have: &String| have == token) {
+            narrowed.push(token.clone());
+        }
+    }
+    Ok(narrowed)
+}
+
+fn unconstrained(configured: &[String]) -> bool {
+    configured.is_empty() || configured.iter().any(|token| token == "any" || token == "*")
+}
+
+fn token_allowed(token: &str, configured: &[String]) -> bool {
+    unconstrained(configured) || configured.iter().any(|configured| covers(configured, token))
+}
+
+/// `configured` allows `requested` when the request is that token or a stricter one: `EU` allows
+/// `EU-secure` and `EU-RO-1`, and `EU-secure` does not allow a token that drops the secure mode.
+fn covers(configured: &str, requested: &str) -> bool {
+    if configured == requested || configured == "any" || configured == "*" {
+        return true;
+    }
+    let (config_region, config_secure) = split_mode(configured);
+    let (request_region, request_secure) = split_mode(requested);
+    if config_secure && !request_secure {
+        return false;
+    }
+    request_region == config_region
+        || request_region.starts_with(&format!("{config_region}-"))
+        || request_region.starts_with(&format!("{config_region}_"))
+}
+
+fn split_mode(token: &str) -> (&str, bool) {
+    match token.strip_suffix("-secure") {
+        Some(region) if !region.is_empty() => (region, true),
+        _ => (token, false),
+    }
+}
+
+fn pinned_offer(body: &Value) -> bool {
+    body.get("offer_id").and_then(Value::as_str).is_some_and(|id| !id.is_empty())
+}
+
+fn session_over_cap(limits: &RentConfig, session: &Value, spent: Option<f64>) -> Option<CapBreach> {
+    let hours = session.get("hours").and_then(Value::as_f64).filter(|hours| hours.is_finite() && *hours > 0.0);
+    let estimate = finite_price(session.get("cost_estimate_usd"));
+    let usd_per_hr = finite_price(session.get("offer").and_then(|offer| offer.get("usd_per_hr")))
+        .or_else(|| hours.zip(estimate).map(|(hours, estimate)| estimate / hours));
+    match (hours, usd_per_hr) {
+        (Some(hours), Some(usd_per_hr)) => {
+            let estimate_usd = estimate.unwrap_or(usd_per_hr * hours);
+            breach(limits, &Quote { hours, usd_per_hr, estimate_usd }, spent)
+        }
+        // A money cap with no price on the created session is not a pass.
+        _ if limits.max_usd_per_hour.is_some() || limits.monthly_cap_usd.is_some() => Some(CapBreach::Unaccounted),
+        _ => None,
+    }
+}
+
+async fn stop_over_cap(
+    state: &AppState,
+    rent: &Gateway,
+    caller: &Option<axum::Extension<Caller>>,
+    headers: &HeaderMap,
+    session: &Value,
+    breach: &CapBreach,
+) -> Response {
+    let Some(id) = session.get("id").and_then(Value::as_str).and_then(session_id) else {
+        return error(
+            StatusCode::BAD_GATEWAY,
+            "rent_cap",
+            "the rental came back over the node's cap and it has no session id to stop",
+        );
+    };
+    let sent = json!({"force": true});
+    let path = format!("/v1/rent/sessions/{id}/stop");
+    match rent.exchange(state, Method::POST, &path, Some(&sent)).await {
+        Ok((status, body)) if status.is_success() => {
+            let response = json_response(status, body.clone());
+            let extra = json!({
+                "rent": {
+                    "action": "stop",
+                    "session_id": id,
+                    "forced": true,
+                    "over_cap": breach.limit(),
+                    "cost_estimate_usd": session.get("cost_estimate_usd").cloned().unwrap_or(Value::Null),
+                }
+            });
+            let _ = record(state, caller, headers, "rent.stop", &sent, response, extra);
+        }
+        _ => {
+            return error(
+                StatusCode::BAD_GATEWAY,
+                "rent_cap",
+                &format!("the rental {id} came back over the node's cap and wckd did not stop it"),
+            );
+        }
+    }
+    let estimate = finite_price(session.get("cost_estimate_usd"));
+    cap_denied(breach, estimate)
 }
 
 fn query_escape(value: &str) -> String {
@@ -345,10 +533,13 @@ pub async fn create(
     if hours > rent.limits.max_hours {
         return cap_denied(&CapBreach::Hours { hours, max: rent.limits.max_hours }, None);
     }
-    if let Some(object) = request.as_object_mut()
-        && !object.contains_key("require_regions")
-    {
-        object.insert("require_regions".to_owned(), json!(rent.limits.require_regions));
+    let regions =
+        match regions_in_body(&request).and_then(|requested| resolve_regions(requested.as_deref(), &rent.limits)) {
+            Ok(regions) => regions,
+            Err(message) => return error(StatusCode::BAD_REQUEST, "bad_request", &message),
+        };
+    if let Some(object) = request.as_object_mut() {
+        object.insert("require_regions".to_owned(), json!(regions));
     }
     let _one = rent.create.lock().await;
     let (status, preview) = match rent.exchange(&state, Method::POST, "/v1/rent/sessions", Some(&request)).await {
@@ -363,7 +554,7 @@ pub async fn create(
             return cap_denied(&CapBreach::Unaccounted, preview.get("cost_estimate_usd").and_then(Value::as_f64));
         }
         return if confirmed(&headers) {
-            confirm_and_record(&state, &rent, &caller, &headers, &request).await
+            confirm_and_record(&state, &rent, &caller, &headers, &request, &preview, None).await
         } else {
             ask_rent(preview)
         };
@@ -381,7 +572,7 @@ pub async fn create(
     if !confirmed(&headers) {
         return ask_rent(preview);
     }
-    confirm_and_record(&state, &rent, &caller, &headers, &request).await
+    confirm_and_record(&state, &rent, &caller, &headers, &request, &preview, spent).await
 }
 
 enum MonthError {
@@ -414,10 +605,28 @@ async fn confirm_and_record(
     caller: &Option<axum::Extension<Caller>>,
     headers: &HeaderMap,
     request: &Value,
+    preview: &Value,
+    spent: Option<f64>,
 ) -> Response {
     let mut confirmed_body = request.clone();
     if let Some(object) = confirmed_body.as_object_mut() {
         object.insert("confirm".to_owned(), json!(true));
+    }
+    // An empty offer id lets wckd re-rank between this preview and the create, and the new row
+    // can cost more than the window the caps were checked against. Pin the previewed offer.
+    if !pinned_offer(&confirmed_body) {
+        let Some(id) =
+            preview.get("offer").and_then(|offer| offer.get("id")).and_then(Value::as_str).filter(|id| !id.is_empty())
+        else {
+            return error(
+                StatusCode::BAD_GATEWAY,
+                "rent_unavailable",
+                "wckd did not name an offer, so the price cannot be locked",
+            );
+        };
+        if let Some(object) = confirmed_body.as_object_mut() {
+            object.insert("offer_id".to_owned(), json!(id));
+        }
     }
     let url = format!("{}/v1/rent/sessions", rent.engine.base_url);
     let response = rent
@@ -442,10 +651,13 @@ async fn confirm_and_record(
         }
     };
     let (status, body) = parse_upstream(status, &bytes, rent.bearer());
-    let response = json_response(status, body.clone());
     if status != StatusCode::CREATED {
-        return response;
+        return json_response(status, body);
     }
+    if let Some(breach) = session_over_cap(&rent.limits, &body, spent) {
+        return stop_over_cap(state, rent, caller, headers, &body, &breach).await;
+    }
+    let response = json_response(status, body.clone());
     let extra = json!({
         "rent": {
             "action": "start",
@@ -711,15 +923,27 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_region_filter_becomes_the_nodes_default() {
+    fn a_request_may_narrow_the_nodes_regions_and_may_not_clear_or_widen_them() {
         let limits = RentConfig::default();
-        assert_eq!(offers_target(None, &limits), "/v1/rent/offers?require_regions=EU");
+        assert_eq!(offers_target(None, &limits).unwrap(), "/v1/rent/offers?require_regions=EU");
         assert_eq!(
-            offers_target(Some("preset=comfy&hours=1"), &limits),
+            offers_target(Some("preset=comfy&hours=1"), &limits).unwrap(),
             "/v1/rent/offers?preset=comfy&hours=1&require_regions=EU"
         );
-        // An explicit empty value is the caller clearing the filter, and is left alone.
-        assert_eq!(offers_target(Some("require_regions="), &limits), "/v1/rent/offers?require_regions=");
+        assert_eq!(
+            offers_target(Some("preset=comfy&require_regions=EU-secure"), &limits).unwrap(),
+            "/v1/rent/offers?preset=comfy&require_regions=EU-secure"
+        );
+        assert_eq!(resolve_regions(Some(&["EU-RO-1".into()]), &limits).unwrap(), vec!["EU-RO-1".to_owned()]);
+        let cleared = offers_target(Some("require_regions="), &limits).unwrap_err();
+        assert!(cleared.contains("cannot be cleared"), "{cleared}");
+        let widened = offers_target(Some("require_regions=US"), &limits).unwrap_err();
+        assert!(widened.contains("US") && widened.contains("EU"), "{widened}");
+        assert!(resolve_regions(Some(&["EU".into(), "US".into()]), &limits).is_err());
+        // Secure is stricter than EU. Dropping it, when that is what the node required, widens.
+        let secure = RentConfig { require_regions: vec!["EU-secure".into()], ..limits };
+        assert!(resolve_regions(Some(&["EU".into()]), &secure).is_err());
+        assert_eq!(resolve_regions(Some(&["EU-secure".into()]), &secure).unwrap(), vec!["EU-secure".to_owned()]);
     }
 
     #[test]

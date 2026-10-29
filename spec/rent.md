@@ -43,10 +43,17 @@ idle_minutes = 15               # recorded and reported; see Idle
 require_regions = ["EU"]        # the default hard filter
 ```
 
-`require_regions` is forwarded when a request does not set its own. `EU` is the default. `EU-secure`
-keeps EU data centers and Secure cloud only. `any` or `*` must be the only token and clears the
-filter. An explicit empty list on a request also clears it. A quote with no usable data center in
-the set is dropped by wckd, not by the node.
+`require_regions` is the node's ceiling. A request that omits it uses this list (`EU` by default).
+A request may only narrow it: `EU` allows `EU`, `EU-secure`, and a finer token such as `EU-RO-1`.
+`EU-secure` does not allow a token that drops the secure mode. An empty list, `any`, `*`, or a
+region outside the ceiling is **400**. The client cannot clear or widen the filter. `any` or `*`
+in the config (the only token) is the operator turning the ceiling off. A quote with no usable
+data center in the set is dropped by wckd, not by the node.
+
+A confirmed create pins `offer_id` to the offer the preview named, when the request did not pin
+one itself, so wckd cannot re-rank onto a dearer row between the two calls. If the created
+session's price is still over the cap, the node stops that session (`force`) and answers **403**
+`rent_cap`. The pod does not stay up at a price the caps were not checked against.
 
 `idle_minutes` is the owner's idle budget. This version records it and returns it on
 `GET /v1/rent/health`. It does not stop a pod for idleness: wckd's sweeper stops a pod at the

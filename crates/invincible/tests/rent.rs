@@ -154,11 +154,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": {"code": "bad_request", "message": "preset and hours are required"}})
                 return
             usd = 5.0 if preset == "expensive" else 0.5
+            confirmed = body.get("confirm") is True or self.headers.get("X-Wckd-Confirm") == "true"
+            # `rerank` previews under the cap and confirms far above it, even when the offer id
+            # was pinned. A confirm that forgot the offer id does the same. The node stops those.
+            if preset == "rerank" and not confirmed:
+                usd = 0.2
+            if confirmed and (preset == "rerank" or not (body.get("offer_id") or "").strip()):
+                usd = 9.0
             estimate = round(usd * hours, 4)
             regions = regions_of(body.get("require_regions"))
-            confirmed = body.get("confirm") is True or self.headers.get("X-Wckd-Confirm") == "true"
             offer = {
-                "id": body.get("offer_id") or "runpod:community:NVIDIA GeForce RTX 4090",
+                "id": (body.get("offer_id") or "").strip() or "runpod:community:NVIDIA GeForce RTX 4090",
                 "usd_per_hr": usd,
                 "estimate_usd": estimate,
             }
@@ -474,6 +480,52 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
     assert_eq!(store(&dir)["previews"], 1);
     assert!(!body.to_string().contains(&key));
 
+    // The node's EU ceiling. An empty list and a non-EU region never reach wckd. EU-secure is a
+    // narrower filter and is forwarded.
+    let (status, body) = call(
+        &url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(json!({"project_id": "hailuo-tests", "preset_id": "comfy", "hours": 1, "require_regions": []})),
+        true,
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    assert!(body["error"]["message"].as_str().unwrap_or("").contains("cannot be cleared"), "{body}");
+    let (status, body) = call(
+        &url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(json!({"project_id": "hailuo-tests", "preset_id": "comfy", "hours": 1, "require_regions": ["US"]})),
+        true,
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    assert!(body["error"]["message"].as_str().unwrap_or("").contains("US"), "{body}");
+    assert_eq!(store(&dir)["previews"], 1, "a refused region must not ask wckd");
+    assert_eq!(store(&dir)["provisions"], 0);
+    let (status, offers) =
+        call(&url, reqwest::Method::GET, "/v1/rent/offers?preset=comfy&hours=1&require_regions=", None, false).await;
+    assert_eq!(status, 400, "{offers}");
+    let (status, offers) =
+        call(&url, reqwest::Method::GET, "/v1/rent/offers?preset=comfy&hours=1&require_regions=US", None, false).await;
+    assert_eq!(status, 400, "{offers}");
+    let (status, body) = call(
+        &url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(json!({"project_id": "hailuo-tests", "preset_id": "comfy", "hours": 1, "require_regions": ["EU-secure"]})),
+        false,
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["require_regions"], json!(["EU-secure"]));
+    let (status, offers) =
+        call(&url, reqwest::Method::GET, "/v1/rent/offers?preset=comfy&hours=1&require_regions=EU-secure", None, false)
+            .await;
+    assert_eq!(status, 200, "{offers}");
+    assert_eq!(offers["require_regions"], json!(["EU-secure"]));
+
     // Over the hourly cap: wckd was asked for a price and did not provision.
     let (status, body) =
         call(&url, reqwest::Method::POST, "/v1/rent/sessions", Some(create_body("expensive", 1.0, false)), true).await;
@@ -486,6 +538,8 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
     assert_eq!(status, 201, "{started}");
     let session_id = started["id"].as_str().unwrap().to_owned();
     assert_eq!(started["phase"], "ready");
+    assert_eq!(started["offer"]["id"], "runpod:community:NVIDIA GeForce RTX 4090");
+    assert_eq!(started["offer"]["usd_per_hr"], 0.5, "the confirm landed on the previewed price");
     assert_eq!(store(&dir)["provisions"], 1);
     assert!(!started.to_string().contains(&key));
 
@@ -528,6 +582,28 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
     assert_eq!(again["id"], session_id);
     assert_eq!(again["phase"], "terminated");
     assert_eq!(store(&dir)["provisions"], 1, "a restart must not provision");
+
+    // wckd re-ranks onto a dearer offer than the preview. The node stops it and does not leave it running.
+    let (status, body) = call(
+        &url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(json!({"project_id": "hailuo-tests", "preset_id": "rerank", "hours": 1})),
+        true,
+    )
+    .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(body["error"]["code"], "rent_cap");
+    let (status, listed) = call(&url, reqwest::Method::GET, "/v1/rent/sessions", None, false).await;
+    assert_eq!(status, 200, "{listed}");
+    let reranked = listed["sessions"]
+        .as_array()
+        .and_then(|sessions| sessions.iter().find(|session| session["preset_id"] == "rerank"))
+        .cloned()
+        .unwrap_or_else(|| panic!("no rerank session in {listed}"));
+    assert_eq!(reranked["phase"], "terminated", "{reranked}");
+    assert!(reranked["offer"]["usd_per_hr"].as_f64().unwrap_or(0.0) > 1.0, "{reranked}");
+    assert!(reranked["forced"] == true, "{reranked}");
 
     let doctor_dir = dir.clone();
     let report = tokio::task::spawn_blocking(move || invincible::doctor::run(&doctor_dir, None)).await.unwrap();
