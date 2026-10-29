@@ -178,6 +178,10 @@ what the agent may do:
   owner to confirm), or stops with no answer, the run adds one user message telling the agent to
   decide routine details itself and continue. `max_nudges` is 0–5 (default 2). An answer that
   begins `DELEGATION: NEED_OWNER` stops the run for the owner instead.
+- **The owner's own instructions win.** If the original message says to wait, not to guess, to
+  ask first or to confirm, the run does **not** nudge: `delegate.started.questions` is `"owner"`,
+  and the first question ends the run for the owner. A nudge can never turn "wait for my answer"
+  into permission to decide.
 - **Approvals are declined, never accepted.** The approver returns the redirect "use a safer way
   or skip this step and keep going"; the stream says `delegate.declined`. Once a run has declined
   an approval it does not nudge the agent to work around it; it reports and stops for the owner.

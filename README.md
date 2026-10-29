@@ -474,9 +474,10 @@ puts the thread's session in **Chat**.
 
 **Keep going** (or `"delegated": true` on a turn) hands the task over for a while. The agent may
 continue itself after a routine question, with at most 2 nudges by default (at most 5), and a
-stalled turn (15 quiet minutes, or 45 while a tool runs) is stopped and nudged once. A usage
-limit that clears within 5 minutes is waited out; a longer one pauses the run with the retry
-time. The one thing delegation never does is accept an approval: a safety check is declined with
+stalled turn (15 quiet minutes, or 45 while a tool runs) is stopped and nudged once. If your own
+words say to wait, not guess, ask first or confirm, the run does not nudge at all: the first
+question comes back to you. A usage limit that clears within 5 minutes is waited out; a longer one
+pauses the run with the retry time. The one thing delegation never does is accept an approval: a safety check is declined with
 a redirect, the stream reports `delegate.declined`, and after a decline the run stops for you
 instead of finding a way around it. The panel shows every nudge and decline in the transcript.
 Set `[delegate] webhook` to get one signed JSON POST when the run finishes or stops, with its

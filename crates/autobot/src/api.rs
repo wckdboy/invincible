@@ -1326,8 +1326,9 @@ fn stream_turn(
     let waiting = state.waiting.clone();
     let runtime = bot.runtime.clone();
     let _ = tx.send(json!({ "v": 1, "type": "turn.started", "session": id }));
+    let owner_controls = crate::delegate::owner_controls(&text);
     if let Some(scope) = &delegated {
-        let _ = tx.send(scope.started());
+        let _ = tx.send(scope.started(owner_controls));
     }
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
@@ -1338,7 +1339,20 @@ fn stream_turn(
                     bot: bot.runtime.name.clone(),
                     declined: Arc::new(AtomicU32::new(0)),
                 };
-                run_delegated(agent, guard, text, images, scope, approver, tx, inbox, runtime, with_images).await;
+                run_delegated(
+                    agent,
+                    guard,
+                    text,
+                    images,
+                    scope,
+                    approver,
+                    tx,
+                    inbox,
+                    runtime,
+                    with_images,
+                    owner_controls,
+                )
+                .await;
             }
             None => {
                 let approver =
@@ -1417,6 +1431,7 @@ async fn run_delegated(
     inbox: crate::tools::Inbox,
     runtime: Arc<Runtime>,
     with_images: bool,
+    owner_controls: bool,
 ) {
     let started = std::time::Instant::now();
     let session_id = guard.session.id.clone();
@@ -1475,7 +1490,7 @@ async fn run_delegated(
             let _ = tx.send(json!({
                 "v": 1, "type": "delegate.stalled", "seconds": scope.stall_seconds,
             }));
-            if nudges >= scope.max_nudges {
+            if nudges >= scope.max_nudges || owner_controls {
                 fatal = Some(format!("the delegated turn produced nothing for {} s", scope.stall_seconds));
                 break;
             }
@@ -1497,6 +1512,7 @@ async fn run_delegated(
                 if let Some(reason) = waiting
                     && nudges < scope.max_nudges
                     && declined == 0
+                    && !owner_controls
                 {
                     nudges += 1;
                     current = crate::delegate::nudge(&scope, nudges, reason);
@@ -1574,6 +1590,7 @@ async fn run_delegated(
         "turns": attempts,
         "seconds": started.elapsed().as_secs(),
         "waiting_on_owner": waiting_for_owner,
+        "owner_controls": owner_controls,
         "paused": paused.is_some(),
         "retry_at": paused.as_ref().map(|p| p["retry_at"].clone()).unwrap_or(Value::Null),
         "retry_at_local": paused.as_ref().map(|p| p["retry_at_local"].clone()).unwrap_or(Value::Null),

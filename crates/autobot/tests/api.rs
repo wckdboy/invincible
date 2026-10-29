@@ -855,3 +855,29 @@ async fn a_long_usage_limit_pauses_a_delegated_run() {
     assert!(!events.iter().any(|e| e["type"] == "answer"), "{kinds:?}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn explicit_wait_instructions_are_not_nudged() {
+    let (gateway, _, dir) = stack(
+        "delegate-owner",
+        vec![json!({ "role": "assistant", "content": "Which file should I use?" })],
+        Duration::ZERO,
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let events = turn_with(
+        &client,
+        &format!("{gateway}/v1/agent/sessions/delegate-owner/turns"),
+        json!({ "text": "Ask me which filename to use, then wait for my answer. Do not guess.", "delegated": true }),
+        async |_: &Value| {},
+    )
+    .await;
+    let kinds: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
+    assert!(!kinds.contains(&"delegate.nudge"), "the owner said to wait: {kinds:?}");
+    let started = events.iter().find(|e| e["type"] == "delegate.started").unwrap();
+    assert_eq!(started["questions"], "owner");
+    let finished = events.iter().find(|e| e["type"] == "delegate.finished").unwrap();
+    assert_eq!(finished["waiting_on_owner"], true);
+    assert_eq!(events.last().unwrap()["text"], "Which file should I use?");
+    let _ = std::fs::remove_dir_all(dir);
+}

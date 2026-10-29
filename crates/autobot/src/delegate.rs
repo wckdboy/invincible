@@ -93,7 +93,7 @@ impl Scope {
         Ok(())
     }
 
-    pub fn started(&self) -> Value {
+    pub fn started(&self, owner_controls: bool) -> Value {
         json!({
             "v": 1,
             "type": "delegate.started",
@@ -101,6 +101,7 @@ impl Scope {
             "stall_seconds": self.stall_seconds,
             "until": self.until,
             "approvals": "declined",
+            "questions": if owner_controls { "owner" } else { "routine" },
         })
     }
 
@@ -110,6 +111,31 @@ impl Scope {
             None => String::new(),
         }
     }
+}
+
+/// Whether the owner's own words say to wait, not guess, or confirm. Delegation must not override
+/// an explicit instruction with a nudge: these tasks stop for the owner at the first question.
+pub fn owner_controls(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    const PHRASES: &[&str] = &[
+        "wait for my",
+        "wait for me",
+        "wait until i",
+        "do not guess",
+        "don't guess",
+        "ask me",
+        "ask first",
+        "check with me",
+        "let me decide",
+        "confirm with me",
+        "do not decide",
+        "don't decide",
+        "before writing anything, ask",
+        "before doing anything, ask",
+        "my answer",
+        "my approval",
+    ];
+    PHRASES.iter().any(|phrase| lower.contains(phrase))
 }
 
 /// Whether the agent used the marker that says it needs the owner (and has stopped).
@@ -169,7 +195,8 @@ pub fn nudge(scope: &Scope, number: u8, reason: &str) -> String {
         "[delegated] Do not wait for the owner. Decide routine details yourself and continue the task. \
          {reason}. Do not ask for confirmation of routine steps. If this needs a decision on product \
          direction, money, publishing, or something the owner reserved, stop and answer with one line \
-         beginning `DELEGATION: NEED_OWNER` and say what you need. This is nudge {number} of {}.{}",
+         beginning `DELEGATION: NEED_OWNER` and say what you need. If the owner's original message \
+         says to wait, not to guess, or to confirm, follow that instead. This is nudge {number} of {}.{}",
         scope.max_nudges,
         scope.until_line()
     )
@@ -335,6 +362,8 @@ mod tests {
         assert_eq!(waiting_reason("I need your call on the license."), Some("the previous answer waits for the owner"));
         assert_eq!(waiting_reason("DELEGATION: NEED_OWNER the price is the owner's call"), None);
         assert!(needs_owner("DELEGATION: NEED_OWNER the price is the owner's call"));
+        assert!(owner_controls("Ask me which file, then wait for my answer. Do not guess."));
+        assert!(!owner_controls("Fix the failing test and run it once."));
         assert_eq!(waiting_reason("  "), Some("the previous turn ended without an answer"));
     }
 
