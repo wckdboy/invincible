@@ -300,22 +300,21 @@ fn rclone_bin() -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let cache = home.join(".cache/invincible/rclone-v1.68.2");
     std::fs::create_dir_all(&cache).unwrap();
+    let _lock = CacheLock::acquire(&cache);
     let zip = cache.join(format!("{name}.zip"));
     let bin = cache.join(name).join("rclone");
     let stamp = cache.join(format!("{name}.sha256"));
-    if stamp.is_file()
-        && std::fs::read_to_string(&stamp).unwrap_or_default().trim() == sha
-        && bin.is_file()
-        && zip.is_file()
-        && sha256_file(&zip) == sha
-    {
+    if zip.is_file() && sha256_file(&zip) == sha && bin.is_file() {
+        let _ = std::fs::write(&stamp, sha);
         return bin;
     }
     if !zip.is_file() || sha256_file(&zip) != sha {
         let url = format!("https://downloads.rclone.org/v1.68.2/{name}.zip");
-        let status = Command::new("curl").args(["-fsSL", "-o"]).arg(&zip).arg(&url).status().expect("curl");
+        let partial = cache.join(format!("{name}.zip.partial"));
+        let status = Command::new("curl").args(["-fsSL", "-o"]).arg(&partial).arg(&url).status().expect("curl");
         assert!(status.success(), "could not download rclone from {url}");
-        assert_eq!(sha256_file(&zip), sha, "rclone zip does not match the pinned digest");
+        assert_eq!(sha256_file(&partial), sha, "rclone zip does not match the pinned digest");
+        std::fs::rename(&partial, &zip).unwrap();
     }
     let extracted = Command::new("python3")
         .args(["-c", "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"])
@@ -333,4 +332,29 @@ fn rclone_bin() -> PathBuf {
     }
     std::fs::write(&stamp, sha).unwrap();
     bin
+}
+
+/// One installer at a time. Two sidecar tests otherwise unzip over a binary that is already running.
+struct CacheLock(PathBuf);
+
+impl CacheLock {
+    fn acquire(cache: &Path) -> Self {
+        let path = cache.join("lock");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(_) => return Self(path),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(err) => panic!("rclone cache lock {}: {err}", path.display()),
+            }
+        }
+    }
+}
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
