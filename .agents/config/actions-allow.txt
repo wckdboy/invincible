@@ -1,0 +1,4 @@
+# Exact action references allowed to remain mutable. One per line, fnmatch syntax.
+# Keep this list empty unless pinning is genuinely impossible; record why in review.
+# Example:
+# owner/action@v1

@@ -1,0 +1,16 @@
+# gitleaks configuration for the eng baseline. Extends the maintained default
+# ruleset; allowlists are path-scoped and must be justified in review.
+title = "eng baseline"
+[extend]
+useDefault = true
+
+# Test fixtures deliberately contain fake credentials. They are never real.
+[[allowlists]]
+description = "eng control fixtures"
+paths = [
+  '''(^|/)tests/fixtures/.*''',
+  '''(^|/)tests/test_eng.py''',
+  '''(^|/)evals/fixtures/.*''',
+  '''(^|/)evals/control-fixture/.*''',
+  '''(^|/)evals/agent/fixture/.*''',
+]

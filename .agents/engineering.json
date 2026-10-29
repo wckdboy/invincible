@@ -1,0 +1,74 @@
+{
+  "schema": "eng-config/v1",
+  "project": "invincible",
+  "commands": {
+    "fast": [
+      {
+        "name": "fmt",
+        "run": "cargo fmt --all --check",
+        "timeout": 300
+      },
+      {
+        "name": "clippy",
+        "run": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+        "timeout": 1200
+      },
+      {
+        "name": "test",
+        "run": "cargo test --workspace --locked",
+        "timeout": 1200
+      }
+    ],
+    "full": [
+      {
+        "name": "fmt",
+        "run": "cargo fmt --all --check",
+        "timeout": 300
+      },
+      {
+        "name": "clippy",
+        "run": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+        "timeout": 1200
+      },
+      {
+        "name": "test",
+        "run": "cargo test --workspace --locked",
+        "timeout": 1200
+      },
+      {
+        "name": "shellcheck",
+        "run": "shellcheck -s sh install.sh tests/install/test.sh",
+        "timeout": 120
+      },
+      {
+        "name": "install-test",
+        "run": "sh tests/install/test.sh",
+        "timeout": 900
+      }
+    ]
+  },
+  "security": {
+    "required": [
+      "gitleaks",
+      "semgrep"
+    ],
+    "optional": [
+      "osv-scanner",
+      "actionlint"
+    ],
+    "gitleaks_config": ".agents/config/gitleaks.toml",
+    "semgrep_config": ".agents/config/semgrep.yml",
+    "gitleaks_history": false,
+    "timeout": 600
+  },
+  "budgets": {
+    "fast_seconds": 900,
+    "full_seconds": 2400
+  },
+  "parallel": {
+    "max_worktrees": 4
+  },
+  "impact": {
+    "base": "origin/main"
+  }
+}

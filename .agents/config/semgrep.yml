@@ -1,0 +1,97 @@
+# eng baseline SAST rules. These are deliberately few and high-signal; they are
+# not a replacement for a full security review. Add rules only with a test case.
+rules:
+  - id: eng-python-subprocess-shell-true
+    languages: [python]
+    message: >-
+      subprocess with shell=True passes a string to a system shell. Prefer an argv
+      list, or validate and quote every interpolated value.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      confidence: HIGH
+    patterns:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  - id: eng-python-requests-verify-false
+    languages: [python]
+    message: TLS certificate verification is disabled. Remove verify=False.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+      confidence: HIGH
+    pattern: requests.$FUNC(..., verify=False, ...)
+
+  - id: eng-python-yaml-unsafe-load
+    languages: [python]
+    message: yaml.load without SafeLoader can construct arbitrary Python objects.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+      confidence: MEDIUM
+    patterns:
+      - pattern: yaml.load($DATA)
+      - pattern-not: yaml.load($DATA, Loader=yaml.SafeLoader)
+      - pattern-not: yaml.load($DATA, Loader=yaml.CSafeLoader)
+
+  - id: eng-python-os-system
+    languages: [python]
+    message: os.system runs a shell command; use subprocess with an argv list.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      confidence: HIGH
+    pattern: os.system(...)
+
+  - id: eng-python-pickle-loads
+    languages: [python]
+    message: pickle.loads can execute code from untrusted bytes. Use a data-only format.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+      confidence: HIGH
+    pattern: pickle.loads(...)
+
+  - id: eng-js-child-process-execsync
+    languages: [javascript, typescript]
+    message: child_process.execSync runs a shell command; use execFile/spawn with an argv list.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      confidence: MEDIUM
+    pattern: $CP.execSync(...)
+
+  - id: eng-rust-command-shell
+    languages: [rust]
+    message: Spawning a shell re-introduces quoting and injection risk. Prefer Command::new(argv0).args([...]).
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      confidence: MEDIUM
+    patterns:
+      - pattern: std::process::Command::new($SHELL)
+      - metavariable-regex:
+          metavariable: $SHELL
+          regex: '"(sh|bash|zsh|cmd|powershell)"'
+
+  - id: eng-js-child-process-exec
+    languages: [javascript, typescript]
+    message: child_process.exec runs a shell command. Use execFile/spawn with an argv list.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      confidence: MEDIUM
+    patterns:
+      - pattern: $CP.exec($CMD, ...)
+      - metavariable-regex:
+          metavariable: $CP
+          regex: 'child_process|require\([''"]child_process[''"]\)'
+      - pattern-not: $CP.exec("...", ...)

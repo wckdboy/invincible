@@ -1,0 +1,6 @@
+#!/bin/sh
+# Pre-push gate: the repository's fast verification profile. Bypass only with
+# `git push --no-verify`, and say so in the report; CI runs the full gate.
+set -eu
+root=$(git rev-parse --show-toplevel)
+exec "$root/.agents/bin/eng" verify --profile fast

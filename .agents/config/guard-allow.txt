@@ -1,0 +1,4 @@
+# Paths the pre-commit guard intentionally skips. One fnmatch pattern per line.
+# Keep this list small and specific; a broad pattern disables the control.
+# Example:
+# tests/fixtures/fake-credentials.py
