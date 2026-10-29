@@ -304,8 +304,8 @@ fn rclone_bin() -> PathBuf {
     let zip = cache.join(format!("{name}.zip"));
     let bin = cache.join(name).join("rclone");
     let stamp = cache.join(format!("{name}.sha256"));
-    if zip.is_file() && sha256_file(&zip) == sha && bin.is_file() {
-        let _ = std::fs::write(&stamp, sha);
+    let stamp_ok = std::fs::read_to_string(&stamp).ok().is_some_and(|text| text.trim() == sha);
+    if zip.is_file() && sha256_file(&zip) == sha && bin.is_file() && stamp_ok {
         return bin;
     }
     if !zip.is_file() || sha256_file(&zip) != sha {
@@ -334,27 +334,22 @@ fn rclone_bin() -> PathBuf {
     bin
 }
 
-/// One installer at a time. Two sidecar tests otherwise unzip over a binary that is already running.
-struct CacheLock(PathBuf);
+/// One installer at a time. The lock is `flock`, released when this value is dropped.
+struct CacheLock {
+    _file: std::fs::File,
+}
 
 impl CacheLock {
     fn acquire(cache: &Path) -> Self {
-        let path = cache.join("lock");
-        let deadline = Instant::now() + Duration::from_secs(60);
-        loop {
-            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(_) => return Self(path),
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists && Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(err) => panic!("rclone cache lock {}: {err}", path.display()),
-            }
-        }
-    }
-}
-
-impl Drop for CacheLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(cache.join("lock"))
+            .unwrap();
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)
+            .unwrap_or_else(|err| panic!("rclone cache lock: {err}"));
+        Self { _file: file }
     }
 }
