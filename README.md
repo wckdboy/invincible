@@ -1211,7 +1211,15 @@ invincible cloud remove ds
 
 Presets know each provider's API, a model to start with, its context and its data policy;
 `egress = "never"` becomes `"ask"` with the first cloud model, and the gateway service is
-restarted to use it (a gateway started by hand needs a restart). Automatic routing never picks a model that trains on prompts (DeepSeek's API does), so with
+restarted to use it (a gateway started by hand needs a restart).
+
+A running gateway also has an admin API for the same thing: `GET /v1/admin/providers`,
+`POST /v1/admin/providers` (add or update; `{"id", "provider", "base_url", "upstream_model",
+"api_key", "context", "data_policy", "vision"}`) and `DELETE /v1/admin/providers/{id}`. It writes
+the config and a `keys/<id>` file (0600) and **hot-loads** the model for the next request, without
+a restart. A key is never returned. The panel's **Providers** page uses it. In the container, an
+existing `config.toml` is kept across restarts, so a provider added from the panel survives one;
+set `INVINCIBLE_CONFIG_FORCE=1` to regenerate it from the environment instead. Automatic routing never picks a model that trains on prompts (DeepSeek's API does), so with
 no local model, name one: `autobot code --model deepseek`, or `[gateway] model` in the agent's
 config (setup does this for a gateway with only cloud models).
 

@@ -515,8 +515,10 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 upstream_model: &model,
                 base_url: &base_url,
                 api_key_file: Some(&key_rel),
+                api_key_env: None,
                 context,
                 data_policy: &policy,
+                vision: None,
             };
             if let Err(e) = cloud::add_to_config(&config_path, &entry) {
                 let _ = std::fs::remove_file(&key_path);
@@ -627,6 +629,7 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Serve { config } => {
             let home = config::home()?;
+            let config_path = config.clone().unwrap_or_else(|| home.join("config.toml"));
             let config = config_for(config, &home)?;
             let token = token::load_or_create(&home.join("token"))?;
             tracing_subscriber::fmt().with_target(false).init();
@@ -634,7 +637,7 @@ fn run(cli: Cli) -> Result<(), String> {
             #[cfg(unix)]
             hangup_ignored();
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
-            runtime.block_on(serve(config, token, home))
+            runtime.block_on(serve(config, token, home, config_path))
         }
         Command::Token => {
             println!("{}", token::load_or_create(&config::home()?.join("token"))?);
@@ -1240,7 +1243,7 @@ fn run(cli: Cli) -> Result<(), String> {
     }
 }
 
-async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), String> {
+async fn serve(config: Config, token: String, home: PathBuf, config_path: PathBuf) -> Result<(), String> {
     let logs = home.join("logs");
     let mut engines = Vec::new();
     // Aborted at shutdown, which kills their engines (a handle dropped would leave its task running).
@@ -1339,20 +1342,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         tracing::info!("no local models: requests go to cloud models only, so private ones are refused");
     }
 
-    let mut cloud = Vec::new();
-    for c in &config.cloud {
-        let policy = invincible_policy::DataPolicy::parse(&c.data_policy);
-        let upstream = c.upstream_model.clone().unwrap_or_else(|| c.id.clone());
-        let model = match c.key(&home) {
-            Ok(key) => invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, key, c.context, policy),
-            Err(e) => {
-                tracing::warn!(model = %c.id, "cloud backend disabled: {e}");
-                invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, None, c.context, policy).disabled()
-            }
-        }
-        .with_vision(c.vision);
-        cloud.push(model);
-    }
+    let cloud = invincible::cloud::models(&config, &home);
     if !config.cloud.is_empty() && config.node.settings().network.is_offline() {
         tracing::info!("the node is offline: cloud backends are configured but will not be used");
     }
@@ -1424,6 +1414,12 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             seeds: config.discovery.seeds.clone(),
         })
         .with_dispatch(dispatch);
+    let clouds = state.cloud.clone();
+    state = state.with_provider_admin(Arc::new(invincible::providers_admin::ProviderAdmin::new(
+        home.clone(),
+        config_path.clone(),
+        clouds,
+    )));
     if config.remote.enabled() {
         let key = node_key.ok_or("no static key for pairing")?;
         let mut pairing = Pairing::new(

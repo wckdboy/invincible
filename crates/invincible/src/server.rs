@@ -25,7 +25,7 @@ use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reaso
 use serde_json::{Value, json};
 
 use crate::audit::{AuditLog, Caller};
-use crate::cloud::{CloudError, CloudModel};
+use crate::cloud::{CloudError, Clouds};
 use crate::devices::{Capabilities as DeviceCapabilities, Capability};
 use crate::engine::Engine;
 use crate::membership::{self, Membership};
@@ -82,7 +82,7 @@ pub struct AppState {
     pub client: reqwest::Client,
     /// Remote access; `None` when the config does not enable it.
     pub pairing: Option<Arc<Pairing>>,
-    pub cloud: Vec<CloudModel>,
+    pub cloud: Clouds,
     /// For requests that leave the node; `None` when the node is offline.
     pub egress: Option<reqwest::Client>,
     pub name: String,
@@ -102,6 +102,8 @@ pub struct AppState {
     /// Dispatch across the nodes this machine owns (spec/dispatch.md); `None` on a node that does
     /// not dispatch.
     pub dispatch: Option<Arc<crate::dispatch::Dispatch>>,
+    /// Cloud providers can be added, changed and removed while this runs (spec/agent.md).
+    pub providers: Option<Arc<crate::providers_admin::ProviderAdmin>>,
     /// This machine's cluster membership (`nodes.json`, `device.key`); `None` in a process with
     /// no home directory, which then cannot join or forget nodes.
     pub membership: Option<Arc<Membership>>,
@@ -130,12 +132,13 @@ impl AppState {
             token,
             client,
             pairing: None,
-            cloud: Vec::new(),
+            cloud: Clouds::default(),
             egress,
             name: "invincible".to_owned(),
             receipt_key,
             receipts: Arc::default(),
             audit: None,
+            providers: None,
             agent_url: "http://127.0.0.1:7792".to_owned(),
             speech: Vec::new(),
             images: Vec::new(),
@@ -202,8 +205,15 @@ impl AppState {
         self
     }
 
-    pub fn with_cloud(mut self, cloud: Vec<CloudModel>) -> Self {
-        self.cloud = cloud;
+    pub fn with_cloud(mut self, cloud: Vec<crate::cloud::CloudModel>) -> Self {
+        self.cloud = Clouds::new(cloud);
+        self
+    }
+
+    /// The provider admin (the config file and hot-reloaded cloud models); `None` in a process
+    /// with no home directory, which cannot add providers.
+    pub fn with_provider_admin(mut self, admin: Arc<crate::providers_admin::ProviderAdmin>) -> Self {
+        self.providers = Some(admin);
         self
     }
 
@@ -217,7 +227,7 @@ impl AppState {
             context: e.context,
             data_policy: DataPolicy::Owned,
         });
-        let cloud = self.cloud.iter().map(|c| Model {
+        let cloud = self.cloud.list().into_iter().map(|c| Model {
             id: c.id.clone(),
             tier: Tier::Cloud,
             healthy: c.healthy() && self.egress.is_some(),
@@ -230,7 +240,7 @@ impl AppState {
     /// Whether model [id] takes images (None: not known, or no such model).
     pub fn vision(&self, id: &str) -> Option<bool> {
         let engine = self.engines.iter().find(|e| e.id == id).map(|e| e.vision);
-        engine.or_else(|| self.cloud.iter().find(|c| c.id == id).map(|c| c.vision)).flatten()
+        engine.or_else(|| self.cloud.find(id).map(|c| c.vision)).flatten()
     }
 
     pub fn with_pairing(mut self, pairing: Arc<Pairing>) -> Self {
@@ -845,6 +855,8 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/admin/devices", get(list_devices))
         // `PATCH` sets what a device may reach (spec/pairing.md, Capabilities); `DELETE` unpairs.
         .route("/v1/admin/devices/{name}", patch(grant_device).delete(remove_device))
+        .route("/v1/admin/providers", get(list_providers).post(add_provider))
+        .route("/v1/admin/providers/{id}", axum::routing::delete(remove_provider))
         .route("/v1/cluster", get(cluster_status))
         .route("/v1/dispatch", get(dispatch_status))
         // Discovery (spec/discovery.md): what this node announces, and the verified descriptors
@@ -1051,6 +1063,57 @@ async fn fetch(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(body
         state.receipts.clone(),
         state.audit.clone(),
     )
+}
+
+/// `GET /v1/admin/providers`: the cloud providers this node is configured with, without keys.
+async fn list_providers(State(state): State<Arc<AppState>>) -> Response {
+    let Some(admin) = &state.providers else {
+        return error(
+            StatusCode::CONFLICT,
+            "not_configurable",
+            "this gateway has no home directory, so providers cannot be edited here",
+        );
+    };
+    match admin.list() {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/admin/providers`: add or update a cloud provider and hot-load it. The key is
+/// written to the gateway's `keys/` directory (0600) and never returned.
+async fn add_provider(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<crate::providers_admin::ProviderBody>,
+) -> Response {
+    let Some(admin) = &state.providers else {
+        return error(
+            StatusCode::CONFLICT,
+            "not_configurable",
+            "this gateway has no home directory, so providers cannot be edited here",
+        );
+    };
+    match admin.upsert(&body) {
+        Ok(provider) => Json(provider).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "provider_error", &e),
+    }
+}
+
+/// `DELETE /v1/admin/providers/{id}`: remove a cloud provider and its key file, and hot-unload
+/// it. The running gateway is one model poorer on the next request.
+async fn remove_provider(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    let Some(admin) = &state.providers else {
+        return error(
+            StatusCode::CONFLICT,
+            "not_configurable",
+            "this gateway has no home directory, so providers cannot be edited here",
+        );
+    };
+    match admin.remove(&id) {
+        Ok(true) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no provider {id:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 /// `POST /v1/admin/pairing`: opens a pairing code. Body optional; `{"capabilities": [...]}`
@@ -1561,9 +1624,9 @@ async fn infer(
                 forward(&state.client, engine, api.path(), body.0.clone(), streaming).await
             }
             (Action::Run, _) => {
-                let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
+                let cloud = state.cloud.find(decision.model.as_deref().unwrap_or_default()).expect("decided model");
                 let client = state.egress.as_ref().expect("a healthy cloud model implies an egress client");
-                let (outgoing, vault) = crate::cloud::prepare(cloud, parsed.clone());
+                let (outgoing, vault) = crate::cloud::prepare(cloud.as_ref(), parsed.clone());
                 for (kind, n) in vault.found() {
                     let seen = draft.redactions.entry(kind).or_insert(0);
                     *seen = (*seen).max(n);
@@ -1578,7 +1641,7 @@ async fn infer(
                 });
                 draft.data_policy = Some(data_policy_code(cloud.data_policy));
                 let streaming = parsed.get("stream").and_then(Value::as_bool) == Some(true);
-                match crate::cloud::forward(client, cloud, outgoing, vault, received, streaming).await {
+                match crate::cloud::forward(client, cloud.as_ref(), outgoing, vault, received, streaming).await {
                     Ok(response) => response,
                     Err(CloudError::Failover(why)) => {
                         tracing::warn!(model = %cloud.id, "cloud backend failed ({why}); routing again");

@@ -18,6 +18,7 @@ pub mod fsutil;
 pub mod media;
 pub mod membership;
 pub mod models;
+pub mod providers_admin;
 pub mod receipts;
 pub mod redact;
 pub mod relay;
