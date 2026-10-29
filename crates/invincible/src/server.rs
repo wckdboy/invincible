@@ -114,6 +114,9 @@ pub struct AppState {
     /// max_buffered_bytes`, spec/pairing.md, Limits). The operator's own loopback requests are
     /// not counted: the ceiling is for the callers the node does not sit behind.
     pub buffered: Arc<Budget>,
+    /// The supervised `wckd` and the rental caps (spec/rent.md). `None` when `[rent] enabled` is
+    /// false: the routes answer that rent is off, and no process is started.
+    pub rent: Option<Arc<crate::rent::Gateway>>,
 }
 
 impl AppState {
@@ -148,7 +151,15 @@ impl AppState {
             membership: None,
             discovery: None,
             buffered: Arc::new(Budget::new(crate::config::DEFAULT_MAX_BUFFERED_BYTES)),
+            rent: None,
         }
+    }
+
+    /// With the rent gateway ([crate::rent]). The supervisor that keeps `wckd` running is the
+    /// caller's; this only holds the address and the key the proxy sends.
+    pub fn with_rent(mut self, rent: Arc<crate::rent::Gateway>) -> Self {
+        self.rent = Some(rent);
+        self
     }
 
     /// With speech-to-text backends ([crate::transcribe]).
@@ -466,6 +477,11 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/cluster/meter", post(cluster_meter).layer(Extension(BodyLimit(LOOPBACK_METER_BODY))))
         .route("/v1/agent", any(agent))
         .route("/v1/agent/{*rest}", any(agent))
+        .route("/v1/rent/health", get(crate::rent::health))
+        .route("/v1/rent/offers", get(crate::rent::offers))
+        .route("/v1/rent/sessions", get(crate::rent::list).post(crate::rent::create))
+        .route("/v1/rent/sessions/{id}", get(crate::rent::session))
+        .route("/v1/rent/sessions/{id}/stop", post(crate::rent::stop))
 }
 
 /// A path the agent proxy passes on: under `/v1/agent`, plain segments only (no `.`/`..`, no
@@ -897,6 +913,10 @@ fn capability_for(path: &str) -> Option<Capability> {
         "/v1/agent" => Some(Capability::Agent),
         path if path.starts_with("/v1/agent/") => Some(Capability::Agent),
         path if path.starts_with("/v1/receipts/") => Some(Capability::Shard),
+        // Rent spends money, so it is its own grant (spec/rent.md). A device without it is
+        // refused with 403, not the fallback 404: the refusal has to say that the grant is missing.
+        "/v1/rent" => Some(Capability::Rent),
+        path if path.starts_with("/v1/rent/") => Some(Capability::Rent),
         _ => None,
     }
 }
@@ -907,7 +927,8 @@ fn capability_for(path: &str) -> Option<Capability> {
 /// A device that lacks it gets the router's fallback answer, byte for byte (status, body and
 /// headers), including its `content-type`: `404` with `{"error":{"message":"no such endpoint",
 /// "type":"not_found","code":"not_found"}}`. Deliberately not a 403 — a 403 would map which
-/// routes exist, and to whom.
+/// routes exist, and to whom. Rent is the exception: missing `rent` is 403, because a refusal to
+/// spend money has to say so (spec/rent.md).
 async fn require_capability(
     State(state): State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
@@ -928,6 +949,10 @@ async fn require_capability(
     };
     match granted {
         Some(capabilities) if capabilities.contains(needed) => next.run(request).await,
+        // Rent is the exception to the 404 below (spec/rent.md). The other grants stay invisible.
+        _ if needed == Capability::Rent => {
+            error(StatusCode::FORBIDDEN, "forbidden", "this device cannot rent; it was not granted the rent scope")
+        }
         _ => error(StatusCode::NOT_FOUND, "not_found", "no such endpoint"),
     }
 }
@@ -989,6 +1014,13 @@ fn device_api(budget: Arc<Budget>) -> Router<Arc<AppState>> {
         // A dispatched completion arrives here whole, so it buffers and is bounded exactly like
         // the chat route above: the same `MAX_REQUEST`, the same admission against the ceiling.
         .route("/v1/dispatch/chat/completions", admitted(post(dispatch_completion), budget, MAX_REQUEST))
+        // Rent is mounted so the capability gate can refuse it with 403 (spec/rent.md). A device
+        // granted `rent` reaches the same proxy the operator's token does.
+        .route("/v1/rent/health", get(crate::rent::health))
+        .route("/v1/rent/offers", get(crate::rent::offers))
+        .route("/v1/rent/sessions", get(crate::rent::list).post(crate::rent::create))
+        .route("/v1/rent/sessions/{id}", get(crate::rent::session))
+        .route("/v1/rent/sessions/{id}/stop", post(crate::rent::stop))
         .fallback(|| async { error(StatusCode::NOT_FOUND, "not_found", "no such endpoint") })
 }
 

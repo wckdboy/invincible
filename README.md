@@ -1213,7 +1213,39 @@ Presets know each provider's API, a model to start with, its context and its dat
 `egress = "never"` becomes `"ask"` with the first cloud model, and the gateway service is
 restarted to use it (a gateway started by hand needs a restart).
 
-A running gateway also has an admin API for the same thing: `GET /v1/admin/providers`,
+### Renting a GPU
+
+`[rent]` supervises [`wckd`](https://github.com/wckdboy/wckd-gpu) `serve` as its own process (it is
+not linked into the node). The node proxies `/v1/rent/*` and keeps wckd's bearer. A rental does
+not start until the request is sent again with `invincible-confirmed: 1` (`invincible rent start
+--confirm`). The caps reject anything over them, and being under a cap is not approval. Off by
+default. Details: [spec/rent.md](spec/rent.md).
+
+```toml
+[rent]
+enabled = true
+binary = "wckd"
+max_usd_per_hour = 1.0
+max_hours = 8
+monthly_cap_usd = 50
+require_regions = ["EU"]    # the default
+```
+
+Put RunPod and S3 credentials in `~/.invincible/rent/.env` (mode 0600). The node does not copy
+them into wckd's environment. wckd reads that file itself.
+
+```sh
+invincible rent offers --preset comfyui-minimax-h3 --hours 1
+invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1
+invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1 --confirm
+invincible rent status
+invincible rent stop <session-id>
+```
+
+A paired device reaches the same routes only with the `rent` scope (`invincible devices grant
+phone shard,rent`). Without it the answer is 403.
+
+A running gateway also has an admin API for those cloud providers: `GET /v1/admin/providers`,
 `POST /v1/admin/providers` (add or update; `{"id", "provider", "base_url", "upstream_model",
 "api_key", "context", "data_policy", "vision"}`) and `DELETE /v1/admin/providers/{id}`. It writes
 the config and a `keys/<id>` file (0600) and **hot-loads** the model for the next request, without
@@ -1377,10 +1409,11 @@ Every paired device is granted a small set of capabilities when it pairs
 routes above: `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
 cluster's `/v1/cluster/node` and `/v1/cluster/meter`, with no token (the device's key
 authenticates it). `agent` adds `/v1/agent` — the Autobot proxy, which runs with the node's own
-token — `audit` adds that device's own entries in the audit log, and `dispatch` adds
-`/v1/dispatch`, a hop into your other nodes. Nothing else is reachable, and a route the device was
-not granted answers exactly as a path that does not exist, so a device cannot even learn it is
-there. Past that check, each route takes only the body it needs (32 MiB for a chat completion,
+token — `audit` adds that device's own entries in the audit log, `dispatch` adds
+`/v1/dispatch`, a hop into your other nodes, and `rent` adds `/v1/rent/*` (cloud GPUs,
+[spec/rent.md](spec/rent.md)). Nothing else is reachable. A route the device was not granted
+answers exactly as a path that does not exist, so a device cannot even learn it is there, except
+`rent`, which answers 403: a refusal to spend money says so. Past that check, each route takes only the body it needs (32 MiB for a chat completion,
 5 MiB for the meter), and the node holds at most `[node] max_buffered_bytes` of device request
 bodies at once — 256 MiB unless set, refusing with 503 and `Retry-After: 2` past it instead of
 running itself out of memory. A device outside its grant never reaches either check, so its 404

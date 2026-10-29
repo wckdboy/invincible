@@ -23,6 +23,7 @@ pub mod receipts;
 pub mod redact;
 pub mod relay;
 pub mod remote;
+pub mod rent;
 pub mod server;
 pub mod service;
 pub mod sshsig;

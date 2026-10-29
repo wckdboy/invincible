@@ -84,11 +84,13 @@ pub enum Capability {
     Audit,
     /// `/v1/dispatch`: choosing among the nodes the operator owns, and sending work to them.
     Dispatch,
+    /// `/v1/rent/*`: renting a cloud GPU. Spending money is a grant of its own (spec/rent.md).
+    Rent,
 }
 
 impl Capability {
     /// Every capability, in the order the spec lists them (and the order a set is written in).
-    pub const ALL: [Self; 4] = [Self::Shard, Self::Agent, Self::Audit, Self::Dispatch];
+    pub const ALL: [Self; 5] = [Self::Shard, Self::Agent, Self::Audit, Self::Dispatch, Self::Rent];
 
     pub fn code(self) -> &'static str {
         match self {
@@ -96,6 +98,7 @@ impl Capability {
             Self::Agent => "agent",
             Self::Audit => "audit",
             Self::Dispatch => "dispatch",
+            Self::Rent => "rent",
         }
     }
 
@@ -152,7 +155,7 @@ impl Capabilities {
         self.0.iter().map(|capability| capability.code()).collect()
     }
 
-    /// Every code a set may hold, for a refusal to name: `shard, agent, audit, dispatch`.
+    /// Every code a set may hold, for a refusal to name: `shard, agent, audit, dispatch, rent`.
     pub fn known() -> String {
         Capability::ALL.map(Capability::code).join(", ")
     }
@@ -482,8 +485,8 @@ mod tests {
 
     #[test]
     fn capability_names_are_a_closed_set() {
-        assert_eq!(Capability::ALL.map(Capability::code), ["shard", "agent", "audit", "dispatch"]);
-        assert_eq!(Capabilities::known(), "shard, agent, audit, dispatch");
+        assert_eq!(Capability::ALL.map(Capability::code), ["shard", "agent", "audit", "dispatch", "rent"]);
+        assert_eq!(Capabilities::known(), "shard, agent, audit, dispatch, rent");
         assert_eq!(
             Capabilities::parse(&["dispatch", "shard"]).unwrap().codes(),
             ["shard", "dispatch"],

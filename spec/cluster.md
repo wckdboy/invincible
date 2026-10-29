@@ -521,7 +521,7 @@ the paired device of that name ([pairing.md](pairing.md), Capabilities). Either 
 - `capabilities` replaces, exactly, the set this node grants the device it hosts under {name} in
   `devices.json` — a grant or a revocation, with no re-pairing: the device keeps its key and its
   open sessions, and the next request is admitted by the new set. A name this node hosts no device
-  under is `404 not_found`; a capability that is not one of `shard`, `agent`, `audit`, `dispatch`
+  under is `404 not_found`; a capability that is not one of `shard`, `agent`, `audit`, `dispatch`, `rent`
   is `400 invalid_capabilities`; the body is parsed and both targets resolved before anything is
   written, so a refused body changes nothing.
 - The answer is the half that was asked for, or both under `device` and `node` when both keys were
