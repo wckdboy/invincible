@@ -2609,6 +2609,7 @@ pub fn describe(action: &Action) -> Value {
         Action::Home { service, entities, data } => {
             json!({ "kind": "home", "service": service, "entities": entities, "data": data })
         }
+        Action::Rent { summary } => json!({ "kind": "rent", "summary": summary }),
     }
 }
 

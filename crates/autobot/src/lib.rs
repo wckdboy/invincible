@@ -53,6 +53,7 @@ pub mod procs;
 pub mod profile;
 pub mod providers;
 pub mod recall;
+pub mod rent;
 pub mod repo_map;
 pub mod sandbox;
 pub mod script;
@@ -132,6 +133,9 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
             return Err(format!("[agent] tools: unknown group {unknown:?}"));
         }
         tools = tools.only(tools::tools_for(groups));
+    } else {
+        // Every group except rent, which spends money and is named explicitly (`tools = [..., "rent"]`).
+        tools = tools.with_rent(false);
     }
     if let Some(unknown) = config.agent.disabled_tools.iter().find(|t| settings::group_of(t).is_none()) {
         return Err(format!("[agent] disabled_tools: unknown tool {unknown:?}"));

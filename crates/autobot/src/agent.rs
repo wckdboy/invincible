@@ -317,6 +317,19 @@ impl Agent {
         session.cap = learned_cap(self.gateway.model(), session.budget);
         session.push(crate::images::message(text, images))?;
         let mut definitions = self.tools.definitions();
+        if self.tools.rents()
+            && let Ok((status, body)) = self.gateway.rent(reqwest::Method::GET, "/rent/health", None, false).await
+            && status == 200
+            && body["ok"] == true
+            && let Some(list) = definitions.as_array_mut()
+        {
+            for tool in crate::tools::rent_definitions() {
+                let name = tool["function"]["name"].as_str().unwrap_or("");
+                if self.tools.offers(name) {
+                    list.push(tool);
+                }
+            }
+        }
         if self.leads_team()
             && let Some(list) = definitions.as_array_mut()
         {
@@ -812,6 +825,10 @@ impl Agent {
         };
         if matches!(call, crate::tools::Call::Speak { .. } | crate::tools::Call::Image { .. }) {
             return self.make(session, &call, approver, grants, events).await;
+        }
+        if let crate::tools::Call::Rent(op) = &call {
+            events(Event::Tool(&format!("rent_gpu {arguments}")));
+            return crate::rent::run(&self.gateway, op, approver).await;
         }
         // A change in a directory with instructions of its own: those first, then the change.
         if matches!(call, crate::tools::Call::WriteFile { .. } | crate::tools::Call::EditFile { .. }) {

@@ -197,6 +197,7 @@ fn question(action: &Action, workdir: &Path) -> (String, String) {
             "Change this in the house?",
             format!("{} {entities} {}", style::code(service), style::gray(&data.chars().take(300).collect::<String>())),
         ),
+        Action::Rent { summary } => ("Rent this GPU?", style::code(summary)),
         Action::Type { page, field, text, submit } => {
             let page = style::underline(page);
             match (text.is_empty(), submit) {

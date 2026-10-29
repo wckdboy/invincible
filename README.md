@@ -1252,26 +1252,41 @@ data_policy = "retention:30"        # what the provider does with prompts
 
 ### Renting a GPU
 
-`[rent]` supervises [`wckd`](https://github.com/wckdboy/wckd-gpu) `serve` as its own process (it is
-not linked into the node). The node proxies `/v1/rent/*` and keeps wckd's bearer. A rental does
-not start until the request is sent again with `invincible-confirmed: 1` (`invincible rent start
---confirm`). The caps reject anything over them, and being under a cap is not approval. Off by
-default. Details: [spec/rent.md](spec/rent.md).
+`[rent]` rents a cloud GPU in-process. There is no separate `wckd` binary. A rental does not
+start until the request is sent again with `invincible-confirmed: 1` (`invincible rent start
+--confirm`). The caps reject anything over them, and being under a cap is not approval. Idle
+pods and pods past their hours are drained and then deleted. Off by default. Details:
+[spec/rent.md](spec/rent.md).
 
 ```toml
 [rent]
 enabled = true
-binary = "wckd"
 max_usd_per_hour = 1.0
 max_hours = 8
 monthly_cap_usd = 50
-require_regions = ["EU"]    # the ceiling; a client can narrow it, not clear it
+idle_minutes = 15
+require_regions = ["EU-secure"]    # the default ceiling; ["EU"] opts into community
+runpod_key_file = "secrets/runpod.key"
+
+[rent.store]
+endpoint = "https://<account>.eu.r2.cloudflarestorage.com"
+bucket = "invincible"
+access_key_file = "secrets/r2.access"
+secret_key_file = "secrets/r2.secret"
 ```
 
-Put RunPod and S3 credentials in `~/.invincible/rent/.env` (mode 0600). The node does not copy
-them into wckd's environment. wckd reads that file itself.
+The key files are mode 0600 under `~/.invincible`. An old `binary = "wckd"` line is ignored.
+Any other unknown `[rent]` key is an error. Autobot's `rent_gpu_start` shows the estimate and
+cannot confirm a rental by itself. The rent tools are off unless `[agent] tools` includes `rent`.
+
+The preset images are `ghcr.io/wckdboy/invincible-rent-vllm`, `invincible-rent-comfyui`, and
+`invincible-rent-dev-box` (`:edge` from `main`). A new GHCR package is private, and RunPod
+cannot pull it. Make the package public, or set `container_registry_auth_id` to the RunPod
+registry credential id. That id is not logged.
 
 ```sh
+invincible rent presets
+invincible rent projects
 invincible rent offers --preset comfyui-minimax-h3 --hours 1
 invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1
 invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1 --confirm

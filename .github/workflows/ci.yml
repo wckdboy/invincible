@@ -32,6 +32,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      # Rent is easy to skip if a later filter lands. This step is the rent suite and the
+      # sidecar (real rclone against the in-test S3 mock) on their own.
+      - run: cargo test -p invincible --test rent --test sidecar --locked
 
   deny:
     runs-on: ubuntu-latest

@@ -522,6 +522,29 @@ impl Gateway {
         serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
     }
 
+    /// One `/v1/rent/*` call. [confirm] is the only way `invincible-confirmed: 1` is sent, and the
+    /// rent tool sets it only after the owner approves the estimate.
+    pub async fn rent(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&Value>,
+        confirm: bool,
+    ) -> Result<(u16, Value), String> {
+        let mut request = self.client.request(method, format!("{}{path}", self.url)).bearer_auth(&self.token);
+        if confirm {
+            request = request.header(invincible::server::CONFIRMED_HEADER, "1");
+        }
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request.send().await.map_err(|e| self.unreachable(e))?;
+        let status = response.status().as_u16();
+        let text = response.text().await.map_err(|e| e.to_string())?;
+        let value = serde_json::from_str(&text).unwrap_or_else(|_| json!({"raw": text}));
+        Ok((status, value))
+    }
+
     fn unreachable(&self, e: reqwest::Error) -> String {
         if e.is_connect() {
             format!("Invincible Gateway is not running at {} (start it with `invincible serve`)", self.url)

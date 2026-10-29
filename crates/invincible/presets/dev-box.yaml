@@ -1,0 +1,37 @@
+# A generic CUDA box. Ported from the wckd-gpu preset schema (MIT). Copyright (c) 2026 wckdboy.
+apiVersion: wckd.gpu/v1
+kind: Preset
+metadata:
+  id: dev-box
+  name: CUDA dev box
+  version: 1
+spec:
+  workload_class: generic
+  constraints:
+    min_vram_gb: 16
+    min_ram_gb: 16
+    min_disk_gb: 50
+    gpu_families: ["A6000", "L40S", "4090", "3090", "A40", "L4"]
+    reliability: any
+    prefer_regions: ["EU"]
+    require_regions: ["EU"]
+  runtime:
+    # Sidecar layered on runpod/pytorch. /start.sh is that image's startup.
+    image: "ghcr.io/wckdboy/invincible-rent-dev-box:edge"
+    entrypoint: ["/start.sh"]
+    env: {}
+    ports:
+      - name: ssh
+        container: 22
+        expose: tcp
+  sync:
+    hydrate:
+      - from: "workspace/"
+        to: "/workspace"
+    drain:
+      - from: "/workspace"
+        to: "workspace/"
+        exclude: ["**/.cache/**"]
+  notes: |
+    Ubuntu, CUDA, and a shell. No workload of its own. The project prefix
+    is hydrated on start and drained before the pod is deleted.

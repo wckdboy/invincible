@@ -1,6 +1,6 @@
 //! Engines: programs the node runs as child processes and never links in, so a crashing engine
-//! cannot take the node down. v0's inference engine is llama.cpp's `llama-server`. The rent
-//! engine (`wckd serve`, [crate::rent]) is supervised the same way and is not linked either.
+//! cannot take the node down. v0's inference engine is llama.cpp's `llama-server`. GPU rental
+//! is in-process ([crate::rent]), not a child.
 //!
 //! An engine answers the node and no one else. Its port is on loopback, which every process and
 //! every user on the machine can reach, so each engine gets its own random key ([new_key]), in a
@@ -142,8 +142,7 @@ pub struct Launch {
     pub env: Vec<(String, String)>,
     /// A key and the file it goes in ([KEY_FILE_FLAG]), written (mode 0600) before each start.
     pub key_file: Option<(PathBuf, String)>,
-    /// Working directory. `None` inherits the node's. `wckd` gets the rent directory so it can
-    /// read its own `.env` there; the node does not put those secrets in the environment.
+    /// Working directory. `None` inherits the node's.
     pub cwd: Option<PathBuf>,
 }
 

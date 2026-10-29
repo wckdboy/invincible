@@ -135,7 +135,7 @@ own.
 | `agent` | `/v1/agent*`: the Autobot proxy on this machine, with this node's token — agent turns with its tools, schedules, bots. |
 | `audit` | `GET /v1/audit`: that device's own audit entries, found by the key recorded in each as `caller_key` ([audit.md](audit.md)). |
 | `dispatch` | `GET /v1/dispatch` and `POST /v1/dispatch/chat/completions`: the operator's other nodes. |
-| `rent` | `/v1/rent/*`: offers, sessions and health for a supervised `wckd` ([rent.md](rent.md)). Not in the default. A device without it gets 403. |
+| `rent` | `/v1/rent/*`: offers, sessions and health for the in-process GPU engine ([rent.md](rent.md)). Not in the default. A device without it gets 403. |
 
 - **The default is `shard`, and only `shard`.** A code minted with no capabilities grants it, and
   every answer that hands out a code says which set it carries, so the default is visible where the

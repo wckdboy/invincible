@@ -1,66 +1,98 @@
 # Rent
 
-The node can rent a cloud GPU by supervising [`wckd`](https://github.com/wckdboy/wckd-gpu)
-`serve` and proxying `/v1/rent/*` to it. `wckd` is a separate process. It is not linked into the
-gateway. A crash in it does not take the node down, and the node never puts wckd's bearer on a
-command line, in a client response, or in a log line.
+The node rents a cloud GPU itself. `/v1/rent/*` is served in-process: a RunPod adapter, a price
+broker, presets, an S3-compatible store and a session sweeper. There is no `wckd` binary and no
+supervised child. The HTTP contract is the one this file describes.
 
-This is the gateway half of that integration. It does not add a Tailscale sidecar, short-lived
-R2 credentials, or a vLLM preset. Those are later.
+The logic is ported from the MIT-licensed [wckd-gpu](https://github.com/wckdboy/wckd-gpu) engine
+(offer ranking, the RunPod pod API, presets, the drain-before-delete stop). It is not a dependency
+and not a submodule.
 
-## Process
+## Engine
 
-When `[rent] enabled` is true, `invincible serve` starts `wckd serve` the way it starts
-`llama-server` ([engine.rs](../crates/invincible/src/engine.rs)):
+When `[rent] enabled` is true, `invincible serve` opens the engine. It does not spawn a process.
 
-- a loopback port the node chose (`--listen 127.0.0.1:<port>`);
-- a fresh bearer in `$INVINCIBLE_HOME/rent/wckd.key`, mode 0600, passed as `--api-key-file` (the
-  path, never the key);
-- a cleared environment, plus `WCKD_STATE_DIR=$INVINCIBLE_HOME/rent/state` and the variables every
-  engine inherits (PATH, HOME, GPU library paths). Provider keys, tokens and `LLAMA_*` are not
-  inherited;
-- working directory `$INVINCIBLE_HOME/rent`, so wckd can read `.env` or `wckd.yaml` there itself.
-  RunPod and S3 credentials belong in that file (mode 0600). The node does not copy them.
+- The RunPod API key is a mode-0600 file, default `$INVINCIBLE_HOME/secrets/runpod.key`. It is an
+  `Authorization` header, never a query parameter, a command-line argument, a log line, or a field
+  in a client response. Errors are scrubbed before they are logged or returned.
+- R2 (or any S3-compatible store) credentials are two more mode-0600 files. They are not read from
+  the environment. With an EU ceiling the endpoint must be a Cloudflare R2 EU-jurisdiction host
+  (`*.eu.r2.cloudflarestorage.com`). A loopback endpoint is refused unless
+  `insecure_endpoint = true`.
+- Presets ship with the binary: `vllm`, `comfyui-minimax-h3`, `dev-box`. Each image layers the
+  sidecar on a real base (`vllm/vllm-openai`, `runpod/comfyui`, `runpod/pytorch`), pinned by
+  digest in `sidecar/`. The entrypoint hydrates, runs `INVINCIBLE_WORKLOAD`, and drains. If that
+  process exits, the container drains and stops. Files in `$INVINCIBLE_HOME/rent/presets/*.yaml`
+  add a preset. A file that reuses a shipped id is ignored, and a symlink is not followed.
+  The schema is wckd-gpu's. A new GHCR package is private. Make it public, or set
+  `container_registry_auth_id` to a RunPod registry credential id. The node sends that as
+  `registry` and does not log it.
+- Sessions live in `$INVINCIBLE_HOME/rent/state/*.json` (mode 0600). A restart loads them and the
+  sweeper drains and deletes anything past its deadline, idle, or over the monthly cap.
+- The pod is named `invincible-<node id>-<session>`. The node id is a stable file
+  `$INVINCIBLE_HOME/rent/node-id`. Reconciliation only touches that prefix. The pod environment
+  receives the project prefix and the operator's object-store key so the image can hydrate and
+  drain. The workload process does not receive those keys. See the tradeoff below.
 
-wckd refuses a non-loopback bind, a group-readable key file, and a request without the bearer
-(401, including `/health`). The supervisor treats a process that answers without its key the same
-way it treats an unkeyed llama-server: it stops it and does not serve it.
+Phases: `provisioning` → `hydrating` → `ready` → `draining` → `stopped`, or `failed`. A quote
+(`quoting`) writes nothing: no session file, no object, no pod.
 
-Sessions live in the state directory. wckd sweeps deadlines in-process. On a node restart the
-supervisor starts wckd again on the same directory and the same style of key file; wckd loads the
-sessions and sweeps anything already past its deadline. The node's proxy follows the new process.
+A stop writes `sessions/<id>/control.json` (`action: drain`), waits for `drain-ok.json`, and only
+then deletes the pod. `force` deletes after that wait even when the marker never arrives. The
+sweeper always deletes after the drain attempt: a pod does not outlive the hours it was paid for,
+and an idle ready or hydrating pod (no status read for `idle_minutes`) is stopped the same way.
+A `failed` session that still has a pod is deleted too. On startup and on each sweep, a pod
+named `invincible-<session>` with no live tracked session is drained on a best-effort basis
+and then terminated.
+Going over `monthly_cap_usd` stops whatever is still running.
+
+Hydrate, on start, lists `projects/<id>/workspace/` and writes `sessions/<id>/hydrate.json`, then
+waits for `hydrate-ok.json` before marking the session ready. The bytes move on the pod. The node
+gates delete on the drain marker.
+
+The broker caches the catalog for 30 seconds and ranks offers that fit the preset by catalog
+$/hr, then by the labeled fit score. Secure cloud and EU data centers only when the ceiling says
+so. A quote that has no usable data center in the set is dropped.
 
 ## Configuration
 
 ```toml
 [rent]
-enabled = false                 # off until set; starting wckd is what makes spending possible
-binary = "wckd"                 # name on PATH, or a path
+enabled = false                 # off until set; this is what makes spending possible
 max_usd_per_hour = 1.0          # omit for no hourly cap
-max_hours = 24                  # a single rental; wckd's own ceiling, and the default
+max_hours = 24                  # a single rental; the engine's own ceiling, and the default
 monthly_cap_usd = 50            # omit for no monthly cap; UTC month, catalog estimates
-idle_minutes = 15               # recorded and reported; see Idle
-require_regions = ["EU"]        # the default hard filter
+idle_minutes = 15               # stop a ready or hydrating pod nobody has asked about
+require_regions = ["EU-secure"] # the default: EU and Secure cloud. ["EU"] opts into community.
+runpod_key_file = "secrets/runpod.key"
+runpod_url = "https://api.runpod.io"   # omit for this default
+
+[rent.store]
+endpoint = "https://<account>.eu.r2.cloudflarestorage.com"
+bucket = "invincible"
+region = "auto"
+access_key_file = "secrets/r2.access"
+secret_key_file = "secrets/r2.secret"
 ```
 
-`require_regions` is the node's ceiling. A request that omits it uses this list (`EU` by default).
+An old `binary` key is ignored. The node logs the key name, not the value. Any other key
+`[rent]` does not know is a configuration error, so a misspelled cap cannot disappear.
+
+`require_regions` is the node's ceiling. A request that omits it uses this list (`EU-secure` by default).
 A request may only narrow it: `EU` allows `EU`, `EU-secure`, and a finer token such as `EU-RO-1`.
-A token may not contain a comma: in the JSON body a comma is not a separator, and `wckd` would
-treat `EU-x,US` as one name.
+A token may not contain a comma: in the JSON body a comma is not a separator.
 `EU-secure` does not allow a token that drops the secure mode. An empty list, `any`, `*`, or a
 region outside the ceiling is **400**. The client cannot clear or widen the filter. `any` or `*`
 in the config (the only token) is the operator turning the ceiling off. A quote with no usable
-data center in the set is dropped by wckd, not by the node.
+data center in the set is dropped.
 
 A confirmed create pins `offer_id` to the offer the preview named, when the request did not pin
-one itself, so wckd cannot re-rank onto a dearer row between the two calls. If the created
-session's price is still over the cap, the node stops that session (`force`) and answers **403**
+one itself. A body may also send `approved_usd_per_hr` from that preview. If the catalog at
+provision time names a different offer, or a higher hourly price, the node answers **409**
+`confirmation_required` with a fresh estimate and creates nothing. If the created
+session's price is still over the cap (the vendor reported a higher hourly cost than the catalog
+row the caps were checked against), the node force-stops that session and answers **403**
 `rent_cap`. The pod does not stay up at a price the caps were not checked against.
-
-`idle_minutes` is the owner's idle budget. This version records it and returns it on
-`GET /v1/rent/health`. It does not stop a pod for idleness: wckd's sweeper stops a pod at the
-deadline `hours` sets, and the node cannot see whether a pod is idle. Idle stop waits until a
-later step can see traffic.
 
 ## API
 
@@ -70,18 +102,17 @@ other missing grants. Spending is refused in the open.
 
 | Method | Path | |
 |---|---|---|
-| `GET` | `/v1/rent/health` | wckd's `{"ok", "engine"}` plus `limits` (the caps, `idle_minutes`, `require_regions`) and `supervised: true` |
+| `GET` | `/v1/rent/health` | `{"ok", "engine": "invincible", "in_process": true}` plus `limits` (the caps, `idle_minutes`, `require_regions`) |
 | `GET` | `/v1/rent/offers` | query `preset`, `hours`, optional `limit` and `require_regions` |
 | `POST` | `/v1/rent/sessions` | create, below |
 | `GET` | `/v1/rent/sessions` | newest first |
-| `GET` | `/v1/rent/sessions/{id}` | one session |
+| `GET` | `/v1/rent/sessions/{id}` | one session; refreshes the vendor and counts as activity for idle |
 | `POST` | `/v1/rent/sessions/{id}/stop` | `{"force": false}` when the body is empty |
 
-The node attaches wckd's bearer. It does not forward the caller's `Authorization`, and it strips a
-`confirm` field and `X-Wckd-Confirm` from the caller. Paths are the same strings wckd serves; the
-proxy does not rewrite them.
-
-Rent off: **503** `rent_disabled`. wckd down: **503** `rent_unavailable`.
+The caller's `confirm` field is ignored. Paths are these strings. Rent off: **503**
+`rent_disabled`. The engine cannot price or reach the vendor: **503** `rent_unavailable`. No
+matching offer: **422** `no_offers`. Drain did not finish and `force` is false: **409**
+`drain_failed`, and the pod stays up.
 
 ## Confirmation
 
@@ -105,20 +136,20 @@ is **409**:
 }
 ```
 
-`cost_estimate_usd` is the catalog hourly price times `hours`, the figure wckd returns. It is not
-a vendor invoice. The node gets it by calling wckd with confirmation off. That call provisions
-nothing: no session file, no pod.
+`cost_estimate_usd` is the catalog hourly price times `hours`. It is not a vendor invoice. The
+preview provisions nothing: no session file, no pod.
 
-The node then calls wckd with `confirm: true` and `X-Wckd-Confirm: true` only when the header is
-present and the caps hold. A body that says `confirm: true` without the header is not approval.
+The node provisions only when the header is present and the caps hold. A body that says
+`confirm: true` without the header is not approval. `failover` on the preview is the window an
+unpinned create would try (up to 3). The caps use the dearest row in that window.
 
 ## Caps
 
-Checked on the node, before that confirming call:
+Checked on the node, before the confirming provision:
 
 | Cap | Refusal |
 |---|---|
-| `hours` above `max_hours` | **403** `rent_cap`, `limit: "max_hours"`. wckd is not called. |
+| `hours` above `max_hours` | **403** `rent_cap`, `limit: "max_hours"`. The vendor is not called. |
 | the dearest candidate's `usd_per_hr` above `max_usd_per_hour` | **403** `rent_cap`, `limit: "max_usd_per_hour"`, with that estimate. An empty `offer_id` can fail over to a dearer row in the same window, so the cap is checked against the whole window, not only the first row. |
 | this month's estimates plus this one above `monthly_cap_usd` | **403** `rent_cap`, `limit: "monthly_cap_usd"`. The sum is `cost_estimate_usd` of sessions whose `created_at` is in the current UTC month, plus the dearest candidate in the window. |
 | a money cap is set and a figure cannot be read | **403** `rent_cap`, `limit: "unaccounted"`. The node does not start a rental it cannot price. |
@@ -131,20 +162,20 @@ monthly cap.
 A create that returns 201 and a stop that returns 200 each append an audit entry (`api`
 `rent.start` or `rent.stop`) with a signed receipt ([receipts.md](receipts.md), [audit.md](audit.md)).
 The entry's `rent` object names the action, the session id and the catalog estimate. It does not
-name the bearer. The receipt hashes the body the client sent. The node's rewrite (`require_regions`
-filled in, `offer_id` pinned) is the entry's `rewrite` field, not part of that hash. The receipt's
-`egress` is empty: the node talked to loopback, and the vendor call is wckd's. A 409 or a cap
-refusal is not a start, and is not logged as one.
+name a provider key. The receipt hashes the body the client sent. The node's rewrite
+(`require_regions` filled in, `offer_id` pinned) is the entry's `rewrite` field, not part of that
+hash. A 409 or a cap refusal is not a start, and is not logged as one.
 
-A quote or a health check gives `wckd` 30 seconds. The confirming create and a stop give it three
-minutes (a stop waits out the drain). Those two keep running if the client disconnects, and the
-audit entry is still written.
+A quote or a health check is given 30 seconds. The confirming create and a stop are given three
+minutes (a stop waits out the drain, two minutes). Those two keep running if the client
+disconnects, and the audit entry is still written.
 
 ## Doctor and CLI
 
-`invincible doctor` has a `rent` line. Off: ok. Enabled and the binary is missing: fail. Enabled,
-the node is up, and `/v1/rent/health` is not ok: fail. Enabled and the node is not up: warn, because
-the doctor does not start wckd and does not read the bearer.
+`invincible doctor` has a `rent` line. Off: ok. Enabled and the provider key or the R2 config is
+missing or not mode 0600: fail. An EU ceiling with a non-EU endpoint: fail. Enabled, the node is
+up, and `/v1/rent/health` is not ok: fail. Enabled and the node is not up: warn, because the
+doctor does not start the engine. An ignored old key is named in the detail.
 
 ```sh
 invincible rent offers --preset <id> --hours <n>
@@ -155,17 +186,20 @@ invincible rent stop <session-id> [--force]
 
 `start` without `--confirm` prints the estimate and does not provision. `--json` prints the API body.
 
+Autobot's `rent_gpu_offers`, `rent_gpu_start`, `rent_gpu_status` and `rent_gpu_stop` call these
+routes. `start` surfaces this 409 and resends with the header only after the owner approves that
+estimate. The model cannot confirm itself. See [agent.md](agent.md).
+
 ## Owned for routing — next step
 
 An EU Secure-cloud pod on the owner's account is hardware the owner is paying for, in a region
 the owner required. When such a session is registered as a backend, routing should treat it as
 tier `node` and `data_policy` `owned`: a private request may run there, and it is a local pick.
 
-That registration is not this change. A later step adds a vLLM preset that auto-registers through
-`Clouds::replace`. The classification belongs with that step, and only for a session that was
-started `EU-secure` (or an equivalent require-secure filter), whose data center is in the EU set,
-on the owner's account. Community cloud and any non-EU pod stay tier `cloud` and keep the ask and
-redact rules.
+That registration is not this change. The `vllm` preset does not register the pod. The
+classification belongs with that step, and only for a session that was started `EU-secure` (or an
+equivalent require-secure filter), whose data center is in the EU set, on the owner's account.
+Community cloud and any non-EU pod stay tier `cloud` and keep the ask and redact rules.
 
 It is not a new `region` tier. [routing.md](routing.md) v0 reserves `region` and maps every unknown
 tier to `cloud`, and the conformance vectors lock that. Adding the tier, or reclassifying a cloud
@@ -175,8 +209,11 @@ in them is a rented pod. Until a session can become a model, the router is uncha
 
 ## Not in this version
 
+- A second vendor. The provider is a trait; only RunPod is implemented.
 - Tailscale sidecar, ephemeral keys, no public ports on the pod.
-- Short-lived R2 (EU) credentials scoped per project. wckd still injects the operator's S3 key
-  into the pod; the node never sees it.
-- A vLLM preset that registers the pod as a backend.
-- Stopping a pod because it has been idle for `idle_minutes`.
+- Short-lived R2 credentials scoped per project. The pod still receives the operator's key so it
+  can hydrate and drain. The node reads that key from a file and scrubs it from errors; it does
+  not mint a prefix-scoped token.
+- Registering a vLLM pod as a backend.
+- Quarantine hold when a drain fails on an interactive stop without `force` (the pod stays, 409).
+  The sweeper, a deadline, idle, the monthly cap, and `force` still delete after the drain attempt.

@@ -1991,3 +1991,98 @@ async fn a_failing_check_is_fed_back_and_the_turn_stops_visibly() {
     let messages = script.lock().unwrap().seen[2].1["messages"].to_string();
     assert!(messages.contains("The configured check `false` failed"), "{messages}");
 }
+
+/// Trust mode still asks before a rental, and a denial does not send the confirm header.
+#[tokio::test]
+async fn trust_mode_does_not_confirm_a_gpu_rental() {
+    rent_is_not_confirmed(ApprovalMode::Trust, false).await;
+}
+
+/// The eval approver says yes to ordinary work and no to rent.
+#[tokio::test]
+async fn the_eval_approver_does_not_confirm_a_gpu_rental() {
+    rent_is_not_confirmed(ApprovalMode::Ask, true).await;
+}
+
+async fn rent_is_not_confirmed(mode: ApprovalMode, eval_yes: bool) {
+    let seen: Arc<Mutex<Vec<(HeaderMap, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+    let app = axum::Router::new()
+        .route(
+            "/v1/chat/completions",
+            axum::routing::post({
+                let seen = Arc::clone(&seen);
+                move |headers: HeaderMap, Json(body): Json<Value>| {
+                    let seen = Arc::clone(&seen);
+                    async move {
+                        let n = {
+                            let mut seen = seen.lock().unwrap();
+                            seen.push((headers, body));
+                            seen.len()
+                        };
+                        let message = if n == 1 {
+                            json!({
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [{ "id": "c1", "type": "function", "function": {
+                                    "name": "rent_gpu_start",
+                                    "arguments": r#"{"project_id":"p","preset_id":"vllm","hours":1,"confirm":true}"#
+                                }}],
+                            })
+                        } else {
+                            json!({ "role": "assistant", "content": "stopped" })
+                        };
+                        Json(json!({ "choices": [{ "message": message }] }))
+                    }
+                }
+            }),
+        )
+        .route(
+            "/v1/rent/sessions",
+            axum::routing::post({
+                let seen = Arc::clone(&seen);
+                move |headers: HeaderMap, Json(body): Json<Value>| {
+                    let seen = Arc::clone(&seen);
+                    async move {
+                        seen.lock().unwrap().push((headers, body));
+                        (
+                            StatusCode::CONFLICT,
+                            Json(json!({
+                                "error": {"code": "confirmation_required"},
+                                "offer": {"id": "runpod:secure:4090", "usd_per_hr": 0.5},
+                                "hours": 1,
+                                "cost_estimate_usd": 0.5,
+                                "require_regions": ["EU-secure"]
+                            })),
+                        )
+                    }
+                }
+            }),
+        )
+        .route("/v1/rent/health", axum::routing::get(|| async { Json(json!({"ok": true})) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let dir = temp(if eval_yes { "eval-rent" } else { "trust-rent" });
+    let mut agent = agent(&url, &dir, mode, true);
+    agent.tools = agent.tools.with_rent(true);
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    if eval_yes {
+        agent.turn(&mut session, "rent a gpu", &EvalYes, &mut HashSet::new(), &quiet).await.unwrap();
+    } else {
+        agent.turn(&mut session, "rent a gpu", &owner(Answer::Deny), &mut HashSet::new(), &quiet).await.unwrap();
+    }
+    let seen = seen.lock().unwrap();
+    let rent_calls: Vec<_> = seen.iter().filter(|(_, body)| body.get("project_id").is_some()).collect();
+    assert_eq!(rent_calls.len(), 1, "the preview is the only rent call: {seen:?}");
+    let confirmed = rent_calls[0].0.get("invincible-confirmed").and_then(|v| v.to_str().ok());
+    assert!(confirmed.is_none(), "no confirm header without the owner's approval: {confirmed:?}");
+}
+
+struct EvalYes;
+
+impl Approver for EvalYes {
+    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        let rent = matches!(action, Action::Rent { .. });
+        Box::pin(async move { if rent { Answer::Deny } else { Answer::Once } })
+    }
+}

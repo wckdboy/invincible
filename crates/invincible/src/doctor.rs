@@ -193,23 +193,27 @@ fn check_home(home: &Path) -> Check {
     }
 }
 
-/// `wckd`, when rent is on: the binary has to be there, and when the node is up its `/v1/rent/health`
-/// has to answer. The doctor never reads the bearer file, and it does not start the process.
+/// When rent is on: the RunPod key file and the R2 config have to be in place, and when the node
+/// is up `/v1/rent/health` has to answer. The doctor does not print the keys.
 fn check_rent(home: &Path, cfg: &Config, node_up: bool) -> Check {
     if !cfg.rent.enabled {
         return Check::ok("rent", "off");
     }
-    let Some(program) = crate::cluster::resolve_program(&cfg.rent.binary) else {
+    let ignored =
+        if cfg.rent.ignored.is_empty() { String::new() } else { format!(" (ignored {})", cfg.rent.ignored.join(", ")) };
+    if let Err(detail) = rent_secrets(home, cfg) {
         return Check::fail(
             "rent",
-            format!("`{}` is not on PATH and not a file", cfg.rent.binary.display()),
-            Some("install wckd and set [rent] binary (spec/rent.md), or set enabled = false"),
+            format!("{detail}{ignored}"),
+            Some("see spec/rent.md: mode-0600 key files under secrets/, and [rent.store]"),
         );
-    };
+    }
     if !node_up {
         return Check::warn(
             "rent",
-            format!("{} is installed; the node is not answering, so wckd's health was not checked", program.display()),
+            format!(
+                "the provider key and R2 config are in place{ignored}; the node is not answering, so rent health was not checked"
+            ),
             Some("invincible serve"),
         );
     }
@@ -217,7 +221,9 @@ fn check_rent(home: &Path, cfg: &Config, node_up: bool) -> Check {
     let Some(token) = token.filter(|token| !token.trim().is_empty()) else {
         return Check::warn(
             "rent",
-            format!("{} is installed; there is no API token, so wckd's health was not checked", program.display()),
+            format!(
+                "the provider key and R2 config are in place{ignored}; there is no API token, so rent health was not checked"
+            ),
             Some("invincible serve"),
         );
     };
@@ -236,19 +242,27 @@ fn check_rent(home: &Path, cfg: &Config, node_up: bool) -> Check {
     });
     match probe {
         Some(response) if response.status().is_success() => {
-            Check::ok("rent", format!("wckd is healthy ({})", program.display()))
+            Check::ok("rent", format!("in-process engine is healthy{ignored}"))
         }
         Some(response) => Check::fail(
             "rent",
-            format!("wckd health returned {}", response.status()),
-            Some("the node log and logs/wckd.log say why; credentials live in $INVINCIBLE_HOME/rent/.env"),
+            format!("rent health returned {}{ignored}", response.status()),
+            Some("the node log says why; keys live in the files [rent] names"),
         ),
         None => Check::fail(
             "rent",
             "the node is up but /v1/rent/health did not answer",
-            Some("wckd may still be starting, or it refused to start (logs/wckd.log)"),
+            Some("invincible serve, then the node log"),
         ),
     }
+}
+
+/// The key files exist, are mode 0600, and the store endpoint is allowed. Does not return the secrets.
+fn rent_secrets(home: &Path, cfg: &Config) -> Result<(), String> {
+    if cfg.rent.store.endpoint.is_empty() || cfg.rent.store.bucket.is_empty() {
+        return Err("[rent.store] endpoint and bucket are required".to_owned());
+    }
+    crate::rent::secrets_ready(home, &cfg.rent)
 }
 
 /// `Ok(config)`, or the failed check's parts.
@@ -445,7 +459,7 @@ fn check_node_state(home: &Path, cfg: &Config) -> Vec<Check> {
         _ => checks.push(Check::warn("node", format!("not answering on http://{listen}"), Some("invincible serve"))),
     }
 
-    // --- rent (wckd) -------------------------------------------------------------------------
+    // --- rent --------------------------------------------------------------------------------
     checks.push(check_rent(home, cfg, health == Some(true)));
 
     // --- room to work ------------------------------------------------------------------------
