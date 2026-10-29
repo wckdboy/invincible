@@ -1213,39 +1213,7 @@ Presets know each provider's API, a model to start with, its context and its dat
 `egress = "never"` becomes `"ask"` with the first cloud model, and the gateway service is
 restarted to use it (a gateway started by hand needs a restart).
 
-### Renting a GPU
-
-`[rent]` supervises [`wckd`](https://github.com/wckdboy/wckd-gpu) `serve` as its own process (it is
-not linked into the node). The node proxies `/v1/rent/*` and keeps wckd's bearer. A rental does
-not start until the request is sent again with `invincible-confirmed: 1` (`invincible rent start
---confirm`). The caps reject anything over them, and being under a cap is not approval. Off by
-default. Details: [spec/rent.md](spec/rent.md).
-
-```toml
-[rent]
-enabled = true
-binary = "wckd"
-max_usd_per_hour = 1.0
-max_hours = 8
-monthly_cap_usd = 50
-require_regions = ["EU"]    # the ceiling; a client can narrow it, not clear it
-```
-
-Put RunPod and S3 credentials in `~/.invincible/rent/.env` (mode 0600). The node does not copy
-them into wckd's environment. wckd reads that file itself.
-
-```sh
-invincible rent offers --preset comfyui-minimax-h3 --hours 1
-invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1
-invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1 --confirm
-invincible rent status
-invincible rent stop <session-id>
-```
-
-A paired device reaches the same routes only with the `rent` scope (`invincible devices grant
-phone shard,rent`). Without it the answer is 403.
-
-A running gateway also has an admin API for those cloud providers: `GET /v1/admin/providers`,
+A running gateway also has an admin API for the same thing: `GET /v1/admin/providers`,
 `POST /v1/admin/providers` (add or update; `{"id", "provider", "base_url", "upstream_model",
 "api_key", "context", "data_policy", "vision"}`) and `DELETE /v1/admin/providers/{id}`. It writes
 the config and a `keys/<id>` file (0600) and **hot-loads** the model for the next request, without
@@ -1281,6 +1249,38 @@ data_policy = "retention:30"        # what the provider does with prompts
   what was hidden.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
+
+### Renting a GPU
+
+`[rent]` supervises [`wckd`](https://github.com/wckdboy/wckd-gpu) `serve` as its own process (it is
+not linked into the node). The node proxies `/v1/rent/*` and keeps wckd's bearer. A rental does
+not start until the request is sent again with `invincible-confirmed: 1` (`invincible rent start
+--confirm`). The caps reject anything over them, and being under a cap is not approval. Off by
+default. Details: [spec/rent.md](spec/rent.md).
+
+```toml
+[rent]
+enabled = true
+binary = "wckd"
+max_usd_per_hour = 1.0
+max_hours = 8
+monthly_cap_usd = 50
+require_regions = ["EU"]    # the ceiling; a client can narrow it, not clear it
+```
+
+Put RunPod and S3 credentials in `~/.invincible/rent/.env` (mode 0600). The node does not copy
+them into wckd's environment. wckd reads that file itself.
+
+```sh
+invincible rent offers --preset comfyui-minimax-h3 --hours 1
+invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1
+invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1 --confirm
+invincible rent status
+invincible rent stop <session-id>
+```
+
+A paired device reaches the same routes only with the `rent` scope (`invincible devices grant
+phone shard,rent`). Without it the answer is 403.
 
 ### Speech and images (optional)
 

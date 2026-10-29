@@ -45,6 +45,8 @@ require_regions = ["EU"]        # the default hard filter
 
 `require_regions` is the node's ceiling. A request that omits it uses this list (`EU` by default).
 A request may only narrow it: `EU` allows `EU`, `EU-secure`, and a finer token such as `EU-RO-1`.
+A token may not contain a comma: in the JSON body a comma is not a separator, and `wckd` would
+treat `EU-x,US` as one name.
 `EU-secure` does not allow a token that drops the secure mode. An empty list, `any`, `*`, or a
 region outside the ceiling is **400**. The client cannot clear or widen the filter. `any` or `*`
 in the config (the only token) is the operator turning the ceiling off. A quote with no usable
@@ -129,8 +131,14 @@ monthly cap.
 A create that returns 201 and a stop that returns 200 each append an audit entry (`api`
 `rent.start` or `rent.stop`) with a signed receipt ([receipts.md](receipts.md), [audit.md](audit.md)).
 The entry's `rent` object names the action, the session id and the catalog estimate. It does not
-name the bearer. The receipt's `egress` is empty: the node talked to loopback, and the vendor call
-is wckd's. A 409 or a cap refusal is not a start, and is not logged as one.
+name the bearer. The receipt hashes the body the client sent. The node's rewrite (`require_regions`
+filled in, `offer_id` pinned) is the entry's `rewrite` field, not part of that hash. The receipt's
+`egress` is empty: the node talked to loopback, and the vendor call is wckd's. A 409 or a cap
+refusal is not a start, and is not logged as one.
+
+A quote or a health check gives `wckd` 30 seconds. The confirming create and a stop give it three
+minutes (a stop waits out the drain). Those two keep running if the client disconnects, and the
+audit entry is still written.
 
 ## Doctor and CLI
 

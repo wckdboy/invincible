@@ -155,6 +155,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             usd = 5.0 if preset == "expensive" else 0.5
             confirmed = body.get("confirm") is True or self.headers.get("X-Wckd-Confirm") == "true"
+            if confirmed and preset == "slow":
+                __import__("time").sleep(3)
             # `rerank` previews under the cap and confirms far above it, even when the offer id
             # was pinned. A confirm that forgot the offer id does the same. The node stops those.
             if preset == "rerank" and not confirmed:
@@ -502,6 +504,16 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
     .await;
     assert_eq!(status, 400, "{body}");
     assert!(body["error"]["message"].as_str().unwrap_or("").contains("US"), "{body}");
+    let (status, body) = call(
+        &url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(json!({"project_id": "hailuo-tests", "preset_id": "comfy", "hours": 1, "require_regions": ["EU-x,US"]})),
+        true,
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    assert!(body["error"]["message"].as_str().unwrap_or("").contains("comma"), "{body}");
     assert_eq!(store(&dir)["previews"], 1, "a refused region must not ask wckd");
     assert_eq!(store(&dir)["provisions"], 0);
     let (status, offers) =
@@ -533,8 +545,11 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
     assert_eq!(body["error"]["limit"], "max_usd_per_hour");
     assert_eq!(store(&dir)["provisions"], 0);
 
+    // A blank offer id is not a pin. The node must lock the previewed offer, not forward the spaces.
+    let mut started_body = create_body("comfy", 1.0, false);
+    started_body["offer_id"] = json!(" ");
     let (status, started) =
-        call(&url, reqwest::Method::POST, "/v1/rent/sessions", Some(create_body("comfy", 1.0, false)), true).await;
+        call(&url, reqwest::Method::POST, "/v1/rent/sessions", Some(started_body.clone()), true).await;
     assert_eq!(status, 201, "{started}");
     let session_id = started["id"].as_str().unwrap().to_owned();
     assert_eq!(started["phase"], "ready");
@@ -550,11 +565,12 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
     assert_eq!(body["error"]["limit"], "monthly_cap_usd");
     assert_eq!(store(&dir)["provisions"], 1);
 
+    let stop_body = json!({"force": false, "note": "bye"});
     let (status, stopped) = call(
         &url,
         reqwest::Method::POST,
         &format!("/v1/rent/sessions/{session_id}/stop"),
-        Some(json!({"force": false})),
+        Some(stop_body.clone()),
         false,
     )
     .await;
@@ -569,6 +585,18 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
     let receipt_key = invincible::receipts::ReceiptKey::load_or_create(&dir.join("receipt.key")).unwrap();
     let log = invincible::audit::AuditLog::new(&dir);
     assert_eq!(log.verify(&receipt_key.public()).unwrap(), 2);
+    let entries = log.read(0, 10);
+    let start = entries.iter().find(|entry| entry["api"] == "rent.start").unwrap();
+    let bound = invincible::receipts::request_hash("rent.start", &started_body).unwrap();
+    assert_eq!(start["receipt"]["receipt"]["request_sha256"], bound, "the receipt binds the body the client sent");
+    assert_eq!(start["rewrite"]["require_regions"], json!(["EU"]));
+    assert_eq!(start["rewrite"]["offer_id"], "runpod:community:NVIDIA GeForce RTX 4090");
+    let stop =
+        entries.iter().find(|entry| entry["api"] == "rent.stop" && entry["rent"]["session_id"] == session_id).unwrap();
+    assert_eq!(
+        stop["receipt"]["receipt"]["request_sha256"],
+        invincible::receipts::request_hash("rent.stop", &stop_body).unwrap()
+    );
 
     // A new node process supervises a new wckd on the same state directory.
     assert!(node.stop(), "the node did not exit");
@@ -620,4 +648,35 @@ async fn the_node_proxies_wckd_and_keeps_the_key_and_the_caps() {
         assert!(!text.contains(&key), "first bearer in {}", path.display());
         assert!(!text.contains(&key_again), "restart bearer in {}", path.display());
     }
+}
+
+/// The confirming call keeps running after the client gives up, and the start is still audited.
+#[tokio::test]
+async fn a_dropped_client_still_gets_a_rent_start_audit() {
+    let (dir, url, _remote) = layout("detach");
+    let node = Node { child: spawn(&dir), dir: dir.clone() };
+    ready(&url, &dir).await;
+    let body = create_body("slow", 1.0, false);
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(1)).build().unwrap();
+    let dropped = client
+        .post(format!("{url}/v1/rent/sessions"))
+        .bearer_auth(TOKEN)
+        .header("invincible-confirmed", "1")
+        .json(&body)
+        .send()
+        .await;
+    assert!(dropped.is_err(), "the client should have given up while wckd was still provisioning");
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let hash = invincible::receipts::request_hash("rent.start", &body).unwrap();
+    loop {
+        if let Ok(text) = std::fs::read_to_string(dir.join("audit.jsonl"))
+            && text.contains("rent.start")
+            && text.contains(&hash)
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the start was not audited after the client left");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    drop(node);
 }
