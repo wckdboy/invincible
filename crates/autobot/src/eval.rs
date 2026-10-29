@@ -264,6 +264,9 @@ fn verify(check: &Check, work: &Path, answer: &str, called: &[String]) -> Result
             if text.contains(value.as_str()) { Err(format!("{path} still contains {value:?}")) } else { Ok(()) }
         }
         Check::CommandOk { command } => {
+            // The command comes from the operator-authored eval spec and running it is
+            // the check's purpose; the spec is trusted input, not agent output.
+            // nosemgrep: agents.config.eng-rust-command-shell
             let out = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(command)

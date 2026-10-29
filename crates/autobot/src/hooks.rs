@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn verifies_signatures_and_bearers() {
-        let secret = "0123456789abcdef0123";
+        let secret = "0123456789abcdef0123"; // gitleaks:allow test fixture, RFC 4231 body
         let body = br#"{"action":"opened"}"#;
         let hex: String = hmac(secret.as_bytes(), body).iter().map(|b| format!("{b:02x}")).collect();
         let mut headers = HeaderMap::new();
