@@ -628,6 +628,13 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
+- **Verification gate:** set `[agent] check = "cargo test"` (or `make check`, `npm test`) and a
+  turn that changed files runs it once before it may finish. A failure goes back to the model as a
+  user message with the output; after one retry the turn stops with the failure in the answer
+  instead of claiming success. The command is trusted because the owner wrote it: it runs where
+  commands run (the worktree, container or SSH machine), with `[agent] command_timeout` or at
+  least ten minutes, and no approval prompt. This is the deterministic half of "run the tests and
+  fix what you broke"; the repo map, threads, checkpoints and team are the rest.
 - **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes, hooks,
   Home Assistant's voice requests, the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
   working directory and temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e.

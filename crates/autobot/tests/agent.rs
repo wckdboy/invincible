@@ -1962,3 +1962,32 @@ async fn a_change_in_a_directory_with_its_own_instructions_waits_for_them() {
     assert!(first.starts_with("not changed yet") && first.contains("four spaces"), "{first}");
     assert_eq!(std::fs::read_to_string(work.join("pkg/new.rs")).unwrap(), "fn x() {}\n", "the second call wrote it");
 }
+
+#[tokio::test]
+async fn the_configured_check_runs_after_a_change_and_can_pass() {
+    let (url, _) = gateway(vec![call("terminal", json!({"command": "printf hi > f.txt"})), say("Done.")]).await;
+    let dir = temp("check-pass");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.options.check = Some("test -f f.txt && printf checked > check.txt".into());
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let outcome =
+        agent.turn(&mut session, "make a file", &owner(Answer::Once), &mut HashSet::new(), &quiet).await.unwrap();
+    assert_eq!(outcome.text, "Done.");
+    assert_eq!(std::fs::read_to_string(dir.join("work/check.txt")).unwrap(), "checked");
+}
+
+#[tokio::test]
+async fn a_failing_check_is_fed_back_and_the_turn_stops_visibly() {
+    let (url, script) =
+        gateway(vec![call("terminal", json!({"command": "printf hi > f.txt"})), say("Done."), say("Done again.")])
+            .await;
+    let dir = temp("check-fail");
+    let mut agent = agent(&url, &dir, ApprovalMode::Ask, true);
+    agent.options.check = Some("false".into());
+    let mut session = Session::open(&dir.join("sessions"), "t").unwrap();
+    let outcome =
+        agent.turn(&mut session, "make a file", &owner(Answer::Once), &mut HashSet::new(), &quiet).await.unwrap();
+    assert!(outcome.text.contains("still fails"), "{}", outcome.text);
+    let messages = script.lock().unwrap().seen[2].1["messages"].to_string();
+    assert!(messages.contains("The configured check `false` failed"), "{messages}");
+}

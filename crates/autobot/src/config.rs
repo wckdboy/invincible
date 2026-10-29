@@ -227,6 +227,10 @@ pub struct AgentConfig {
     /// How often the heartbeat works through `HEARTBEAT.md` (`30m`, `2h`; `off`).
     #[serde(default = "heartbeat")]
     pub heartbeat: String,
+    /// A command run after a turn changed files, before the agent may finish. The owner
+    /// configured it, so it runs without an approval; it is the project's build, lint or test.
+    #[serde(default)]
+    pub check: Option<String>,
     /// Keep every finished turn in `$AUTOBOT_HOME/trajectories`, for fine-tuning a local model
     /// on the agent's own work ([crate::trajectory]).
     #[serde(default)]
@@ -290,6 +294,7 @@ impl Default for AgentConfig {
             tools: None,
             disabled_tools: Vec::new(),
             heartbeat: heartbeat(),
+            check: None,
             trajectories: false,
             context_kib: None,
             stream: true,

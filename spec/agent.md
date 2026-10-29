@@ -215,6 +215,28 @@ The events are additive to the turn grammar:
 `answer` is still the last event of a successful run and `error` the last of a failed one. The
 receipts in `answer` cover every model call the run made.
 
+## Variables, subscriptions and providers
+
+**Variables** are operator-owned, non-secret context. They are stored in
+`$AUTOBOT_HOME/variables.json` and appended to the system prompt as data, never as instructions:
+`project.name: checkout`, `deploy.host: staging.example.org`. A key is letters, digits, `_`, `-`
+and `.`; a value is one line. Secrets belong in the secret files, not here.
+
+**Subscriptions** are a ledger of plans and renewals, in `$AUTOBOT_HOME/subscriptions.json`: name,
+provider, plan, status (`active`, `paused`, `cancelled`), monthly cost and currency, renewal date,
+seats, URL and notes. The API returns totals per currency and the renewals in the next 30 days.
+Nothing here is sent to a provider.
+
+**Providers** lists Autobot and the external coding CLIs detected on the machine: `codex`,
+`claude`, `opencode`, `cursor-agent`, `hermes` and `pi`, with their versions, paths, auth kind
+(`gateway` for Autobot, `account` for the CLIs) and login hint. Detection is read-only and cached
+for five minutes; a missing CLI is simply not installed.
+
+**Secret files** are the connector tokens and passwords in the bot's home. `GET
+/v1/agent/secrets` returns their names, sizes, update times and kind, never their values;
+`POST /v1/agent/secrets` writes one (`{"file", "value"}`, a plain name, mode 0600) and `DELETE
+/v1/agent/secrets/{name}` removes one. A value is never returned or logged.
+
 ## Scheduled tasks
 
 `when` is a cron expression in the machine's local time (or in UTC, prefixed `CRON_TZ=UTC `) (five fields: minute, hour, day of month,

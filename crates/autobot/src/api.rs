@@ -440,7 +440,13 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/settings", get(settings).post(set_setting))
         .route("/v1/agent/model", post(set_model))
         .route("/v1/agent/tools", post(set_tool))
-        .route("/v1/agent/secrets", post(set_secret))
+        .route("/v1/agent/secrets", get(secrets).post(set_secret))
+        .route("/v1/agent/secrets/{name}", axum::routing::delete(remove_secret))
+        .route("/v1/agent/variables", get(variables).post(set_variable))
+        .route("/v1/agent/variables/{key}", axum::routing::delete(remove_variable))
+        .route("/v1/agent/subscriptions", get(subscriptions).post(set_subscription))
+        .route("/v1/agent/subscriptions/{id}", axum::routing::delete(remove_subscription))
+        .route("/v1/agent/providers", get(providers))
         .route("/v1/agent/approvals", get(approvals))
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
@@ -535,6 +541,93 @@ async fn info(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot) -> Json<Valu
     Json(info)
 }
 
+/// `GET /v1/agent/secrets`: the secret files in the bot's home, without their values.
+async fn secrets(Bot(bot, _): Bot) -> Response {
+    match crate::secrets::list(bot.home()) {
+        Ok(secrets) => Json(json!({ "secrets": secrets })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/secrets/{name}`: remove a secret file from the bot's home.
+async fn remove_secret(Bot(bot, _): Bot, Path(name): Path<String>) -> Response {
+    match crate::secrets::remove(bot.home(), &name) {
+        Ok(true) => Json(json!({ "ok": true, "name": name })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no secret file {name:?}")),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct VariableBody {
+    key: String,
+    value: String,
+    #[serde(default)]
+    description: String,
+}
+
+/// `GET /v1/agent/variables`: operator variables, values included (they are not secrets).
+async fn variables(Bot(bot, _): Bot) -> Response {
+    match crate::variables::Variables::new(bot.home()).list() {
+        Ok(list) => Json(json!({ "variables": list.iter().map(crate::variables::Variable::view).collect::<Vec<_>>() }))
+            .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/variables {"key", "value", "description"?}`: add or replace one.
+async fn set_variable(Bot(bot, _): Bot, Json(body): Json<VariableBody>) -> Response {
+    match crate::variables::Variables::new(bot.home()).set(&body.key, &body.value, &body.description) {
+        Ok(variable) => Json(json!({ "ok": true, "variable": variable.view() })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/variables/{key}`.
+async fn remove_variable(Bot(bot, _): Bot, Path(key): Path<String>) -> Response {
+    if let Err(e) = crate::variables::validate_key(&key) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e);
+    }
+    match crate::variables::Variables::new(bot.home()).remove(&key) {
+        Ok(true) => Json(json!({ "ok": true, "key": key })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no variable {key:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `GET /v1/agent/subscriptions`: plans, totals per currency and renewals in the next 30 days.
+async fn subscriptions(Bot(bot, _): Bot) -> Response {
+    match crate::subscriptions::Subscriptions::new(bot.home()).summary() {
+        Ok(summary) => Json(summary).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/subscriptions`: add or replace a plan (an id replaces one).
+async fn set_subscription(Bot(bot, _): Bot, Json(body): Json<crate::subscriptions::Subscription>) -> Response {
+    match crate::subscriptions::Subscriptions::new(bot.home()).upsert(body) {
+        Ok(subscription) => Json(json!({ "ok": true, "subscription": subscription.view() })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/subscriptions/{id}`.
+async fn remove_subscription(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    match crate::subscriptions::Subscriptions::new(bot.home()).remove(&id) {
+        Ok(true) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no subscription {id:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `GET /v1/agent/providers`: Autobot and the external coding CLIs installed on this machine.
+async fn providers() -> Response {
+    match tokio::task::spawn_blocking(crate::providers::detect).await {
+        Ok(providers) => Json(json!({ "providers": providers })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("provider detection: {e}")),
+    }
+}
+
 /// `GET /v1/agent/settings`: what an operator can change, without any secret value.
 async fn settings(Bot(bot, _): Bot) -> Json<Value> {
     let config = &bot.runtime.config;
@@ -573,6 +666,7 @@ async fn settings(Bot(bot, _): Bot) -> Json<Value> {
         "agent": {
             "workdir": config.agent.workdir(home).display().to_string(),
             "max_steps": config.agent.max_steps,
+            "check": config.agent.check,
             "sandbox": config.agent.sandbox,
             "context_kib": config.agent.context_kib,
             "tools": tools,

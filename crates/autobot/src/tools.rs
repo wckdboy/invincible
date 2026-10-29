@@ -1156,14 +1156,24 @@ impl Tools {
     /// What runs [command] (`sh -c`) where commands run: here (sandboxed when confined), in the
     /// container, or on the SSH machine; stopped there after the timeout.
     pub async fn shell_command(&self, command: &str) -> Result<tokio::process::Command, String> {
+        self.shell_command_for(command, self.timeout).await
+    }
+
+    /// [Tools::shell_command], with [timeout] on the SSH machine or in the container instead of
+    /// the command timeout (the verification gate allows a longer check).
+    pub async fn shell_command_for(
+        &self,
+        command: &str,
+        timeout: std::time::Duration,
+    ) -> Result<tokio::process::Command, String> {
         if self.ssh.is_none() {
             tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
         }
         let mut child = if let Some(ssh) = &self.ssh {
-            ssh.command(command, &self.workdir, Some(self.timeout.as_secs()))
+            ssh.command(command, &self.workdir, Some(timeout.as_secs()))
         } else if let Some(docker) = &self.docker {
             let name = docker.ensure(&self.workdir).await?;
-            docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
+            docker.command(&name, command, &self.workdir, Some(timeout.as_secs()))
         } else if self.confined {
             crate::sandbox::command(command, &self.workdir)?
         } else {

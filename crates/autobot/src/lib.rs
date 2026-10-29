@@ -47,11 +47,13 @@ pub mod pairing;
 pub mod personality;
 pub mod procs;
 pub mod profile;
+pub mod providers;
 pub mod recall;
 pub mod repo_map;
 pub mod sandbox;
 pub mod script;
 pub mod search;
+pub mod secrets;
 pub mod service;
 pub mod session;
 pub mod settings;
@@ -60,12 +62,14 @@ pub mod signal;
 pub mod skills;
 pub mod slack;
 pub mod ssh;
+pub mod subscriptions;
 pub mod team;
 pub mod telegram;
 pub mod threads;
 pub mod tools;
 pub mod trajectory;
 pub mod tui;
+pub mod variables;
 pub mod voice;
 pub mod whatsapp;
 
@@ -142,6 +146,7 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
             nudge_every: config.agent.nudge_every,
             persona: persona(config),
             recall_model: config.agent.recall_model.clone(),
+            check: config.agent.check.clone(),
             ..Default::default()
         },
     })

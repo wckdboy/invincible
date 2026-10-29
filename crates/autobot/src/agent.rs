@@ -49,6 +49,8 @@ pub struct Options {
     pub repo_map: Option<String>,
     /// Reviewing a change rather than making one: read-only, findings only ([crate::for_review]).
     pub review: bool,
+    /// A command run once after files changed, before the turn may finish ([crate::config::AgentConfig::check]).
+    pub check: Option<String>,
 }
 
 /// A bot's name.
@@ -251,6 +253,7 @@ impl Agent {
     ) -> Result<Outcome, String> {
         // What the trajectory notes: the models that answered and what was refused.
         let refused = std::sync::atomic::AtomicU64::new(0);
+        let changed = std::sync::atomic::AtomicBool::new(false);
         let models = std::sync::Mutex::new(Vec::<String>::new());
         let outer_events = events;
         let counted = |event: Event| {
@@ -263,6 +266,14 @@ impl Agent {
                     if !models.iter().any(|m| m == model) {
                         models.push((*model).to_owned());
                     }
+                }
+                Event::Change { .. } => {
+                    changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                Event::Output { name, .. }
+                    if matches!(*name, "write_file" | "edit_file" | "terminal" | "execute_code") =>
+                {
+                    changed.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 _ => {}
             }
@@ -350,6 +361,7 @@ impl Agent {
         // Times the window was made smaller after the model said the request was too long.
         let mut shrunk = 0;
         let mut steps = 0;
+        let mut checks = 0;
         let mut sent: Vec<Value> = Vec::new();
         let mut loops = Loops::default();
         loop {
@@ -500,9 +512,49 @@ impl Agent {
             let calls = tool_calls(&mut message);
             session.push(message.clone())?;
             if calls.is_empty() {
-                record(&sent, &definitions, message.clone(), "answer", steps, &receipts);
-                let text = message["content"].as_str().unwrap_or_default().trim().to_owned();
-                return Ok(Outcome { text: if text.is_empty() { "(no answer)".to_owned() } else { text }, receipts });
+                // The verification gate: a coding turn that changed files runs the owner's check
+                // once more before it may finish. A failure is fed back as a user message; after
+                // one retry the turn stops with the failure visible instead of claiming success.
+                let mut check_note = String::new();
+                if !self.options.review
+                    && changed.load(std::sync::atomic::Ordering::Relaxed)
+                    && let Some(check) = self.options.check.as_deref().filter(|c| !c.trim().is_empty())
+                {
+                    let (passed, output) = self.check(check).await;
+                    events(Event::Tool(&format!("check: {check}")));
+                    events(Event::Output { name: "check", text: &output });
+                    if !passed {
+                        checks += 1;
+                        if checks < 2 {
+                            session.push(json!({
+                                "role": "user",
+                                "content": format!(
+                                    "The configured check `{check}` failed. Fix the project, then answer again. Its output:
+
+{output}"
+                                ),
+                            }))?;
+                            continue;
+                        }
+                        check_note = format!(
+                            "\n\nThe configured check `{check}` still fails; the turn stopped instead of claiming success."
+                        );
+                    }
+                }
+                record(
+                    &sent,
+                    &definitions,
+                    message.clone(),
+                    if check_note.is_empty() { "answer" } else { "failed" },
+                    steps,
+                    &receipts,
+                );
+                let mut text = message["content"].as_str().unwrap_or_default().trim().to_owned();
+                if text.is_empty() {
+                    text = "(no answer)".to_owned();
+                }
+                text.push_str(&check_note);
+                return Ok(Outcome { text, receipts });
             }
             // Hand-offs to the team in one reply work at the same time (bounded); the rest in order.
             let (delegated, own): (Vec<_>, Vec<_>) =
@@ -1081,6 +1133,51 @@ impl Agent {
         if ran { Ok(()) } else { Err(instead) }
     }
 
+    /// Run the owner's configured check where commands run. It is trusted: no approval, because
+    /// the owner wrote it in `[agent] check`; the sandbox still applies when confined.
+    async fn check(&self, command: &str) -> (bool, String) {
+        let mut child = match self.tools.shell_command(command).await {
+            Ok(child) => child,
+            Err(e) => return (false, format!("could not start: {e}")),
+        };
+        child
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let limit = self.tools.timeout().max(std::time::Duration::from_secs(600));
+        match tokio::time::timeout(limit, child.output()).await {
+            Err(_) => (false, format!("timed out after {} s", limit.as_secs())),
+            Ok(Err(e)) => (false, format!("could not run: {e}")),
+            Ok(Ok(output)) => {
+                let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.trim().is_empty() {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&stderr);
+                }
+                if text.trim().is_empty() {
+                    text = if output.status.success() {
+                        "check passed".to_owned()
+                    } else {
+                        format!("exit {}", output.status.code().unwrap_or(-1))
+                    };
+                }
+                const CAP: usize = 12 * 1024;
+                if text.len() > CAP {
+                    let mut cut = CAP;
+                    while cut > 0 && !text.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    text.truncate(cut);
+                    text.push_str("\n…");
+                }
+                (output.status.success(), text)
+            }
+        }
+    }
+
     pub fn system_prompt(&self) -> String {
         let persona = self.options.persona.as_ref();
         let who = match persona.and_then(|p| p.name.as_deref()) {
@@ -1187,6 +1284,11 @@ impl Agent {
         if let Some(notes) = self.tools.project_notes() {
             prompt.push_str("\n\nThe project's instructions for agents (follow them):\n");
             prompt.push_str(&notes);
+        }
+        if let Some(home) = self.tools.home()
+            && let Some(variables) = crate::variables::prompt(home)
+        {
+            prompt.push_str(&variables);
         }
         if let Some(home) = self.tools.home() {
             if let Some(facts) = crate::memory::Memory::new(home).prompt() {
