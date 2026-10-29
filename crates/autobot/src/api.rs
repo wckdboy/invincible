@@ -1495,7 +1495,6 @@ fn project_view(bot: &BotApi, root: &std::path::Path, brief: Option<crate::brief
         }),
     };
     view["check"] = json!(bot.agent().options.check);
-    view["workdir"] = json!(bot.agent().tools.workdir().display().to_string());
     view
 }
 
