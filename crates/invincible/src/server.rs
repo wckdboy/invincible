@@ -114,8 +114,8 @@ pub struct AppState {
     /// max_buffered_bytes`, spec/pairing.md, Limits). The operator's own loopback requests are
     /// not counted: the ceiling is for the callers the node does not sit behind.
     pub buffered: Arc<Budget>,
-    /// The supervised `wckd` and the rental caps (spec/rent.md). `None` when `[rent] enabled` is
-    /// false: the routes answer that rent is off, and no process is started.
+    /// The in-process rent engine and the rental caps (spec/rent.md). `None` when `[rent] enabled`
+    /// is false: the routes answer that rent is off.
     pub rent: Option<Arc<crate::rent::Gateway>>,
 }
 
@@ -155,8 +155,7 @@ impl AppState {
         }
     }
 
-    /// With the rent gateway ([crate::rent]). The supervisor that keeps `wckd` running is the
-    /// caller's; this only holds the address and the key the proxy sends.
+    /// With the rent gateway ([crate::rent]). The sweeper runs inside the node.
     pub fn with_rent(mut self, rent: Arc<crate::rent::Gateway>) -> Self {
         self.rent = Some(rent);
         self

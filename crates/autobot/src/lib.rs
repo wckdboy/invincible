@@ -53,6 +53,7 @@ pub mod procs;
 pub mod profile;
 pub mod providers;
 pub mod recall;
+pub mod rent;
 pub mod repo_map;
 pub mod sandbox;
 pub mod script;

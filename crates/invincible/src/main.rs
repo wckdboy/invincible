@@ -133,7 +133,7 @@ enum Command {
         #[command(subcommand)]
         action: CloudAction,
     },
-    /// Rent a cloud GPU through the supervised `wckd` engine (spec/rent.md). Nothing starts
+    /// Rent a cloud GPU through the in-process engine (spec/rent.md). Nothing starts
     /// until `start --confirm`; the caps in `[rent]` are a ceiling, not a permission.
     Rent {
         #[command(subcommand)]
@@ -385,7 +385,7 @@ enum CloudAction {
 enum RentAction {
     /// List offers for a preset. Does not start a pod.
     Offers {
-        /// The wckd preset id.
+        /// The preset id (`vllm`, `comfyui-minimax-h3`, `dev-box`, or one added under rent/presets).
         #[arg(long)]
         preset: String,
         /// How long the rental would run, in hours, in (0, 24].
@@ -411,7 +411,7 @@ enum RentAction {
         preset: String,
         #[arg(long)]
         hours: f64,
-        /// Lock this offer. Without it, wckd may fail over inside the priced window.
+        /// Lock this offer. Without it, the node may fail over inside the priced window, then pins the preview.
         #[arg(long)]
         offer: Option<String>,
         /// The owner's approval. Required to provision; the caps are checked either way.
@@ -1404,10 +1404,9 @@ async fn serve(config: Config, token: String, home: PathBuf, config_path: PathBu
     } else {
         None
     };
-    let rent = invincible::rent::start(&config.rent, &home, &logs)?;
-    if let Some(started) = &rent {
-        supervisors.push(engine::supervise(started.gateway.engine().clone(), started.launch.clone()));
-        tracing::info!(url = %started.gateway.engine().base_url, "rent engine starting");
+    let rent = invincible::rent::start(&config.rent, &home)?;
+    if rent.is_some() {
+        tracing::info!("rent engine in-process");
     }
     if engines.is_empty() && config.cloud.is_empty() {
         tracing::warn!(
@@ -1489,8 +1488,8 @@ async fn serve(config: Config, token: String, home: PathBuf, config_path: PathBu
             seeds: config.discovery.seeds.clone(),
         })
         .with_dispatch(dispatch);
-    if let Some(started) = rent {
-        state = state.with_rent(started.gateway);
+    if let Some(gateway) = rent {
+        state = state.with_rent(gateway);
     }
     let clouds = state.cloud.clone();
     state = state.with_provider_admin(Arc::new(invincible::providers_admin::ProviderAdmin::new(
@@ -2144,7 +2143,7 @@ fn discover_command(
     Ok(())
 }
 
-/// `invincible rent`: the node's `/v1/rent/*`, with the local token. The wckd bearer stays on the node.
+/// `invincible rent`: the node's `/v1/rent/*`, with the local token. Provider keys stay on the node.
 fn rent_command(action: RentAction) -> Result<(), String> {
     match action {
         RentAction::Offers { preset, hours, limit, require_regions, config, json } => {

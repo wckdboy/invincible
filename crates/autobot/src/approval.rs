@@ -44,6 +44,11 @@ pub enum Action {
         entities: String,
         data: String,
     },
+    /// Rent a GPU. The summary is the node's estimate (offer, region, $/hr, hours, total).
+    /// Trust mode does not skip this: spending is asked for in the conversation.
+    Rent {
+        summary: String,
+    },
 }
 
 impl Action {
@@ -58,6 +63,7 @@ impl Action {
             Self::Mcp { .. } => "mcp",
             Self::Type { .. } => "type",
             Self::Home { .. } => "home",
+            Self::Rent { .. } => "rent",
         }
     }
 
@@ -90,6 +96,7 @@ impl Action {
                 }
                 line
             }
+            Self::Rent { summary } => summary.clone(),
         }
     }
 }
@@ -141,6 +148,10 @@ pub enum Verdict {
 
 /// The policy's answer before anyone is asked.
 pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
+    // A rental is asked for every time, including trust mode. An allowlist entry cannot spend.
+    if matches!(action, Action::Rent { .. }) {
+        return Verdict::Ask;
+    }
     if config.mode == ApprovalMode::Trust {
         return Verdict::Run;
     }

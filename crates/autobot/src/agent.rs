@@ -813,6 +813,10 @@ impl Agent {
         if matches!(call, crate::tools::Call::Speak { .. } | crate::tools::Call::Image { .. }) {
             return self.make(session, &call, approver, grants, events).await;
         }
+        if let crate::tools::Call::Rent(op) = &call {
+            events(Event::Tool(&format!("rent_gpu {arguments}")));
+            return crate::rent::run(&self.gateway, op, approver).await;
+        }
         // A change in a directory with instructions of its own: those first, then the change.
         if matches!(call, crate::tools::Call::WriteFile { .. } | crate::tools::Call::EditFile { .. }) {
             let notes = self.tools.nested_notes(&call, session);

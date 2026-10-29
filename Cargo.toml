@@ -32,6 +32,8 @@ hyper-util = { version = "0.1", features = ["tokio", "service"] }
 qrcode = { version = "0.14", default-features = false }
 base64 = "0.23"
 sha2 = "0.11"
+hmac = "0.13"
+serde-saphyr = { version = "2", default-features = false, features = ["deserialize"] }
 toml_edit = "0.25"
 regex = "1"
 futures-util = { version = "0.3", default-features = false }
@@ -39,7 +41,7 @@ ed25519-dalek = "3"
 # LAN discovery (spec/discovery.md): mDNS/DNS-SD, its own thread, no async runtime.
 mdns-sd = { version = "0.21", default-features = false }
 # Local time for scheduled agent tasks.
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
