@@ -119,8 +119,9 @@ pub fn parse(text: &str) -> Result<Vec<Task>, String> {
 struct Yes;
 
 impl Approver for Yes {
-    fn approve<'a>(&'a self, _: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
-        Box::pin(async { Answer::Once })
+    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        let rent = matches!(action, Action::Rent { .. });
+        Box::pin(async move { if rent { Answer::Deny } else { Answer::Once } })
     }
 
     fn channel(&self) -> &'static str {

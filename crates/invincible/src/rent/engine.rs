@@ -3,6 +3,7 @@
 //! idle, and for a month that has gone over its cap, and it deletes even when the marker never
 //! arrives: a pod does not outlive the hours it was paid for.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -45,7 +46,9 @@ pub struct Engine {
     access_key: String,
     secret_key: String,
     cache: tokio::sync::Mutex<Cache>,
-    life: tokio::sync::Mutex<()>,
+    /// One lock per session. A drain does not block a status read of another session, or of this
+    /// one: status takes no lock here.
+    session_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     drain_wait: Duration,
     drain_poll: Duration,
     hydrate_wait: Duration,
@@ -61,6 +64,8 @@ pub struct Ask {
     pub hours: f64,
     pub offer_id: Option<String>,
     pub regions: Vec<String>,
+    /// The $/hr the owner approved. A confirming create refuses when the offer now costs more.
+    pub approved_usd_per_hr: Option<f64>,
 }
 
 pub enum RentError {
@@ -68,6 +73,8 @@ pub enum RentError {
     NoOffers(String),
     NotFound,
     Drain(Value),
+    /// The offer moved or got dearer than the approved preview. The value is a fresh 409 body.
+    Stale(Value),
     Unavailable(String),
 }
 
@@ -84,7 +91,7 @@ impl Engine {
             access_key: parts.access_key,
             secret_key: parts.secret_key,
             cache: tokio::sync::Mutex::new(Cache::new()),
-            life: tokio::sync::Mutex::new(()),
+            session_locks: std::sync::Mutex::new(HashMap::new()),
             drain_wait: DRAIN_WAIT,
             drain_poll: DRAIN_POLL,
             hydrate_wait: HYDRATE_WAIT,
@@ -96,6 +103,15 @@ impl Engine {
 
     fn now(&self) -> DateTime<Utc> {
         (self.clock)()
+    }
+
+    fn session_lock(&self, id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        self.session_locks
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .entry(id.to_owned())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     fn scrubbed(&self, err: impl std::fmt::Display) -> String {
@@ -111,7 +127,7 @@ impl Engine {
     ) -> Result<Value, RentError> {
         let preset = self.preset(preset_id)?;
         let query = self.query(preset, regions)?;
-        let ranked = self.ranked(&query).await?;
+        let ranked = self.ranked(&query, false).await?;
         let offers: Vec<Offer> = ranked.into_iter().take(limit.clamp(1, 100)).collect();
         Ok(json!({
             "preset_id": preset.id,
@@ -123,12 +139,13 @@ impl Engine {
         }))
     }
 
-    /// The 409 preview. No session file, no pod, no object.
-    pub async fn preview(&self, ask: &Ask) -> Result<Value, RentError> {
+    /// The 409 preview. No session file, no pod, no object. `fresh` skips the catalog cache so a
+    /// confirming call sees the price the owner is about to pay.
+    pub async fn preview(&self, ask: &Ask, fresh: bool) -> Result<Value, RentError> {
         self.check_project(&ask.project_id)?;
         let preset = self.preset(&ask.preset_id)?;
         let query = self.query(preset, &ask.regions)?;
-        let ranked = self.ranked(&query).await?;
+        let ranked = self.ranked(&query, fresh).await?;
         let window = broker::select(&ranked, ask.offer_id.as_deref()).map_err(RentError::NoOffers)?;
         let first = &window[0];
         let estimate = first.usd_per_hr * ask.hours;
@@ -149,13 +166,33 @@ impl Engine {
         }))
     }
 
-    pub async fn provision(&self, ask: &Ask) -> Result<Value, RentError> {
-        let _guard = self.life.lock().await;
+    /// Provisions on a task the caller's timeout cannot cancel. Dropping this future (the HTTP
+    /// timeout) leaves that task running: it still persists `instance_id` or terminates the pod.
+    pub async fn provision(self: Arc<Self>, ask: Ask) -> Result<Value, RentError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let this = Arc::clone(&self);
+        tokio::spawn(async move {
+            let _ = tx.send(this.provision_body(ask).await);
+        });
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(RentError::Unavailable("the rent create stopped before it could report".into())),
+        }
+    }
+
+    async fn provision_body(&self, ask: Ask) -> Result<Value, RentError> {
+        let _guard = self.session_lock(&format!("create-{}", &ask.project_id)).lock_owned().await;
         self.check_project(&ask.project_id)?;
         let preset = self.preset(&ask.preset_id)?.clone();
         let query = self.query(&preset, &ask.regions)?;
-        let ranked = self.ranked(&query).await?;
+        let ranked = self.ranked(&query, true).await?;
         let window = broker::select(&ranked, ask.offer_id.as_deref()).map_err(RentError::NoOffers)?;
+        if let Some(approved) = ask.approved_usd_per_hr
+            && (cents(window[0].usd_per_hr) > cents(approved)
+                || ask.offer_id.as_deref().is_some_and(|id| id != window[0].id))
+        {
+            return Err(RentError::Stale(preview_body(&ask, &window)));
+        }
         let now = self.now();
         let id = session::new_id().map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
         let mut session = Session {
@@ -199,14 +236,16 @@ impl Engine {
                             "provision {}: data center {:?} is outside require_regions",
                             candidate.id, instance.data_center
                         );
-                        if let Err(err) = self.provider.terminate(&instance.id).await {
-                            session.instance_id = instance.id;
-                            session.data_center = instance.data_center;
-                            let message = self.scrubbed(err);
-                            session.error = format!("{last} (terminate: {message})");
-                            let _ = session.go(Phase::Failed, self.now(), session.error.clone());
-                            let _ = self.sessions.save(&session);
-                            return Err(RentError::Unavailable(session.error.clone()));
+                        match self.provider.terminate(&instance.id).await {
+                            Ok(()) => {}
+                            Err(err) => {
+                                session.instance_id = instance.id;
+                                session.data_center = instance.data_center;
+                                session.error = format!("{last} (terminate: {})", self.scrubbed(err));
+                                let _ = session.go(Phase::Failed, self.now(), session.error.clone());
+                                let _ = self.sessions.save(&session);
+                                return Err(RentError::Unavailable(session.error.clone()));
+                            }
                         }
                         continue;
                     }
@@ -223,7 +262,9 @@ impl Engine {
                     session
                         .go(Phase::Hydrating, self.now(), format!("pod {} created", instance.id))
                         .map_err(RentError::Unavailable)?;
-                    let _ = self.sessions.save(&session);
+                    if let Err(err) = self.sessions.save(&session) {
+                        return self.abandon(&session.instance_id, err).await;
+                    }
                     break;
                 }
                 Err(err) => last = self.scrubbed(err),
@@ -236,27 +277,53 @@ impl Engine {
             return Err(RentError::Unavailable(last));
         }
         if let Err(err) = self.hydrate(&mut session).await {
-            let _ = self.provider.terminate(&session.instance_id).await;
-            session.error = err.clone();
-            let _ = session.go(Phase::Failed, self.now(), err.clone());
+            session.error = match self.provider.terminate(&session.instance_id).await {
+                Ok(()) => {
+                    session.instance_id.clear();
+                    err.clone()
+                }
+                Err(term) => format!("{err} (terminate: {})", self.scrubbed(term)),
+            };
+            let _ = session.go(Phase::Failed, self.now(), session.error.clone());
             let _ = self.sessions.save(&session);
-            return Err(RentError::Unavailable(err));
+            return Err(RentError::Unavailable(session.error.clone()));
         }
-        let _ = self.sessions.save(&session);
+        self.sessions.save(&session).map_err(|err| RentError::Unavailable(self.scrubbed(err)))?;
         Ok(session.public())
     }
 
+    /// The pod exists and we could not record it. Terminate, and say so if that also fails.
+    async fn abandon(&self, instance_id: &str, err: String) -> Result<Value, RentError> {
+        match self.provider.terminate(instance_id).await {
+            Ok(()) => Err(RentError::Unavailable(format!(
+                "the pod was deleted because its session could not be saved: {}",
+                self.scrubbed(&err)
+            ))),
+            Err(term) => Err(RentError::Unavailable(format!(
+                "the pod {instance_id} could not be saved ({}) or deleted ({})",
+                self.scrubbed(&err),
+                self.scrubbed(term)
+            ))),
+        }
+    }
+
     pub async fn list(&self) -> Result<Value, RentError> {
-        let sessions = self.sessions.list().map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        let (sessions, warnings) = self.sessions.list().map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        for warning in warnings {
+            tracing::warn!(target: "rent", "{warning}");
+        }
         Ok(json!({ "sessions": sessions.iter().map(Session::public).collect::<Vec<_>>() }))
     }
 
     pub async fn sessions(&self) -> Result<Vec<Session>, RentError> {
-        self.sessions.list().map_err(|e| RentError::Unavailable(self.scrubbed(e)))
+        let (sessions, warnings) = self.sessions.list().map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        for warning in warnings {
+            tracing::warn!(target: "rent", "{warning}");
+        }
+        Ok(sessions)
     }
 
     pub async fn get(&self, id: &str) -> Result<Value, RentError> {
-        let _guard = self.life.lock().await;
         let Some(mut session) = self.sessions.get(id).map_err(|e| RentError::Unavailable(self.scrubbed(e)))? else {
             return Err(RentError::NotFound);
         };
@@ -271,7 +338,7 @@ impl Engine {
     /// Drain, then delete. `must_delete` is the sweeper: the pod is removed after the drain
     /// attempt even when the marker never arrives.
     pub async fn stop(&self, id: &str, force: bool, must_delete: bool) -> Result<Value, RentError> {
-        let _guard = self.life.lock().await;
+        let _guard = self.session_lock(id).lock_owned().await;
         self.stop_locked(id, force, must_delete).await
     }
 
@@ -299,39 +366,91 @@ impl Engine {
         }
         let control = json!({ "action": "drain", "requested_at": self.now().to_rfc3339() });
         let bytes = serde_json::to_vec(&control).map_err(|e| RentError::Unavailable(e.to_string()))?;
-        self.objects
-            .put(&control_key(&session.id), &bytes)
-            .await
-            .map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
-        let drained =
-            self.wait_marker(&drain_key(&session.id), self.drain_wait).await.map_err(RentError::Unavailable)?;
+        let mut drained = false;
+        let mut drain_error = None;
+        match self.objects.put(&control_key(&session.id), &bytes).await {
+            Ok(()) => match self.wait_marker(&drain_key(&session.id), self.drain_wait).await {
+                Ok(ok) => drained = ok,
+                Err(err) => drain_error = Some(err),
+            },
+            Err(err) => drain_error = Some(self.scrubbed(err)),
+        }
+        if let Some(err) = &drain_error {
+            tracing::warn!(session = %session.id, "drain did not start: {err}");
+        }
         if !drained && !force && !must_delete {
-            session.error = "drain did not finish; pod left running".to_owned();
-            session.note(self.now(), session.error.clone());
+            let why = drain_error.unwrap_or_else(|| {
+                "drain did not finish; the pod is still running. It stays until you stop it again, or until its hours, idle time, or the monthly cap ends it".to_owned()
+            });
+            session.error = why.clone();
+            if session.phase.can_go(Phase::Ready) {
+                let _ = session.go(Phase::Ready, self.now(), why);
+            } else {
+                session.note(self.now(), session.error.clone());
+            }
             self.sessions.save(&session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
             return Err(RentError::Drain(session.public()));
         }
-        self.provider.terminate(&session.instance_id).await.map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        let instance_id = session.instance_id.clone();
+        self.provider.terminate(&instance_id).await.map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
         let forced = !drained && (force || must_delete);
         self.finish(&mut session, drained, forced).await?;
         Ok(session.public())
     }
 
     pub async fn sweep(&self) {
-        let Ok(sessions) = self.sessions.list() else { return };
+        let (sessions, warnings) = match self.sessions.list() {
+            Ok(listed) => listed,
+            Err(err) => {
+                tracing::warn!("{}", self.scrubbed(err));
+                return;
+            }
+        };
+        for warning in warnings {
+            tracing::warn!(target: "rent", "{warning}");
+        }
         let now = self.now();
         let over_month = self.month_over(&sessions, now);
-        for session in sessions {
-            if !session.phase.active() {
+        for session in &sessions {
+            let orphan = session.phase == Phase::Failed && !session.instance_id.is_empty();
+            if !session.phase.active() && !orphan {
                 continue;
             }
             let expired = now >= session.deadline_at;
             let quiet = matches!(session.phase, Phase::Ready | Phase::Hydrating)
                 && now.signed_duration_since(session.last_active) >= TimeDelta::minutes(self.idle_minutes as i64);
-            if (expired || quiet || over_month || session.phase == Phase::Draining || session.phase == Phase::Failed)
+            if (expired || quiet || over_month || session.phase == Phase::Draining || orphan)
                 && let Err(err) = self.stop(&session.id, true, true).await
             {
                 tracing::warn!(session = %session.id, "{}", self.scrubbed(err));
+            }
+        }
+        self.reconcile(&sessions).await;
+    }
+
+    /// Pods named `invincible-<session>` with no live tracked session are drained, then deleted.
+    async fn reconcile(&self, sessions: &[Session]) {
+        let pods = match self.provider.list_pods().await {
+            Ok(pods) => pods,
+            Err(err) => {
+                tracing::warn!("could not list pods to reconcile: {}", self.scrubbed(err));
+                return;
+            }
+        };
+        for pod in pods {
+            let Some(id) = pod.name.strip_prefix("invincible-") else { continue };
+            let tracked = sessions.iter().any(|session| {
+                session.id == id
+                    && session.instance_id == pod.id
+                    && (session.phase.active() || session.phase == Phase::Failed)
+            });
+            if tracked {
+                continue;
+            }
+            tracing::warn!(pod = %pod.id, session = id, "terminating a pod with no live session");
+            let _ = self.objects.put(&control_key(id), br#"{"action":"drain"}"#).await;
+            if let Err(err) = self.provider.terminate(&pod.id).await {
+                tracing::warn!(pod = %pod.id, "reconcile terminate: {}", self.scrubbed(err));
             }
         }
     }
@@ -452,9 +571,21 @@ impl Engine {
         env.insert("INVINCIBLE_BUCKET".into(), self.bucket.clone());
         env.insert("INVINCIBLE_ENDPOINT".into(), self.endpoint.clone());
         env.insert("INVINCIBLE_PREFIX".into(), format!("projects/{}/", session.project_id));
+        env.insert("INVINCIBLE_ACCESS_KEY_ID".into(), self.access_key.clone());
+        env.insert("INVINCIBLE_SECRET_ACCESS_KEY".into(), self.secret_key.clone());
+        env.insert("INVINCIBLE_REGION".into(), "auto".into());
         env.insert("AWS_ACCESS_KEY_ID".into(), self.access_key.clone());
         env.insert("AWS_SECRET_ACCESS_KEY".into(), self.secret_key.clone());
         env.insert("AWS_DEFAULT_REGION".into(), "auto".into());
+        env.insert("INVINCIBLE_DEADLINE_AT".into(), session.deadline_at.to_rfc3339());
+        env.insert("INVINCIBLE_HYDRATE_MAP".into(), format!("projects/{}/workspace|/workspace", session.project_id));
+        env.insert("INVINCIBLE_DRAIN_MAP".into(), format!("/workspace|projects/{}/workspace", session.project_id));
+        env.insert("INVINCIBLE_DRAIN_EXCLUDES".into(), "**/.cache/**".into());
+        if !preset.entrypoint.is_empty() {
+            env.insert("INVINCIBLE_WORKLOAD".into(), shell_join(&preset.entrypoint));
+        }
+        // The image ENTRYPOINT is the sidecar. RunPod's `entrypoint` field would replace it
+        // (OpenAPI BaseContainerConfig), so the workload stays in the environment.
         ProvisionRequest {
             name: format!("invincible-{}", session.id),
             image: preset.image.clone(),
@@ -465,13 +596,13 @@ impl Engine {
             ports: preset.ports.clone(),
             env,
             data_center_ids: offer.data_center_ids.clone(),
-            entrypoint: preset.entrypoint.clone(),
+            entrypoint: Vec::new(),
         }
     }
 
-    async fn ranked(&self, query: &Query) -> Result<Vec<Offer>, RentError> {
+    async fn ranked(&self, query: &Query, fresh: bool) -> Result<Vec<Offer>, RentError> {
         let key = broker::cache_key(query);
-        if let Some(hit) = self.cache.lock().await.get(&key) {
+        if !fresh && let Some(hit) = self.cache.lock().await.get(&key) {
             return Ok(hit.to_vec());
         }
         let quotes = self.provider.list_quotes(query).await.map_err(|err| {
@@ -525,6 +656,40 @@ fn offer_row(offer: &Offer, hours: f64) -> Value {
     })
 }
 
+fn preview_body(ask: &Ask, window: &[Offer]) -> Value {
+    let first = &window[0];
+    json!({
+        "error": {
+            "code": "confirmation_required",
+            "message": "the offer changed since it was approved; send again with `invincible-confirmed: 1`",
+        },
+        "project_id": ask.project_id,
+        "preset_id": ask.preset_id,
+        "hours": ask.hours,
+        "cost_basis": "catalog_usd_per_hr_times_hours",
+        "cost_estimate_usd": first.usd_per_hr * ask.hours,
+        "require_regions": ask.regions,
+        "offer": offer_row(first, ask.hours),
+        "failover": window.iter().map(|offer| offer_row(offer, ask.hours)).collect::<Vec<_>>(),
+    })
+}
+
+fn cents(usd: f64) -> i64 {
+    if !usd.is_finite() { i64::MAX } else { (usd * 100.0).round() as i64 }
+}
+
+fn shell_join(args: &[String]) -> String {
+    args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ")
+}
+
+fn shell_quote(arg: &str) -> String {
+    if arg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=')) {
+        arg.to_owned()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
 fn placement_ok(regions: &[String], data_center: &str) -> bool {
     regions.is_empty() || (!data_center.trim().is_empty() && broker::matches_region(data_center, "", regions))
 }
@@ -550,7 +715,190 @@ impl std::fmt::Display for RentError {
         match self {
             Self::Bad(message) | Self::NoOffers(message) | Self::Unavailable(message) => f.write_str(message),
             Self::NotFound => f.write_str("no such session"),
-            Self::Drain(_) => f.write_str("drain did not finish; pod left running"),
+            Self::Drain(_) => f.write_str(
+                "drain did not finish; the pod is still running until its hours, idle time, or the monthly cap",
+            ),
+            Self::Stale(_) => f.write_str("the offer changed since it was approved"),
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::rent::provider::{DataCenter, Instance, PodRef, Quote};
+    use crate::rent::sync::StoreFut;
+
+    struct Fake {
+        state: std::path::PathBuf,
+        events: Arc<Mutex<Vec<String>>>,
+        freeze: bool,
+        orphan: bool,
+    }
+
+    impl Provider for Fake {
+        fn list_quotes<'a>(&'a self, _query: &'a Query) -> super::super::provider::ProviderFut<'a, Vec<Quote>> {
+            Box::pin(async {
+                Ok(vec![Quote {
+                    gpu_id: "NVIDIA GeForce RTX 4090".into(),
+                    name: "RTX 4090".into(),
+                    vram_gb: 24,
+                    cloud: "secure".into(),
+                    usd_per_hour: 0.5,
+                    availability: "HIGH".into(),
+                    data_centers: vec![DataCenter {
+                        id: "EU-RO-1".into(),
+                        name: "EU Romania".into(),
+                        availability: "HIGH".into(),
+                    }],
+                }])
+            })
+        }
+
+        fn provision<'a>(
+            &'a self,
+            _request: &'a ProvisionRequest,
+        ) -> super::super::provider::ProviderFut<'a, Instance> {
+            let state = self.state.clone();
+            let events = Arc::clone(&self.events);
+            let freeze = self.freeze;
+            Box::pin(async move {
+                if freeze {
+                    let mut perms = std::fs::metadata(&state).unwrap().permissions();
+                    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o555);
+                    std::fs::set_permissions(&state, perms).unwrap();
+                }
+                events.lock().unwrap().push("create".into());
+                Ok(Instance {
+                    id: "pod-crash".into(),
+                    status: "RUNNING".into(),
+                    cost_per_hour: 0.5,
+                    data_center: "EU-RO-1".into(),
+                    ..Instance::default()
+                })
+            })
+        }
+
+        fn status<'a>(&'a self, id: &'a str) -> super::super::provider::ProviderFut<'a, Instance> {
+            let id = id.to_owned();
+            Box::pin(async move { Ok(Instance { id, status: "RUNNING".into(), ..Instance::default() }) })
+        }
+
+        fn terminate<'a>(&'a self, id: &'a str) -> super::super::provider::ProviderFut<'a, ()> {
+            let events = Arc::clone(&self.events);
+            let id = id.to_owned();
+            Box::pin(async move {
+                events.lock().unwrap().push(format!("terminate:{id}"));
+                Ok(())
+            })
+        }
+
+        fn list_pods<'a>(&'a self) -> super::super::provider::ProviderFut<'a, Vec<PodRef>> {
+            let orphan = self.orphan;
+            Box::pin(async move {
+                Ok(if orphan {
+                    vec![PodRef { id: "pod-orphan".into(), name: "invincible-sess_gone".into() }]
+                } else {
+                    Vec::new()
+                })
+            })
+        }
+    }
+
+    struct Mem {
+        events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ObjectStore for Mem {
+        fn put<'a>(&'a self, key: &'a str, _body: &'a [u8]) -> StoreFut<'a, ()> {
+            let events = Arc::clone(&self.events);
+            let key = key.to_owned();
+            Box::pin(async move {
+                events.lock().unwrap().push(format!("put:{key}"));
+                Ok(())
+            })
+        }
+
+        fn exists<'a>(&'a self, _key: &'a str) -> StoreFut<'a, bool> {
+            Box::pin(async { Ok(false) })
+        }
+
+        fn list_prefix<'a>(&'a self, _prefix: &'a str) -> StoreFut<'a, Vec<String>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+    }
+
+    struct Home {
+        path: std::path::PathBuf,
+        state: std::path::PathBuf,
+    }
+
+    impl Drop for Home {
+        fn drop(&mut self) {
+            if let Ok(meta) = std::fs::metadata(&self.state) {
+                let mut perms = meta.permissions();
+                std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+                let _ = std::fs::set_permissions(&self.state, perms);
+            }
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn engine(freeze: bool, orphan: bool) -> (Arc<Engine>, Arc<Mutex<Vec<String>>>, Home) {
+        let path = std::env::temp_dir().join(format!("invincible-rent-engine-{}-{}", std::process::id(), freeze));
+        let _ = std::fs::remove_dir_all(&path);
+        let state = path.join("rent/state");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::open(Open {
+            provider: Arc::new(Fake { state: state.clone(), events: Arc::clone(&events), freeze, orphan }),
+            objects: Arc::new(Mem { events: Arc::clone(&events) }),
+            home: path.clone(),
+            secrets: Vec::new(),
+            bucket: "rent".into(),
+            endpoint: "http://127.0.0.1:9".into(),
+            access_key: "access".into(),
+            secret_key: "secret".into(),
+            idle_minutes: 15,
+            monthly_cap_usd: None,
+        })
+        .unwrap();
+        (Arc::new(engine), events, Home { path, state })
+    }
+
+    #[tokio::test]
+    async fn a_save_failure_after_create_terminates_the_pod() {
+        let (engine, events, _home) = engine(true, false);
+        let err = engine
+            .provision(Ask {
+                project_id: "hailuo".into(),
+                preset_id: "comfyui-minimax-h3".into(),
+                hours: 1.0,
+                offer_id: None,
+                regions: vec!["EU-secure".into()],
+                approved_usd_per_hr: None,
+            })
+            .await
+            .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("could not be saved") || text.contains("deleted"), "{text}");
+        let events = events.lock().unwrap().clone();
+        assert!(events.iter().any(|line| line == "create"), "{events:?}");
+        assert!(events.iter().any(|line| line == "terminate:pod-crash"), "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn a_sweep_terminates_a_pod_with_no_session() {
+        let (engine, events, _home) = engine(false, true);
+        engine.sweep().await;
+        let events = events.lock().unwrap().clone();
+        let control = events
+            .iter()
+            .position(|line| line.contains("sess_gone") && line.starts_with("put:"))
+            .unwrap_or_else(|| panic!("{events:?}"));
+        let deleted =
+            events.iter().position(|line| line == "terminate:pod-orphan").unwrap_or_else(|| panic!("{events:?}"));
+        assert!(control < deleted, "{events:?}");
     }
 }

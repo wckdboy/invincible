@@ -46,7 +46,7 @@ impl Phase {
                 (Self::Provisioning, Self::Hydrating | Self::Draining | Self::Failed)
                     | (Self::Hydrating, Self::Ready | Self::Draining | Self::Failed)
                     | (Self::Ready, Self::Draining | Self::Failed)
-                    | (Self::Draining, Self::Stopped | Self::Failed)
+                    | (Self::Draining, Self::Ready | Self::Stopped | Self::Failed)
                     | (Self::Failed, Self::Draining)
             )
     }
@@ -156,20 +156,37 @@ impl Store {
         Ok(Self { dir: dir.to_owned() })
     }
 
-    pub fn list(&self) -> Result<Vec<Session>, String> {
+    /// Sessions that parsed, and a warning for each file that did not. One bad file does not
+    /// hide the rest. A failure to read the directory is the only hard error.
+    pub fn list(&self) -> Result<(Vec<Session>, Vec<String>), String> {
         let mut sessions = Vec::new();
+        let mut warnings = Vec::new();
         for entry in std::fs::read_dir(&self.dir).map_err(|e| format!("{}: {e}", self.dir.display()))? {
-            let entry = entry.map_err(|e| format!("{}: {e}", self.dir.display()))?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    warnings.push(format!("{}: {err}", self.dir.display()));
+                    continue;
+                }
+            };
             let path = entry.path();
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let session: Session = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-            sessions.push(session);
+            let text = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(err) => {
+                    warnings.push(format!("{}: {err}", path.display()));
+                    continue;
+                }
+            };
+            match serde_json::from_str::<Session>(&text) {
+                Ok(session) => sessions.push(session),
+                Err(err) => warnings.push(format!("{}: {err}", path.display())),
+            }
         }
         sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-        Ok(sessions)
+        Ok((sessions, warnings))
     }
 
     pub fn get(&self, id: &str) -> Result<Option<Session>, String> {

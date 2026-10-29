@@ -317,6 +317,19 @@ impl Agent {
         session.cap = learned_cap(self.gateway.model(), session.budget);
         session.push(crate::images::message(text, images))?;
         let mut definitions = self.tools.definitions();
+        if self.tools.rents()
+            && let Ok((status, body)) = self.gateway.rent(reqwest::Method::GET, "/rent/health", None, false).await
+            && status == 200
+            && body["ok"] == true
+            && let Some(list) = definitions.as_array_mut()
+        {
+            for tool in crate::tools::rent_definitions() {
+                let name = tool["function"]["name"].as_str().unwrap_or("");
+                if self.tools.offers(name) {
+                    list.push(tool);
+                }
+            }
+        }
         if self.leads_team()
             && let Some(list) = definitions.as_array_mut()
         {

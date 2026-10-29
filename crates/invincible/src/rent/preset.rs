@@ -17,7 +17,6 @@ const EMBEDDED: &[(&str, &str)] = &[
 #[derive(Clone, Debug)]
 pub struct Preset {
     pub id: String,
-    #[allow(dead_code)]
     pub name: String,
     pub workload_class: String,
     pub min_vram_gb: u32,
@@ -59,8 +58,21 @@ impl Catalog {
                 if !name.ends_with(".yaml") && !name.ends_with(".yml") {
                     continue;
                 }
+                let meta = std::fs::symlink_metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                if meta.file_type().is_symlink() {
+                    tracing::warn!("{} is a symlink; operator presets are not followed", path.display());
+                    continue;
+                }
                 let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 let preset = parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+                if presets.contains_key(&preset.id) {
+                    tracing::warn!(
+                        "operator preset {} reuses the shipped id {}; the shipped preset stays",
+                        path.display(),
+                        preset.id
+                    );
+                    continue;
+                }
                 presets.insert(preset.id.clone(), preset);
             }
         }
@@ -69,6 +81,10 @@ impl Catalog {
 
     pub fn get(&self, id: &str) -> Option<&Preset> {
         self.presets.get(id)
+    }
+
+    pub fn names(&self) -> Vec<(String, String)> {
+        self.presets.iter().map(|(id, preset)| (id.clone(), preset.name.clone())).collect()
     }
 }
 

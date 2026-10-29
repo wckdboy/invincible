@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::provider::{DataCenter, Instance, Port, Provider, ProviderError, ProvisionRequest, Query, Quote};
+use super::provider::{DataCenter, Instance, PodRef, Port, Provider, ProviderError, ProvisionRequest, Query, Quote};
 use super::secrets::scrub;
 
 const DEFAULT_ORIGIN: &str = "https://api.runpod.io";
@@ -43,6 +43,27 @@ impl Client {
         query: &[(&str, &str)],
         body: Option<Value>,
     ) -> Result<Value, ProviderError> {
+        let mut last = ProviderError::Vendor("runpod did not answer".to_owned());
+        for attempt in 1..=3 {
+            match self.send_once(method.clone(), path, query, body.clone()).await {
+                Ok(value) => return Ok(value),
+                Err(err) if attempt < 3 && retryable(&err) => {
+                    last = err;
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * attempt)).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Err(last)
+    }
+
+    async fn send_once(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> Result<Value, ProviderError> {
         let mut url = format!("{}{path}", self.origin);
         if !query.is_empty() {
             let query = query.iter().map(|(key, value)| format!("{key}={value}")).collect::<Vec<_>>().join("&");
@@ -71,6 +92,16 @@ impl Client {
         serde_json::from_str(&text)
             .map_err(|e| ProviderError::Vendor(self.scrubbed(format!("decode runpod response: {e}"))))
     }
+}
+
+fn retryable(err: &ProviderError) -> bool {
+    let ProviderError::Vendor(message) = err;
+    message.contains("status 429")
+        || message.contains("status 500")
+        || message.contains("status 502")
+        || message.contains("status 503")
+        || message.contains("status 504")
+        || !message.contains("status ")
 }
 
 fn detail(body: &str) -> String {
@@ -115,7 +146,7 @@ impl Provider for Client {
             if request.min_ram_gb > 0 {
                 gpu["minRamPerGpu"] = json!(request.min_ram_gb);
             }
-            let mut body = json!({
+            let body = json!({
                 "name": request.name,
                 "image": request.image,
                 "cloud": request.cloud.to_ascii_uppercase(),
@@ -125,9 +156,11 @@ impl Provider for Client {
                 "env": request.env,
                 "dataCenterIds": request.data_center_ids,
             });
-            if !request.entrypoint.is_empty() {
-                body["dockerStartCmd"] = json!(request.entrypoint);
-            }
+            // Do not send `entrypoint` or `dockerStartCmd`. RunPod REST API v2
+            // `BaseContainerConfig.entrypoint` is "Container ENTRYPOINT in exec form, overriding
+            // the image's own" (https://api.runpod.io/v2/openapi.json, fetched 2026-10-29).
+            // The sidecar image's ENTRYPOINT is the bootstrap; the workload is INVINCIBLE_WORKLOAD.
+            let _ = &request.entrypoint;
             let value = self.send(reqwest::Method::POST, "/v2/pods", &[], Some(body)).await?;
             let pod: Pod = serde_json::from_value(value)
                 .map_err(|e| ProviderError::Vendor(self.scrubbed(format!("decode pod: {e}"))))?;
@@ -150,11 +183,49 @@ impl Provider for Client {
     fn terminate<'a>(&'a self, id: &'a str) -> super::provider::ProviderFut<'a, ()> {
         Box::pin(async move {
             let path = format!("/v2/pods/{}", urlencoding_path(id));
-            match self.send(reqwest::Method::DELETE, &path, &[], None).await {
-                Ok(_) => Ok(()),
+            let deleted = self.send(reqwest::Method::DELETE, &path, &[], None).await;
+            let missing = match &deleted {
+                Err(ProviderError::Vendor(message)) if message.contains("status 404") => true,
+                Ok(_) => false,
+                Err(err) => return Err(ProviderError::Vendor(err.to_string())),
+            };
+            match self.send(reqwest::Method::GET, &path, &[], None).await {
                 Err(ProviderError::Vendor(message)) if message.contains("status 404") => Ok(()),
+                Ok(_) => Err(ProviderError::Vendor(format!(
+                    "runpod pod {id} is still present after delete{}",
+                    if missing { " (delete was 404)" } else { "" }
+                ))),
                 Err(err) => Err(err),
             }
+        })
+    }
+
+    fn list_pods<'a>(&'a self) -> super::provider::ProviderFut<'a, Vec<PodRef>> {
+        Box::pin(async move {
+            let mut pods = Vec::new();
+            let mut cursor: Option<String> = None;
+            loop {
+                let mut query = vec![("limit", "100".to_owned())];
+                if let Some(cursor) = &cursor {
+                    query.push(("cursor", cursor.clone()));
+                }
+                let query_ref: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                let body = self.send(reqwest::Method::GET, "/v2/pods", &query_ref, None).await?;
+                let page: Vec<Listed> = serde_json::from_value(body.get("pods").cloned().unwrap_or(Value::Null))
+                    .map_err(|e| ProviderError::Vendor(self.scrubbed(format!("decode pods: {e}"))))?;
+                for pod in page {
+                    if !pod.id.is_empty() {
+                        pods.push(PodRef { id: pod.id, name: pod.name });
+                    }
+                }
+                let next = body["pagination"]["nextCursor"].as_str().filter(|c| !c.is_empty()).map(str::to_owned);
+                let more = body["pagination"]["hasNextPage"].as_bool().unwrap_or(false);
+                if !more || next.is_none() {
+                    break;
+                }
+                cursor = next;
+            }
+            Ok(pods)
         })
     }
 }
@@ -253,6 +324,14 @@ struct Center {
     name: String,
     #[serde(default)]
     availability: String,
+}
+
+#[derive(Deserialize)]
+struct Listed {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Deserialize)]

@@ -37,6 +37,10 @@ pub struct Tools {
     ha: Option<std::sync::Arc<crate::homeassistant::Home>>,
     /// What speech and image backends the node has ([crate::media]).
     media: crate::media::Cache,
+    /// The `rent` group is on for this agent. Channel, delegated and scheduled runs clear it
+    /// unless their tool list names a `rent_gpu_*` tool. Definitions are still withheld until
+    /// `/v1/rent/health` answers ([crate::agent]).
+    rent: bool,
     /// Files read and written through someone else: an editor that holds them open
     /// ([crate::acp]).
     files: Option<std::sync::Arc<dyn Files>>,
@@ -86,7 +90,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("rent", &["rent_gpu_offers", "rent_gpu_start", "rent_gpu_status", "rent_gpu_stop"]),
 ];
 
-fn rent_definitions() -> Vec<Value> {
+pub(crate) fn rent_definitions() -> Vec<Value> {
     let function = |name: &str, description: &str, properties: Value, required: &[&str]| {
         json!({
             "type": "function",
@@ -335,6 +339,7 @@ impl Tools {
             ha: None,
             media: Default::default(),
             files: None,
+            rent: false,
         }
     }
 
@@ -409,9 +414,24 @@ impl Tools {
     }
 
     /// For a run with nobody watching: commands are confined unless the sandbox is off.
+    /// Rent is dropped unless this run's tool list already names it.
     pub fn unattended(mut self) -> Self {
         self.confined = self.sandbox != crate::sandbox::Mode::Off;
+        let granted = self.only.as_ref().is_some_and(|only| only.iter().any(|name| name.starts_with("rent_gpu_")));
+        if !granted {
+            self.rent = false;
+        }
         self
+    }
+
+    /// Turn the rent tool group on or off. Off by default.
+    pub fn with_rent(mut self, rent: bool) -> Self {
+        self.rent = rent;
+        self
+    }
+
+    pub fn rents(&self) -> bool {
+        self.rent && self.offered("rent_gpu_offers")
     }
 
     /// Where commands run and how they are confined, as the action log says it: `ssh` or
@@ -431,6 +451,7 @@ impl Tools {
 
     /// Offers and runs only [tools] (by name).
     pub fn only(mut self, tools: Vec<String>) -> Self {
+        self.rent = tools.iter().any(|name| name.starts_with("rent_gpu_"));
         self.only = Some(tools);
         self
     }
@@ -447,6 +468,9 @@ impl Tools {
     }
 
     fn offered(&self, name: &str) -> bool {
+        if name.starts_with("rent_gpu_") && !self.rent {
+            return false;
+        }
         self.only.as_ref().is_none_or(|only| only.iter().any(|t| t == name)) && !self.off.iter().any(|t| t == name)
     }
 
@@ -561,9 +585,6 @@ impl Tools {
             && let Some(list) = tools.as_array_mut()
         {
             list.push(crate::homeassistant::definition());
-        }
-        if let Some(list) = tools.as_array_mut() {
-            list.extend(rent_definitions());
         }
         if let Some(list) = tools.as_array_mut() {
             list.retain(|t| self.offered(t["function"]["name"].as_str().unwrap_or_default()));
@@ -2067,6 +2088,18 @@ mod tests {
     use super::{Call, RESULT_LIMIT, Tools, cut};
     use crate::approval::Action;
     use std::time::Duration;
+
+    #[test]
+    fn rent_tools_are_off_unless_the_group_is_granted() {
+        let (tools, dir) = tools();
+        assert!(!tools.definitions().to_string().contains("rent_gpu"), "rent is not in the default set");
+        assert!(!tools.rents());
+        assert!(!tools.clone().unattended().rents());
+        let granted = tools.only(crate::tools::tools_for(&["rent".into()]));
+        assert!(granted.rents(), "an explicit rent group grants the tools");
+        assert!(granted.clone().unattended().rents(), "a granted list keeps them when unattended");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn tools() -> (Tools, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("autobot-tools-{}-{}", std::process::id(), rand()));

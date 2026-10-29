@@ -136,17 +136,40 @@ impl ObjectStore for S3 {
 
     fn list_prefix<'a>(&'a self, prefix: &'a str) -> StoreFut<'a, Vec<String>> {
         Box::pin(async move {
-            let query = format!("list-type=2&prefix={}", aws_encode(prefix));
-            let url = self.url("", &query)?;
-            let response = self.send(reqwest::Method::GET, url, None).await?;
-            let status = response.status();
-            let text = response.text().await.map_err(|e| self.scrubbed(e))?;
-            if !status.is_success() {
-                return Err(self.scrubbed(format!("s3 list {prefix}: {status} {}", clip(&text))));
+            let mut keys = Vec::new();
+            let mut token: Option<String> = None;
+            loop {
+                let mut query = format!("list-type=2&prefix={}", aws_encode(prefix));
+                if let Some(token) = &token {
+                    query.push_str(&format!("&continuation-token={}", aws_encode(token)));
+                }
+                let url = self.url("", &query)?;
+                let response = self.send(reqwest::Method::GET, url, None).await?;
+                let status = response.status();
+                let text = response.text().await.map_err(|e| self.scrubbed(e))?;
+                if !status.is_success() {
+                    return Err(self.scrubbed(format!("s3 list {prefix}: {status} {}", clip(&text))));
+                }
+                keys.extend(keys_from_list(&text));
+                match next_page(&text) {
+                    Some(next) => token = Some(next),
+                    None => break,
+                }
             }
-            Ok(keys_from_list(&text))
+            Ok(keys)
         })
     }
+}
+
+fn next_page(xml: &str) -> Option<String> {
+    let truncated = xml.contains("<IsTruncated>true</IsTruncated>");
+    if !truncated {
+        return None;
+    }
+    let start = xml.find("<NextContinuationToken>")? + "<NextContinuationToken>".len();
+    let end = xml[start..].find("</NextContinuationToken>")? + start;
+    let token = decode_xml(&xml[start..end]);
+    (!token.is_empty()).then_some(token)
 }
 
 fn keys_from_list(xml: &str) -> Vec<String> {
@@ -341,6 +364,16 @@ mod tests {
             header.ends_with("Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"),
             "{header}\n{canonical}"
         );
+    }
+
+    #[test]
+    fn a_truncated_list_names_the_next_page() {
+        assert!(next_page("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>").is_none());
+        assert_eq!(
+            next_page("<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>abc&amp;d</NextContinuationToken></ListBucketResult>").as_deref(),
+            Some("abc&d")
+        );
+        assert!(next_page("<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>").is_none());
     }
 
     #[test]

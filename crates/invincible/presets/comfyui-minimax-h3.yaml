@@ -16,8 +16,10 @@ spec:
     prefer_regions: ["EU"]
     require_regions: ["EU"]
   runtime:
-    image: "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
-    entrypoint: ["/usr/local/bin/start-comfy.sh"]
+    # Sidecar image. The stock Comfy script is not in this image; the sidecar
+    # holds the session until drain when INVINCIBLE_WORKLOAD is empty.
+    image: "ghcr.io/wckdboy/invincible-rent-sidecar:edge"
+    entrypoint: []
     env:
       COMFY_PORT: "8188"
     ports:

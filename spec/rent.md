@@ -17,9 +17,12 @@ When `[rent] enabled` is true, `invincible serve` opens the engine. It does not 
   in a client response. Errors are scrubbed before they are logged or returned.
 - R2 (or any S3-compatible store) credentials are two more mode-0600 files. They are not read from
   the environment. With an EU ceiling the endpoint must be a Cloudflare R2 EU-jurisdiction host
-  (`*.eu.r2.cloudflarestorage.com`) or loopback.
-- Presets ship with the binary: `vllm`, `comfyui-minimax-h3`, `dev-box`. Files in
-  `$INVINCIBLE_HOME/rent/presets/*.yaml` add or replace one. The schema is wckd-gpu's.
+  (`*.eu.r2.cloudflarestorage.com`). A loopback endpoint is refused unless
+  `insecure_endpoint = true`.
+- Presets ship with the binary: `vllm`, `comfyui-minimax-h3`, `dev-box`. The image is the rent
+  sidecar (`ghcr.io/wckdboy/invincible-rent-sidecar`), whose entrypoint hydrates, runs
+  `INVINCIBLE_WORKLOAD`, and drains. Files in `$INVINCIBLE_HOME/rent/presets/*.yaml` add a preset.
+  A file that reuses a shipped id is ignored, and a symlink is not followed. The schema is wckd-gpu's.
 - Sessions live in `$INVINCIBLE_HOME/rent/state/*.json` (mode 0600). A restart loads them and the
   sweeper drains and deletes anything past its deadline, idle, or over the monthly cap.
 - The pod is named `invincible-<session>`. Its environment receives the project prefix and the
@@ -32,6 +35,9 @@ A stop writes `sessions/<id>/control.json` (`action: drain`), waits for `drain-o
 then deletes the pod. `force` deletes after that wait even when the marker never arrives. The
 sweeper always deletes after the drain attempt: a pod does not outlive the hours it was paid for,
 and an idle ready or hydrating pod (no status read for `idle_minutes`) is stopped the same way.
+A `failed` session that still has a pod is deleted too. On startup and on each sweep, a pod
+named `invincible-<session>` with no live tracked session is drained on a best-effort basis
+and then terminated.
 Going over `monthly_cap_usd` stops whatever is still running.
 
 Hydrate, on start, lists `projects/<id>/workspace/` and writes `sessions/<id>/hydrate.json`, then
@@ -51,7 +57,7 @@ max_usd_per_hour = 1.0          # omit for no hourly cap
 max_hours = 24                  # a single rental; the engine's own ceiling, and the default
 monthly_cap_usd = 50            # omit for no monthly cap; UTC month, catalog estimates
 idle_minutes = 15               # stop a ready or hydrating pod nobody has asked about
-require_regions = ["EU"]        # the default hard filter
+require_regions = ["EU-secure"] # the default: EU and Secure cloud. ["EU"] opts into community.
 runpod_key_file = "secrets/runpod.key"
 runpod_url = "https://api.runpod.io"   # omit for this default
 
@@ -63,10 +69,10 @@ access_key_file = "secrets/r2.access"
 secret_key_file = "secrets/r2.secret"
 ```
 
-An old `binary` key, and any other key `[rent]` does not know, is ignored. The node logs the key
-name, not the value.
+An old `binary` key is ignored. The node logs the key name, not the value. Any other key
+`[rent]` does not know is a configuration error, so a misspelled cap cannot disappear.
 
-`require_regions` is the node's ceiling. A request that omits it uses this list (`EU` by default).
+`require_regions` is the node's ceiling. A request that omits it uses this list (`EU-secure` by default).
 A request may only narrow it: `EU` allows `EU`, `EU-secure`, and a finer token such as `EU-RO-1`.
 A token may not contain a comma: in the JSON body a comma is not a separator.
 `EU-secure` does not allow a token that drops the secure mode. An empty list, `any`, `*`, or a
@@ -75,7 +81,9 @@ in the config (the only token) is the operator turning the ceiling off. A quote 
 data center in the set is dropped.
 
 A confirmed create pins `offer_id` to the offer the preview named, when the request did not pin
-one itself, so the engine cannot re-rank onto a dearer row between the two calls. If the created
+one itself. A body may also send `approved_usd_per_hr` from that preview. If the catalog at
+provision time names a different offer, or a higher hourly price, the node answers **409**
+`confirmation_required` with a fresh estimate and creates nothing. If the created
 session's price is still over the cap (the vendor reported a higher hourly cost than the catalog
 row the caps were checked against), the node force-stops that session and answers **403**
 `rent_cap`. The pod does not stay up at a price the caps were not checked against.

@@ -36,6 +36,24 @@ use crate::server::{AppState, CLIENT_HEADER, CONFIRMED_HEADER, error};
 
 use engine::{Ask, Engine, RentError};
 
+/// Preset id and display name, shipped ones and any the operator added.
+pub fn preset_names(home: &Path) -> Result<Vec<(String, String)>, String> {
+    Ok(preset::Catalog::load(home)?.names())
+}
+
+/// Project ids that have a session file. A file that does not parse is skipped.
+pub fn project_ids(home: &Path) -> Result<Vec<String>, String> {
+    let state = home.join("rent/state");
+    if !state.exists() {
+        return Ok(Vec::new());
+    }
+    let (sessions, _) = session::Store::open(&state)?.list()?;
+    let mut ids: Vec<String> = sessions.into_iter().map(|session| session.project_id).collect();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
 /// Where sessions and operator presets live: `$INVINCIBLE_HOME/rent`.
 pub fn work_dir(home: &Path) -> std::path::PathBuf {
     home.join("rent")
@@ -70,7 +88,7 @@ pub fn secrets_ready(home: &Path, config: &RentConfig) -> Result<(), String> {
     if config.store.endpoint.is_empty() || config.store.bucket.is_empty() {
         return Err("[rent.store] endpoint and bucket are required when rent is enabled".to_owned());
     }
-    secrets::endpoint_allowed(&config.store.endpoint, &config.require_regions)?;
+    secrets::endpoint_allowed(&config.store.endpoint, &config.require_regions, config.insecure_endpoint)?;
     let _ = secrets::read_secret(&secrets::resolve(home, &config.runpod_key_file))?;
     let _ = secrets::read_secret(&secrets::resolve(home, &config.store.access_key_file))?;
     let _ = secrets::read_secret(&secrets::resolve(home, &config.store.secret_key_file))?;
@@ -90,7 +108,7 @@ pub fn start(config: &RentConfig, home: &Path) -> Result<Option<Arc<Gateway>>, S
     if config.store.endpoint.is_empty() || config.store.bucket.is_empty() {
         return Err("[rent.store] endpoint and bucket are required when rent is enabled".to_owned());
     }
-    secrets::endpoint_allowed(&config.store.endpoint, &config.require_regions)?;
+    secrets::endpoint_allowed(&config.store.endpoint, &config.require_regions, config.insecure_endpoint)?;
     if let Some(url) = &config.runpod_url {
         let parsed = reqwest::Url::parse(url).map_err(|e| format!("[rent] runpod_url: {e}"))?;
         let host = parsed.host_str().unwrap_or("");
@@ -169,6 +187,7 @@ fn map_err(err: RentError) -> Response {
         RentError::NoOffers(message) => error(StatusCode::UNPROCESSABLE_ENTITY, "no_offers", &message),
         RentError::NotFound => error(StatusCode::NOT_FOUND, "not_found", "no such session"),
         RentError::Unavailable(message) => unavailable(&message),
+        RentError::Stale(body) => ask_rent(body),
         RentError::Drain(session) => json_response(
             StatusCode::CONFLICT,
             json!({
@@ -474,9 +493,19 @@ pub async fn create(
     if let Some(object) = request.as_object_mut() {
         object.insert("require_regions".to_owned(), json!(regions.clone()));
     }
-    let ask = Ask { project_id, preset_id, hours, offer_id: offer_id(&request).map(str::to_owned), regions };
+    let ask = Ask {
+        project_id,
+        preset_id,
+        hours,
+        offer_id: offer_id(&request).map(str::to_owned),
+        regions,
+        approved_usd_per_hr: request
+            .get("approved_usd_per_hr")
+            .and_then(Value::as_f64)
+            .filter(|n| n.is_finite() && *n >= 0.0),
+    };
     let guard = Arc::clone(&rent.create).lock_owned().await;
-    let preview = match within(READ_TIMEOUT, rent.engine.preview(&ask)).await {
+    let preview = match within(READ_TIMEOUT, rent.engine.preview(&ask, confirmed(&headers))).await {
         Ok(preview) => preview,
         Err(err) => return map_err(err),
     };
@@ -507,6 +536,13 @@ pub async fn create(
     };
     if let Some(breach) = breach(&rent.limits, &quote, spent) {
         return cap_denied(&breach, Some(quote.estimate_usd));
+    }
+    if confirmed(&headers)
+        && let Some(approved) = ask.approved_usd_per_hr
+        && (cents(quote.usd_per_hr) > cents(approved)
+            || ask.offer_id.as_deref().is_some_and(|id| preview["offer"]["id"].as_str() != Some(id)))
+    {
+        return ask_rent(preview);
     }
     if !confirmed(&headers) {
         return ask_rent(preview);
@@ -570,7 +606,9 @@ async fn confirm_and_record(work: &ConfirmWork) -> Response {
         }
     };
     ask.offer_id = Some(pinned.clone());
-    let body = match within(CREATE_TIMEOUT, work.rent.engine.provision(&ask)).await {
+    let engine = Arc::clone(&work.rent.engine);
+    let ask = ask.clone();
+    let body = match within(CREATE_TIMEOUT, async move { engine.provision(ask).await }).await {
         Ok(body) => body,
         Err(err) => return map_err(err),
     };
@@ -898,7 +936,8 @@ mod tests {
     fn a_request_may_narrow_the_nodes_regions_and_may_not_clear_or_widen_them() {
         let limits = RentConfig::default();
         let eu = offers_query(Some("preset=comfyui-minimax-h3&hours=1"), &limits).unwrap();
-        assert_eq!(eu.regions, vec!["EU".to_owned()]);
+        assert_eq!(eu.regions, vec!["EU-secure".to_owned()]);
+        assert!(offers_query(Some("preset=vllm&hours=1&require_regions=EU"), &limits).is_err());
         let secure = offers_query(Some("preset=vllm&hours=1&require_regions=EU-secure"), &limits).unwrap();
         assert_eq!(secure.regions, vec!["EU-secure".to_owned()]);
         assert!(offers_query(Some("preset=vllm&hours=1&require_regions="), &limits).is_err());

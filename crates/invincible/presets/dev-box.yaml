@@ -16,8 +16,8 @@ spec:
     prefer_regions: ["EU"]
     require_regions: ["EU"]
   runtime:
-    image: "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
-    entrypoint: ["/bin/bash", "-lc", "sleep infinity"]
+    image: "ghcr.io/wckdboy/invincible-rent-sidecar:edge"
+    entrypoint: []
     env: {}
     ports:
       - name: ssh

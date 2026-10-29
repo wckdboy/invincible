@@ -79,7 +79,7 @@ pub struct Endpoint {
 
 /// A pod to create. `env` may hold object-store credentials for the workload. Callers scrub
 /// those values out of anything they log or return.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ProvisionRequest {
     pub name: String,
     pub image: String,
@@ -91,6 +91,34 @@ pub struct ProvisionRequest {
     pub env: BTreeMap<String, String>,
     pub data_center_ids: Vec<String>,
     pub entrypoint: Vec<String>,
+}
+
+impl std::fmt::Debug for ProvisionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut env: BTreeMap<&str, &str> = BTreeMap::new();
+        for (key, value) in &self.env {
+            let secret = key.contains("SECRET")
+                || key.contains("ACCESS_KEY")
+                || key.contains("TOKEN")
+                || key.contains("PASSWORD");
+            env.insert(key.as_str(), if secret { "[redacted]" } else { value.as_str() });
+        }
+        f.debug_struct("ProvisionRequest")
+            .field("name", &self.name)
+            .field("image", &self.image)
+            .field("cloud", &self.cloud)
+            .field("gpu_id", &self.gpu_id)
+            .field("env", &env)
+            .field("data_center_ids", &self.data_center_ids)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A pod the vendor still has, for reconciliation.
+#[derive(Clone, Debug)]
+pub struct PodRef {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +147,7 @@ pub trait Provider: Send + Sync {
     fn provision<'a>(&'a self, request: &'a ProvisionRequest) -> ProviderFut<'a, Instance>;
     fn status<'a>(&'a self, id: &'a str) -> ProviderFut<'a, Instance>;
     fn terminate<'a>(&'a self, id: &'a str) -> ProviderFut<'a, ()>;
+    fn list_pods<'a>(&'a self) -> ProviderFut<'a, Vec<PodRef>>;
 }
 
 pub type ProviderFut<'a, T> =

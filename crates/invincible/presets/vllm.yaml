@@ -16,8 +16,11 @@ spec:
     prefer_regions: ["EU"]
     require_regions: ["EU"]
   runtime:
-    image: "vllm/vllm-openai:latest"
-    entrypoint: ["vllm", "serve"]
+    # The sidecar image's ENTRYPOINT is the bootstrap. `entrypoint` here is the
+    # workload it starts after hydrate (INVINCIBLE_WORKLOAD), not a second
+    # `vllm serve` in front of the image's own entrypoint.
+    image: "ghcr.io/wckdboy/invincible-rent-sidecar:edge"
+    entrypoint: ["vllm", "serve", "--host", "0.0.0.0", "--port", "8000"]
     env:
       VLLM_PORT: "8000"
     ports:

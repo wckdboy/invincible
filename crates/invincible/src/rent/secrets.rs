@@ -49,10 +49,13 @@ pub fn read_secret(path: &Path) -> Result<String, String> {
 /// An EU ceiling allows a loopback endpoint (a test, or a tunnel that terminates here) and a
 /// Cloudflare R2 EU-jurisdiction host (`*.eu.r2.cloudflarestorage.com`). Anything else can place
 /// project data outside the region the owner required.
-pub fn endpoint_allowed(endpoint: &str, regions: &[String]) -> Result<(), String> {
+pub fn endpoint_allowed(endpoint: &str, regions: &[String], insecure_endpoint: bool) -> Result<(), String> {
     let url = reqwest::Url::parse(endpoint).map_err(|e| format!("[rent.store] endpoint: {e}"))?;
     let host = url.host_str().unwrap_or("");
     let loopback = host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    if loopback && !insecure_endpoint {
+        return Err("[rent.store] endpoint is loopback; set insecure_endpoint = true only for a local mock".to_owned());
+    }
     if !loopback && url.scheme() != "https" {
         return Err(format!("[rent.store] endpoint {endpoint}: https, or a loopback address"));
     }
@@ -88,10 +91,11 @@ mod tests {
     #[test]
     fn an_eu_ceiling_accepts_the_eu_r2_host_and_refuses_the_default_one() {
         let eu = ["EU".to_owned()];
-        assert!(endpoint_allowed("https://abc.eu.r2.cloudflarestorage.com", &eu).is_ok());
-        assert!(endpoint_allowed("http://127.0.0.1:9", &eu).is_ok());
-        let err = endpoint_allowed("https://abc.r2.cloudflarestorage.com", &eu).unwrap_err();
+        assert!(endpoint_allowed("https://abc.eu.r2.cloudflarestorage.com", &eu, false).is_ok());
+        assert!(endpoint_allowed("http://127.0.0.1:9", &eu, false).is_err());
+        assert!(endpoint_allowed("http://127.0.0.1:9", &eu, true).is_ok());
+        let err = endpoint_allowed("https://abc.r2.cloudflarestorage.com", &eu, false).unwrap_err();
         assert!(err.contains("EU"), "{err}");
-        assert!(endpoint_allowed("https://abc.r2.cloudflarestorage.com", &["any".into()]).is_ok());
+        assert!(endpoint_allowed("https://abc.r2.cloudflarestorage.com", &["any".into()], false).is_ok());
     }
 }

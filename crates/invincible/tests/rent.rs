@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use invincible::devices::StaticKey;
 use invincible::remote::{self, PairingCode};
@@ -30,7 +30,10 @@ struct Mocks {
     log: Arc<Mutex<Vec<String>>>,
     slow: bool,
     hostile: bool,
+    raise: bool,
+    catalogs: Arc<Mutex<u32>>,
     pods: Arc<Mutex<Vec<String>>>,
+    named: Arc<Mutex<Vec<Value>>>,
     seq: Arc<Mutex<u64>>,
     objects: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>>,
 }
@@ -101,13 +104,16 @@ struct Stack {
     mocks: Mocks,
 }
 
-async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool) -> (Stack, Node) {
+async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool, raise: bool) -> (Stack, Node) {
     let mocks = Mocks {
         key: RUNPOD_KEY.to_owned(),
         log: Arc::new(Mutex::new(Vec::new())),
         slow,
         hostile,
+        raise,
+        catalogs: Arc::new(Mutex::new(0)),
         pods: Arc::new(Mutex::new(Vec::new())),
+        named: Arc::new(Mutex::new(Vec::new())),
         seq: Arc::new(Mutex::new(0)),
         objects: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
@@ -117,7 +123,7 @@ async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool) -> (Stack, N
     let s3_port = s3.local_addr().unwrap().port();
     let runpod_app = Router::new()
         .route("/v2/catalog/gpus", get(catalog))
-        .route("/v2/pods", post(create_pod))
+        .route("/v2/pods", get(list_pods).post(create_pod))
         .route("/v2/pods/{id}", get(pod_status).delete(delete_pod))
         .route("/__log", get(show_log))
         .with_state(mocks.clone());
@@ -149,7 +155,7 @@ async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool) -> (Stack, N
          max_hours = 2\n\
          {monthly}\
          idle_minutes = 15\n\
-         require_regions = [\"EU\"]\n\
+         insecure_endpoint = true\n\
          runpod_key_file = \"secrets/runpod.key\"\n\
          runpod_url = \"http://127.0.0.1:{runpod_port}\"\n\
          [rent.store]\n\
@@ -261,12 +267,16 @@ async fn catalog(
     if !bearer_ok(&headers, &mocks.key) {
         return (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthorized"}))).into_response();
     }
-    mocks.log.lock().unwrap().push("runpod:catalog".into());
+    let cloud = query.get("cloud").map(String::as_str).unwrap_or("").to_owned();
+    mocks.log.lock().unwrap().push(format!("runpod:catalog:{cloud}"));
+    let n = {
+        let mut catalogs = mocks.catalogs.lock().unwrap();
+        *catalogs += 1;
+        *catalogs
+    };
     if mocks.hostile {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": mocks.key}))).into_response();
     }
-    let cloud = query.get("cloud").map(String::as_str).unwrap_or("");
-    let _ = cloud;
     Json(json!({"gpus": [
         {
             "id": "NVIDIA GeForce RTX 4090",
@@ -275,7 +285,7 @@ async fn catalog(
             "secure": true,
             "community": true,
             "availability": "HIGH",
-            "price": {"community": 0.50, "secure": 0.60},
+            "price": {"community": 0.34, "secure": if mocks.raise && n > 1 { 0.90 } else { 0.50 }},
             "dataCenters": [
                 {"id": "EU-RO-1", "name": "EU Romania", "availability": "HIGH"},
                 {"id": "US-OR-1", "name": "US Oregon", "availability": "HIGH"}
@@ -285,10 +295,10 @@ async fn catalog(
             "id": "NVIDIA RTX A6000",
             "name": "RTX A6000",
             "memory": 48,
-            "secure": false,
+            "secure": true,
             "community": true,
             "availability": "HIGH",
-            "price": {"community": 4.0, "secure": 0.0},
+            "price": {"community": 4.0, "secure": 4.0},
             "dataCenters": [{"id": "EU-RO-1", "name": "EU Romania", "availability": "HIGH"}]
         }
     ]}))
@@ -312,18 +322,14 @@ async fn create_pod(
         format!("pod-{}", *seq)
     };
     mocks.pods.lock().unwrap().push(id.clone());
+    mocks.named.lock().unwrap().push(json!({"id": id, "name": body["name"].as_str().unwrap_or("")}));
     mocks.log.lock().unwrap().push("runpod:create".into());
     let image = body["image"].as_str().unwrap_or("");
     let cloud = body["cloud"].as_str().unwrap_or("");
+    mocks.log.lock().unwrap().push(format!("runpod:cloud:{cloud}"));
     let center =
         body["dataCenterIds"].as_array().and_then(|ids| ids.first()).and_then(Value::as_str).unwrap_or("US-OR-1");
-    let cost = if image == "test/rerank" {
-        5.0
-    } else if cloud.eq_ignore_ascii_case("SECURE") {
-        0.60
-    } else {
-        0.50
-    };
+    let cost = if image == "test/rerank" { 5.0 } else { 0.50 };
     let _ = body.get("env");
     Json(json!({"id": id, "status": "RUNNING", "cost": cost, "dataCenterId": center})).into_response()
 }
@@ -342,12 +348,21 @@ async fn pod_status(
     Json(json!({"id": id, "status": "RUNNING", "cost": 0.50, "dataCenterId": "EU-RO-1"})).into_response()
 }
 
+async fn list_pods(State(mocks): State<Mocks>, headers: HeaderMap) -> axum::response::Response {
+    if !bearer_ok(&headers, &mocks.key) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthorized"}))).into_response();
+    }
+    let pods = mocks.named.lock().unwrap().clone();
+    Json(json!({"pods": pods, "pagination": {"nextCursor": null, "hasNextPage": false}})).into_response()
+}
+
 async fn delete_pod(State(mocks): State<Mocks>, headers: HeaderMap, UrlPath(id): UrlPath<String>) -> StatusCode {
     if !bearer_ok(&headers, &mocks.key) {
         return StatusCode::UNAUTHORIZED;
     }
     mocks.log.lock().unwrap().push(format!("runpod:delete:{id}"));
     mocks.pods.lock().unwrap().retain(|pod| pod != &id);
+    mocks.named.lock().unwrap().retain(|pod| pod["id"].as_str() != Some(id.as_str()));
     StatusCode::NO_CONTENT
 }
 
@@ -445,9 +460,9 @@ fn doctor_fails_when_rent_is_enabled_without_a_provider_key() {
 
 #[tokio::test]
 async fn the_node_rents_in_process_and_keeps_the_caps() {
-    let (stack, mut node) = stack("proxy", "monthly_cap_usd = 0.75\n", false, false).await;
+    let (stack, mut node) = stack("proxy", "monthly_cap_usd = 0.75\n", false, false, false).await;
     let health = ready(&stack.url, &stack.dir).await;
-    assert_eq!(health["limits"]["require_regions"], json!(["EU"]));
+    assert_eq!(health["limits"]["require_regions"], json!(["EU-secure"]));
     assert_eq!(health["limits"]["max_hours"], 2.0);
     assert_eq!(health["engine"], "invincible");
     assert!(health.get("supervised").is_none());
@@ -501,9 +516,12 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
     let (status, offers) =
         call(&stack.url, reqwest::Method::GET, "/v1/rent/offers?preset=comfyui-minimax-h3&hours=1", None, false).await;
     assert_eq!(status, 200, "{offers}");
-    assert_eq!(offers["require_regions"], json!(["EU"]));
+    assert_eq!(offers["require_regions"], json!(["EU-secure"]));
     assert_eq!(offers["offers"][0]["usd_per_hr"], 0.5);
-    assert_eq!(offers["offers"][0]["id"], "runpod:community:NVIDIA GeForce RTX 4090");
+    assert_eq!(offers["offers"][0]["cloud"], "secure");
+    assert_eq!(offers["offers"][0]["id"], "runpod:secure:NVIDIA GeForce RTX 4090");
+    assert!(log_of(&stack.mocks).iter().any(|line| line == "runpod:catalog:SECURE"), "{:?}", log_of(&stack.mocks));
+    assert!(!log_of(&stack.mocks).iter().any(|line| line.contains("COMMUNITY")), "{:?}", log_of(&stack.mocks));
     assert!(
         offers["offers"][0]["data_center_ids"]
             .as_array()
@@ -523,7 +541,7 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
     assert!(cli.status.success(), "stderr: {}", String::from_utf8_lossy(&cli.stderr));
     assert!(cli_out.contains("0.5"), "{cli_out}");
 
-    let catalogs = count(&log_of(&stack.mocks), "runpod:catalog");
+    let catalogs = log_of(&stack.mocks).iter().filter(|line| line.starts_with("runpod:catalog")).count();
     let (status, body) = call(
         &stack.url,
         reqwest::Method::POST,
@@ -534,7 +552,11 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
     .await;
     assert_eq!(status, 403, "{body}");
     assert_eq!(body["error"]["limit"], "max_hours");
-    assert_eq!(count(&log_of(&stack.mocks), "runpod:catalog"), catalogs, "over max_hours does not ask the vendor");
+    assert_eq!(
+        log_of(&stack.mocks).iter().filter(|line| line.starts_with("runpod:catalog")).count(),
+        catalogs,
+        "over max_hours does not ask the vendor"
+    );
     assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 0);
 
     let (status, body) = call(
@@ -549,11 +571,11 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
     assert_eq!(body["error"]["code"], "confirmation_required");
     assert_eq!(body["error"]["confirm_header"], "invincible-confirmed");
     assert_eq!(body["cost_estimate_usd"], 0.5);
-    assert_eq!(body["require_regions"], json!(["EU"]));
+    assert_eq!(body["require_regions"], json!(["EU-secure"]));
     assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 0);
     assert!(std::fs::read_dir(stack.dir.join("rent/state")).unwrap().next().is_none(), "a quote writes no session");
 
-    let catalogs = count(&log_of(&stack.mocks), "runpod:catalog");
+    let catalogs = log_of(&stack.mocks).iter().filter(|line| line.starts_with("runpod:catalog")).count();
     let (status, body) = call(
         &stack.url,
         reqwest::Method::POST,
@@ -584,7 +606,11 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
     )
     .await;
     assert_eq!(status, 400, "{body}");
-    assert_eq!(count(&log_of(&stack.mocks), "runpod:catalog"), catalogs, "a refused region does not ask the vendor");
+    assert_eq!(
+        log_of(&stack.mocks).iter().filter(|line| line.starts_with("runpod:catalog")).count(),
+        catalogs,
+        "a refused region does not ask the vendor"
+    );
     let (status, offers) = call(
         &stack.url,
         reqwest::Method::GET,
@@ -610,10 +636,11 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
     assert_eq!(status, 201, "{started}");
     let session_id = started["id"].as_str().unwrap().to_owned();
     assert_eq!(started["phase"], "ready");
-    assert_eq!(started["offer"]["id"], "runpod:community:NVIDIA GeForce RTX 4090");
+    assert_eq!(started["offer"]["id"], "runpod:secure:NVIDIA GeForce RTX 4090");
     assert_eq!(started["offer"]["usd_per_hr"], 0.5);
     assert_eq!(started["data_center"], "EU-RO-1");
     assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 1);
+    assert!(log_of(&stack.mocks).iter().any(|line| line == "runpod:cloud:SECURE"), "{:?}", log_of(&stack.mocks));
     assert!(count(&log_of(&stack.mocks), "s3:hydrate") >= 1);
 
     let (status, body) = call(
@@ -653,8 +680,8 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
     let start = entries.iter().find(|entry| entry["api"] == "rent.start").unwrap();
     let bound = invincible::receipts::request_hash("rent.start", &started_body).unwrap();
     assert_eq!(start["receipt"]["receipt"]["request_sha256"], bound);
-    assert_eq!(start["rewrite"]["require_regions"], json!(["EU"]));
-    assert_eq!(start["rewrite"]["offer_id"], "runpod:community:NVIDIA GeForce RTX 4090");
+    assert_eq!(start["rewrite"]["require_regions"], json!(["EU-secure"]));
+    assert_eq!(start["rewrite"]["offer_id"], "runpod:secure:NVIDIA GeForce RTX 4090");
     let stop =
         entries.iter().find(|entry| entry["api"] == "rent.stop" && entry["rent"]["session_id"] == session_id).unwrap();
     assert_eq!(
@@ -685,7 +712,7 @@ async fn the_node_rents_in_process_and_keeps_the_caps() {
 
 #[tokio::test]
 async fn an_over_cap_pod_is_drained_and_deleted() {
-    let (stack, _node) = stack("rerank", "monthly_cap_usd = 100\n", false, false).await;
+    let (stack, _node) = stack("rerank", "monthly_cap_usd = 100\n", false, false, false).await;
     ready(&stack.url, &stack.dir).await;
     let (status, body) =
         call(&stack.url, reqwest::Method::POST, "/v1/rent/sessions", Some(create_body("rerank", 1.0, false)), true)
@@ -698,7 +725,7 @@ async fn an_over_cap_pod_is_drained_and_deleted() {
 
 #[tokio::test]
 async fn a_restart_drains_an_expired_pod_and_an_idle_one() {
-    let (stack, mut node) = stack("sweep", "monthly_cap_usd = 50\n", false, false).await;
+    let (stack, mut node) = stack("sweep", "monthly_cap_usd = 50\n", false, false, false).await;
     ready(&stack.url, &stack.dir).await;
     let (status, started) = call(
         &stack.url,
@@ -739,11 +766,64 @@ async fn a_restart_drains_an_expired_pod_and_an_idle_one() {
         call(&stack.url, reqwest::Method::GET, &format!("/v1/rent/sessions/{idle_id}"), None, false).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["phase"], "stopped", "{body}");
+
+    stack.mocks.pods.lock().unwrap().push("pod-orphan".into());
+    stack.mocks.named.lock().unwrap().push(json!({"id": "pod-orphan", "name": "invincible-sess_gone"}));
+    assert!(node.stop());
+    node.child = spawn(&stack.dir);
+    ready(&stack.url, &stack.dir).await;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !log_of(&stack.mocks).iter().any(|line| line == "runpod:delete:pod-orphan") {
+        assert!(Instant::now() < deadline, "untracked pod was not deleted\n{}", log_of(&stack.mocks).join("\n"));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_dearer_or_different_offer_than_the_approved_preview_is_refused() {
+    let (stack, _node) = stack("price", "monthly_cap_usd = 50\n", false, false, true).await;
+    ready(&stack.url, &stack.dir).await;
+    let (status, preview) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(create_body("comfyui-minimax-h3", 1.0, false)),
+        false,
+    )
+    .await;
+    assert_eq!(status, 409, "{preview}");
+    assert_eq!(preview["offer"]["usd_per_hr"], 0.5);
+    let mut body = create_body("comfyui-minimax-h3", 1.0, false);
+    body["offer_id"] = preview["offer"]["id"].clone();
+    body["approved_usd_per_hr"] = json!(0.5);
+    let (status, again) = call(&stack.url, reqwest::Method::POST, "/v1/rent/sessions", Some(body), true).await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(again["error"]["code"], "confirmation_required");
+    assert_eq!(again["offer"]["usd_per_hr"], 0.9);
+    assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 0, "a dearer offer is not provisioned");
+
+    let (status, missing) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(json!({
+            "project_id": "hailuo-tests",
+            "preset_id": "comfyui-minimax-h3",
+            "hours": 1,
+            "offer_id": "runpod:secure:does-not-exist",
+            "approved_usd_per_hr": 0.5
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, 422, "{missing}");
+    assert_eq!(missing["error"]["code"], "no_offers");
+    assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 0);
 }
 
 #[tokio::test]
 async fn a_vendor_error_does_not_return_the_api_key() {
-    let (stack, _node) = stack("scrub", "", false, true).await;
+    let (stack, _node) = stack("scrub", "", false, true, false).await;
     ready(&stack.url, &stack.dir).await;
     let (status, body) =
         call(&stack.url, reqwest::Method::GET, "/v1/rent/offers?preset=vllm&hours=1", None, false).await;
@@ -756,7 +836,7 @@ async fn a_vendor_error_does_not_return_the_api_key() {
 
 #[tokio::test]
 async fn a_dropped_client_still_gets_a_rent_start_audit() {
-    let (stack, node) = stack("detach", "monthly_cap_usd = 50\n", true, false).await;
+    let (stack, node) = stack("detach", "monthly_cap_usd = 50\n", true, false, false).await;
     ready(&stack.url, &stack.dir).await;
     let body = create_body("comfyui-minimax-h3", 1.0, false);
     let client = reqwest::Client::builder().timeout(Duration::from_secs(1)).build().unwrap();

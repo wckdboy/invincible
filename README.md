@@ -1265,7 +1265,7 @@ max_usd_per_hour = 1.0
 max_hours = 8
 monthly_cap_usd = 50
 idle_minutes = 15
-require_regions = ["EU"]    # the ceiling; a client can narrow it, not clear it
+require_regions = ["EU-secure"]    # the default ceiling; ["EU"] opts into community
 runpod_key_file = "secrets/runpod.key"
 
 [rent.store]
@@ -1276,9 +1276,12 @@ secret_key_file = "secrets/r2.secret"
 ```
 
 The key files are mode 0600 under `~/.invincible`. An old `binary = "wckd"` line is ignored.
-Autobot's `rent_gpu_start` shows the estimate and cannot confirm a rental by itself.
+Any other unknown `[rent]` key is an error. Autobot's `rent_gpu_start` shows the estimate and
+cannot confirm a rental by itself. The rent tools are off unless `[agent] tools` includes `rent`.
 
 ```sh
+invincible rent presets
+invincible rent projects
 invincible rent offers --preset comfyui-minimax-h3 --hours 1
 invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1
 invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1 --confirm

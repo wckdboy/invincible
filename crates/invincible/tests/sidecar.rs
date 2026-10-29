@@ -1,0 +1,262 @@
+//! The rent sidecar against real rclone and an in-process S3 mock.
+//! Hydrate writes `hydrate-ok.json` before the workload, and a passed deadline drains before exit.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::{Request, StatusCode};
+use axum::response::Response;
+
+#[tokio::test]
+async fn the_sidecar_hydrates_then_drains_when_the_deadline_has_passed() {
+    let root = std::env::temp_dir().join(format!("invincible-sidecar-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let workspace = root.join("workspace");
+    let store = Store::default();
+    store.put("projects/demo/workspace/note.txt", b"kept\n");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = axum::Router::new().fallback(s3).with_state(store.clone());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let rclone = rclone_bin(&root);
+    let scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sidecar");
+    let mut child = Command::new("bash")
+        .arg(scripts.join("bootstrap.sh"))
+        .env("PATH", format!("{}:{}", rclone.parent().unwrap().display(), std::env::var("PATH").unwrap_or_default()))
+        .env("INVINCIBLE_SESSION_ID", "sess_demo")
+        .env("INVINCIBLE_PROJECT_ID", "demo")
+        .env("INVINCIBLE_BUCKET", "rent")
+        .env("INVINCIBLE_ENDPOINT", format!("http://127.0.0.1:{port}"))
+        .env("INVINCIBLE_ACCESS_KEY_ID", "access-key-test")
+        .env("INVINCIBLE_SECRET_ACCESS_KEY", "secret-key-test")
+        .env("INVINCIBLE_REGION", "auto")
+        .env("INVINCIBLE_WORKSPACE", &workspace)
+        .env("INVINCIBLE_HYDRATE_MAP", format!("projects/demo/workspace|{}", workspace.display()))
+        .env("INVINCIBLE_DRAIN_MAP", format!("{}|projects/demo/workspace", workspace.display()))
+        .env("INVINCIBLE_DRAIN_EXCLUDES", "")
+        .env("INVINCIBLE_WORKLOAD", "true")
+        .env("INVINCIBLE_DEADLINE_AT", "2020-01-01T00:00:00Z")
+        .env("INVINCIBLE_POLL_SEC", "1")
+        .env("INVINCIBLE_DRAIN_GRACE_SEC", "1")
+        .current_dir(&scripts)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let out = std::thread::spawn(move || std::io::read_to_string(stdout).unwrap_or_default());
+    let err = std::thread::spawn(move || std::io::read_to_string(stderr).unwrap_or_default());
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "sidecar did not exit\nstdout:\n{}\nstderr:\n{}\nlog:\n{:?}",
+                out.join().unwrap_or_default(),
+                err.join().unwrap_or_default(),
+                store.log.lock().unwrap()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let stdout = out.join().unwrap_or_default();
+    let stderr = err.join().unwrap_or_default();
+    assert!(status.success(), "status {status:?}\nstdout:\n{stdout}\nstderr:\n{stderr}");
+    assert_eq!(std::fs::read_to_string(workspace.join("note.txt")).unwrap_or_default(), "kept\n", "{stderr}");
+    assert_eq!(store.get("projects/demo/workspace/note.txt").as_deref(), Some(b"kept\n".as_slice()));
+    assert!(store.get("sessions/sess_demo/hydrate-ok.json").is_some(), "hydrate-ok missing\n{stderr}");
+    assert!(store.get("sessions/sess_demo/drain-ok.json").is_some(), "drain-ok missing\n{stderr}");
+    let log = store.log.lock().unwrap().clone();
+    let hydrate_at =
+        log.iter().position(|line| line == "hydrate-ok.json").unwrap_or_else(|| panic!("{log:?}\n{stderr}"));
+    let drain_at = log.iter().position(|line| line == "drain-ok.json").unwrap_or_else(|| panic!("{log:?}\n{stderr}"));
+    assert!(hydrate_at < drain_at, "{log:?}");
+    assert!(
+        log.iter().any(|line| line.contains("AWS4-HMAC-SHA256") && line.contains("access-key-test")),
+        "rclone did not sign an S3 request: {log:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[derive(Clone, Default)]
+struct Store {
+    objects: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    log: Arc<Mutex<Vec<String>>>,
+}
+
+impl Store {
+    fn put(&self, key: &str, body: &[u8]) {
+        self.objects.lock().unwrap().insert(key.to_owned(), body.to_vec());
+    }
+
+    fn get(&self, key: &str) -> Option<Vec<u8>> {
+        self.objects.lock().unwrap().get(key).cloned()
+    }
+}
+
+async fn s3(State(store): State<Store>, request: Request<Body>) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let query = request.uri().query().unwrap_or("").to_owned();
+    let auth = request.headers().get("authorization").and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
+    store.log.lock().unwrap().push(format!("{method} {path}?{query} {auth}"));
+    if !auth.starts_with("AWS4-HMAC-SHA256 ") {
+        return text(StatusCode::FORBIDDEN, "unsigned");
+    }
+    let key = object_key(&path);
+    let body = axum::body::to_bytes(request.into_body(), 8 * 1024 * 1024).await.unwrap_or_default();
+    if query.contains("list-type=2") || (method == axum::http::Method::GET && key.is_empty()) {
+        return text(StatusCode::OK, &list_xml(&store, &query_param(&query, "prefix").unwrap_or_default()));
+    }
+    if method == axum::http::Method::PUT {
+        if !key.is_empty() {
+            let name = key.rsplit('/').next().unwrap_or(&key).to_owned();
+            store.put(&key, &body);
+            store.log.lock().unwrap().push(name);
+        }
+        return text(StatusCode::OK, "");
+    }
+    if method == axum::http::Method::DELETE {
+        store.objects.lock().unwrap().remove(&key);
+        return text(StatusCode::NO_CONTENT, "");
+    }
+    if method == axum::http::Method::HEAD && key.is_empty() {
+        return text(StatusCode::OK, "");
+    }
+    match store.get(&key) {
+        Some(bytes) if method == axum::http::Method::HEAD || method == axum::http::Method::GET => {
+            let mut response =
+                Response::new(Body::from(if method == axum::http::Method::HEAD { Vec::new() } else { bytes.clone() }));
+            *response.status_mut() = StatusCode::OK;
+            response.headers_mut().insert("content-length", bytes.len().to_string().parse().unwrap());
+            response.headers_mut().insert("etag", "\"sidecar-test\"".parse().unwrap());
+            response.headers_mut().insert("last-modified", "Wed, 01 Jan 2020 00:00:00 GMT".parse().unwrap());
+            response
+        }
+        Some(_) => text(StatusCode::METHOD_NOT_ALLOWED, "method"),
+        None => text(StatusCode::NOT_FOUND, "missing"),
+    }
+}
+
+fn list_xml(store: &Store, prefix: &str) -> String {
+    let objects = store.objects.lock().unwrap();
+    let mut xml =
+        String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult><IsTruncated>false</IsTruncated>");
+    for (key, bytes) in objects.iter().filter(|(key, _)| key.starts_with(prefix)) {
+        xml.push_str(&format!(
+            "<Contents><Key>{}</Key><Size>{}</Size><ETag>&quot;sidecar-test&quot;</ETag><LastModified>2020-01-01T00:00:00.000Z</LastModified></Contents>",
+            xml_escape(key),
+            bytes.len()
+        ));
+    }
+    xml.push_str("</ListBucketResult>");
+    xml
+}
+
+fn object_key(path: &str) -> String {
+    let rest = path.trim_start_matches('/');
+    match rest.split_once('/') {
+        Some(("rent", key)) => decode(key),
+        Some(_) => String::new(),
+        None => String::new(),
+    }
+}
+
+fn query_param(query: &str, name: &str) -> Option<String> {
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if decode(key) == name {
+            return Some(decode(value));
+        }
+    }
+    None
+}
+
+fn decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+        {
+            out.push(byte);
+            i += 3;
+            continue;
+        }
+        if bytes[i] == b'+' {
+            out.push(b' ');
+        } else {
+            out.push(bytes[i]);
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn text(status: StatusCode, body: &str) -> Response {
+    let mut response = Response::new(Body::from(body.to_owned()));
+    *response.status_mut() = status;
+    response.headers_mut().insert("content-type", "application/xml".parse().unwrap());
+    response
+}
+
+fn rclone_bin(root: &Path) -> PathBuf {
+    let cache = std::env::temp_dir().join("invincible-rclone-v1.68.2");
+    let name = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "rclone-v1.68.2-linux-amd64",
+        ("linux", "aarch64") => "rclone-v1.68.2-linux-arm64",
+        ("macos", "x86_64") => "rclone-v1.68.2-osx-amd64",
+        ("macos", "aarch64") => "rclone-v1.68.2-osx-arm64",
+        (os, arch) => panic!("no pinned rclone build for {os}-{arch}; install rclone on PATH"),
+    };
+    let bin = cache.join(name).join("rclone");
+    if bin.is_file() {
+        return bin;
+    }
+    if let Some(on_path) = which("rclone") {
+        return on_path;
+    }
+    std::fs::create_dir_all(&cache).unwrap();
+    let zip = root.join("rclone.zip");
+    let url = format!("https://downloads.rclone.org/v1.68.2/{name}.zip");
+    let status = Command::new("curl").args(["-fsSL", "-o"]).arg(&zip).arg(&url).status().expect("curl");
+    assert!(status.success(), "could not download rclone from {url}");
+    let extracted = Command::new("python3")
+        .args(["-c", "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"])
+        .arg(&zip)
+        .arg(&cache)
+        .status()
+        .expect("python3");
+    assert!(extracted.success() && bin.is_file(), "rclone zip did not contain {bin:?}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut mode = std::fs::metadata(&bin).unwrap().permissions();
+        mode.set_mode(0o755);
+        std::fs::set_permissions(&bin, mode).unwrap();
+    }
+    bin
+}
+
+fn which(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH")
+        .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join(name)).find(|candidate| candidate.is_file()))
+}

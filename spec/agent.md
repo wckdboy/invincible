@@ -313,7 +313,7 @@ to the model and run, whatever the approval mode, and still under the unattended
 | `home` | `home` (Home Assistant, where it is set up) |
 | `schedule` | `schedule_task`, `list_schedules`, `cancel_schedule` |
 | `media` | `speak`, `generate_image`, where the node has a speech or image backend (one off the machine asks like a cloud model, and is refused unattended) |
-| `rent` | `rent_gpu_offers`, `rent_gpu_start`, `rent_gpu_status`, `rent_gpu_stop`. Calls the node's `/v1/rent/*` with the gateway token (a paired device still needs the `rent` scope to call those routes itself). `start` shows the node's 409 estimate and sends `invincible-confirmed: 1` only after the owner approves that estimate in the conversation. The model has no confirm argument. Trust mode does not skip the ask. `stop` does not ask. Unattended runs cannot approve a start, so they cannot rent. |
+| `rent` | `rent_gpu_offers`, `rent_gpu_start`, `rent_gpu_status`, `rent_gpu_stop`, only when `[agent] tools` includes `rent` and `/v1/rent/health` answers. Off for channel, delegated and scheduled runs unless that list names them. `start` shows the node's 409 estimate and sends `invincible-confirmed: 1` only after the owner approves that estimate. The model has no confirm argument. Trust mode and `autobot eval` do not skip the ask. `stop` does not ask. |
 | `vault` | none: this machine has no such tool |
 
 No `tools` means every tool, as for schedules made here; a schedule from a device must name its

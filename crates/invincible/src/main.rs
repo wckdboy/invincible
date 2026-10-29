@@ -383,6 +383,16 @@ enum CloudAction {
 
 #[derive(Subcommand)]
 enum RentAction {
+    /// The presets the node ships, and any added under rent/presets.
+    Presets {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Project ids that have a session on this node.
+    Projects {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// List offers for a preset. Does not start a pod.
     Offers {
         /// The preset id (`vllm`, `comfyui-minimax-h3`, `dev-box`, or one added under rent/presets).
@@ -2146,6 +2156,28 @@ fn discover_command(
 /// `invincible rent`: the node's `/v1/rent/*`, with the local token. Provider keys stay on the node.
 fn rent_command(action: RentAction) -> Result<(), String> {
     match action {
+        RentAction::Presets { config } => {
+            let home = rent_home(config)?;
+            for (id, name) in invincible::rent::preset_names(&home)? {
+                if name.is_empty() {
+                    println!("{id}");
+                } else {
+                    println!("{id}\t{name}");
+                }
+            }
+            Ok(())
+        }
+        RentAction::Projects { config } => {
+            let home = rent_home(config)?;
+            let projects = invincible::rent::project_ids(&home)?;
+            if projects.is_empty() {
+                println!("{}", brand::ash("no projects"));
+            }
+            for id in projects {
+                println!("{id}");
+            }
+            Ok(())
+        }
         RentAction::Offers { preset, hours, limit, require_regions, config, json } => {
             let mut path = format!("/v1/rent/offers?preset={}&hours={hours}", query_escape(&preset));
             if let Some(limit) = limit {
@@ -2304,6 +2336,13 @@ fn query_escape(value: &str) -> String {
 }
 
 /// The rent API, including a 409 the caller wants to print rather than treat as a transport error.
+fn rent_home(config: Option<PathBuf>) -> Result<PathBuf, String> {
+    match config {
+        Some(config) => Ok(config.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))),
+        None => config::home(),
+    }
+}
+
 fn rent_call(
     config: Option<PathBuf>,
     method: reqwest::Method,

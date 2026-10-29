@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use invincible_policy::{Egress, NetworkMode, NodeSettings};
 use serde::Deserialize;
+use serde::de::Error as DeError;
 
 use crate::fsutil;
 
@@ -355,6 +356,8 @@ pub struct RentConfig {
     pub runpod_key_file: PathBuf,
     /// RunPod API origin. Unset: `https://api.runpod.io`.
     pub runpod_url: Option<String>,
+    /// Allow an `http://127.0.0.1` object-store endpoint. Off unless a test or a local mock needs it.
+    pub insecure_endpoint: bool,
     pub store: StoreConfig,
     /// Keys an older config still has (`binary`, and anything else unknown). Not used.
     pub ignored: Vec<String>,
@@ -395,7 +398,8 @@ fn default_idle_minutes() -> u64 {
 }
 
 fn default_regions() -> Vec<String> {
-    vec!["EU".to_owned()]
+    // Secure cloud in the EU. Community is an explicit opt-in (`require_regions = ["EU"]`).
+    vec!["EU-secure".to_owned()]
 }
 
 impl Default for StoreConfig {
@@ -421,6 +425,7 @@ impl Default for RentConfig {
             require_regions: default_regions(),
             runpod_key_file: default_runpod_key(),
             runpod_url: None,
+            insecure_endpoint: false,
             store: StoreConfig::default(),
             ignored: Vec::new(),
         }
@@ -445,6 +450,8 @@ struct RentRaw {
     runpod_key_file: PathBuf,
     #[serde(default)]
     runpod_url: Option<String>,
+    #[serde(default)]
+    insecure_endpoint: bool,
     #[serde(default)]
     store: StoreRaw,
     #[serde(default, flatten)]
@@ -480,8 +487,16 @@ impl Default for StoreRaw {
 impl<'de> Deserialize<'de> for RentConfig {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = RentRaw::deserialize(deserializer)?;
-        let mut ignored: Vec<String> = raw.extra.into_keys().collect();
-        ignored.sort();
+        let mut ignored = Vec::new();
+        for key in raw.extra.keys() {
+            if key == "binary" {
+                ignored.push(key.clone());
+            } else {
+                return Err(DeError::custom(format!(
+                    "[rent] unknown key `{key}` (the only legacy key that is ignored is `binary`)"
+                )));
+            }
+        }
         Ok(Self {
             enabled: raw.enabled,
             max_usd_per_hour: raw.max_usd_per_hour,
@@ -491,6 +506,7 @@ impl<'de> Deserialize<'de> for RentConfig {
             require_regions: raw.require_regions,
             runpod_key_file: raw.runpod_key_file,
             runpod_url: raw.runpod_url,
+            insecure_endpoint: raw.insecure_endpoint,
             store: StoreConfig {
                 endpoint: raw.store.endpoint,
                 bucket: raw.store.bucket,
@@ -937,7 +953,7 @@ mod tests {
         assert_eq!(config.rent.idle_minutes, 15);
         assert!(config.rent.max_usd_per_hour.is_none());
         assert!(config.rent.monthly_cap_usd.is_none());
-        assert_eq!(config.rent.require_regions, vec!["EU"]);
+        assert_eq!(config.rent.require_regions, vec!["EU-secure".to_owned()]);
 
         let on = Config::parse(
             "[rent]\nenabled = true\nmax_usd_per_hour = 0.4\nmax_hours = 2\nmonthly_cap_usd = 10\nidle_minutes = 20\nrequire_regions = [\"EU-secure\"]\n",
@@ -959,6 +975,8 @@ mod tests {
         assert!(Config::parse("[rent]\nrequire_regions = [\"any\", \"EU\"]\n").unwrap_err().contains("only token"));
         let old = Config::parse("[rent]\nenabled = false\nbinary = \"wckd\"\n").unwrap();
         assert_eq!(old.rent.ignored, vec!["binary".to_owned()]);
+        let unknown = Config::parse("[rent]\nnot_a_cap = 1\n").unwrap_err();
+        assert!(unknown.contains("unknown key") && unknown.contains("not_a_cap"), "{unknown}");
     }
 
     #[test]

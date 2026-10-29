@@ -119,7 +119,14 @@ pub async fn start(
             };
         }
     }
-    let (status, created) = match gateway.rent(reqwest::Method::POST, "/rent/sessions", Some(&body), true).await {
+    let mut confirmed = body.clone();
+    if let Some(id) = preview["offer"]["id"].as_str().map(str::trim).filter(|id| !id.is_empty()) {
+        confirmed["offer_id"] = json!(id);
+    }
+    if let Some(usd) = preview["offer"]["usd_per_hr"].as_f64() {
+        confirmed["approved_usd_per_hr"] = json!(usd);
+    }
+    let (status, created) = match gateway.rent(reqwest::Method::POST, "/rent/sessions", Some(&confirmed), true).await {
         Ok(response) => response,
         Err(err) => return format!("error: {err}"),
     };
@@ -223,6 +230,9 @@ mod tests {
                             let text = String::from_utf8_lossy(&body);
                             assert!(!text.contains("\"confirm\""), "the tool must not forward a confirm field: {text}");
                             if confirmed {
+                                let value: Value = serde_json::from_str(&text).unwrap_or(json!({}));
+                                assert_eq!(value["offer_id"], "runpod:community:4090", "the approved offer is pinned: {text}");
+                                assert_eq!(value["approved_usd_per_hr"], 0.5, "{text}");
                                 *state.confirmed.lock().unwrap() += 1;
                                 (axum::http::StatusCode::CREATED, r#"{"id":"sess_1","phase":"ready"}"#.to_owned())
                             } else {
