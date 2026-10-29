@@ -3,6 +3,7 @@
 
 pub mod acp;
 pub mod actions;
+pub mod adapters;
 pub mod agent;
 pub mod alerts;
 pub mod api;
@@ -17,6 +18,7 @@ pub mod config;
 pub mod context;
 pub mod cron;
 pub mod delegate;
+pub mod delegations;
 pub mod diff;
 pub mod discord;
 pub mod docker;

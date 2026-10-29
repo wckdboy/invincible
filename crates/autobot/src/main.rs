@@ -1868,6 +1868,8 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         tracing::error!("{e}");
     }
     background.push(tokio::spawn(autobot::backup::scheduler(root.clone())));
+    // Delegated runs paused on a usage limit resume themselves after a restart too.
+    background.push(state.start_resumer());
     // All bots use the one gateway on this machine.
     let gateway = runtimes[0].agent().gateway.clone();
     drop(runtimes);

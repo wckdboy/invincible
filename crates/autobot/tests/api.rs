@@ -851,8 +851,87 @@ async fn a_long_usage_limit_pauses_a_delegated_run() {
     assert_eq!(paused["retry_after_seconds"], 3600);
     assert!(paused["retry_at"].as_u64().is_some());
     assert!(paused["retry_at_local"].as_str().unwrap().contains('T'));
+    assert_eq!(paused["auto_resume"], true);
+    assert_eq!(paused["resumes"], 0);
+    let job = paused["job_id"].as_str().unwrap();
     assert_eq!(events.iter().find(|e| e["type"] == "delegate.stopped").unwrap()["reason"], "usage_limit");
     assert!(!events.iter().any(|e| e["type"] == "answer"), "{kinds:?}");
+
+    // The pause is a real job on disk, listed by the API and cancellable.
+    let listed: Value = client
+        .get(format!("{gateway}/v1/agent/delegations"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed["paused"], 1, "{listed}");
+    assert_eq!(listed["delegations"][0]["id"], job);
+    assert_eq!(listed["delegations"][0]["state"], "paused");
+    assert_eq!(listed["delegations"][0]["max_resumes"], 5);
+    let cancel = client
+        .post(format!("{gateway}/v1/agent/delegations/{job}/cancel"))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cancel.status(), 200);
+    let again = client
+        .post(format!("{gateway}/v1/agent/delegations/{job}/cancel"))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), 409);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_paused_delegation_resumes_in_the_same_conversation() {
+    let (gateway, _, dir) = stack_at("delegate-resume", failing_model(429, "3600").await).await;
+    let client = reqwest::Client::new();
+    let events = turn_with(
+        &client,
+        &format!("{gateway}/v1/agent/sessions/delegate-resume/turns"),
+        json!({ "text": "fix the checkout test", "delegated": true }),
+        async |_: &Value| {},
+    )
+    .await;
+    let paused = events.iter().find(|e| e["type"] == "delegate.paused").unwrap();
+    let job = paused["job_id"].as_str().unwrap().to_owned();
+    let resume = client
+        .post(format!("{gateway}/v1/agent/delegations/{job}/resume"))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resume.status(), 200);
+    // The resumed run hits the same limit and pauses again, now with one resume spent.
+    let mut latest = Value::Null;
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let listed: Value = client
+            .get(format!("{gateway}/v1/agent/delegations"))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        latest = listed["delegations"][0].clone();
+        if latest["resumes"].as_u64().unwrap_or(0) >= 1 && latest["state"] == "paused" {
+            break;
+        }
+    }
+    assert_eq!(latest["id"], job.as_str(), "{latest}");
+    assert_eq!(latest["resumes"], 1, "{latest}");
+    assert_eq!(latest["state"], "paused", "{latest}");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -879,5 +958,28 @@ async fn explicit_wait_instructions_are_not_nudged() {
     let finished = events.iter().find(|e| e["type"] == "delegate.finished").unwrap();
     assert_eq!(finished["waiting_on_owner"], true);
     assert_eq!(events.last().unwrap()["text"], "Which file should I use?");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn adapters_are_listed_with_their_auth_and_a_native_autobot() {
+    let (gateway, _, dir) = stack("adapters", Vec::new(), Duration::ZERO).await;
+    let client = reqwest::Client::new();
+    let list: Value = client
+        .get(format!("{gateway}/v1/agent/adapters"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let adapters = list["adapters"].as_array().unwrap();
+    let autobot = adapters.iter().find(|a| a["name"] == "autobot").expect("autobot");
+    assert_eq!(autobot["runnable"], false);
+    assert_eq!(autobot["auth"], "gateway");
+    let codex = adapters.iter().find(|a| a["name"] == "codex").expect("codex");
+    assert_eq!(codex["auth"], "account");
+    assert!(codex["login"].as_str().unwrap().contains("codex login"));
     let _ = std::fs::remove_dir_all(dir);
 }

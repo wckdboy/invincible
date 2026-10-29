@@ -73,6 +73,11 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/stats` | | `{"tasks", "open_sessions", "waiting"}`: what the process holds now (tasks on its runtime, conversations kept in memory, every bot's; questions waiting), for monitoring. At most 64 idle conversations per bot stay in memory; past that the one used longest ago is let go (it is on disk), and with it what the owner said "always" to in it |
 | `POST /v1/agent/alerts/test` | `{}` | A test alert, now, to where `[alerts]` sends them (`to`, else the default bot's home channel), whatever the limits and quiet hours: `{"sent": [{"to", "error"?}]}`; 409 `no_alerts` when there is no address (`autobot alerts test`) |
 | `GET /v1/agent/insights?days=&bot=` | | What the bot did over the last `days` (default 7), with `"bot"`: `{"days", "turns", "seconds", "calls", "tokens", "cost", "unpriced", "local_share": {"calls", "tokens"}, "tools": [{"name", "count"}], "projects": [{"name", "count"}], "models": [{"model", "calls", "tokens", "cloud"}], "failures": {"errors", "stopped", "tool_errors", "refused"}}` |
+| `GET /v1/agent/adapters` | | `{"adapters": [{"name", "label", "command", "installed", "version", "path", "auth", "login", "capabilities", "runnable", "note"}]}`: Autobot and the external coding CLIs detected on the machine; `runnable` is false for native Autobot. Detection is cached for five minutes |
+| `POST /v1/agent/adapters/{name}/run` | `{"task", "thread", "timeout_seconds"?, "stream"?}` | Runs the CLI in the thread's worktree with its own account and a scrubbed environment; the task is one argument, never a shell, and one run per worktree is allowed. Without `stream`: `{"adapter", "thread", "workdir", "exit_code", "seconds", "stdout", "stderr", "truncated"}` when it ends. With `"stream": true`: `adapter.started`, one `adapter.output` per complete line (`stream`: `stdout` or `stderr`, `delta`) and then `adapter.finished` (`exit_code`, `seconds`, `truncated`) or `adapter.error`. `409` when it is not installed, not logged in or busy; `504` after the timeout (30–7200 s, default 1800) |
+| `GET /v1/agent/delegations` | | `{"delegations": [{"id", "session", "bot", "task", "state", "retry_at", "retry_at_local", "created_at", "updated_at", "resumes", "max_resumes", "owner_controls", "max_nudges", "until", "last_error", "final_text"}], "paused", "running", "max_resumes"}`: paused delegated runs, newest first |
+| `POST /v1/agent/delegations/{id}/resume` | `{}` | `{"ok": true}`: makes a paused run due now; it resumes in the same conversation and worktree within seconds. `409` (`not_paused`) |
+| `POST /v1/agent/delegations/{id}/cancel` | `{}` | `{"ok": true}`: drops a paused run; a running one is left to finish. `409` (`not_paused`) |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
 already running one answers `409` with type `session_busy`.
@@ -189,8 +194,13 @@ what the agent may do:
   and nudged once; a running tool gets three times as long, because a build may be busy without
   speaking. The stopped turn is closed cleanly (`close_dangling`) before the nudge.
 - **Usage limits.** A limit that clears within 300 seconds is waited out, with `delegate.waiting`
-  heartbeats every 30 seconds so the event stream stays open. A longer one ends the run with
-  `delegate.paused` (and `retry_at`), and the task can be sent again then.
+  heartbeats every 30 seconds so the event stream stays open. A longer one ends the request with
+  `delegate.paused` and saves the run in `$AUTOBOT_HOME/delegations.json`; `autobot serve` (and
+  the API) resumes it at `retry_at` in the same conversation and worktree, without a client, up
+  to five automatic resumes. A limit with no retry time waits 30 minutes. The event carries
+  `job_id`, `auto_resume` and `resumes`; the panel's **Delegations** view shows the queue and can
+  resume or cancel a paused run. A newer delegated request in the same conversation replaces an
+  older paused one.
 - **Budget.** One request runs at most 8 turns, whatever the nudges and limit waits.
 - **Webhook.** With `[delegate] webhook` set, one JSON POST goes out when the run finishes or
   stops: `{"v":1,"event":"delegate.finished"|"delegate.stopped","bot","session","text","nudges",
@@ -208,7 +218,7 @@ The events are additive to the turn grammar:
 | `delegate.declined` | `text`, `action`, `reason`, `redirect`, `bot` | A safety check was declined |
 | `delegate.stalled` | `seconds` | A turn produced nothing for that long and was stopped |
 | `delegate.waiting` | `seconds`, `reason` | Waiting out a usage limit; sent again as time passes |
-| `delegate.paused` | `reason`, `retry_after_seconds`?, `retry_at`?, `retry_at_local`? | The limit is longer than the run waits |
+| `delegate.paused` | `reason`, `retry_after_seconds`?, `retry_at`?, `retry_at_local`?, `job_id`, `auto_resume`, `resumes` | The limit is longer than the run waits; the saved job resumes by itself at `retry_at` |
 | `delegate.finished` | `nudges`, `declined`, `turns`, `seconds`, `waiting_on_owner` | The run's summary, before `answer` |
 | `delegate.stopped` | `reason`, `text`, `nudges`, `declined` | The run failed; followed by `error`. `reason` is `stalled`, `usage_limit` or `error` |
 
@@ -231,6 +241,16 @@ Nothing here is sent to a provider.
 `claude`, `opencode`, `cursor-agent`, `hermes` and `pi`, with their versions, paths, auth kind
 (`gateway` for Autobot, `account` for the CLIs) and login hint. Detection is read-only and cached
 for five minutes; a missing CLI is simply not installed.
+
+**Adapters** run an installed CLI in a thread's worktree. The child's environment is rebuilt from
+a short allowlist (`PATH`, `HOME`, locale and the CLI's own config dirs); gateway, provider,
+GitHub and Autobot tokens are never inherited. Its login is checked first when the CLI has a
+status command, and one run per worktree is allowed. The CLI talks to its own provider, so
+Invincible cannot receipt those calls and the answer is its raw stdout and stderr (capped at
+128 KiB and 32 KiB). A run takes the task as one argument, never through a shell. With
+`"stream": true` the API forwards complete output lines as `adapter.output` events while the CLI
+runs, which is what the panel shows; the process keeps going if the client disconnects, and the
+worktree keeps its changes.
 
 **Secret files** are the connector tokens and passwords in the bot's home. `GET
 /v1/agent/secrets` returns their names, sizes, update times and kind, never their values;

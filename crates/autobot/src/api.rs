@@ -52,6 +52,8 @@ pub struct ApiState {
     failed: Vec<(String, String)>,
     /// Prices for `/usage` and `/insights`, for every bot; each bot's own `[prices]` without.
     prices: Option<crate::insights::Prices>,
+    /// Paused delegated runs, in `delegations.json` under the served root.
+    jobs: Arc<crate::delegations::Jobs>,
 }
 
 /// One bot as the API serves it.
@@ -168,6 +170,7 @@ impl ApiState {
     /// schedules beside them), described by [info].
     pub fn new(agent: Arc<Agent>, token: String, home: std::path::PathBuf, info: Value) -> Self {
         let runtime = Runtime::standalone(crate::bots::DEFAULT, &home, agent);
+        let jobs = Arc::new(crate::delegations::Jobs::new(&home));
         Self {
             token,
             bots: Mutex::new(vec![BotApi::new(runtime, info)]),
@@ -176,12 +179,14 @@ impl ApiState {
             root: None,
             failed: Vec::new(),
             prices: None,
+            jobs,
         }
     }
 
     /// The bots [fleet] runs, as it runs them now (`autobot serve`).
     pub fn for_fleet(token: String, fleet: Arc<Fleet>) -> Self {
         let root = Some(fleet.root().to_owned());
+        let jobs = Arc::new(crate::delegations::Jobs::new(fleet.root()));
         Self {
             token,
             bots: Mutex::default(),
@@ -190,6 +195,7 @@ impl ApiState {
             root,
             failed: Vec::new(),
             prices: None,
+            jobs,
         }
     }
 
@@ -229,7 +235,9 @@ impl ApiState {
         failed: Vec<(String, String)>,
     ) -> Self {
         let bots = runtimes.iter().map(|r| BotApi::new(r.clone(), info_of(r))).collect();
-        Self { token, bots: Mutex::new(bots), fleet: None, waiting: Arc::default(), root, failed, prices: None }
+        let home = root.clone().or_else(|| runtimes.first().map(|r| r.home.clone())).unwrap_or_default();
+        let jobs = Arc::new(crate::delegations::Jobs::new(home));
+        Self { token, bots: Mutex::new(bots), fleet: None, waiting: Arc::default(), root, failed, prices: None, jobs }
     }
 
     /// With these prices, for costs in `/usage` and `/insights`, instead of each bot's `[prices]`.
@@ -254,6 +262,102 @@ impl ApiState {
         self.bots().into_iter().find(|b| {
             b.sessions_dir().join(format!("{id}.jsonl")).is_file() || b.open.lock().expect("open").contains_key(id)
         })
+    }
+}
+
+impl ApiState {
+    /// Starts the background resumer: on boot it recovers runs interrupted by a restart, then
+    /// every ten seconds it starts the paused runs whose retry time has come. A paused job is
+    /// resumed in the same conversation and worktree, with no client attached.
+    pub fn start_resumer(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let state = self.clone();
+        tokio::spawn(async move {
+            match state.jobs.recover(crate::delegations::now()) {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("recovering {n} delegated run(s) interrupted by a restart"),
+                Err(e) => tracing::warn!("delegations: {e}"),
+            }
+            // Finished jobs are history; keep a month of it.
+            if let Err(e) = state.jobs.prune(30) {
+                tracing::warn!("delegations: {e}");
+            }
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                state.resume_due().await;
+            }
+        })
+    }
+
+    /// Starts every paused delegation that is due now. Each start is exclusive: [claim] moves
+    /// the job to running before its task exists, so two resumers cannot both take it.
+    async fn resume_due(self: &Arc<Self>) {
+        let due = match self.jobs.due(crate::delegations::now()) {
+            Ok(due) => due,
+            Err(e) => {
+                tracing::warn!("delegations: {e}");
+                return;
+            }
+        };
+        for job in due {
+            if job.resumes >= crate::delegations::MAX_RESUMES {
+                let _ = self.jobs.finish(
+                    &job.id,
+                    crate::delegations::State::Failed,
+                    "the run used its automatic resumes; send the task again",
+                );
+                continue;
+            }
+            let claimed = match self.jobs.claim(&job.id, crate::delegations::now()) {
+                Ok(Some(job)) => job,
+                Ok(None) => continue,
+                Err(e) => {
+                    tracing::warn!("delegations: {e}");
+                    continue;
+                }
+            };
+            if let Err(e) = self.start_resume(claimed.clone()) {
+                tracing::warn!(delegation = %job.id, "{e}");
+                let _ = self.jobs.release(&job.id, crate::delegations::now() + 60, &e);
+            }
+        }
+    }
+
+    /// One resumed delegated run, on its own task. Its events go to a channel nobody reads:
+    /// the answer and the webhook report are the result; the panel shows the registry.
+    fn start_resume(&self, job: crate::delegations::Job) -> Result<(), String> {
+        let bot = self.named(&job.bot).ok_or_else(|| format!("bot {:?} is not running", job.bot))?;
+        let open = bot.open(&job.session)?;
+        let guard =
+            open.clone().try_lock_owned().map_err(|_| format!("session {} is busy; it will try again", job.session))?;
+        let agent = bot.agent_for(&job.session)?;
+        let inbox = bot.inbox(&job.session);
+        let runtime = bot.runtime.clone();
+        let jobs = self.jobs.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        tokio::spawn(async move {
+            let approver = DelegatedApprover {
+                events: tx.clone(),
+                bot: runtime.name.clone(),
+                declined: Arc::new(AtomicU32::new(0)),
+            };
+            run_delegated(
+                agent,
+                guard,
+                crate::delegate::resume_task(&job.scope),
+                Vec::new(),
+                job.scope.clone(),
+                approver,
+                tx,
+                inbox,
+                runtime,
+                false,
+                job.owner_controls,
+                Resumption { jobs, id: Some(job.id.clone()), resumes: job.resumes },
+            )
+            .await;
+        });
+        Ok(())
     }
 }
 
@@ -447,6 +551,11 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/subscriptions", get(subscriptions).post(set_subscription))
         .route("/v1/agent/subscriptions/{id}", axum::routing::delete(remove_subscription))
         .route("/v1/agent/providers", get(providers))
+        .route("/v1/agent/adapters", get(adapters))
+        .route("/v1/agent/adapters/{name}/run", post(run_adapter))
+        .route("/v1/agent/delegations", get(delegations))
+        .route("/v1/agent/delegations/{id}/resume", post(resume_delegation))
+        .route("/v1/agent/delegations/{id}/cancel", post(cancel_delegation))
         .route("/v1/agent/approvals", get(approvals))
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
@@ -625,6 +734,199 @@ async fn providers() -> Response {
     match tokio::task::spawn_blocking(crate::providers::detect).await {
         Ok(providers) => Json(json!({ "providers": providers })).into_response(),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("provider detection: {e}")),
+    }
+}
+
+/// `GET /v1/agent/adapters`: the installed coding CLIs, their auth and what they can do.
+async fn adapters() -> Response {
+    match tokio::task::spawn_blocking(crate::adapters::list).await {
+        Ok(adapters) => Json(json!({ "adapters": adapters })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("adapter detection: {e}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct AdapterRunBody {
+    task: String,
+    /// The thread whose worktree the adapter works in.
+    thread: String,
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+    /// Stream `adapter.started`, `adapter.output` lines and a final event, instead of one JSON
+    /// answer at the end.
+    #[serde(default)]
+    stream: bool,
+}
+
+/// `POST /v1/agent/adapters/{name}/run {"task", "thread", "timeout_seconds"?, "stream"?}`: run one
+/// external coding CLI in a thread's worktree. It uses its own account, so the answer is not a
+/// gateway receipt and is marked as such. One run at a time per worktree; with `stream`, output
+/// lines arrive as they happen.
+async fn run_adapter(Bot(bot, _): Bot, Path(name): Path<String>, Json(body): Json<AdapterRunBody>) -> Response {
+    let task = body.task.trim();
+    if task.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the task is empty");
+    }
+    if task.chars().count() > 8_000 {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the task is longer than 8000 characters");
+    }
+    let thread = match bot.threads.get(&body.thread) {
+        Ok(Some(thread)) => thread,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {:?}", body.thread)),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    if !thread.worktree.is_dir() {
+        return error(
+            StatusCode::CONFLICT,
+            "worktree_gone",
+            &format!("the worktree for thread {} is gone ({})", thread.id, thread.worktree.display()),
+        );
+    }
+    let timeout = Duration::from_secs(body.timeout_seconds.unwrap_or(1800).clamp(30, 7200));
+    let workdir = thread.worktree.clone();
+    let thread_id = thread.id.clone();
+    if body.stream {
+        let prepared = match crate::adapters::prepare(&name, task, &workdir).await {
+            Ok(prepared) => prepared,
+            Err(e) => return adapter_failure(&e),
+        };
+        return stream_adapter(prepared, thread_id, workdir, timeout);
+    }
+    match crate::adapters::run(&name, task, &workdir, timeout).await {
+        Ok(out) => Json(json!({
+            "adapter": out.adapter,
+            "thread": thread_id,
+            "workdir": workdir.display().to_string(),
+            "exit_code": out.exit_code,
+            "seconds": out.seconds,
+            "stdout": out.stdout,
+            "stderr": out.stderr,
+            "truncated": out.truncated,
+        }))
+        .into_response(),
+        Err(e) => adapter_failure(&e),
+    }
+}
+
+/// The status for an adapter that could not start, or that failed before it ran.
+fn adapter_failure(e: &str) -> Response {
+    let status = if e.contains("unknown adapter") {
+        StatusCode::NOT_FOUND
+    } else if e.contains("timed out") {
+        StatusCode::GATEWAY_TIMEOUT
+    } else if e.contains("not installed")
+        || e.contains("not logged in")
+        || e.contains("credentials are not ready")
+        || e.contains("already running")
+        || e.contains("native")
+    {
+        StatusCode::CONFLICT
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    error(status, "adapter_error", e)
+}
+
+/// An adapter run as it happens: one `adapter.output` event per complete line, then
+/// `adapter.finished` or `adapter.error`. The process keeps running if the client goes away;
+/// the worktree keeps its changes either way.
+fn stream_adapter(
+    prepared: crate::adapters::Prepared,
+    thread: String,
+    workdir: std::path::PathBuf,
+    limit: Duration,
+) -> Response {
+    let (tx, rx) = mpsc::unbounded_channel::<Value>();
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(bool, String)>();
+    let (drained_tx, drained_rx) = oneshot::channel();
+    let events = tx.clone();
+    tokio::spawn(async move {
+        while let Some((stdout, delta)) = out_rx.recv().await {
+            let event = json!({
+                "v": 1, "type": "adapter.output",
+                "stream": if stdout { "stdout" } else { "stderr" },
+                "delta": delta,
+            });
+            if events.send(event).is_err() {
+                break;
+            }
+        }
+        let _ = drained_tx.send(());
+    });
+    let _ = tx.send(json!({
+        "v": 1, "type": "adapter.started",
+        "adapter": prepared.name(), "label": prepared.label(),
+        "thread": thread, "workdir": workdir.display().to_string(),
+    }));
+    tokio::spawn(async move {
+        let result = crate::adapters::execute(prepared, limit, Some(out_tx)).await;
+        let _ = drained_rx.await;
+        match result {
+            Ok(out) => {
+                let _ = tx.send(json!({
+                    "v": 1, "type": "adapter.finished",
+                    "adapter": out.adapter, "exit_code": out.exit_code,
+                    "seconds": out.seconds, "truncated": out.truncated,
+                }));
+            }
+            Err(e) => {
+                let _ = tx.send(json!({ "v": 1, "type": "adapter.error", "text": e }));
+            }
+        }
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        let event = rx.recv().await?;
+        Some((Ok::<_, std::convert::Infallible>(Bytes::from(format!("data: {event}\n\n"))), rx))
+    });
+    let mut response = Response::new(Body::from_stream(stream));
+    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+}
+
+/// `GET /v1/agent/delegations`: delegated runs that paused on a usage limit, and where they
+/// are now. The registry survives restarts; `autobot serve` resumes a due one by itself.
+async fn delegations(State(state): State<Arc<ApiState>>) -> Response {
+    match state.jobs.list() {
+        Ok(jobs) => {
+            let paused = jobs.iter().filter(|job| job.state == crate::delegations::State::Paused).count();
+            let running = jobs.iter().filter(|job| job.state == crate::delegations::State::Running).count();
+            Json(json!({
+                "delegations": jobs.iter().map(crate::delegations::Job::view).collect::<Vec<_>>(),
+                "paused": paused,
+                "running": running,
+                "max_resumes": crate::delegations::MAX_RESUMES,
+            }))
+            .into_response()
+        }
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/delegations/{id}/resume`: makes a paused run due now. It starts within a few
+/// seconds, in the same conversation and worktree.
+async fn resume_delegation(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+    match state.jobs.retry_now(&id) {
+        Ok(true) => {
+            let state = state.clone();
+            tokio::spawn(async move { state.resume_due().await });
+            Json(json!({ "ok": true, "id": id })).into_response()
+        }
+        Ok(false) => error(
+            StatusCode::CONFLICT,
+            "not_paused",
+            "that delegation is not paused (it is running, finished or cancelled)",
+        ),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/delegations/{id}/cancel`: drops a paused run; a running one is left to finish.
+async fn cancel_delegation(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+    match state.jobs.cancel(&id) {
+        Ok(true) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(false) => error(StatusCode::CONFLICT, "not_paused", "only a paused delegation can be cancelled"),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     }
 }
 
@@ -1390,6 +1692,41 @@ fn cap_event(text: &str, max: usize) -> String {
     )
 }
 
+/// What a delegated run needs to outlive a long usage limit: the store, and the job it already
+/// is (None for the first request, which creates one when it pauses).
+#[derive(Clone)]
+struct Resumption {
+    jobs: Arc<crate::delegations::Jobs>,
+    id: Option<String>,
+    resumes: u8,
+}
+
+impl Resumption {
+    /// Records a pause at [retry_at], creating the job on the first run and moving the existing
+    /// one back to paused on a resume. None when every automatic resume is spent.
+    #[allow(clippy::too_many_arguments)]
+    fn pause(
+        &self,
+        session: &str,
+        bot: &str,
+        scope: &crate::delegate::Scope,
+        task: &str,
+        owner_controls: bool,
+        retry_at: u64,
+        error: &str,
+    ) -> Result<Option<crate::delegations::Job>, String> {
+        if let Some(id) = &self.id {
+            if self.resumes >= crate::delegations::MAX_RESUMES {
+                return Ok(None);
+            }
+            self.jobs.release(id, retry_at, error)?;
+            return self.jobs.get(id);
+        }
+        let job = crate::delegations::Job::new(session, bot, task, scope.clone(), retry_at, owner_controls)?;
+        self.jobs.pause(job).map(Some)
+    }
+}
+
 /// Runs a turn of [bot] on its own task and streams its events. A delegated turn may run more
 /// than one turn ([crate::delegate]); its events use the same grammar.
 #[allow(clippy::too_many_arguments)]
@@ -1419,6 +1756,7 @@ fn stream_turn(
     let with_images = !images.is_empty();
     let waiting = state.waiting.clone();
     let runtime = bot.runtime.clone();
+    let jobs = state.jobs.clone();
     let _ = tx.send(json!({ "v": 1, "type": "turn.started", "session": id }));
     let owner_controls = crate::delegate::owner_controls(&text);
     if let Some(scope) = &delegated {
@@ -1445,6 +1783,7 @@ fn stream_turn(
                     runtime,
                     with_images,
                     owner_controls,
+                    Resumption { jobs, id: None, resumes: 0 },
                 )
                 .await;
             }
@@ -1526,9 +1865,11 @@ async fn run_delegated(
     runtime: Arc<Runtime>,
     with_images: bool,
     owner_controls: bool,
+    resumption: Resumption,
 ) {
     let started = std::time::Instant::now();
     let session_id = guard.session.id.clone();
+    let task = text.clone();
     let mut current = text;
     let mut attempts = 0u8;
     let mut nudges = 0u8;
@@ -1647,20 +1988,55 @@ async fn run_delegated(
                         current = crate::delegate::resume_nudge();
                         continue;
                     }
-                    let event = crate::delegate::paused(Some(seconds));
-                    let at = event["retry_at_local"].as_str().unwrap_or("later").to_owned();
-                    paused = Some(event.clone());
-                    let _ = tx.send(event);
-                    fatal = Some(format!(
-                        "the provider's usage limit is reached; retry after {at} (or send the task again then)"
-                    ));
+                    let event = crate::delegate::paused(Some(seconds), None, true, resumption.resumes);
+                    let retry_at = event["retry_at"].as_u64().unwrap_or_else(|| crate::delegations::now() + seconds);
+                    match resumption.pause(&session_id, &runtime.name, &scope, &task, owner_controls, retry_at, &e) {
+                        Ok(Some(job)) => {
+                            let mut event = event;
+                            event["job_id"] = json!(job.id);
+                            event["resumes"] = json!(job.resumes);
+                            let at = event["retry_at_local"].as_str().unwrap_or("later").to_owned();
+                            paused = Some(event.clone());
+                            let _ = tx.send(event);
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached; this run is paused and will resume automatically after {at}"
+                            ));
+                        }
+                        Ok(None) => {
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached and this run has used its {} automatic resumes; send the task again ({e})",
+                                crate::delegations::MAX_RESUMES
+                            ));
+                        }
+                        Err(error) => fatal = Some(format!("{e}; the pause could not be saved: {error}")),
+                    }
                     break;
                 }
                 if crate::delegate::is_usage_limit(&e) {
-                    let event = crate::delegate::paused(None);
-                    paused = Some(event.clone());
-                    let _ = tx.send(event);
-                    fatal = Some(e);
+                    // No retry time: wait a conservative half hour, then the limit may be gone.
+                    let seconds = 1_800;
+                    let event = crate::delegate::paused(Some(seconds), None, true, resumption.resumes);
+                    let retry_at = crate::delegations::now() + seconds;
+                    match resumption.pause(&session_id, &runtime.name, &scope, &task, owner_controls, retry_at, &e) {
+                        Ok(Some(job)) => {
+                            let mut event = event;
+                            event["job_id"] = json!(job.id);
+                            event["resumes"] = json!(job.resumes);
+                            let at = event["retry_at_local"].as_str().unwrap_or("later").to_owned();
+                            paused = Some(event.clone());
+                            let _ = tx.send(event);
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached; this run is paused and will resume automatically after {at}"
+                            ));
+                        }
+                        Ok(None) => {
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached and this run has used its {} automatic resumes; send the task again ({e})",
+                                crate::delegations::MAX_RESUMES
+                            ));
+                        }
+                        Err(error) => fatal = Some(format!("{e}; the pause could not be saved: {error}")),
+                    }
                     break;
                 }
                 fatal = Some(e);
@@ -1670,6 +2046,18 @@ async fn run_delegated(
     }
     if fatal.is_none() && attempts >= crate::delegate::MAX_ATTEMPTS {
         fatal = Some("the delegated run used its turn budget".to_owned());
+    }
+    if let Some(id) = &resumption.id {
+        if finished {
+            if let Err(e) = resumption.jobs.finish(id, crate::delegations::State::Done, &last_text) {
+                tracing::warn!(bot = %runtime.name, "{e}");
+            }
+        } else if paused.is_none()
+            && let Some(e) = &fatal
+            && let Err(error) = resumption.jobs.finish(id, crate::delegations::State::Failed, e)
+        {
+            tracing::warn!(bot = %runtime.name, "{error}");
+        }
     }
     // The report for the operator's webhook, if one is configured. It is sent on its own task,
     // so a slow endpoint never delays the answer; a failure is logged, not retried.

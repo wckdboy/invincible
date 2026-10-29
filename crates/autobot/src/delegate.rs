@@ -184,6 +184,22 @@ pub fn waiting_reason(text: &str) -> Option<&'static str> {
     PHRASES.iter().any(|phrase| tail.contains(phrase)).then_some("the previous answer waits for the owner")
 }
 
+/// The message that continues a paused delegated run in a fresh process: the conversation has
+/// the request and its work, so it only has to look at the state and go on.
+pub fn resume_task(scope: &Scope) -> String {
+    let until = scope
+        .until
+        .as_deref()
+        .map(|until| format!(" The owner's end condition still stands: {until}."))
+        .unwrap_or_default();
+    format!(
+        "[delegated] The provider's usage limit has lifted and this task is resuming automatically. \
+         The conversation has the request and the work so far. Check the current state of the \
+         worktree, then continue from there. Do not repeat completed work, do not wait for the \
+         owner, and do not ask for confirmation of routine steps.{until}"
+    )
+}
+
 /// The message that gives the agent another turn. It is a user message like any other, so the
 /// transcript shows exactly what delegation added.
 pub fn nudge(scope: &Scope, number: u8, reason: &str) -> String {
@@ -244,8 +260,9 @@ pub fn is_usage_limit(error: &str) -> bool {
 }
 
 /// The event that says the run is paused until [at] (unix seconds), when a client should try
-/// again; None when the gateway did not say.
-pub fn paused(seconds: Option<u64>) -> Value {
+/// again; None when the gateway did not say. With a [job_id] the run is persisted and resumes by
+/// itself, so a client does not need to resend it.
+pub fn paused(seconds: Option<u64>, job_id: Option<&str>, auto_resume: bool, resumes: u8) -> Value {
     let at = seconds.map(|s| {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()).saturating_add(s)
     });
@@ -261,6 +278,9 @@ pub fn paused(seconds: Option<u64>) -> Value {
         "retry_after_seconds": seconds,
         "retry_at": at,
         "retry_at_local": local,
+        "job_id": job_id,
+        "auto_resume": auto_resume,
+        "resumes": resumes,
     })
 }
 
