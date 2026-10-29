@@ -33,6 +33,8 @@ pub struct Open {
     pub secret_key: String,
     pub idle_minutes: u64,
     pub monthly_cap_usd: Option<f64>,
+    /// RunPod container-registry credential id. Sent as `registry`. Never logged.
+    pub registry_auth: Option<String>,
 }
 
 pub struct Engine {
@@ -46,9 +48,11 @@ pub struct Engine {
     access_key: String,
     secret_key: String,
     cache: tokio::sync::Mutex<Cache>,
-    /// One lock per session. A drain does not block a status read of another session, or of this
-    /// one: status takes no lock here.
+    /// One lock per session. A drain does not block a status read of another session. This
+    /// session's status read takes the lock only to re-read and save, after the vendor call.
     session_locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    node_id: String,
+    registry_auth: Option<String>,
     drain_wait: Duration,
     drain_poll: Duration,
     hydrate_wait: Duration,
@@ -92,6 +96,11 @@ impl Engine {
             secret_key: parts.secret_key,
             cache: tokio::sync::Mutex::new(Cache::new()),
             session_locks: std::sync::Mutex::new(HashMap::new()),
+            node_id: load_node_id(&parts.home)?,
+            registry_auth: parts.registry_auth.and_then(|id| {
+                let id = id.trim().to_owned();
+                (!id.is_empty()).then_some(id)
+            }),
             drain_wait: DRAIN_WAIT,
             drain_poll: DRAIN_POLL,
             hydrate_wait: HYDRATE_WAIT,
@@ -324,15 +333,28 @@ impl Engine {
     }
 
     pub async fn get(&self, id: &str) -> Result<Value, RentError> {
-        let Some(mut session) = self.sessions.get(id).map_err(|e| RentError::Unavailable(self.scrubbed(e)))? else {
+        let Some(mut seen) = self.sessions.get(id).map_err(|e| RentError::Unavailable(self.scrubbed(e)))? else {
             return Err(RentError::NotFound);
         };
-        self.refresh(&mut session).await;
-        if session.phase.active() {
-            session.last_active = self.now();
+        self.refresh(&mut seen).await;
+        let _guard = self.session_lock(id).lock_owned().await;
+        let Some(mut stored) = self.sessions.get(id).map_err(|e| RentError::Unavailable(self.scrubbed(e)))? else {
+            return Err(RentError::NotFound);
+        };
+        if stored.phase == Phase::Stopped {
+            return Ok(stored.public());
         }
-        self.sessions.save(&session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
-        Ok(session.public())
+        stored.pod_status = seen.pod_status;
+        stored.endpoints = seen.endpoints;
+        stored.data_center = seen.data_center;
+        if stored.phase == Phase::Hydrating && seen.phase == Phase::Ready {
+            let _ = stored.go(Phase::Ready, self.now(), "hydrate marker found");
+        }
+        if stored.phase.active() {
+            stored.last_active = self.now();
+        }
+        self.sessions.save(&stored).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        Ok(stored.public())
     }
 
     /// Drain, then delete. `must_delete` is the sweeper: the pod is removed after the drain
@@ -416,6 +438,16 @@ impl Engine {
             if !session.phase.active() && !orphan {
                 continue;
             }
+            if session.phase.active()
+                && !session.instance_id.is_empty()
+                && let Ok(instance) = self.provider.status(&session.instance_id).await
+                && container_stopped(&instance.status)
+            {
+                if let Err(err) = self.stop(&session.id, true, true).await {
+                    tracing::warn!(session = %session.id, "exited pod: {}", self.scrubbed(err));
+                }
+                continue;
+            }
             let expired = now >= session.deadline_at;
             let quiet = matches!(session.phase, Phase::Ready | Phase::Hydrating)
                 && now.signed_duration_since(session.last_active) >= TimeDelta::minutes(self.idle_minutes as i64);
@@ -425,11 +457,13 @@ impl Engine {
                 tracing::warn!(session = %session.id, "{}", self.scrubbed(err));
             }
         }
-        self.reconcile(&sessions).await;
+        self.reconcile().await;
     }
 
-    /// Pods named `invincible-<session>` with no live tracked session are drained, then deleted.
-    async fn reconcile(&self, sessions: &[Session]) {
+    /// Pods named `invincible-<this node's id>-<session>` with no live tracked session are
+    /// drained, then deleted. Another node's prefix, and a name that is only `invincible-…`,
+    /// are left alone.
+    async fn reconcile(&self) {
         let pods = match self.provider.list_pods().await {
             Ok(pods) => pods,
             Err(err) => {
@@ -437,15 +471,34 @@ impl Engine {
                 return;
             }
         };
+        let (sessions, warnings) = match self.sessions.list() {
+            Ok(listed) => listed,
+            Err(err) => {
+                tracing::warn!("could not read sessions to reconcile: {}", self.scrubbed(err));
+                return;
+            }
+        };
+        for warning in warnings {
+            tracing::warn!(target: "rent", "{warning}");
+        }
+        let prefix = format!("invincible-{}-", self.node_id);
         for pod in pods {
-            let Some(id) = pod.name.strip_prefix("invincible-") else { continue };
-            let tracked = sessions.iter().any(|session| {
-                session.id == id
-                    && session.instance_id == pod.id
-                    && (session.phase.active() || session.phase == Phase::Failed)
-            });
-            if tracked {
+            let Some(id) = pod.name.strip_prefix(&prefix).filter(|id| !id.is_empty()) else { continue };
+            if sessions.iter().any(|session| session.id == id && keeps_pod(session, &pod.id)) {
                 continue;
+            }
+            let _guard = self.session_lock(id).lock_owned().await;
+            match self.sessions.get(id) {
+                Ok(Some(session)) if keeps_pod(&session, &pod.id) => continue,
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        session = id,
+                        "not terminating; the session file could not be read: {}",
+                        self.scrubbed(err)
+                    );
+                    continue;
+                }
             }
             tracing::warn!(pod = %pod.id, session = id, "terminating a pod with no live session");
             let _ = self.objects.put(&control_key(id), br#"{"action":"drain"}"#).await;
@@ -587,8 +640,9 @@ impl Engine {
         // The image ENTRYPOINT is the sidecar. RunPod's `entrypoint` field would replace it
         // (OpenAPI BaseContainerConfig), so the workload stays in the environment.
         ProvisionRequest {
-            name: format!("invincible-{}", session.id),
+            name: format!("invincible-{}-{}", self.node_id, session.id),
             image: preset.image.clone(),
+            registry: self.registry_auth.clone(),
             cloud: offer.cloud.clone(),
             gpu_id: offer.sku.clone(),
             min_ram_gb: preset.min_ram_gb,
@@ -638,6 +692,43 @@ impl Engine {
             Err(RentError::Bad("project_id is [A-Za-z0-9_-]+, at most 64 characters".to_owned()))
         }
     }
+}
+
+fn load_node_id(home: &std::path::Path) -> Result<String, String> {
+    let path = home.join("rent/node-id");
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        let id = text.trim();
+        if is_node_id(id) {
+            return Ok(id.to_owned());
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    let id = crate::token::hex(&crate::token::random::<8>()?);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    use std::io::Write;
+    let mut file = options.open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    writeln!(file, "{id}").map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(id)
+}
+
+fn is_node_id(id: &str) -> bool {
+    (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// A create in flight, or a session that has not recorded its pod yet, still owns the name.
+fn keeps_pod(session: &Session, pod_id: &str) -> bool {
+    session.phase == Phase::Provisioning
+        || session.instance_id.is_empty()
+        || (session.instance_id == pod_id && (session.phase.active() || session.phase == Phase::Failed))
+}
+
+fn container_stopped(status: &str) -> bool {
+    matches!(status.to_ascii_uppercase().as_str(), "EXITED" | "STOPPED" | "DEAD" | "TERMINATED")
 }
 
 fn offer_row(offer: &Offer, hours: f64) -> Value {
@@ -735,7 +826,7 @@ mod tests {
         state: std::path::PathBuf,
         events: Arc<Mutex<Vec<String>>>,
         freeze: bool,
-        orphan: bool,
+        pods: Arc<Mutex<Vec<PodRef>>>,
     }
 
     impl Provider for Fake {
@@ -796,33 +887,33 @@ mod tests {
         }
 
         fn list_pods<'a>(&'a self) -> super::super::provider::ProviderFut<'a, Vec<PodRef>> {
-            let orphan = self.orphan;
-            Box::pin(async move {
-                Ok(if orphan {
-                    vec![PodRef { id: "pod-orphan".into(), name: "invincible-sess_gone".into() }]
-                } else {
-                    Vec::new()
-                })
-            })
+            let pods = Arc::clone(&self.pods);
+            Box::pin(async move { Ok(pods.lock().unwrap().clone()) })
         }
     }
 
     struct Mem {
         events: Arc<Mutex<Vec<String>>>,
+        fail: bool,
     }
 
     impl ObjectStore for Mem {
         fn put<'a>(&'a self, key: &'a str, _body: &'a [u8]) -> StoreFut<'a, ()> {
             let events = Arc::clone(&self.events);
             let key = key.to_owned();
+            let fail = self.fail;
             Box::pin(async move {
+                if fail {
+                    return Err("store down".to_owned());
+                }
                 events.lock().unwrap().push(format!("put:{key}"));
                 Ok(())
             })
         }
 
         fn exists<'a>(&'a self, _key: &'a str) -> StoreFut<'a, bool> {
-            Box::pin(async { Ok(false) })
+            let fail = self.fail;
+            Box::pin(async move { if fail { Err("store down".to_owned()) } else { Ok(false) } })
         }
 
         fn list_prefix<'a>(&'a self, _prefix: &'a str) -> StoreFut<'a, Vec<String>> {
@@ -846,14 +937,29 @@ mod tests {
         }
     }
 
-    fn engine(freeze: bool, orphan: bool) -> (Arc<Engine>, Arc<Mutex<Vec<String>>>, Home) {
-        let path = std::env::temp_dir().join(format!("invincible-rent-engine-{}-{}", std::process::id(), freeze));
+    struct Opened {
+        engine: Arc<Engine>,
+        events: Arc<Mutex<Vec<String>>>,
+        home: Home,
+        node: String,
+        pods: Arc<Mutex<Vec<PodRef>>>,
+    }
+
+    fn engine(label: &str, freeze: bool, fail_store: bool) -> Opened {
+        let path = std::env::temp_dir().join(format!("invincible-rent-engine-{}-{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
+        let node = super::load_node_id(&path).unwrap();
         let state = path.join("rent/state");
         let events = Arc::new(Mutex::new(Vec::new()));
-        let engine = Engine::open(Open {
-            provider: Arc::new(Fake { state: state.clone(), events: Arc::clone(&events), freeze, orphan }),
-            objects: Arc::new(Mem { events: Arc::clone(&events) }),
+        let pods = Arc::new(Mutex::new(Vec::new()));
+        let mut engine = Engine::open(Open {
+            provider: Arc::new(Fake {
+                state: state.clone(),
+                events: Arc::clone(&events),
+                freeze,
+                pods: Arc::clone(&pods),
+            }),
+            objects: Arc::new(Mem { events: Arc::clone(&events), fail: fail_store }),
             home: path.clone(),
             secrets: Vec::new(),
             bucket: "rent".into(),
@@ -862,14 +968,67 @@ mod tests {
             secret_key: "secret".into(),
             idle_minutes: 15,
             monthly_cap_usd: None,
+            registry_auth: None,
         })
         .unwrap();
-        (Arc::new(engine), events, Home { path, state })
+        engine.drain_wait = std::time::Duration::from_millis(30);
+        engine.drain_poll = std::time::Duration::from_millis(5);
+        Opened { engine: Arc::new(engine), events, home: Home { path, state }, node, pods }
+    }
+
+    fn sample(id: &str, phase: crate::rent::session::Phase, instance: &str) -> crate::rent::session::Session {
+        let now = chrono::Utc::now();
+        crate::rent::session::Session {
+            id: id.to_owned(),
+            project_id: "hailuo".into(),
+            preset_id: "vllm".into(),
+            hours: 1.0,
+            created_at: now,
+            deadline_at: now + chrono::TimeDelta::hours(2),
+            last_active: now,
+            phase,
+            offer: crate::rent::provider::Offer {
+                id: "runpod:secure:4090".into(),
+                vendor: "runpod".into(),
+                sku: "NVIDIA GeForce RTX 4090".into(),
+                name: "RTX 4090".into(),
+                family: "4090".into(),
+                vram_gb: 24,
+                usd_per_hr: 0.5,
+                cloud: "secure".into(),
+                region: "EU-RO-1".into(),
+                data_center_ids: vec!["EU-RO-1".into()],
+                availability: "HIGH".into(),
+                perf_index: 48.0,
+                perf_table: "2026-09-29".into(),
+                reliability_factor: 1.0,
+                region_factor: 1.0,
+                score: 96.0,
+            },
+            instance_id: instance.to_owned(),
+            pod_status: String::new(),
+            data_center: String::new(),
+            endpoints: Vec::new(),
+            cost_estimate_usd: 0.5,
+            cost_actual_usd: 0.0,
+            drain_ok: false,
+            forced: false,
+            error: String::new(),
+            warning: String::new(),
+            events: Vec::new(),
+            ended_at: None,
+        }
+    }
+
+    fn write_session(state: &std::path::Path, session: &crate::rent::session::Session) {
+        std::fs::create_dir_all(state).unwrap();
+        let path = state.join(format!("{}.json", session.id));
+        std::fs::write(path, serde_json::to_vec_pretty(session).unwrap()).unwrap();
     }
 
     #[tokio::test]
     async fn a_save_failure_after_create_terminates_the_pod() {
-        let (engine, events, _home) = engine(true, false);
+        let Opened { engine, events, home: _home, .. } = engine("save", true, false);
         let err = engine
             .provision(Ask {
                 project_id: "hailuo".into(),
@@ -889,16 +1048,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_sweep_terminates_a_pod_with_no_session() {
-        let (engine, events, _home) = engine(false, true);
+    async fn a_sweep_terminates_only_this_nodes_untracked_pod() {
+        let Opened { engine, events, home: _home, node, pods } = engine("scope", false, false);
+        pods.lock().unwrap().extend([
+            PodRef { id: "pod-orphan".into(), name: format!("invincible-{node}-sess_gone") },
+            PodRef { id: "pod-other".into(), name: "invincible-0123456789abcdef-sess_other".into() },
+            PodRef { id: "pod-hand".into(), name: "invincible-foo".into() },
+        ]);
         engine.sweep().await;
         let events = events.lock().unwrap().clone();
-        let control = events
-            .iter()
-            .position(|line| line.contains("sess_gone") && line.starts_with("put:"))
-            .unwrap_or_else(|| panic!("{events:?}"));
-        let deleted =
-            events.iter().position(|line| line == "terminate:pod-orphan").unwrap_or_else(|| panic!("{events:?}"));
-        assert!(control < deleted, "{events:?}");
+        assert!(events.iter().any(|line| line == "terminate:pod-orphan"), "{events:?}");
+        assert!(!events.iter().any(|line| line.contains("pod-other") || line.contains("pod-hand")), "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn a_create_in_flight_is_not_reconciled_away() {
+        let Opened { engine, events, home, node, pods } = engine("race", false, false);
+        pods.lock().unwrap().push(PodRef { id: "pod-fresh".into(), name: format!("invincible-{node}-sess_fresh") });
+        write_session(&home.state, &sample("sess_fresh", crate::rent::session::Phase::Provisioning, ""));
+        engine.sweep().await;
+        let events = events.lock().unwrap().clone();
+        assert!(!events.iter().any(|line| line.contains("pod-fresh")), "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_session_is_swept_and_a_corrupt_file_is_skipped() {
+        let Opened { engine, events, home, .. } = engine("failed", false, false);
+        write_session(&home.state, &sample("sess_bad", crate::rent::session::Phase::Failed, "pod-failed"));
+        std::fs::write(home.state.join("corrupt.json"), b"not json").unwrap();
+        engine.sweep().await;
+        let events = events.lock().unwrap().clone();
+        assert!(events.iter().any(|line| line == "terminate:pod-failed"), "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failing_store_still_lets_a_forced_stop_terminate() {
+        let Opened { engine, events, home, .. } = engine("store", false, true);
+        write_session(&home.state, &sample("sess_up", crate::rent::session::Phase::Ready, "pod-up"));
+        engine.stop("sess_up", true, true).await.unwrap_or_else(|err| panic!("force stop deletes the pod: {err}"));
+        let events = events.lock().unwrap().clone();
+        assert!(events.iter().any(|line| line == "terminate:pod-up"), "{events:?}");
     }
 }

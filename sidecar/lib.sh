@@ -45,6 +45,24 @@ invincible_hold() {
   done
 }
 
+# Run the preset command without the object-store credentials. The parent keeps
+# them for rclone. The child must not.
+invincible_exec_workload() {
+  local command="$1"
+  (
+    unset INVINCIBLE_ACCESS_KEY_ID INVINCIBLE_SECRET_ACCESS_KEY
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN AWS_DEFAULT_REGION
+    local name
+    while IFS='=' read -r name _; do
+      case "${name}" in
+        RCLONE_CONFIG*) unset "${name}" ;;
+      esac
+    done < <(env)
+    exec bash -lc "${command}"
+  ) &
+  workload_pid=$!
+}
+
 # Split "a|b;;c|d" and call the given function with left and right.
 invincible_each_pair() {
   local spec="$1"

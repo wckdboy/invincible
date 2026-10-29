@@ -24,21 +24,30 @@ drain_one() {
   local src="$1"
   local dest="$2"
   if [[ ! -d "${src}" ]]; then
-    invincible_log "drain source ${src} is missing; syncing an empty prefix"
-    mkdir -p "${src}"
+    invincible_log "drain source ${src} is missing; refusing to sync an empty prefix over the remote"
+    return 1
+  fi
+  if [[ -z "$(ls -A "${src}")" ]]; then
+    local remote=""
+    if ! remote=$(rclone --contimeout 5s --timeout 10s --retries 1 --low-level-retries 1 lsf "invincible:${INVINCIBLE_BUCKET}/${dest}" 2>&1); then
+      invincible_log "drain source ${src} is empty and the remote could not be listed; refusing to sync"
+      return 1
+    fi
+    if [[ -n "${remote}" ]]; then
+      invincible_log "drain source ${src} is empty and the remote is not; refusing to sync"
+      return 1
+    fi
+    invincible_log "drain source ${src} and the remote are both empty"
+    return 0
   fi
   invincible_log "drain ${src} -> s3:${INVINCIBLE_BUCKET}/${dest}"
-  # Bash 3.2 (macOS /usr/bin/env bash) errors on "${empty[@]}" under set -u.
-  local -a sync_args=(rclone sync "${src}" "invincible:${INVINCIBLE_BUCKET}/${dest}" --checksum)
-  if [[ ${#RCLONE_EXCLUDES[@]} -gt 0 ]]; then
-    sync_args+=("${RCLONE_EXCLUDES[@]}")
-  fi
-  "${sync_args[@]}"
+  # ${arr[@]+...} is the bash 3.2 form that does not trip `set -u` on an empty array.
+  rclone sync "${src}" "invincible:${INVINCIBLE_BUCKET}/${dest}" --checksum ${RCLONE_EXCLUDES[@]+"${RCLONE_EXCLUDES[@]}"}
   rclone lsf -R "${src}" \
     | rclone rcat "invincible:${INVINCIBLE_BUCKET}/sessions/${INVINCIBLE_SESSION_ID}/drain-files.txt" || true
 }
 
-DRAIN_MAP="${INVINCIBLE_DRAIN_MAP:-/workspace|projects/${INVINCIBLE_PROJECT_ID}/workspace}"
+DRAIN_MAP="${INVINCIBLE_DRAIN_MAP:-${INVINCIBLE_WORKSPACE:-/workspace}|projects/${INVINCIBLE_PROJECT_ID}/workspace}"
 invincible_each_pair "${DRAIN_MAP}" drain_one
 
 printf '{"session_id":"%s","at":"%s","ok":true}\n' "${INVINCIBLE_SESSION_ID}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

@@ -31,6 +31,7 @@ struct Mocks {
     slow: bool,
     hostile: bool,
     raise: bool,
+    fail_create: bool,
     catalogs: Arc<Mutex<u32>>,
     pods: Arc<Mutex<Vec<String>>>,
     named: Arc<Mutex<Vec<Value>>>,
@@ -111,6 +112,7 @@ async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool, raise: bool)
         slow,
         hostile,
         raise,
+        fail_create: tag == "create-fail",
         catalogs: Arc::new(Mutex::new(0)),
         pods: Arc::new(Mutex::new(Vec::new())),
         named: Arc::new(Mutex::new(Vec::new())),
@@ -321,9 +323,12 @@ async fn create_pod(
         *seq += 1;
         format!("pod-{}", *seq)
     };
+    mocks.log.lock().unwrap().push("runpod:create".into());
+    if mocks.fail_create {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "unavailable"}))).into_response();
+    }
     mocks.pods.lock().unwrap().push(id.clone());
     mocks.named.lock().unwrap().push(json!({"id": id, "name": body["name"].as_str().unwrap_or("")}));
-    mocks.log.lock().unwrap().push("runpod:create".into());
     let image = body["image"].as_str().unwrap_or("");
     let cloud = body["cloud"].as_str().unwrap_or("");
     mocks.log.lock().unwrap().push(format!("runpod:cloud:{cloud}"));
@@ -767,8 +772,14 @@ async fn a_restart_drains_an_expired_pod_and_an_idle_one() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["phase"], "stopped", "{body}");
 
-    stack.mocks.pods.lock().unwrap().push("pod-orphan".into());
-    stack.mocks.named.lock().unwrap().push(json!({"id": "pod-orphan", "name": "invincible-sess_gone"}));
+    let node_id = std::fs::read_to_string(stack.dir.join("rent/node-id")).unwrap();
+    let node_id = node_id.trim();
+    stack.mocks.pods.lock().unwrap().extend(["pod-orphan".into(), "pod-other".into(), "pod-hand".into()]);
+    stack.mocks.named.lock().unwrap().extend([
+        json!({"id": "pod-orphan", "name": format!("invincible-{node_id}-sess_gone")}),
+        json!({"id": "pod-other", "name": "invincible-other-node-sess_other"}),
+        json!({"id": "pod-hand", "name": "invincible-foo"}),
+    ]);
     assert!(node.stop());
     node.child = spawn(&stack.dir);
     ready(&stack.url, &stack.dir).await;
@@ -777,6 +788,10 @@ async fn a_restart_drains_an_expired_pod_and_an_idle_one() {
         assert!(Instant::now() < deadline, "untracked pod was not deleted\n{}", log_of(&stack.mocks).join("\n"));
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    let log = log_of(&stack.mocks);
+    assert!(!log.iter().any(|line| line == "runpod:delete:pod-other" || line == "runpod:delete:pod-hand"), "{log:?}");
+    let left = stack.mocks.pods.lock().unwrap().clone();
+    assert!(left.iter().any(|pod| pod == "pod-other") && left.iter().any(|pod| pod == "pod-hand"), "{left:?}");
 }
 
 #[tokio::test]
@@ -860,7 +875,50 @@ async fn a_dropped_client_still_gets_a_rent_start_audit() {
         assert!(Instant::now() < deadline, "the start was not audited after the client left");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let instance = loop {
+        let mut found = None;
+        if let Ok(entries) = std::fs::read_dir(stack.dir.join("rent/state")) {
+            for entry in entries.flatten() {
+                let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
+                let Ok(value) = serde_json::from_str::<Value>(&text) else { continue };
+                if let Some(id) = value["instance_id"].as_str().filter(|id| !id.is_empty()) {
+                    found = Some(id.to_owned());
+                }
+            }
+        }
+        if found.is_some() || log_of(&stack.mocks).iter().any(|line| line.starts_with("runpod:delete:")) {
+            break found;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the pod was neither recorded nor deleted\n{}",
+            log_of(&stack.mocks).join("\n")
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    match instance {
+        Some(id) => assert!(stack.mocks.pods.lock().unwrap().iter().any(|pod| pod == &id), "tracked pod {id} is gone"),
+        None => assert!(log_of(&stack.mocks).iter().any(|line| line.starts_with("runpod:delete:"))),
+    }
     drop(node);
+}
+
+#[tokio::test]
+async fn a_create_error_is_not_retried() {
+    let (stack, _node) = stack("create-fail", "monthly_cap_usd = 50\n", false, false, false).await;
+    ready(&stack.url, &stack.dir).await;
+    let (status, body) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        "/v1/rent/sessions",
+        Some(create_body("comfyui-minimax-h3", 1.0, false)),
+        true,
+    )
+    .await;
+    assert!(status >= 500, "{status} {body}");
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 1, "{:?}", log_of(&stack.mocks));
 }
 
 fn rewrite_session(dir: &Path, id: &str, deadline: &str, last_active: Option<&str>) {

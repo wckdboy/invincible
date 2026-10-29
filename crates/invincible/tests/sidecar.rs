@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -25,7 +27,7 @@ async fn the_sidecar_hydrates_then_drains_when_the_deadline_has_passed() {
     let app = axum::Router::new().fallback(s3).with_state(store.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-    let rclone = rclone_bin(&root);
+    let rclone = rclone_bin();
     let scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sidecar");
     let stdout_path = root.join("stdout.log");
     let stderr_path = root.join("stderr.log");
@@ -85,6 +87,58 @@ async fn the_sidecar_hydrates_then_drains_when_the_deadline_has_passed() {
         log.iter().any(|line| line.contains("AWS4-HMAC-SHA256") && line.contains("access-key-test")),
         "rclone did not sign an S3 request: {log:?}"
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn an_empty_workspace_does_not_wipe_a_nonempty_remote() {
+    let root = std::env::temp_dir().join(format!("invincible-sidecar-empty-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let store = Store::default();
+    store.put("projects/demo/workspace/note.txt", b"kept\n");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = axum::Router::new().fallback(s3).with_state(store.clone());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let rclone = rclone_bin();
+    let scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sidecar");
+    let stderr_path = root.join("stderr.log");
+    let stderr_file = std::fs::File::create(&stderr_path).unwrap();
+    let mut child = Command::new("bash")
+        .arg(scripts.join("drain.sh"))
+        .env("PATH", format!("{}:{}", rclone.parent().unwrap().display(), std::env::var("PATH").unwrap_or_default()))
+        .env("INVINCIBLE_SESSION_ID", "sess_demo")
+        .env("INVINCIBLE_PROJECT_ID", "demo")
+        .env("INVINCIBLE_BUCKET", "rent")
+        .env("INVINCIBLE_ENDPOINT", format!("http://127.0.0.1:{port}"))
+        .env("INVINCIBLE_ACCESS_KEY_ID", "access-key-test")
+        .env("INVINCIBLE_SECRET_ACCESS_KEY", "secret-key-test")
+        .env("INVINCIBLE_REGION", "auto")
+        .env("INVINCIBLE_WORKSPACE", &workspace)
+        .env_remove("INVINCIBLE_DRAIN_MAP")
+        .current_dir(&scripts)
+        .stdout(Stdio::from(stderr_file.try_clone().unwrap()))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("drain did not exit\n{}", std::fs::read_to_string(&stderr_path).unwrap_or_default());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let err = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+    assert!(!status.success(), "an empty drain must fail\n{err}");
+    assert_eq!(store.get("projects/demo/workspace/note.txt").as_deref(), Some(b"kept\n".as_slice()), "{err}");
+    assert!(store.get("sessions/sess_demo/drain-ok.json").is_none(), "drain-ok was written over kept data\n{err}");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -216,27 +270,53 @@ fn text(status: StatusCode, body: &str) -> Response {
     response
 }
 
-fn rclone_bin(root: &Path) -> PathBuf {
-    let cache = std::env::temp_dir().join("invincible-rclone-v1.68.2");
-    let name = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => "rclone-v1.68.2-linux-amd64",
-        ("linux", "aarch64") => "rclone-v1.68.2-linux-arm64",
-        ("macos", "x86_64") => "rclone-v1.68.2-osx-amd64",
-        ("macos", "aarch64") => "rclone-v1.68.2-osx-arm64",
-        (os, arch) => panic!("no pinned rclone build for {os}-{arch}; install rclone on PATH"),
-    };
+/// SHA-256 of the rclone v1.68.2 zip, from downloads.rclone.org/v1.68.2/SHA256SUMS.
+fn rclone_sha() -> (&'static str, &'static str) {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => {
+            ("rclone-v1.68.2-linux-amd64", "0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c")
+        }
+        ("linux", "aarch64") => {
+            ("rclone-v1.68.2-linux-arm64", "c6e9d4cf9c88b279f6ad80cd5675daebc068e404890fa7e191412c1bc7a4ac5f")
+        }
+        ("macos", "x86_64") => {
+            ("rclone-v1.68.2-osx-amd64", "cdc685e16abbf35b6f47c95b2a5b4ad73a73921ff6842e5f4136c8b461756188")
+        }
+        ("macos", "aarch64") => {
+            ("rclone-v1.68.2-osx-arm64", "323f387b32bcf9ddfc3874f01879a0b2689dbd91309beb8c3a4410db04d0c41f")
+        }
+        (os, arch) => panic!("no pinned rclone build for {os}-{arch}"),
+    }
+}
+
+fn sha256_file(path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(std::fs::read(path).unwrap_or_default());
+    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn rclone_bin() -> PathBuf {
+    let (name, sha) = rclone_sha();
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let cache = home.join(".cache/invincible/rclone-v1.68.2");
+    std::fs::create_dir_all(&cache).unwrap();
+    let zip = cache.join(format!("{name}.zip"));
     let bin = cache.join(name).join("rclone");
-    if bin.is_file() {
+    let stamp = cache.join(format!("{name}.sha256"));
+    if stamp.is_file()
+        && std::fs::read_to_string(&stamp).unwrap_or_default().trim() == sha
+        && bin.is_file()
+        && zip.is_file()
+        && sha256_file(&zip) == sha
+    {
         return bin;
     }
-    if let Some(on_path) = which("rclone") {
-        return on_path;
+    if !zip.is_file() || sha256_file(&zip) != sha {
+        let url = format!("https://downloads.rclone.org/v1.68.2/{name}.zip");
+        let status = Command::new("curl").args(["-fsSL", "-o"]).arg(&zip).arg(&url).status().expect("curl");
+        assert!(status.success(), "could not download rclone from {url}");
+        assert_eq!(sha256_file(&zip), sha, "rclone zip does not match the pinned digest");
     }
-    std::fs::create_dir_all(&cache).unwrap();
-    let zip = root.join("rclone.zip");
-    let url = format!("https://downloads.rclone.org/v1.68.2/{name}.zip");
-    let status = Command::new("curl").args(["-fsSL", "-o"]).arg(&zip).arg(&url).status().expect("curl");
-    assert!(status.success(), "could not download rclone from {url}");
     let extracted = Command::new("python3")
         .args(["-c", "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"])
         .arg(&zip)
@@ -251,10 +331,6 @@ fn rclone_bin(root: &Path) -> PathBuf {
         mode.set_mode(0o755);
         std::fs::set_permissions(&bin, mode).unwrap();
     }
+    std::fs::write(&stamp, sha).unwrap();
     bin
-}
-
-fn which(name: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH")
-        .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join(name)).find(|candidate| candidate.is_file()))
 }

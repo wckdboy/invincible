@@ -335,9 +335,8 @@ impl RemoteConfig {
 ///
 /// `enabled` defaults to false. A rental still needs `invincible-confirmed: 1` even when it is
 /// under these caps (spec/rent.md). The RunPod key and the R2 keys are files, mode 0600. An old
-/// `binary` key, and any other key this version does not know, is ignored and named in
-/// [RentConfig::ignored].
-#[derive(Clone, Debug)]
+/// `binary` key is ignored and named in [RentConfig::ignored]. Any other unknown key is an error.
+#[derive(Clone)]
 pub struct RentConfig {
     pub enabled: bool,
     /// Refuse an offer whose catalog price is above this, in USD per hour. Unset: no hourly cap.
@@ -358,9 +357,30 @@ pub struct RentConfig {
     pub runpod_url: Option<String>,
     /// Allow an `http://127.0.0.1` object-store endpoint. Off unless a test or a local mock needs it.
     pub insecure_endpoint: bool,
+    /// RunPod container-registry credential id (`registry` on create). Not logged.
+    pub container_registry_auth_id: Option<String>,
     pub store: StoreConfig,
-    /// Keys an older config still has (`binary`, and anything else unknown). Not used.
+    /// The legacy `binary` key, when present. Any other unknown `[rent]` key is an error.
     pub ignored: Vec<String>,
+}
+
+impl std::fmt::Debug for RentConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RentConfig")
+            .field("enabled", &self.enabled)
+            .field("max_usd_per_hour", &self.max_usd_per_hour)
+            .field("max_hours", &self.max_hours)
+            .field("monthly_cap_usd", &self.monthly_cap_usd)
+            .field("idle_minutes", &self.idle_minutes)
+            .field("require_regions", &self.require_regions)
+            .field("runpod_key_file", &self.runpod_key_file)
+            .field("runpod_url", &self.runpod_url)
+            .field("insecure_endpoint", &self.insecure_endpoint)
+            .field("container_registry_auth_id", &self.container_registry_auth_id.as_ref().map(|_| "[redacted]"))
+            .field("store", &self.store)
+            .field("ignored", &self.ignored)
+            .finish()
+    }
 }
 
 /// Object store for project hydrate and drain. Keys are files, not environment variables.
@@ -426,6 +446,7 @@ impl Default for RentConfig {
             runpod_key_file: default_runpod_key(),
             runpod_url: None,
             insecure_endpoint: false,
+            container_registry_auth_id: None,
             store: StoreConfig::default(),
             ignored: Vec::new(),
         }
@@ -452,6 +473,8 @@ struct RentRaw {
     runpod_url: Option<String>,
     #[serde(default)]
     insecure_endpoint: bool,
+    #[serde(default)]
+    container_registry_auth_id: Option<String>,
     #[serde(default)]
     store: StoreRaw,
     #[serde(default, flatten)]
@@ -507,6 +530,7 @@ impl<'de> Deserialize<'de> for RentConfig {
             runpod_key_file: raw.runpod_key_file,
             runpod_url: raw.runpod_url,
             insecure_endpoint: raw.insecure_endpoint,
+            container_registry_auth_id: raw.container_registry_auth_id,
             store: StoreConfig {
                 endpoint: raw.store.endpoint,
                 bucket: raw.store.bucket,
@@ -973,8 +997,12 @@ mod tests {
         assert!(Config::parse("[rent]\nmonthly_cap_usd = -1\n").unwrap_err().contains("monthly_cap_usd"));
         assert!(Config::parse("[rent]\nidle_minutes = 0\n").unwrap_err().contains("idle_minutes"));
         assert!(Config::parse("[rent]\nrequire_regions = [\"any\", \"EU\"]\n").unwrap_err().contains("only token"));
-        let old = Config::parse("[rent]\nenabled = false\nbinary = \"wckd\"\n").unwrap();
+        let old =
+            Config::parse("[rent]\nenabled = false\nbinary = \"wckd\"\ncontainer_registry_auth_id = \"reg_secret\"\n")
+                .unwrap();
         assert_eq!(old.rent.ignored, vec!["binary".to_owned()]);
+        assert_eq!(old.rent.container_registry_auth_id.as_deref(), Some("reg_secret"));
+        assert!(!format!("{old:?}").contains("reg_secret"), "{old:?}");
         let unknown = Config::parse("[rent]\nnot_a_cap = 1\n").unwrap_err();
         assert!(unknown.contains("unknown key") && unknown.contains("not_a_cap"), "{unknown}");
     }

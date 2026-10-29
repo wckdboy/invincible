@@ -16,8 +16,9 @@ spec:
     prefer_regions: ["EU"]
     require_regions: ["EU"]
   runtime:
-    image: "ghcr.io/wckdboy/invincible-rent-sidecar:edge"
-    entrypoint: []
+    # Sidecar layered on runpod/pytorch. /start.sh is that image's startup.
+    image: "ghcr.io/wckdboy/invincible-rent-dev-box:edge"
+    entrypoint: ["/start.sh"]
     env: {}
     ports:
       - name: ssh

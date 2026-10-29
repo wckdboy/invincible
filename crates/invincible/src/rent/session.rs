@@ -146,6 +146,8 @@ fn empty_null(text: &str) -> Value {
     if text.is_empty() { Value::Null } else { Value::String(text.to_owned()) }
 }
 
+static SAVE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct Store {
     dir: PathBuf,
 }
@@ -201,7 +203,8 @@ impl Store {
     pub fn save(&self, session: &Session) -> Result<(), String> {
         let path = self.path(&session.id);
         let bytes = serde_json::to_vec_pretty(session).map_err(|e| e.to_string())?;
-        let tmp = path.with_extension("tmp");
+        let n = SAVE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = self.dir.join(format!(".{}.{}.{n}.tmp", session.id, std::process::id()));
         {
             use std::io::Write;
             let mut options = std::fs::OpenOptions::new();

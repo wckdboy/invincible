@@ -16,10 +16,9 @@ spec:
     prefer_regions: ["EU"]
     require_regions: ["EU"]
   runtime:
-    # Sidecar image. The stock Comfy script is not in this image; the sidecar
-    # holds the session until drain when INVINCIBLE_WORKLOAD is empty.
-    image: "ghcr.io/wckdboy/invincible-rent-sidecar:edge"
-    entrypoint: []
+    # Sidecar layered on runpod/comfyui. /start.sh is that image's ComfyUI startup.
+    image: "ghcr.io/wckdboy/invincible-rent-comfyui:edge"
+    entrypoint: ["/start.sh"]
     env:
       COMFY_PORT: "8188"
     ports:

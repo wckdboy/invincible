@@ -120,6 +120,10 @@ pub fn start(config: &RentConfig, home: &Path) -> Result<Option<Arc<Gateway>>, S
     let runpod_key = secrets::read_secret(&secrets::resolve(home, &config.runpod_key_file))?;
     let access = secrets::read_secret(&secrets::resolve(home, &config.store.access_key_file))?;
     let secret = secrets::read_secret(&secrets::resolve(home, &config.store.secret_key_file))?;
+    let mut secret_values = vec![runpod_key.clone(), access.clone(), secret.clone()];
+    if let Some(id) = config.container_registry_auth_id.as_deref().filter(|id| !id.is_empty()) {
+        secret_values.push(id.to_owned());
+    }
     let provider = Arc::new(runpod::Client::new(config.runpod_url.as_deref(), runpod_key.clone())?);
     let objects = Arc::new(sync::S3::new(
         &config.store.endpoint,
@@ -132,13 +136,14 @@ pub fn start(config: &RentConfig, home: &Path) -> Result<Option<Arc<Gateway>>, S
         provider,
         objects,
         home: home.to_owned(),
-        secrets: vec![runpod_key, access.clone(), secret.clone()],
+        secrets: secret_values,
         bucket: config.store.bucket.clone(),
         endpoint: config.store.endpoint.clone(),
         access_key: access,
         secret_key: secret,
         idle_minutes: config.idle_minutes,
         monthly_cap_usd: config.monthly_cap_usd,
+        registry_auth: config.container_registry_auth_id.clone(),
     })?);
     let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
     let sweep = Arc::clone(&engine);

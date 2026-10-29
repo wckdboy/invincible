@@ -29,14 +29,7 @@ printf '{"session_id":"%s","at":"%s"}\n' "${INVINCIBLE_SESSION_ID}" "$(date -u +
 workload_pid=""
 if [[ -n "${INVINCIBLE_WORKLOAD:-}" ]]; then
   invincible_log "starting workload: ${INVINCIBLE_WORKLOAD}"
-  bash -lc "${INVINCIBLE_WORKLOAD}" &
-  workload_pid=$!
-  sleep 1
-  if ! kill -0 "${workload_pid}" 2>/dev/null; then
-    invincible_log "workload exited; holding the session until drain"
-    invincible_hold &
-    workload_pid=$!
-  fi
+  invincible_exec_workload "${INVINCIBLE_WORKLOAD}"
 else
   invincible_log "no INVINCIBLE_WORKLOAD; holding the session until drain"
   invincible_hold &
@@ -106,9 +99,13 @@ drain_and_exit() {
 trap drain_and_exit TERM INT
 
 invincible_log "session ${INVINCIBLE_SESSION_ID} running until ${INVINCIBLE_DEADLINE_AT:-manual stop}"
-while true; do
+while kill -0 "${workload_pid}" 2>/dev/null; do
   if should_drain; then
     drain_and_exit
   fi
   sleep "${INVINCIBLE_POLL_SEC:-10}"
 done
+if [[ "${draining}" != "1" ]]; then
+  invincible_log "workload exited; draining and stopping"
+  drain_and_exit
+fi

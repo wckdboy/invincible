@@ -1,4 +1,7 @@
-# Build the rent sidecar image. Push to GHCR from main. This is not a release.
+# Build one rent image per preset. Push to GHCR from main. This is not a release.
+# A new GHCR package is private. RunPod cannot pull it until the operator makes
+# the package public or sets [rent] container_registry_auth_id. This workflow
+# does not change package visibility.
 name: rent-sidecar
 
 on:
@@ -14,18 +17,56 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  image:
+  build:
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - file: sidecar/vllm.Dockerfile
+            tag: ghcr.io/wckdboy/invincible-rent-vllm:edge
+          - file: sidecar/comfyui.Dockerfile
+            tag: ghcr.io/wckdboy/invincible-rent-comfyui:edge
+          - file: sidecar/dev-box.Dockerfile
+            tag: ghcr.io/wckdboy/invincible-rent-dev-box:edge
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+        with:
+          context: sidecar
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          tags: ${{ matrix.tag }}
+
+  push:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - file: sidecar/vllm.Dockerfile
+            tag: ghcr.io/wckdboy/invincible-rent-vllm:edge
+          - file: sidecar/comfyui.Dockerfile
+            tag: ghcr.io/wckdboy/invincible-rent-comfyui:edge
+          - file: sidecar/dev-box.Dockerfile
+            tag: ghcr.io/wckdboy/invincible-rent-dev-box:edge
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
       - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -33,5 +74,7 @@ jobs:
       - uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: sidecar
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/wckdboy/invincible-rent-sidecar:edge
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ matrix.tag }}

@@ -19,14 +19,20 @@ When `[rent] enabled` is true, `invincible serve` opens the engine. It does not 
   the environment. With an EU ceiling the endpoint must be a Cloudflare R2 EU-jurisdiction host
   (`*.eu.r2.cloudflarestorage.com`). A loopback endpoint is refused unless
   `insecure_endpoint = true`.
-- Presets ship with the binary: `vllm`, `comfyui-minimax-h3`, `dev-box`. The image is the rent
-  sidecar (`ghcr.io/wckdboy/invincible-rent-sidecar`), whose entrypoint hydrates, runs
-  `INVINCIBLE_WORKLOAD`, and drains. Files in `$INVINCIBLE_HOME/rent/presets/*.yaml` add a preset.
-  A file that reuses a shipped id is ignored, and a symlink is not followed. The schema is wckd-gpu's.
+- Presets ship with the binary: `vllm`, `comfyui-minimax-h3`, `dev-box`. Each image layers the
+  sidecar on a real base (`vllm/vllm-openai`, `runpod/comfyui`, `runpod/pytorch`), pinned by
+  digest in `sidecar/`. The entrypoint hydrates, runs `INVINCIBLE_WORKLOAD`, and drains. If that
+  process exits, the container drains and stops. Files in `$INVINCIBLE_HOME/rent/presets/*.yaml`
+  add a preset. A file that reuses a shipped id is ignored, and a symlink is not followed.
+  The schema is wckd-gpu's. A new GHCR package is private. Make it public, or set
+  `container_registry_auth_id` to a RunPod registry credential id. The node sends that as
+  `registry` and does not log it.
 - Sessions live in `$INVINCIBLE_HOME/rent/state/*.json` (mode 0600). A restart loads them and the
   sweeper drains and deletes anything past its deadline, idle, or over the monthly cap.
-- The pod is named `invincible-<session>`. Its environment receives the project prefix and the
-  operator's object-store key so the image can hydrate and drain. See the tradeoff below.
+- The pod is named `invincible-<node id>-<session>`. The node id is a stable file
+  `$INVINCIBLE_HOME/rent/node-id`. Reconciliation only touches that prefix. The pod environment
+  receives the project prefix and the operator's object-store key so the image can hydrate and
+  drain. The workload process does not receive those keys. See the tradeoff below.
 
 Phases: `provisioning` → `hydrating` → `ready` → `draining` → `stopped`, or `failed`. A quote
 (`quoting`) writes nothing: no session file, no object, no pod.

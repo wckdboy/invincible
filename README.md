@@ -1279,6 +1279,11 @@ The key files are mode 0600 under `~/.invincible`. An old `binary = "wckd"` line
 Any other unknown `[rent]` key is an error. Autobot's `rent_gpu_start` shows the estimate and
 cannot confirm a rental by itself. The rent tools are off unless `[agent] tools` includes `rent`.
 
+The preset images are `ghcr.io/wckdboy/invincible-rent-vllm`, `invincible-rent-comfyui`, and
+`invincible-rent-dev-box` (`:edge` from `main`). A new GHCR package is private, and RunPod
+cannot pull it. Make the package public, or set `container_registry_auth_id` to the RunPod
+registry credential id. That id is not logged.
+
 ```sh
 invincible rent presets
 invincible rent projects

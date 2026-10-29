@@ -91,6 +91,8 @@ pub struct ProvisionRequest {
     pub env: BTreeMap<String, String>,
     pub data_center_ids: Vec<String>,
     pub entrypoint: Vec<String>,
+    /// RunPod registry credential id. Redacted: it is not a value to log.
+    pub registry: Option<String>,
 }
 
 impl std::fmt::Debug for ProvisionRequest {
@@ -110,6 +112,7 @@ impl std::fmt::Debug for ProvisionRequest {
             .field("gpu_id", &self.gpu_id)
             .field("env", &env)
             .field("data_center_ids", &self.data_center_ids)
+            .field("registry", &self.registry.as_ref().map(|_| "[redacted]"))
             .finish_non_exhaustive()
     }
 }
