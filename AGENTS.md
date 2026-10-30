@@ -47,6 +47,5 @@ against `block-buffer 0.10.4`, which arrives through `snow 0.10.0` (newest relea
 `blake2`/`sha2 0.10` → `digest 0.10`. The fix needs digest 0.11, so it moves when snow does.
 Expires 2027-01-31; osv-scanner prints the reason on every run.
 
-`.agents/lib/eng.py` also carries the upstream fix from agent-engineering PR #1 (osv named its
-lockfiles when the recursive walk finds nothing, which is what a `.worktrees/` checkout looks
-like). Drop that patch when kit 1.0.1 or later is published.
+The kit is 1.0.1, which scans osv inside `.worktrees/`; inside a worktree, inputs outside the
+enumerated lockfile set stay unscanned until the work is integrated here.
