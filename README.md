@@ -85,8 +85,9 @@ middle tier**, and later the regional one.
    open to frontier" becomes a number you track instead of a feeling. The scores do not drive
    routing (not built yet): today the route follows your rules.
 6. **Keeps the records you own.** Every request's route, model and token counts, in a signed
-   receipt and a hash-chained local log only you can read (mode 0600). Cost per request and
-   encryption at rest are planned. Nothing is reported anywhere.
+   receipt and a hash-chained local log only you can read (mode 0600). A GPU rental's estimated
+   cost is in its log entry; cost per request and encryption at rest are planned. Nothing is
+   reported anywhere.
 
 ### Not in v1
 

@@ -219,7 +219,7 @@ it cannot, it says so. The commands, today and planned:
 | Serve a model | `invincible model add hf:…`, `invincible serve` | `invincible model add --auto` picks engine and settings from the tune profile |
 | Know what it costs you | `invincible receipts`, `/v1/receipts/{id}`, the audit log | a `cost` line per receipt in tokens, seconds and, for the cloud, money |
 | Measure before believing | `invincible eval` | the gate wired into `tune` and `train` |
-| Find out what is wrong | `autobot doctor`; `invincible doctor` for the node: engines, devices, links, services, with what to do about each | none |
+| Find out what is wrong | `autobot doctor`; `invincible doctor` for the node: its home, config, engine, devices, identity, links, whether it answers and GPU rental, with what to do about each | none |
 | Run a model bigger than one box | `invincible join`, `invincible cluster status` | `invincible cluster plan <model>` shows the split and the expected speed before it runs |
 | Teach it your work | the eval history | `invincible train`, `invincible adapters` |
 | Understand a decision | reason codes in receipts | `invincible explain <receipt>`: why this route, this engine, these nodes, in sentences |
