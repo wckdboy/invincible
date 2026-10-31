@@ -478,6 +478,9 @@ pub struct Draft {
     /// client that cannot learn which machine answered cannot check the claim, and a dispatch
     /// receipt naming only the head reads as if the head did the work.
     pub dispatch: Option<Value>,
+    /// Fields for the audit line only, never the signed receipt (`rent` on a start or a stop).
+    /// A key that the entry already has is dropped by the log, so this cannot rename the caller.
+    pub audit_extra: Option<Value>,
     /// The request as bound: `{"api", "body"}` canonicalised and hashed, then dropped — a receipt
     /// holds the hash of the request, never the prompt.
     request_sha256: Option<String>,
@@ -508,6 +511,7 @@ impl Draft {
             client: None,
             api: "chat",
             dispatch: None,
+            audit_extra: None,
             request_sha256: None,
             answer: Sha256::new(),
             answer_bytes: 0,
@@ -660,6 +664,13 @@ impl Drop for Finisher {
                     let mut extra = json!({ "request_id": &draft.id });
                     if let Some(dispatch) = &draft.dispatch {
                         extra["dispatch"] = dispatch.clone();
+                    }
+                    if let Some(more) = &draft.audit_extra
+                        && let Some(fields) = more.as_object()
+                    {
+                        for (key, value) in fields {
+                            extra[key] = value.clone();
+                        }
                     }
                     if let Err(e) =
                         audit.append_tagged(&draft.caller, draft.client.as_deref(), draft.api, &envelope, Some(&extra))

@@ -10,3 +10,5 @@ __pycache__/
 # Local node state and keys: never commit
 /.invincible/
 *.key
+.agents/evidence/
+.worktrees/

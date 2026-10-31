@@ -4,8 +4,9 @@
 //! usage, for the receipt, where the API takes that. A backend that fails is marked down for a
 //! while, and the router sends its requests elsewhere (spec/routing.md, `cloud-down`).
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
@@ -21,6 +22,41 @@ use crate::redact::{StreamRestorer, Vault, redact_request, restore_response};
 pub const DOWN_FOR: Duration = Duration::from_secs(30);
 
 pub const REDACTED_HEADER: &str = "invincible-redacted";
+
+/// The cloud models a running gateway routes to. The list can be replaced while requests are in
+/// flight: each request holds the `Arc` it started with, so a provider added, changed or removed
+/// from the panel takes effect on the next request, without a restart.
+#[derive(Clone, Default)]
+pub struct Clouds {
+    models: Arc<RwLock<Vec<Arc<CloudModel>>>>,
+}
+
+impl Clouds {
+    pub fn new(models: Vec<CloudModel>) -> Self {
+        Self { models: Arc::new(RwLock::new(models.into_iter().map(Arc::new).collect())) }
+    }
+
+    pub fn list(&self) -> Vec<Arc<CloudModel>> {
+        self.models.read().expect("cloud models").clone()
+    }
+
+    pub fn find(&self, id: &str) -> Option<Arc<CloudModel>> {
+        self.models.read().expect("cloud models").iter().find(|model| model.id == id).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.models.read().expect("cloud models").len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Swaps the whole list. A request already running keeps the model it chose.
+    pub fn replace(&self, models: Vec<CloudModel>) {
+        *self.models.write().expect("cloud models") = models.into_iter().map(Arc::new).collect();
+    }
+}
 
 pub struct CloudModel {
     pub id: String,
@@ -316,8 +352,14 @@ pub struct Entry<'a> {
     pub base_url: &'a str,
     /// Relative to the config's directory.
     pub api_key_file: Option<&'a str>,
+    pub api_key_env: Option<&'a str>,
     pub context: Option<u64>,
     pub data_policy: &'a str,
+    /// Whether it takes images; None leaves it to the name ([guess_vision]).
+    pub vision: Option<bool>,
+    /// Whether a streamed request asks for its token usage; None leaves it to the preset
+    /// ([CloudModel::include_usage]).
+    pub include_usage: Option<bool>,
 }
 
 pub(crate) fn edit(
@@ -351,13 +393,85 @@ pub fn add_to_config(config: &std::path::Path, entry: &Entry) -> Result<(), Stri
         if let Some(file) = entry.api_key_file {
             table.insert("api_key_file", toml_edit::value(file));
         }
+        if let Some(var) = entry.api_key_env {
+            table.insert("api_key_env", toml_edit::value(var));
+        }
         if let Some(context) = entry.context {
             table.insert("context", toml_edit::value(i64::try_from(context).map_err(|e| e.to_string())?));
         }
         table.insert("data_policy", toml_edit::value(entry.data_policy));
+        if let Some(vision) = entry.vision {
+            table.insert("vision", toml_edit::value(vision));
+        }
+        if let Some(include_usage) = entry.include_usage {
+            table.insert("include_usage", toml_edit::value(include_usage));
+        }
         clouds.push(table);
         Ok(())
     })
+}
+
+/// Adds [entry], or replaces the entry with its id in place, keeping the config's other
+/// settings. This is the admin API's write; the CLI's `cloud add` uses [add_to_config].
+pub fn upsert_to_config(config: &std::path::Path, entry: &Entry) -> Result<(), String> {
+    edit(config, |doc| {
+        let clouds = doc
+            .entry("cloud")
+            .or_insert_with(|| toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()))
+            .as_array_of_tables_mut()
+            .ok_or("`cloud` is not a list of [[cloud]] tables")?;
+        let mut table = toml_edit::Table::new();
+        table.insert("id", toml_edit::value(entry.id));
+        table.insert("upstream_model", toml_edit::value(entry.upstream_model));
+        table.insert("base_url", toml_edit::value(entry.base_url));
+        if let Some(file) = entry.api_key_file {
+            table.insert("api_key_file", toml_edit::value(file));
+        }
+        if let Some(var) = entry.api_key_env {
+            table.insert("api_key_env", toml_edit::value(var));
+        }
+        if let Some(context) = entry.context {
+            table.insert("context", toml_edit::value(i64::try_from(context).map_err(|e| e.to_string())?));
+        }
+        table.insert("data_policy", toml_edit::value(entry.data_policy));
+        if let Some(vision) = entry.vision {
+            table.insert("vision", toml_edit::value(vision));
+        }
+        if let Some(include_usage) = entry.include_usage {
+            table.insert("include_usage", toml_edit::value(include_usage));
+        }
+        let index = clouds.iter().position(|t| t.get("id").and_then(|v| v.as_str()) == Some(entry.id));
+        match index {
+            Some(index) => {
+                clouds.remove(index);
+                clouds.insert(index, table);
+            }
+            None => clouds.push(table),
+        }
+        Ok(())
+    })
+}
+
+/// Builds the running models from a config. A key that cannot be read leaves its model disabled
+/// (the gateway warns), rather than failing the whole start: one rotated key is not an outage.
+pub fn models(config: &crate::config::Config, home: &Path) -> Vec<CloudModel> {
+    config
+        .cloud
+        .iter()
+        .map(|c| {
+            let policy = DataPolicy::parse(&c.data_policy);
+            let upstream = c.upstream_model.clone().unwrap_or_else(|| c.id.clone());
+            match c.key(home) {
+                Ok(key) => CloudModel::new(&c.id, &upstream, &c.base_url, key, c.context, policy),
+                Err(e) => {
+                    tracing::warn!(model = %c.id, "cloud backend disabled: {e}");
+                    CloudModel::new(&c.id, &upstream, &c.base_url, None, c.context, policy).disabled()
+                }
+            }
+            .with_vision(c.vision)
+            .with_include_usage(c.include_usage)
+        })
+        .collect()
 }
 
 /// Removes the `[[cloud]]` entry [id]; false when there is none.
@@ -531,8 +645,11 @@ mod config_tests {
             upstream_model: p.model.unwrap(),
             base_url: p.base_url,
             api_key_file: Some("keys/claude"),
+            api_key_env: None,
             context: p.context,
             data_policy: p.data_policy,
+            vision: None,
+            include_usage: None,
         };
         add_to_config(&config, &entry).unwrap();
         assert!(add_to_config(&config, &entry).is_err(), "ids are unique");

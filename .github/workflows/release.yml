@@ -134,8 +134,12 @@ jobs:
           mkdir -p "$dir"
           cp out/invincible out/autobot README.md LICENSE "$dir"/
           # Fixed order, owner and times in the archive.
-          if tar --version | grep -q GNU; then opts="--sort=name --owner=0 --group=0 --numeric-owner --mtime=@0"; else opts="--uid 0 --gid 0"; fi
-          tar $opts -cf - "$dir" | gzip -n > "$dir.tar.gz"
+          if tar --version | grep -q GNU; then
+            opts=(--sort=name --owner=0 --group=0 --numeric-owner --mtime=@0)
+          else
+            opts=(--uid 0 --gid 0)
+          fi
+          tar "${opts[@]}" -cf - "$dir" | gzip -n > "$dir.tar.gz"
           # They say the version they are released as.
           test "$("$dir/invincible" --version)" = "invincible $VERSION"
           test "$("$dir/autobot" --version)" = "autobot $VERSION"

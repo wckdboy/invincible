@@ -44,6 +44,16 @@ pub struct Options {
     /// The model that summarizes earlier conversations for `search_sessions` (None: the agent's
     /// own; `off`: no summaries) ([crate::recall]).
     pub recall_model: Option<String>,
+    /// A compact map of the coding project, built when the session starts ([crate::repo_map]).
+    /// None outside a coding session.
+    pub repo_map: Option<String>,
+    /// Reviewing a change rather than making one: read-only, findings only ([crate::for_review]).
+    pub review: bool,
+    /// A command run once after files changed, before the turn may finish ([crate::config::AgentConfig::check]).
+    pub check: Option<String>,
+    /// The project whose [crate::briefs] apply; None: the working directory. A thread sets it
+    /// to the repository it was branched from, so every worktree shares one brief.
+    pub project_root: Option<std::path::PathBuf>,
 }
 
 /// A bot's name.
@@ -246,6 +256,7 @@ impl Agent {
     ) -> Result<Outcome, String> {
         // What the trajectory notes: the models that answered and what was refused.
         let refused = std::sync::atomic::AtomicU64::new(0);
+        let changed = std::sync::atomic::AtomicBool::new(false);
         let models = std::sync::Mutex::new(Vec::<String>::new());
         let outer_events = events;
         let counted = |event: Event| {
@@ -258,6 +269,14 @@ impl Agent {
                     if !models.iter().any(|m| m == model) {
                         models.push((*model).to_owned());
                     }
+                }
+                Event::Change { .. } => {
+                    changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                Event::Output { name, .. }
+                    if matches!(*name, "write_file" | "edit_file" | "terminal" | "execute_code") =>
+                {
+                    changed.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 _ => {}
             }
@@ -298,6 +317,19 @@ impl Agent {
         session.cap = learned_cap(self.gateway.model(), session.budget);
         session.push(crate::images::message(text, images))?;
         let mut definitions = self.tools.definitions();
+        if self.tools.rents()
+            && let Ok((status, body)) = self.gateway.rent(reqwest::Method::GET, "/rent/health", None, false).await
+            && status == 200
+            && body["ok"] == true
+            && let Some(list) = definitions.as_array_mut()
+        {
+            for tool in crate::tools::rent_definitions() {
+                let name = tool["function"]["name"].as_str().unwrap_or("");
+                if self.tools.offers(name) {
+                    list.push(tool);
+                }
+            }
+        }
         if self.leads_team()
             && let Some(list) = definitions.as_array_mut()
         {
@@ -345,6 +377,7 @@ impl Agent {
         // Times the window was made smaller after the model said the request was too long.
         let mut shrunk = 0;
         let mut steps = 0;
+        let mut checks = 0;
         let mut sent: Vec<Value> = Vec::new();
         let mut loops = Loops::default();
         loop {
@@ -495,9 +528,49 @@ impl Agent {
             let calls = tool_calls(&mut message);
             session.push(message.clone())?;
             if calls.is_empty() {
-                record(&sent, &definitions, message.clone(), "answer", steps, &receipts);
-                let text = message["content"].as_str().unwrap_or_default().trim().to_owned();
-                return Ok(Outcome { text: if text.is_empty() { "(no answer)".to_owned() } else { text }, receipts });
+                // The verification gate: a coding turn that changed files runs the owner's check
+                // once more before it may finish. A failure is fed back as a user message; after
+                // one retry the turn stops with the failure visible instead of claiming success.
+                let mut check_note = String::new();
+                if !self.options.review
+                    && changed.load(std::sync::atomic::Ordering::Relaxed)
+                    && let Some(check) = self.options.check.as_deref().filter(|c| !c.trim().is_empty())
+                {
+                    let (passed, output) = self.check(check).await;
+                    events(Event::Tool(&format!("check: {check}")));
+                    events(Event::Output { name: "check", text: &output });
+                    if !passed {
+                        checks += 1;
+                        if checks < 2 {
+                            session.push(json!({
+                                "role": "user",
+                                "content": format!(
+                                    "The configured check `{check}` failed. Fix the project, then answer again. Its output:
+
+{output}"
+                                ),
+                            }))?;
+                            continue;
+                        }
+                        check_note = format!(
+                            "\n\nThe configured check `{check}` still fails; the turn stopped instead of claiming success."
+                        );
+                    }
+                }
+                record(
+                    &sent,
+                    &definitions,
+                    message.clone(),
+                    if check_note.is_empty() { "answer" } else { "failed" },
+                    steps,
+                    &receipts,
+                );
+                let mut text = message["content"].as_str().unwrap_or_default().trim().to_owned();
+                if text.is_empty() {
+                    text = "(no answer)".to_owned();
+                }
+                text.push_str(&check_note);
+                return Ok(Outcome { text, receipts });
             }
             // Hand-offs to the team in one reply work at the same time (bounded); the rest in order.
             let (delegated, own): (Vec<_>, Vec<_>) =
@@ -752,6 +825,10 @@ impl Agent {
         };
         if matches!(call, crate::tools::Call::Speak { .. } | crate::tools::Call::Image { .. }) {
             return self.make(session, &call, approver, grants, events).await;
+        }
+        if let crate::tools::Call::Rent(op) = &call {
+            events(Event::Tool(&format!("rent_gpu {arguments}")));
+            return crate::rent::run(&self.gateway, op, approver).await;
         }
         // A change in a directory with instructions of its own: those first, then the change.
         if matches!(call, crate::tools::Call::WriteFile { .. } | crate::tools::Call::EditFile { .. }) {
@@ -1076,6 +1153,51 @@ impl Agent {
         if ran { Ok(()) } else { Err(instead) }
     }
 
+    /// Run the owner's configured check where commands run. It is trusted: no approval, because
+    /// the owner wrote it in `[agent] check`; the sandbox still applies when confined.
+    async fn check(&self, command: &str) -> (bool, String) {
+        let mut child = match self.tools.shell_command(command).await {
+            Ok(child) => child,
+            Err(e) => return (false, format!("could not start: {e}")),
+        };
+        child
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let limit = self.tools.timeout().max(std::time::Duration::from_secs(600));
+        match tokio::time::timeout(limit, child.output()).await {
+            Err(_) => (false, format!("timed out after {} s", limit.as_secs())),
+            Ok(Err(e)) => (false, format!("could not run: {e}")),
+            Ok(Ok(output)) => {
+                let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.trim().is_empty() {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&stderr);
+                }
+                if text.trim().is_empty() {
+                    text = if output.status.success() {
+                        "check passed".to_owned()
+                    } else {
+                        format!("exit {}", output.status.code().unwrap_or(-1))
+                    };
+                }
+                const CAP: usize = 12 * 1024;
+                if text.len() > CAP {
+                    let mut cut = CAP;
+                    while cut > 0 && !text.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    text.truncate(cut);
+                    text.push_str("\n…");
+                }
+                (output.status.success(), text)
+            }
+        }
+    }
+
     pub fn system_prompt(&self) -> String {
         let persona = self.options.persona.as_ref();
         let who = match persona.and_then(|p| p.name.as_deref()) {
@@ -1096,7 +1218,8 @@ impl Agent {
              again, write down how with create_skill before you answer; when a skill you followed was \
              wrong or out of date, fix it with improve_skill. When you learn how the owner likes to \
              work (a preference, their tools, their style), keep it with update_user_profile. \
-             Work step by step, check results, and answer briefly in plain text.",
+             Work step by step, check results, and answer briefly in plain text. For a job with \
+             several steps, use `todo` to keep one plan and mark items done as they are.",
             os = std::env::consts::OS,
             dir = self.tools.workdir().display(),
         );
@@ -1149,7 +1272,14 @@ impl Agent {
             );
             prompt.push_str(&self.team.prompt());
         }
-        if let Some(branch) = self.tools.git_branch() {
+        if self.options.review {
+            prompt.push_str(
+                "\n\nReview mode: you are reviewing a change, not making one. You have read-only tools. Do not \
+                 edit, write, commit, or run commands that change anything. Read files when the diff is not \
+                 enough. Report only actionable findings, most severe first, each with file:line and a concrete \
+                 fix; say \"No actionable findings\" when there are none. Do not restate the diff.",
+            );
+        } else if let Some(branch) = self.tools.git_branch() {
             prompt.push_str(&format!(
                 "\n\nThe working directory is a git repository (branch {branch}). Work on it like a careful \
                  senior engineer: find your way with `search` and `find_files`, read the code before you change \
@@ -1158,9 +1288,39 @@ impl Agent {
                  the owner asks. When done, say what you changed and how you checked it, briefly."
             ));
         }
+        if self.options.repo_map.is_some() {
+            prompt.push_str(
+                "\n\nWork in a tight loop: read the files and tests you need in one pass, make the smallest \
+                 change, run the relevant test once, and stop as soon as it passes. Re-read or re-run only \
+                 after a failure, and keep unrelated files unchanged.",
+            );
+        }
+        if let Some(map) = &self.options.repo_map {
+            prompt.push_str(
+                "\n\nA map of the project, to orient you (a snapshot; use `search`, `find_files` and `read_file` \
+                 for the current truth):\n",
+            );
+            prompt.push_str(map);
+        }
         if let Some(notes) = self.tools.project_notes() {
             prompt.push_str("\n\nThe project's instructions for agents (follow them):\n");
             prompt.push_str(&notes);
+        }
+        if let Some(home) = self.tools.home() {
+            let root = self.options.project_root.as_deref().unwrap_or_else(|| self.tools.workdir());
+            if let Some(brief) = crate::briefs::prompt(home, root) {
+                prompt.push_str("\n\nThe owner's brief for this project (standing context; keep to it):\n");
+                prompt.push_str(&brief);
+            }
+            if let Some(plan) = crate::plans::prompt(home, &crate::tools::current_session()) {
+                prompt.push_str("\n\n");
+                prompt.push_str(&plan);
+            }
+        }
+        if let Some(home) = self.tools.home()
+            && let Some(variables) = crate::variables::prompt(home)
+        {
+            prompt.push_str(&variables);
         }
         if let Some(home) = self.tools.home() {
             if let Some(facts) = crate::memory::Memory::new(home).prompt() {

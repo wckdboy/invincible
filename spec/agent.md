@@ -43,8 +43,8 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `POST /v1/agent/bots/{name}/enable`, `POST /v1/agent/bots/{name}/disable` | | `{"ok": true, "enabled", "restart": false, "status": "running"\|"stopped"\|"error", "error"?}`: kept in the bot's config, and `autobot serve` starts or stops it at once (`restart: true` and no `status` from an agent that cannot). `404` (`unknown_bot`) |
 | `POST /v1/agent/bots/reload` | `{}` | `{"started", "stopped", "restarted", "persona", "failed": [{"name", "error"}], "running"}` (names): the running bots brought in line with their configuration now, as `autobot serve` does on its own within seconds of a change. `persona`: bots whose `SOUL.md` changed (read at every turn; nothing restarts). `409` (`not_configurable`) without bots to reload, `400` (`invalid_config`) when `config.toml` does not load |
 | `GET /v1/agent/sessions?bot=` | | `{"sessions": [{"id", "modified", "bot"}]}`: every bot's conversations (only `bot`'s with it), newest first; `modified` in Unix seconds |
-| `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...]}`: the conversation in the OpenAI chat shape; a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
-| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn), `"bot"` and `"images"` (below) | An event stream (below); `400` for an unknown personality, or images that are not taken (`model_cannot_see_images` when the model cannot see). `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
+| `GET /v1/agent/sessions/{id}` | | `{"id", "messages": [...], "plan"}`: the conversation in the OpenAI chat shape, and its plan (`null` when there is none); a user message with images keeps them by reference in `autobot_images` (`[{"path", "name", "sha256", "bytes", "mime", "width", "height"}]`), never their bytes |
+| `POST /v1/agent/sessions/{id}/turns` | `{"text": "..."}`, optional `"personality"` (a name from `/v1/agent/personalities`, or `"none"`, for this turn), `"bot"`, `"images"` (below) and `"delegated"` (below) | An event stream (below); `400` for an unknown personality, images that are not taken (`model_cannot_see_images` when the model cannot see), or a delegated scope out of bounds. `bot` says which bot answers a new conversation; one that exists keeps its bot. `404` (`unknown_bot`) when there is no such bot |
 | `POST /v1/agent/sessions/{id}/retry` | `{}` | An event stream, like a turn: the last turn leaves the conversation and its request (with its images) runs again; files it changed stay. `404` when there is no turn to retry, `409` while one runs |
 | `POST /v1/agent/sessions/{id}/fork` | `{"to"?, "at"?}` | `{"id", "messages"}`: a new conversation starting as this one did, up to message `at` (rounded to the end of that turn; all of it by default) |
 | `POST /v1/agent/sessions/{id}/steer` | `{"text": "..."}` | `{"ok": true}`: a message for the turn running in the session, taken in before the agent's next step; `409` (`no_turn`) when none is running |
@@ -73,6 +73,15 @@ Errors use the gateway's shape: `{"error": {"message": "...", "type": "...", "co
 | `GET /v1/agent/stats` | | `{"tasks", "open_sessions", "waiting"}`: what the process holds now (tasks on its runtime, conversations kept in memory, every bot's; questions waiting), for monitoring. At most 64 idle conversations per bot stay in memory; past that the one used longest ago is let go (it is on disk), and with it what the owner said "always" to in it |
 | `POST /v1/agent/alerts/test` | `{}` | A test alert, now, to where `[alerts]` sends them (`to`, else the default bot's home channel), whatever the limits and quiet hours: `{"sent": [{"to", "error"?}]}`; 409 `no_alerts` when there is no address (`autobot alerts test`) |
 | `GET /v1/agent/insights?days=&bot=` | | What the bot did over the last `days` (default 7), with `"bot"`: `{"days", "turns", "seconds", "calls", "tokens", "cost", "unpriced", "local_share": {"calls", "tokens"}, "tools": [{"name", "count"}], "projects": [{"name", "count"}], "models": [{"model", "calls", "tokens", "cloud"}], "failures": {"errors", "stopped", "tool_errors", "refused"}}` |
+| `GET /v1/agent/adapters` | | `{"adapters": [{"name", "label", "command", "installed", "version", "path", "auth", "login", "capabilities", "runnable", "note"}]}`: Autobot and the external coding CLIs detected on the machine; `runnable` is false for native Autobot. Detection is cached for five minutes |
+| `POST /v1/agent/adapters/{name}/run` | `{"task", "thread", "timeout_seconds"?, "stream"?}` | Runs the CLI in the thread's worktree with its own account and a scrubbed environment; the task is one argument, never a shell, and one run per worktree is allowed. Without `stream`: `{"adapter", "thread", "workdir", "exit_code", "seconds", "stdout", "stderr", "truncated"}` when it ends. With `"stream": true`: `adapter.started`, one `adapter.output` per complete line (`stream`: `stdout` or `stderr`, `delta`) and then `adapter.finished` (`exit_code`, `seconds`, `truncated`) or `adapter.error`. `409` when it is not installed, not logged in or busy; `504` after the timeout (30–7200 s, default 1800) |
+| `GET /v1/agent/plan?session=` | | `{"session", "items": [{"text", "status"}], "updated_at", "done", "total"}`: the task list the agent keeps with `todo` for that conversation; `items` is empty when there is none |
+| `GET /v1/agent/project?thread=` | | `{"root", "name", "brief", "characters", "updated_at", "check"}`: the owner's brief for the thread's repository (or the agent's working directory without `thread`), and the configured verification command |
+| `POST /v1/agent/project` | `{"brief", "thread"?}` | The same view: writes or replaces the brief; empty text removes it; `400` for a missing root or more than 64 KiB |
+| `DELETE /v1/agent/project?thread=` | | `{"ok": true, "removed": bool, "root"}`: forgets the brief; repository files are untouched |
+| `GET /v1/agent/delegations` | | `{"delegations": [{"id", "session", "bot", "task", "state", "retry_at", "retry_at_local", "created_at", "updated_at", "resumes", "max_resumes", "owner_controls", "max_nudges", "until", "last_error", "final_text"}], "paused", "running", "max_resumes"}`: paused delegated runs, newest first |
+| `POST /v1/agent/delegations/{id}/resume` | `{}` | `{"ok": true}`: makes a paused run due now; it resumes in the same conversation and worktree within seconds. `409` (`not_paused`) |
+| `POST /v1/agent/delegations/{id}/cancel` | `{}` | `{"ok": true}`: drops a paused run; a running one is left to finish. `409` (`not_paused`) |
 
 A session id is 1 to 64 characters from letters, digits, `-` and `_`. A turn on a session that is
 already running one answers `409` with type `session_busy`.
@@ -121,16 +130,24 @@ only>` (delivered only within 24 hours of that person's last message). A schedul
 ## Turn events
 
 `text/event-stream`: one `data: <json>` line per event, each followed by a blank line. Every event
-has a `type`:
+has `v` (the grammar version, currently `1`) and `type`. The grammar is additive: a client ignores
+types and fields it does not know; a field is never repurposed.
 
 | `type` | Fields | Meaning |
 |---|---|---|
+| `turn.started` | `session` | The turn began; the first event |
+| `text` | `delta` | Part of the answer, as the model streams it. `answer` repeats the complete text at the end, so a client can render live and replace it |
+| `reasoning` | `delta` | Part of the model's reasoning, when it streams it |
 | `tool` | `text` | A tool is about to run (`run: ls -la`, `write 120 bytes to /…`) |
+| `tool_output` | `name`, `text` | What a tool gave back, capped to 8 KiB in the event; the conversation has the full result |
+| `diff` | `text` | A change as a unified diff, before it is made, capped to 64 KiB |
+| `change` | `path`, `before_bytes`, `after_bytes` | The whole change, right after `diff`; byte lengths only (editors that hold files open use their own buffers) |
+| `usage` | `input`, `output`, `cached` | Tokens one model call used |
 | `refused` | `text` | A tool call was refused, by policy or by the owner |
 | `receipt` | `id`, `model`, `tier` | A model call finished; its signed receipt is at `GET /v1/receipts/{id}` |
-| `approval` | `id`, `text`, `action` | The agent waits for the owner: answer with `POST /v1/agent/approvals/{id}` |
+| `approval` | `id`, `text`, `action`, `bot`, `agent`? | The agent waits for the owner: answer with `POST /v1/agent/approvals/{id}` |
 | `member` | `agent`, `text` | A team member finished the task it was handed; `text` is its answer to the lead |
-| `answer` | `text`, `receipts` | The turn's answer; the last event of the turn |
+| `answer` | `text`, `receipts` | The turn's complete answer; the last event of the turn |
 | `error` | `text`, `code`? | The turn failed; the last event. `code` is `model_cannot_see_images` when the model the router picked refused the turn's images |
 | `kept` | `text` | After `answer`, when the turn was at a nudge: what the agent kept on its own (`profile: …`, `memory: …`), one event each. The stream stays open for it at most 30 seconds; the conversation is free for the next turn already |
 
@@ -159,6 +176,109 @@ Navigating the browser to a new site asks as a `fetch` of the site's origin.
 A question nobody answers within 10 minutes counts as `deny`. The turn goes on if the client
 disconnects. It is saved in the session, and its approvals can still be answered by id until they
 expire.
+
+## Delegated turns
+
+`"delegated": true` (or `{"max_nudges": 2, "stall_seconds": 900, "until": "…"}`) tells the agent
+it may keep the task moving while the owner is away. Delegation is bounded, and it never widens
+what the agent may do:
+
+- **Nudges.** When an answer asks a routine question (its last line is a question, or it asks the
+  owner to confirm), or stops with no answer, the run adds one user message telling the agent to
+  decide routine details itself and continue. `max_nudges` is 0–5 (default 2). An answer that
+  begins `DELEGATION: NEED_OWNER` stops the run for the owner instead.
+- **The owner's own instructions win.** If the original message says to wait, not to guess, to
+  ask first or to confirm, the run does **not** nudge: `delegate.started.questions` is `"owner"`,
+  and the first question ends the run for the owner. A nudge can never turn "wait for my answer"
+  into permission to decide.
+- **Approvals are declined, never accepted.** The approver returns the redirect "use a safer way
+  or skip this step and keep going"; the stream says `delegate.declined`. Once a run has declined
+  an approval it does not nudge the agent to work around it; it reports and stops for the owner.
+- **Stalls.** A turn that produces no event for `stall_seconds` (30–3600, default 900) is stopped
+  and nudged once; a running tool gets three times as long, because a build may be busy without
+  speaking. The stopped turn is closed cleanly (`close_dangling`) before the nudge.
+- **Usage limits.** A limit that clears within 300 seconds is waited out, with `delegate.waiting`
+  heartbeats every 30 seconds so the event stream stays open. A longer one ends the request with
+  `delegate.paused` and saves the run in `$AUTOBOT_HOME/delegations.json`; `autobot serve` (and
+  the API) resumes it at `retry_at` in the same conversation and worktree, without a client, up
+  to five automatic resumes. A limit with no retry time waits 30 minutes. The event carries
+  `job_id`, `auto_resume` and `resumes`; the panel's **Delegations** view shows the queue and can
+  resume or cancel a paused run. A newer delegated request in the same conversation replaces an
+  older paused one.
+- **Budget.** One request runs at most 8 turns, whatever the nudges and limit waits.
+- **Webhook.** With `[delegate] webhook` set, one JSON POST goes out when the run finishes or
+  stops: `{"v":1,"event":"delegate.finished"|"delegate.stopped","bot","session","text","nudges",
+  "declined","turns","seconds","waiting_on_owner","owner_controls","paused","retry_at",
+  "retry_at_local","receipts","at"}`. With `webhook_secret_file` (or `$AUTOBOT_HOME/delegate-webhook.secret`), the body is
+  signed as `X-Invincible-Signature: sha256=<HMAC-SHA256>`; the POST runs on its own task, so a
+  slow endpoint never delays the answer.
+
+The events are additive to the turn grammar:
+
+| `type` | Fields | Meaning |
+|---|---|---|
+| `delegate.started` | `max_nudges`, `stall_seconds`, `until`?, `approvals`, `questions` | The run began; `approvals` is `"declined"`; `questions` is `"routine"` or `"owner"` |
+| `delegate.nudge` | `number`, `of`, `reason`, `text` | The run added a turn; `text` is the user message |
+| `delegate.declined` | `text`, `action`, `reason`, `redirect`, `bot` | A safety check was declined |
+| `delegate.stalled` | `seconds` | A turn produced nothing for that long and was stopped |
+| `delegate.waiting` | `seconds`, `reason` | Waiting out a usage limit; sent again as time passes |
+| `delegate.paused` | `reason`, `retry_after_seconds`?, `retry_at`?, `retry_at_local`?, `job_id`, `auto_resume`, `resumes` | The limit is longer than the run waits; the saved job resumes by itself at `retry_at` |
+| `delegate.finished` | `nudges`, `declined`, `turns`, `seconds`, `waiting_on_owner` | The run's summary, before `answer` |
+| `delegate.stopped` | `reason`, `text`, `nudges`, `declined` | The run failed; followed by `error`. `reason` is `stalled`, `usage_limit` or `error` |
+
+`answer` is still the last event of a successful run and `error` the last of a failed one. The
+receipts in `answer` cover every model call the run made.
+
+## Variables, subscriptions and providers
+
+**Variables** are operator-owned, non-secret context. They are stored in
+`$AUTOBOT_HOME/variables.json` and appended to the system prompt as data, never as instructions:
+`project.name: checkout`, `deploy.host: staging.example.org`. A key is letters, digits, `_`, `-`
+and `.`; a value is one line. Secrets belong in the secret files, not here.
+
+**Subscriptions** are a ledger of plans and renewals, in `$AUTOBOT_HOME/subscriptions.json`: name,
+provider, plan, status (`active`, `paused`, `cancelled`), monthly cost and currency, renewal date,
+seats, URL and notes. The API returns totals per currency and the renewals in the next 30 days.
+Nothing here is sent to a provider.
+
+**Providers** lists Autobot and the external coding CLIs detected on the machine: `codex`,
+`claude`, `opencode`, `cursor-agent`, `hermes` and `pi`, with their versions, paths, auth kind
+(`gateway` for Autobot, `account` for the CLIs) and login hint. Detection is read-only and cached
+for five minutes; a missing CLI is simply not installed.
+
+**Adapters** run an installed CLI in a thread's worktree. The child's environment is rebuilt from
+a short allowlist (`PATH`, `HOME`, locale and the CLI's own config dirs); gateway, provider,
+GitHub and Autobot tokens are never inherited. Its login is checked first when the CLI has a
+status command, and one run per worktree is allowed. The CLI talks to its own provider, so
+Invincible cannot receipt those calls and the answer is its raw stdout and stderr (capped at
+128 KiB and 32 KiB). A run takes the task as one argument, never through a shell. With
+`"stream": true` the API forwards complete output lines as `adapter.output` events while the CLI
+runs, which is what the panel shows; the process keeps going if the client disconnects, and the
+worktree keeps its changes.
+
+**Secret files** are the connector tokens and passwords in the bot's home. `GET
+/v1/agent/secrets` returns their names, sizes, update times and kind, never their values;
+`POST /v1/agent/secrets` writes one (`{"file", "value"}`, a plain name, mode 0600) and `DELETE
+/v1/agent/secrets/{name}` removes one. A value is never returned or logged.
+
+## Project brief and plan
+
+A large repository needs context that outlives a conversation, and a long task needs a plan that
+outlives a turn.
+
+**The brief** is the owner's standing context for a project, stored in
+`$AUTOBOT_HOME/briefs.json` (mode 0600) and keyed by canonical root. A thread uses its repository
+root, so every worktree shares one brief even before it is committed; the default project is the
+agent's working directory. The brief is capped at 64 KiB and carried in the system prompt on
+every step, labelled as the owner's. The repository's `AGENTS.md`, `CLAUDE.md` and
+`.autobot/AGENTS.md` are still read from the checkout; a brief complements them rather than
+replacing them. The panel's **Project** page edits it per project.
+
+**The plan** is the latest `todo` list of a conversation, stored in
+`$AUTOBOT_HOME/sessions/<id>.plan.json` and replaced whole every time the tool is called (empty
+clears it, at most 100 items, 500 characters each). `todo` is in the `plan` tool group. The list
+is carried in the system prompt on every step, is shown beside the conversation, survives a
+restart and is seen again by a resumed delegated run. `…/reset` clears it; `…/fork` copies it.
 
 ## Scheduled tasks
 
@@ -193,6 +313,7 @@ to the model and run, whatever the approval mode, and still under the unattended
 | `home` | `home` (Home Assistant, where it is set up) |
 | `schedule` | `schedule_task`, `list_schedules`, `cancel_schedule` |
 | `media` | `speak`, `generate_image`, where the node has a speech or image backend (one off the machine asks like a cloud model, and is refused unattended) |
+| `rent` | `rent_gpu_offers`, `rent_gpu_start`, `rent_gpu_status`, `rent_gpu_stop`, only when `[agent] tools` includes `rent` and `/v1/rent/health` answers. Off for channel, delegated and scheduled runs unless that list names them. `start` shows the node's 409 estimate and sends `invincible-confirmed: 1` only after the owner approves that estimate. The model has no confirm argument. Trust mode and `autobot eval` do not skip the ask. `stop` does not ask. |
 | `vault` | none: this machine has no such tool |
 
 No `tools` means every tool, as for schedules made here; a schedule from a device must name its

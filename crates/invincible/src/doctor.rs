@@ -193,6 +193,78 @@ fn check_home(home: &Path) -> Check {
     }
 }
 
+/// When rent is on: the RunPod key file and the R2 config have to be in place, and when the node
+/// is up `/v1/rent/health` has to answer. The doctor does not print the keys.
+fn check_rent(home: &Path, cfg: &Config, node_up: bool) -> Check {
+    if !cfg.rent.enabled {
+        return Check::ok("rent", "off");
+    }
+    let ignored =
+        if cfg.rent.ignored.is_empty() { String::new() } else { format!(" (ignored {})", cfg.rent.ignored.join(", ")) };
+    if let Err(detail) = rent_secrets(home, cfg) {
+        return Check::fail(
+            "rent",
+            format!("{detail}{ignored}"),
+            Some("see spec/rent.md: mode-0600 key files under secrets/, and [rent.store]"),
+        );
+    }
+    if !node_up {
+        return Check::warn(
+            "rent",
+            format!(
+                "the provider key and R2 config are in place{ignored}; the node is not answering, so rent health was not checked"
+            ),
+            Some("invincible serve"),
+        );
+    }
+    let token = fsutil::read_optional(&home.join("token")).ok().flatten();
+    let Some(token) = token.filter(|token| !token.trim().is_empty()) else {
+        return Check::warn(
+            "rent",
+            format!(
+                "the provider key and R2 config are in place{ignored}; there is no API token, so rent health was not checked"
+            ),
+            Some("invincible serve"),
+        );
+    };
+    let token = token.trim().to_owned();
+    let listen = cfg.listen;
+    let runtime = tokio::runtime::Runtime::new();
+    let probe = runtime.ok().and_then(|runtime| {
+        runtime.block_on(async {
+            crate::engine::health_client()
+                .get(format!("http://{listen}/v1/rent/health"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .ok()
+        })
+    });
+    match probe {
+        Some(response) if response.status().is_success() => {
+            Check::ok("rent", format!("in-process engine is healthy{ignored}"))
+        }
+        Some(response) => Check::fail(
+            "rent",
+            format!("rent health returned {}{ignored}", response.status()),
+            Some("the node log says why; keys live in the files [rent] names"),
+        ),
+        None => Check::fail(
+            "rent",
+            "the node is up but /v1/rent/health did not answer",
+            Some("invincible serve, then the node log"),
+        ),
+    }
+}
+
+/// The key files exist, are mode 0600, and the store endpoint is allowed. Does not return the secrets.
+fn rent_secrets(home: &Path, cfg: &Config) -> Result<(), String> {
+    if cfg.rent.store.endpoint.is_empty() || cfg.rent.store.bucket.is_empty() {
+        return Err("[rent.store] endpoint and bucket are required".to_owned());
+    }
+    crate::rent::secrets_ready(home, &cfg.rent)
+}
+
 /// `Ok(config)`, or the failed check's parts.
 fn check_config(path: &Path) -> Result<Config, (State, String, Option<String>)> {
     match fsutil::read_optional(path) {
@@ -386,6 +458,9 @@ fn check_node_state(home: &Path, cfg: &Config) -> Vec<Check> {
         Some(true) => checks.push(Check::ok("node", format!("answering on http://{listen}"))),
         _ => checks.push(Check::warn("node", format!("not answering on http://{listen}"), Some("invincible serve"))),
     }
+
+    // --- rent --------------------------------------------------------------------------------
+    checks.push(check_rent(home, cfg, health == Some(true)));
 
     // --- room to work ------------------------------------------------------------------------
     if let Some(free) = free_bytes(home) {

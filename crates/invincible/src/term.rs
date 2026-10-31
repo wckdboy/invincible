@@ -7,6 +7,8 @@ pub fn read_hidden(prompt: &str) -> Result<String, String> {
     let secret = if std::io::stdin().is_terminal() {
         eprint!("{prompt}");
         let _ = std::io::stderr().flush();
+        // Fixed, non-interpolated script: no caller data reaches the shell.
+        // nosemgrep: agents.config.eng-rust-command-shell
         let out = std::process::Command::new("sh")
             .arg("-c")
             .arg("trap 'stty echo; exit 130' INT TERM; stty -echo; IFS= read -r line; status=$?; stty echo; printf '%s' \"$line\"; exit $status")

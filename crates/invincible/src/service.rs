@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 pub const GATEWAY: &str = "sh.invincible.gateway";
 pub const AGENT: &str = "sh.invincible.autobot";
@@ -317,17 +318,25 @@ pub fn install(platform: Platform, home: &Path, services: &[Service]) -> Result<
             let domain = format!("gui/{}", uid()?);
             for (service, changed) in services.iter().zip(changed) {
                 let file = service.path(platform, home).display().to_string();
-                let loaded = loaded(&domain, service.name);
-                if loaded && !changed {
+                let was_loaded = loaded(&domain, service.name);
+                if was_loaded && !changed {
                     done.push(format!("{} already {}", service.name, state_word(service.kind)));
                     continue;
                 }
-                // Replace a loaded copy; "not loaded" is fine.
-                if loaded {
+                // Replace a loaded copy; "not loaded" is fine. `bootout` returns before launchd
+                // has finished tearing the job down, and a `bootstrap` in that window fails
+                // with EIO, so wait for the label to actually go and retry the bootstrap.
+                if was_loaded {
                     let _ = run("launchctl", &["bootout", &format!("{domain}/{}", service.name)]);
+                    for _ in 0..50 {
+                        if !loaded(&domain, service.name) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
-                run("launchctl", &["bootstrap", &domain, &file])?;
-                done.push(format!("{} {}", if loaded { "reloaded" } else { "started" }, service.name));
+                bootstrap(&domain, &file)?;
+                done.push(format!("{} {}", if was_loaded { "reloaded" } else { "started" }, service.name));
             }
         }
         Platform::SystemdUser | Platform::SystemdSystem => {
@@ -415,8 +424,14 @@ pub fn restart(platform: Platform, home: &Path, labels: &[&str]) -> Vec<String> 
         }
         let ok = match platform {
             Platform::Launchd => uid().is_ok_and(|uid| {
-                let target = format!("gui/{uid}/{label}");
-                loaded(&format!("gui/{uid}"), label) && run("launchctl", &["kickstart", "-k", &target]).is_ok()
+                let domain = format!("gui/{uid}");
+                let target = format!("{domain}/{label}");
+                if loaded(&domain, label) {
+                    run("launchctl", &["kickstart", "-k", &target]).is_ok()
+                } else {
+                    // Installed, but a failed reload left it unloaded: start it from its file.
+                    bootstrap(&domain, &path(platform, home, label).display().to_string()).is_ok()
+                }
             }),
             Platform::SystemdUser | Platform::SystemdSystem => {
                 let unit = format!("{}.service", unit(label));
@@ -514,6 +529,21 @@ pub fn parse_systemd_show(text: &str) -> (Option<String>, Option<u64>) {
         _ => None,
     };
     (last, field("NRestarts").and_then(|v| v.parse().ok()))
+}
+
+/// `launchctl bootstrap`, retried: a just-removed job may still be settling.
+fn bootstrap(domain: &str, file: &str) -> Result<(), String> {
+    let mut last = String::new();
+    for attempt in 0..5 {
+        match run("launchctl", &["bootstrap", domain, file]) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = e;
+                std::thread::sleep(Duration::from_millis(200 * (attempt + 1)));
+            }
+        }
+    }
+    Err(last)
 }
 
 fn loaded(domain: &str, label: &str) -> bool {

@@ -3,6 +3,7 @@
 
 pub mod acp;
 pub mod actions;
+pub mod adapters;
 pub mod agent;
 pub mod alerts;
 pub mod api;
@@ -10,12 +11,15 @@ pub mod approval;
 pub mod backup;
 pub mod board;
 pub mod bots;
+pub mod briefs;
 pub mod browser;
 pub mod channel;
 pub mod commands;
 pub mod config;
 pub mod context;
 pub mod cron;
+pub mod delegate;
+pub mod delegations;
 pub mod diff;
 pub mod discord;
 pub mod docker;
@@ -44,12 +48,17 @@ pub mod migrate;
 pub mod net;
 pub mod pairing;
 pub mod personality;
+pub mod plans;
 pub mod procs;
 pub mod profile;
+pub mod providers;
 pub mod recall;
+pub mod rent;
+pub mod repo_map;
 pub mod sandbox;
 pub mod script;
 pub mod search;
+pub mod secrets;
 pub mod service;
 pub mod session;
 pub mod settings;
@@ -58,11 +67,14 @@ pub mod signal;
 pub mod skills;
 pub mod slack;
 pub mod ssh;
+pub mod subscriptions;
 pub mod team;
 pub mod telegram;
+pub mod threads;
 pub mod tools;
 pub mod trajectory;
 pub mod tui;
+pub mod variables;
 pub mod voice;
 pub mod whatsapp;
 
@@ -121,6 +133,9 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
             return Err(format!("[agent] tools: unknown group {unknown:?}"));
         }
         tools = tools.only(tools::tools_for(groups));
+    } else {
+        // Every group except rent, which spends money and is named explicitly (`tools = [..., "rent"]`).
+        tools = tools.with_rent(false);
     }
     if let Some(unknown) = config.agent.disabled_tools.iter().find(|t| settings::group_of(t).is_none()) {
         return Err(format!("[agent] disabled_tools: unknown tool {unknown:?}"));
@@ -139,6 +154,7 @@ pub fn agent_in(config: &Config, home: &Path, workdir: Option<PathBuf>) -> Resul
             nudge_every: config.agent.nudge_every,
             persona: persona(config),
             recall_model: config.agent.recall_model.clone(),
+            check: config.agent.check.clone(),
             ..Default::default()
         },
     })
@@ -157,6 +173,18 @@ pub fn persona(config: &Config) -> Option<agent::Persona> {
 pub fn for_coding(agent: &mut agent::Agent) {
     agent.max_steps = agent.max_steps.max(100);
     agent.team = std::sync::Arc::new((*agent.team).clone().with_explorer());
+    agent.options.repo_map = crate::repo_map::render(agent.tools.workdir(), 4096);
+}
+
+/// Reviewing a change (`autobot review`): read-only tools, no team, no edits, and the review
+/// instructions in the system prompt.
+pub fn for_review(agent: &mut agent::Agent) {
+    agent.max_steps = 24;
+    agent.team = std::sync::Arc::new(team::Team::default());
+    agent.tools = agent.tools.clone().only(tools::tools_for(&["files-read".to_owned()]));
+    agent.approvals.mode = config::ApprovalMode::Ask;
+    agent.options.repo_map = crate::repo_map::render(agent.tools.workdir(), 4096);
+    agent.options.review = true;
 }
 
 /// Switches [agent] to the model [id] of [models] (what the gateway serves): a cloud model lets

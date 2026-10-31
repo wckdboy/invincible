@@ -29,6 +29,7 @@ use invincible::remote::Pairing;
 use invincible::server::{AppState, LOOPBACK_METER_BODY, MAX_REQUEST, METER_BODY, app, device_app};
 use invincible_policy::{Egress, NetworkMode, NodeSettings};
 use serde_json::{Value, json};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const TOKEN: &str = "operator-token";
 /// The device every request on `Node::device` speaks as: paired with every capability, so the
@@ -144,6 +145,37 @@ fn chat(bytes: usize, hold_ms: u64) -> Value {
         body["hold_ms"] = json!(hold_ms);
     }
     body
+}
+
+/// A raw HTTP/1.1 POST with [content_length] declared and no body sent, read to the close. It
+/// lets a test see a refusal that happens before the body is read, without a client-side race.
+async fn raw(url: &str, path: &str, content_length: usize) -> String {
+    let addr = url.strip_prefix("http://").unwrap();
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!(
+        "POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+         Content-Length: {content_length}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let read = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut chunk)).await;
+        let Ok(Ok(n)) = read else { break };
+        if n == 0 {
+            break;
+        }
+        response.extend_from_slice(&chunk[..n]);
+    }
+    String::from_utf8_lossy(&response).into_owned()
+}
+
+fn status_line(response: &str) -> &str {
+    response.lines().next().unwrap_or_default()
+}
+
+fn response_body(response: &str) -> &str {
+    response.split_once("\r\n\r\n").map_or("", |(_, body)| body)
 }
 
 fn client() -> reqwest::Client {
@@ -330,14 +362,15 @@ async fn an_unauthorised_device_is_refused_404_before_its_body_is_judged() {
     // 503. Capability is decided first, so the answer is the 404 of a path that does not exist —
     // and the node neither reserves a byte for it nor reads it.
     let node = node(8 << 20).await;
-    let over = chat(MAX_REQUEST + 1, 0);
-    let refused = client().post(format!("{}/v1/chat/completions", node.guest)).json(&over).send().await.unwrap();
-    assert_eq!(refused.status(), 404, "an un-granted route is not a 413 or a 503");
+    // Headers only: a 33 MiB Content-Length with no body. A server that judged the size or the
+    // budget first would wait for the body (or answer 413/503); this one must answer 404 and
+    // close. Sending the body over a real socket races the refusal and can surface as a reset.
+    let refused = raw(&node.guest, "/v1/chat/completions", MAX_REQUEST + 1).await;
+    assert!(status_line(&refused).contains("404"), "an un-granted route is not a 413 or a 503: {refused}");
     // Byte for byte what a path that was never mounted answers.
-    let refused = refused.text().await.unwrap();
-    let unknown = client().get(format!("{}/v1/nothing-here", node.guest)).send().await.unwrap();
-    assert_eq!(unknown.status(), 404);
-    assert_eq!(refused, unknown.text().await.unwrap(), "an un-granted route answers like an unknown one");
+    let unknown = raw(&node.guest, "/v1/nothing-here", 0).await;
+    assert!(status_line(&unknown).contains("404"), "{unknown}");
+    assert_eq!(response_body(&refused), response_body(&unknown), "an un-granted route answers like an unknown one");
     assert_eq!(node.engine_hits.load(Ordering::SeqCst), 0, "an unauthorised body reached the engine");
     assert_eq!(node.state.buffered.held(), 0, "an unauthorised body was charged to the ceiling");
 

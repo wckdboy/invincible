@@ -1,10 +1,12 @@
 //! The node's configuration: `$INVINCIBLE_HOME/config.toml` (default `~/.invincible`).
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use invincible_policy::{Egress, NetworkMode, NodeSettings};
 use serde::Deserialize;
+use serde::de::Error as DeError;
 
 use crate::fsutil;
 
@@ -53,6 +55,9 @@ pub struct Config {
     /// Image generation backends: `POST /v1/images/generations` ([crate::synth]).
     #[serde(default)]
     pub images: Vec<MediaConfig>,
+    /// Speech-to-text backends on this machine: `POST /v1/audio/transcriptions` ([crate::transcribe]).
+    #[serde(default)]
+    pub transcription: Vec<MediaConfig>,
     /// This node as a shard for paired heads (spec/cluster.md).
     #[serde(default)]
     pub cluster: ClusterConfig,
@@ -60,6 +65,10 @@ pub struct Config {
     /// them. Off unless the operator turns it on.
     #[serde(default)]
     pub discovery: DiscoveryConfig,
+    /// Cloud GPU rental, in-process (spec/rent.md). Off unless enabled:
+    /// starting it can spend money, and only after an explicit confirmation.
+    #[serde(default)]
+    pub rent: RentConfig,
 }
 
 /// ```toml
@@ -312,6 +321,268 @@ impl RemoteConfig {
     }
 }
 
+/// ```toml
+/// [rent]
+/// enabled = false
+/// max_usd_per_hour = 1.0          # omit: no hourly cap
+/// max_hours = 8                   # a single rental; at most 24
+/// monthly_cap_usd = 50            # omit: no monthly cap
+/// idle_minutes = 15               # a ready pod with no status read for this long is stopped
+/// require_regions = ["EU"]        # ceiling; a request may narrow it, not clear it
+/// runpod_key_file = "secrets/runpod.key"
+/// runpod_url = "https://api.runpod.io"   # omit for the public API
+///
+/// [rent.store]
+/// endpoint = "https://<account>.eu.r2.cloudflarestorage.com"
+/// bucket = "invincible"
+/// access_key_file = "secrets/r2.access"
+/// secret_key_file = "secrets/r2.secret"
+/// ```
+///
+/// `enabled` defaults to false. A rental still needs `invincible-confirmed: 1` even when it is
+/// under these caps (spec/rent.md). The RunPod key and the R2 keys are files, mode 0600. An old
+/// `binary` key is ignored and named in [RentConfig::ignored]. Any other unknown key is an error.
+#[derive(Clone)]
+pub struct RentConfig {
+    pub enabled: bool,
+    /// Refuse an offer whose catalog price is above this, in USD per hour. Unset: no hourly cap.
+    pub max_usd_per_hour: Option<f64>,
+    /// Refuse a rental longer than this. The engine itself refuses anything above 24.
+    pub max_hours: f64,
+    /// Refuse a rental that would take this UTC month's estimates over this, in USD. Unset: no monthly cap.
+    pub monthly_cap_usd: Option<f64>,
+    /// Stop a ready or hydrating pod that nobody has asked about for this many minutes.
+    pub idle_minutes: u64,
+    /// Hard region filter. Default `EU`. A request may only narrow this list; it cannot clear
+    /// it or name a region outside it. An explicit empty list here is the operator turning the
+    /// filter off. `any` or `*` must be the only token and does the same.
+    pub require_regions: Vec<String>,
+    /// RunPod API key. Relative to `$INVINCIBLE_HOME`, or absolute. Mode 0600.
+    pub runpod_key_file: PathBuf,
+    /// RunPod API origin. Unset: `https://api.runpod.io`.
+    pub runpod_url: Option<String>,
+    /// Allow an `http://127.0.0.1` object-store endpoint. Off unless a test or a local mock needs it.
+    pub insecure_endpoint: bool,
+    /// RunPod container-registry credential id (`registry` on create). Not logged.
+    pub container_registry_auth_id: Option<String>,
+    pub store: StoreConfig,
+    /// The legacy `binary` key, when present. Any other unknown `[rent]` key is an error.
+    pub ignored: Vec<String>,
+}
+
+impl std::fmt::Debug for RentConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RentConfig")
+            .field("enabled", &self.enabled)
+            .field("max_usd_per_hour", &self.max_usd_per_hour)
+            .field("max_hours", &self.max_hours)
+            .field("monthly_cap_usd", &self.monthly_cap_usd)
+            .field("idle_minutes", &self.idle_minutes)
+            .field("require_regions", &self.require_regions)
+            .field("runpod_key_file", &self.runpod_key_file)
+            .field("runpod_url", &self.runpod_url)
+            .field("insecure_endpoint", &self.insecure_endpoint)
+            .field("container_registry_auth_id", &self.container_registry_auth_id.as_ref().map(|_| "[redacted]"))
+            .field("store", &self.store)
+            .field("ignored", &self.ignored)
+            .finish()
+    }
+}
+
+/// Object store for project hydrate and drain. Keys are files, not environment variables.
+#[derive(Clone, Debug)]
+pub struct StoreConfig {
+    pub endpoint: String,
+    pub bucket: String,
+    pub region: String,
+    pub access_key_file: PathBuf,
+    pub secret_key_file: PathBuf,
+}
+
+fn default_runpod_key() -> PathBuf {
+    PathBuf::from("secrets/runpod.key")
+}
+
+fn default_access_key() -> PathBuf {
+    PathBuf::from("secrets/r2.access")
+}
+
+fn default_secret_key() -> PathBuf {
+    PathBuf::from("secrets/r2.secret")
+}
+
+fn default_store_region() -> String {
+    "auto".to_owned()
+}
+
+fn default_max_hours() -> f64 {
+    24.0
+}
+
+fn default_idle_minutes() -> u64 {
+    15
+}
+
+fn default_regions() -> Vec<String> {
+    // Secure cloud in the EU. Community is an explicit opt-in (`require_regions = ["EU"]`).
+    vec!["EU-secure".to_owned()]
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            bucket: String::new(),
+            region: default_store_region(),
+            access_key_file: default_access_key(),
+            secret_key_file: default_secret_key(),
+        }
+    }
+}
+
+impl Default for RentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_usd_per_hour: None,
+            max_hours: default_max_hours(),
+            monthly_cap_usd: None,
+            idle_minutes: default_idle_minutes(),
+            require_regions: default_regions(),
+            runpod_key_file: default_runpod_key(),
+            runpod_url: None,
+            insecure_endpoint: false,
+            container_registry_auth_id: None,
+            store: StoreConfig::default(),
+            ignored: Vec::new(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RentRaw {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    max_usd_per_hour: Option<f64>,
+    #[serde(default = "default_max_hours")]
+    max_hours: f64,
+    #[serde(default)]
+    monthly_cap_usd: Option<f64>,
+    #[serde(default = "default_idle_minutes")]
+    idle_minutes: u64,
+    #[serde(default = "default_regions")]
+    require_regions: Vec<String>,
+    #[serde(default = "default_runpod_key")]
+    runpod_key_file: PathBuf,
+    #[serde(default)]
+    runpod_url: Option<String>,
+    #[serde(default)]
+    insecure_endpoint: bool,
+    #[serde(default)]
+    container_registry_auth_id: Option<String>,
+    #[serde(default)]
+    store: StoreRaw,
+    #[serde(default, flatten)]
+    extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Deserialize)]
+struct StoreRaw {
+    #[serde(default)]
+    endpoint: String,
+    #[serde(default)]
+    bucket: String,
+    #[serde(default = "default_store_region")]
+    region: String,
+    #[serde(default = "default_access_key")]
+    access_key_file: PathBuf,
+    #[serde(default = "default_secret_key")]
+    secret_key_file: PathBuf,
+}
+
+impl Default for StoreRaw {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            bucket: String::new(),
+            region: default_store_region(),
+            access_key_file: default_access_key(),
+            secret_key_file: default_secret_key(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RentConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = RentRaw::deserialize(deserializer)?;
+        let mut ignored = Vec::new();
+        for key in raw.extra.keys() {
+            if key == "binary" {
+                ignored.push(key.clone());
+            } else {
+                return Err(DeError::custom(format!(
+                    "[rent] unknown key `{key}` (the only legacy key that is ignored is `binary`)"
+                )));
+            }
+        }
+        Ok(Self {
+            enabled: raw.enabled,
+            max_usd_per_hour: raw.max_usd_per_hour,
+            max_hours: raw.max_hours,
+            monthly_cap_usd: raw.monthly_cap_usd,
+            idle_minutes: raw.idle_minutes,
+            require_regions: raw.require_regions,
+            runpod_key_file: raw.runpod_key_file,
+            runpod_url: raw.runpod_url,
+            insecure_endpoint: raw.insecure_endpoint,
+            container_registry_auth_id: raw.container_registry_auth_id,
+            store: StoreConfig {
+                endpoint: raw.store.endpoint,
+                bucket: raw.store.bucket,
+                region: raw.store.region,
+                access_key_file: raw.store.access_key_file,
+                secret_key_file: raw.store.secret_key_file,
+            },
+            ignored,
+        })
+    }
+}
+
+impl RentConfig {
+    /// The caps and the region filter are numbers the node will enforce. A value it cannot
+    /// compare against is refused here, before a process is started.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(max) = self.max_usd_per_hour
+            && (!max.is_finite() || max <= 0.0)
+        {
+            return Err(format!("[rent] max_usd_per_hour = {max}: a positive finite number of USD"));
+        }
+        if !self.max_hours.is_finite() || self.max_hours <= 0.0 || self.max_hours > 24.0 {
+            return Err(format!("[rent] max_hours = {}: in (0, 24]", self.max_hours));
+        }
+        if let Some(max) = self.monthly_cap_usd
+            && (!max.is_finite() || max <= 0.0)
+        {
+            return Err(format!("[rent] monthly_cap_usd = {max}: a positive finite number of USD"));
+        }
+        if self.idle_minutes == 0 || self.idle_minutes > 7 * 24 * 60 {
+            return Err(format!("[rent] idle_minutes = {}: from 1 to 10080 (a week)", self.idle_minutes));
+        }
+        let wildcard = self.require_regions.iter().any(|region| region == "any" || region == "*");
+        if wildcard && self.require_regions.len() != 1 {
+            return Err("[rent] require_regions: \"any\" or \"*\" must be the only token".to_owned());
+        }
+        if self.require_regions.iter().any(|region| region.trim().is_empty()) {
+            return Err("[rent] require_regions: an empty token".to_owned());
+        }
+        for key in &self.ignored {
+            tracing::warn!("[rent] {key} is ignored; the node rents GPUs itself (spec/rent.md)");
+        }
+        Ok(())
+    }
+}
+
 fn default_listen() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7777))
 }
@@ -423,6 +694,9 @@ pub struct ModelConfig {
     /// Whether it takes images; unset: when it has an `mmproj`.
     #[serde(default)]
     pub vision: Option<bool>,
+    /// An embedding model: the engine answers `/v1/embeddings` only ([crate::embed]).
+    #[serde(default)]
+    pub embeddings: bool,
     /// Paired nodes (by name, as `invincible join` saved them) this model may be split across
     /// (spec/cluster.md). Empty: this machine only.
     #[serde(default)]
@@ -520,6 +794,7 @@ impl Config {
                 return Err(format!("[discovery] addresses: {address:?}: {problem}"));
             }
         }
+        self.rent.validate()?;
         for seed in &self.discovery.seeds {
             let parsed = reqwest::Url::parse(seed).map_err(|e| format!("[discovery] seeds: {seed:?}: {e}"))?;
             if !matches!(parsed.scheme(), "http" | "https") {
@@ -699,6 +974,46 @@ mod tests {
         let twice = "[[speech]]\nid = \"a\"\nbase_url = \"http://127.0.0.1:1\"\n[[speech]]\nid = \"a\"\nbase_url = \"http://127.0.0.1:2\"\n";
         assert!(Config::parse(twice).unwrap_err().contains("twice"));
         assert!(Config::parse("[[speech]]\nid = \"auto\"\nbase_url = \"http://127.0.0.1:1\"\n").is_err());
+    }
+
+    #[test]
+    fn rent_is_off_until_asked_and_defaults_to_the_eu() {
+        let config = Config::parse("").unwrap();
+        assert!(!config.rent.enabled);
+        assert!(config.rent.ignored.is_empty());
+        assert_eq!(config.rent.runpod_key_file, std::path::PathBuf::from("secrets/runpod.key"));
+        assert_eq!(config.rent.max_hours, 24.0);
+        assert_eq!(config.rent.idle_minutes, 15);
+        assert!(config.rent.max_usd_per_hour.is_none());
+        assert!(config.rent.monthly_cap_usd.is_none());
+        assert_eq!(config.rent.require_regions, vec!["EU-secure".to_owned()]);
+
+        let on = Config::parse(
+            "[rent]\nenabled = true\nmax_usd_per_hour = 0.4\nmax_hours = 2\nmonthly_cap_usd = 10\nidle_minutes = 20\nrequire_regions = [\"EU-secure\"]\n",
+        )
+        .unwrap();
+        assert!(on.rent.enabled);
+        assert_eq!(on.rent.max_usd_per_hour, Some(0.4));
+        assert_eq!(on.rent.require_regions, vec!["EU-secure"]);
+        // An explicit empty list is the operator clearing the filter, which the API allows.
+        assert!(Config::parse("[rent]\nrequire_regions = []\n").unwrap().rent.require_regions.is_empty());
+    }
+
+    #[test]
+    fn rent_refuses_a_cap_it_cannot_enforce() {
+        assert!(Config::parse("[rent]\nmax_hours = 48\n").unwrap_err().contains("max_hours"));
+        assert!(Config::parse("[rent]\nmax_usd_per_hour = 0\n").unwrap_err().contains("max_usd_per_hour"));
+        assert!(Config::parse("[rent]\nmonthly_cap_usd = -1\n").unwrap_err().contains("monthly_cap_usd"));
+        assert!(Config::parse("[rent]\nidle_minutes = 0\n").unwrap_err().contains("idle_minutes"));
+        assert!(Config::parse("[rent]\nrequire_regions = [\"any\", \"EU\"]\n").unwrap_err().contains("only token"));
+        let old =
+            Config::parse("[rent]\nenabled = false\nbinary = \"wckd\"\ncontainer_registry_auth_id = \"reg_secret\"\n")
+                .unwrap();
+        assert_eq!(old.rent.ignored, vec!["binary".to_owned()]);
+        assert_eq!(old.rent.container_registry_auth_id.as_deref(), Some("reg_secret"));
+        assert!(!format!("{old:?}").contains("reg_secret"), "{old:?}");
+        let unknown = Config::parse("[rent]\nnot_a_cap = 1\n").unwrap_err();
+        assert!(unknown.contains("unknown key") && unknown.contains("not_a_cap"), "{unknown}");
     }
 
     #[test]

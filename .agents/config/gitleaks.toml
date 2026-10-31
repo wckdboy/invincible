@@ -1,0 +1,29 @@
+# gitleaks configuration for the eng baseline. Extends the maintained default
+# ruleset; allowlists are path-scoped and must be justified in review.
+title = "eng baseline"
+[extend]
+useDefault = true
+
+# Test fixtures deliberately contain fake credentials. They are never real.
+[[allowlists]]
+description = "eng control fixtures"
+paths = [
+  '''(^|/)tests/fixtures/.*''',
+  '''(^|/)tests/test_eng.py''',
+  '''(^|/)evals/fixtures/.*''',
+  '''(^|/)evals/control-fixture/.*''',
+  '''(^|/)evals/agent/fixture/.*''',
+]
+
+# Repo-local exception added during kit adoption. demo/runs, evals/projects.jsonl and
+# spec/vectors are captured transcripts and public test vectors: the "keys" in them are
+# fixtures, never credentials. .agents/evidence holds scanner output and must not be
+# rescanned. Reviewed and narrow; not a loosening of the rule set.
+[[allowlists]]
+description = "captured demo transcripts, eval fixtures, public vectors, eng evidence"
+paths = [
+  '''(^|/)demo/runs/.*''',
+  '''(^|/)evals/.*\.jsonl''',
+  '''(^|/)spec/vectors/.*''',
+  '''(^|/)\.agents/evidence/.*''',
+]

@@ -1025,9 +1025,9 @@ pub fn add(root: &Path, name: &str, new: &NewBot) -> Result<PathBuf, String> {
         return Err(format!("there is a bot {name} already (`autobot bots edit {name}`)"));
     }
     if let Some(mode) = &new.approvals
-        && !["ask", "edits", "allowlist", "trust"].contains(&mode.as_str())
+        && !["ask", "edits", "auto", "allowlist", "trust"].contains(&mode.as_str())
     {
-        return Err(format!("--approvals {mode:?}: ask, edits, allowlist or trust"));
+        return Err(format!("--approvals {mode:?}: ask, edits, auto, allowlist or trust"));
     }
     if let Some(groups) = &new.tools
         && let Some(unknown) = groups.iter().find(|g| !crate::tools::GROUPS.iter().any(|(n, _)| n == g))

@@ -1,9 +1,11 @@
 //! The `autobot` command.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use autobot::agent::Event;
 use autobot::config::{self, Config};
@@ -49,8 +51,8 @@ enum Command {
         /// provider to set up now (anthropic, deepseek, …). Remembered for next time.
         #[arg(long)]
         model: Option<String>,
-        /// ask, edits (changes in the project run without asking), allowlist or trust.
-        /// Remembered for next time.
+        /// ask, edits (changes in the project run without asking), auto (commands and project
+        /// changes run), allowlist or trust. Remembered for next time.
         #[arg(long)]
         approvals: Option<String>,
         /// The conversation [default: one per project].
@@ -63,16 +65,18 @@ enum Command {
     /// Do one task and print the answer. Anything that needs approval is refused unless allowlisted.
     Run {
         task: String,
-        #[arg(long, default_value = "run")]
-        session: String,
+        /// Continue this conversation instead of starting a fresh one.
+        #[arg(long)]
+        session: Option<String>,
         /// Work in this directory (a project: its AGENTS.md, search tools, undo).
         #[arg(long, short = 'C')]
         dir: Option<PathBuf>,
         /// The model to use (an id the gateway serves; a cloud model allows cloud use).
         #[arg(long)]
         model: Option<String>,
-        /// ask (nothing is asked here, so: refused), edits (changes in the directory run),
-        /// allowlist or trust. Allowlisted commands run in every mode.
+        /// ask (nothing is asked here, so: refused), edits (changes in the directory run), auto
+        /// (commands and project changes run), allowlist or trust. Allowlisted commands run in
+        /// every mode.
         #[arg(long)]
         approvals: Option<String>,
         /// Print every event as a JSON line (text deltas, tool calls, outputs, diffs, receipts)
@@ -98,6 +102,25 @@ enum Command {
     Acp,
     /// Check the install, the gateway, the model and the channels.
     Doctor,
+    /// Print the project map a coding session starts with.
+    Map {
+        /// The project [default: the current directory].
+        dir: Option<PathBuf>,
+    },
+    /// Review the working tree's change with a read-only second model.
+    Review {
+        /// The project [default: the current directory].
+        dir: Option<PathBuf>,
+        /// Review staged changes instead of the working tree.
+        #[arg(long)]
+        staged: bool,
+        /// Review against this git ref.
+        #[arg(long)]
+        base: Option<String>,
+        /// The reviewer model (an id the gateway serves); default: the agent's configured model.
+        #[arg(long)]
+        model: Option<String>,
+    },
     /// The bots on this machine: list, add, show, edit, remove, enable, disable, status.
     Bots {
         #[command(subcommand)]
@@ -206,6 +229,11 @@ enum Command {
     Sessions {
         #[command(subcommand)]
         action: Option<SessionsAction>,
+    },
+    /// Threads: a conversation with a git worktree and a branch of its own.
+    Thread {
+        #[command(subcommand)]
+        action: Option<ThreadAction>,
     },
     /// What the agent remembered between conversations (`remember`): list, or forget one.
     Memory {
@@ -366,6 +394,53 @@ enum SessionsAction {
         /// Only say which would go.
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ThreadAction {
+    /// Start a thread: a new worktree and branch in the project (default: here).
+    Start {
+        /// The project [default: the current directory].
+        #[arg(long, short = 'C')]
+        repo: Option<PathBuf>,
+        /// The branch or commit to start from [default: the checked-out branch].
+        #[arg(long)]
+        base: Option<String>,
+        /// A name for the thread.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// List the threads and their checkouts.
+    List,
+    /// Show one thread.
+    Show { id: String },
+    /// Show the worktree's changes against its base.
+    Diff {
+        id: String,
+        /// Only the summary.
+        #[arg(long)]
+        stat: bool,
+    },
+    /// Commit, push and open a pull request for the thread (or print the compare link).
+    Pr {
+        id: String,
+        /// The pull request title (default: the thread's name, or the branch).
+        #[arg(long)]
+        title: Option<String>,
+        /// The pull request body.
+        #[arg(long)]
+        body: Option<String>,
+        /// The base branch (default: the thread's base).
+        #[arg(long)]
+        base: Option<String>,
+    },
+    /// Remove the thread's worktree and branch.
+    Remove {
+        id: String,
+        /// Discard uncommitted changes.
+        #[arg(long, short)]
+        force: bool,
     },
 }
 
@@ -533,7 +608,7 @@ enum BotsAction {
         /// Only these tool groups (comma-separated: files-read,files-write,terminal,web,memory,mcp,plan).
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
-        /// ask, edits, allowlist or trust.
+        /// ask, edits, auto, allowlist or trust.
         #[arg(long)]
         approvals: Option<String>,
         /// Where its tools work [default: its own directory's work/].
@@ -707,6 +782,7 @@ fn run(mut cli: Cli) -> Result<(), String> {
                 let models = agent.gateway.model_info().await.unwrap_or_default();
                 autobot::use_model(&mut agent, &config, &models, model)?;
             }
+            let session = session.unwrap_or_else(fresh_run_session);
             let mut session = Session::open(&home.join("sessions"), &session)?;
             let streamed = std::sync::atomic::AtomicBool::new(false);
             // Streamed text that has not ended its line yet.
@@ -797,6 +873,63 @@ fn run(mut cli: Cli) -> Result<(), String> {
             }
             println!();
             if failed > 0 { Err(format!("{failed} problem(s)")) } else { Ok(()) }
+        }
+        Command::Map { dir } => {
+            let dir = dir.unwrap_or(std::env::current_dir().map_err(|e| format!("the current directory: {e}"))?);
+            let dir = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
+            match autobot::repo_map::render(&dir, 4096) {
+                Some(map) => {
+                    print!("{map}");
+                    if !map.ends_with('\n') {
+                        println!();
+                    }
+                    Ok(())
+                }
+                None => Err(format!("{}: no code files to map", dir.display())),
+            }
+        }
+        Command::Review { dir, staged, base, model } => {
+            let dir = dir.unwrap_or(std::env::current_dir().map_err(|e| format!("the current directory: {e}"))?);
+            let dir = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
+            let diff = review_diff(&dir, staged, base.as_deref())?;
+            let prompt = format!(
+                "Review this change as a senior engineer. The project is {}. Do not modify anything. \
+                 Findings only: bugs, regressions, missing tests, security issues, and concrete API or \
+                 compatibility risks. For each finding give file:line, what is wrong, and the fix. If there \
+                 are none, say \"No actionable findings\". Do not restate the diff.\n\n{diff}",
+                dir.display()
+            );
+            runtime()?.block_on(async {
+                let mut agent = autobot::agent_in(&config, &home, Some(dir.clone()))?;
+                autobot::for_review(&mut agent);
+                if let Some(model) = &model {
+                    let models = agent.gateway.model_info().await.unwrap_or_default();
+                    autobot::use_model(&mut agent, &config, &models, model)?;
+                }
+                let mut session = Session::open(&home.join("sessions"), "review")?;
+                session.reset()?;
+                let approver = Unattended { cloud: true };
+                let streamed = AtomicBool::new(false);
+                let events = |event: Event| match event {
+                    Event::Text(text) => {
+                        streamed.store(true, Ordering::Relaxed);
+                        print!("{text}");
+                        let _ = std::io::stdout().flush();
+                    }
+                    Event::Reasoning(_) => {}
+                    other => print_event(other),
+                };
+                let outcome = agent.turn(&mut session, &prompt, &approver, &mut HashSet::new(), &events).await?;
+                autobot::procs::shut_down().await;
+                if !streamed.load(Ordering::Relaxed) {
+                    print!("{}", outcome.text);
+                }
+                if !outcome.text.ends_with('\n') {
+                    println!();
+                }
+                Ok::<(), String>(())
+            })?;
+            Ok(())
         }
         Command::Telegram { action } => {
             let mut users = telegram::Users::load(&home)?;
@@ -1152,6 +1285,71 @@ fn run(mut cli: Cli) -> Result<(), String> {
                 }
             }
         }
+        Command::Thread { action } => {
+            let threads = autobot::threads::Threads::new(home.clone());
+            match action.unwrap_or(ThreadAction::List) {
+                ThreadAction::Start { repo, base, name } => {
+                    let repo = match repo {
+                        Some(dir) => dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?,
+                        None => std::env::current_dir().map_err(|e| format!("the current directory: {e}"))?,
+                    };
+                    let thread = threads.create(&repo, base.as_deref(), name.as_deref().unwrap_or(""))?;
+                    println!("thread {}  (session {})", thread.id, thread.session);
+                    println!("  repo      {}", thread.repo.display());
+                    println!("  worktree  {}", thread.worktree.display());
+                    println!("  branch    {} from {}", thread.branch, thread.base);
+                    println!();
+                    println!("next: autobot run -C '{}' --session {} \"…\"", thread.worktree.display(), thread.session);
+                    println!("      or open the control panel and pick the thread.");
+                }
+                ThreadAction::List => {
+                    let list = threads.list()?;
+                    if list.is_empty() {
+                        println!("no threads; start one with `autobot thread start`");
+                    } else {
+                        println!("{:<16} {:<28} {:<10} {:>5}  name", "id", "branch", "changes", "ahead");
+                        for thread in list {
+                            let view = threads.view(&thread);
+                            let changes = if view["dirty"].as_bool() == Some(true) { "dirty" } else { "clean" };
+                            let ahead = view["ahead"].as_u64().unwrap_or(0);
+                            println!(
+                                "{:<16} {:<28} {:<10} {:>5}  {}",
+                                thread.id, thread.branch, changes, ahead, thread.name
+                            );
+                        }
+                    }
+                }
+                ThreadAction::Show { id } => {
+                    let thread = threads.get(&id)?.ok_or_else(|| format!("there is no thread {id:?}"))?;
+                    println!("{}", serde_json::to_string_pretty(&threads.view(&thread)).map_err(|e| e.to_string())?);
+                }
+                ThreadAction::Diff { id, stat } => {
+                    println!("{}", threads.diff(&id, stat)?);
+                }
+                ThreadAction::Pr { id, title, body, base } => {
+                    let prepared = threads.prepare_pr(&id, title.as_deref(), body.as_deref(), base.as_deref())?;
+                    let outcome = runtime()?.block_on(autobot::threads::open_pr(&prepared));
+                    let _ = threads.record_pr(&id, &outcome);
+                    println!("branch  {}", outcome.branch);
+                    if let Some(commit) = &outcome.commit {
+                        println!("commit  {commit}");
+                    }
+                    println!("pushed  {}", outcome.pushed);
+                    if let Some(url) = &outcome.pr_url {
+                        println!("pull request  {url}");
+                    }
+                    if let Some(url) = &outcome.compare_url {
+                        println!("compare  {url}");
+                    }
+                    println!("{}", outcome.message);
+                }
+                ThreadAction::Remove { id, force } => {
+                    threads.remove(&id, force)?;
+                    println!("removed thread {id}");
+                }
+            }
+            Ok(())
+        }
         Command::Sessions { action: None | Some(SessionsAction::List) } => {
             for (name, modified) in autobot::session::list(&home.join("sessions")) {
                 let ago = modified.elapsed().map(|d| d.as_secs()).unwrap_or(0);
@@ -1451,6 +1649,80 @@ fn project_session(dir: &std::path::Path) -> String {
     format!("code-{}-{:06x}", if name.is_empty() { "root" } else { &name }, hash & 0xffffff)
 }
 
+/// Largest diff sent to the reviewer; the rest is read from the files if it matters.
+const MAX_REVIEW_DIFF: usize = 64 * 1024;
+
+fn git_text(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let out =
+        std::process::Command::new("git").arg("-C").arg(dir).args(args).output().map_err(|e| format!("git: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The working tree (or staged, or against [base]) as the reviewer sees it: status, untracked
+/// files and the diff, capped at [MAX_REVIEW_DIFF].
+fn review_diff(dir: &Path, staged: bool, base: Option<&str>) -> Result<String, String> {
+    let mut args = vec!["diff", "--no-ext-diff", "--unified=3"];
+    if staged {
+        args.push("--cached");
+    }
+    if let Some(base) = base {
+        args.push(base);
+    }
+    let diff = git_text(dir, &args)?;
+    let status = git_text(dir, &["status", "--short"])?;
+    let untracked = git_text(dir, &["ls-files", "--others", "--exclude-standard"])?;
+    if diff.trim().is_empty() && untracked.trim().is_empty() {
+        let what = if staged {
+            "staged changes".to_owned()
+        } else if let Some(base) = base {
+            format!("changes against {base}")
+        } else {
+            "unstaged changes or untracked files".to_owned()
+        };
+        return Err(format!("nothing to review: no {what}"));
+    }
+    let mut out = String::new();
+    if !status.trim().is_empty() {
+        out.push_str("Changed files:\n");
+        out.push_str(status.trim_end());
+        out.push_str("\n\n");
+    }
+    if !untracked.trim().is_empty() {
+        out.push_str("Untracked files (read them if relevant):\n");
+        for line in untracked.lines().take(40) {
+            out.push_str("  ");
+            out.push_str(line);
+            out.push('\n');
+        }
+        if untracked.lines().count() > 40 {
+            out.push_str("  …\n");
+        }
+        out.push('\n');
+    }
+    if diff.trim().is_empty() {
+        out.push_str("No tracked diff; review the untracked files above.\n");
+    } else {
+        out.push_str("Diff:\n");
+        out.push_str(&review_truncate(&diff, MAX_REVIEW_DIFF));
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn review_truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n[diff truncated at {} KiB; read the files for the rest]", &text[..end], max / 1024)
+}
+
 /// Nobody to ask: no, except to a cloud model when the run said so (`--cloud`).
 struct Unattended {
     cloud: bool,
@@ -1474,13 +1746,20 @@ fn approval_mode(mode: &str) -> Result<config::ApprovalMode, String> {
     Ok(match mode {
         "ask" => config::ApprovalMode::Ask,
         "edits" => config::ApprovalMode::Edits,
+        "auto" => config::ApprovalMode::Auto,
         "allowlist" => config::ApprovalMode::Allowlist,
         "trust" => config::ApprovalMode::Trust,
-        other => return Err(format!("--approvals {other:?}: ask, edits, allowlist or trust")),
+        other => return Err(format!("--approvals {other:?}: ask, edits, auto, allowlist or trust")),
     })
 }
 
 /// [event] as a JSON line (`autobot run --json`).
+/// A fresh conversation for one `autobot run`: it must not see the last task's context.
+fn fresh_run_session() -> String {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_nanos());
+    format!("run-{}-{nanos}", std::process::id())
+}
+
 fn event_json(event: &Event) -> serde_json::Value {
     use serde_json::json;
     match event {
@@ -1589,6 +1868,8 @@ async fn serve(root: PathBuf) -> Result<(), String> {
         tracing::error!("{e}");
     }
     background.push(tokio::spawn(autobot::backup::scheduler(root.clone())));
+    // Delegated runs paused on a usage limit resume themselves after a restart too.
+    background.push(state.start_resumer());
     // All bots use the one gateway on this machine.
     let gateway = runtimes[0].agent().gateway.clone();
     drop(runtimes);
@@ -1961,7 +2242,7 @@ fn bots(action: BotsAction, root: &std::path::Path) -> Result<(), String> {
                     new.model = (model != "auto").then_some(model);
                 }
                 if new.approvals.is_none() {
-                    let mode = prompt.ask("  approvals: ask, edits, allowlist or trust", "ask")?;
+                    let mode = prompt.ask("  approvals: ask, edits, auto, allowlist or trust", "ask")?;
                     new.approvals = (mode != "ask").then_some(mode);
                 }
                 if new.telegram_token.is_none() && prompt.yes("  a Telegram bot of its own?", false)? {
@@ -2116,5 +2397,56 @@ fn hooks(action: Option<HooksAction>, config: &Config, home: &std::path::Path) -
             }
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::fresh_run_session;
+
+    #[test]
+    fn one_shot_runs_get_fresh_valid_session_names() {
+        let first = fresh_run_session();
+        let second = fresh_run_session();
+        assert_ne!(first, second);
+        assert!(
+            first.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "not a session name: {first}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::review_diff;
+    use std::path::Path;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    #[test]
+    fn collects_the_diff_untracked_files_and_refuses_nothing() {
+        let dir = std::env::temp_dir().join(format!("autobot-review-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.name", "Autobot Test"]);
+        git(&dir, &["config", "user.email", "autobot@example.invalid"]);
+        std::fs::write(dir.join("maths.py"), "def add(a, b):\n    return a + b\n").unwrap();
+        git(&dir, &["add", "maths.py"]);
+        git(&dir, &["commit", "-qm", "add maths"]);
+        std::fs::write(dir.join("maths.py"), "def add(a, b):\n    return a - b\n").unwrap();
+        std::fs::write(dir.join("new.py"), "print('new')\n").unwrap();
+
+        let text = review_diff(&dir, false, None).unwrap();
+        assert!(text.contains("Changed files:"), "{text}");
+        assert!(text.contains("+    return a - b"), "{text}");
+        assert!(text.contains("Untracked files") && text.contains("new.py"), "{text}");
+        std::fs::remove_file(dir.join("new.py")).unwrap();
+        assert!(review_diff(&dir, true, None).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

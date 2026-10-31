@@ -25,13 +25,14 @@ Early, and used daily. What is built, and what is not yet:
 
 | Part | State |
 | --- | --- |
-| Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
+| Gateway | Open models through llama.cpp behind OpenAI- and Anthropic-compatible APIs, embeddings from an embedding model the node serves, speech to text and text to speech and images through backends on this machine; every request through the routing rules ([spec/routing.md](spec/routing.md), 51 conformance vectors) |
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
 | Discovery | Signed, expiring descriptors published to seeds and mDNS, so a node is found without a pasted code — and still only usable after pairing ([spec/discovery.md](spec/discovery.md)): implemented, unaudited |
 | Cluster | **Phase 1, in review:** one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts ([Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0)) |
+| Control panel | A zero-dependency authenticated panel with rooms for chat, workspaces, bots, integrations, usage and settings: live sessions and transcripts, delegated runs that report every nudge and declined approval, a thread with its own worktree and one-click PR, a connector matrix and token files, today's tokens and cost, model/approval/tool settings and advanced dotted keys; scrypt, signed sessions, CSRF, CSP; no provider keys in the browser. Working on the alpha stack (gateway + Autobot + panel behind Traefik); the Docker Compose with Caddy is in [platform/services/agent](https://github.com/WCKDai/platform/tree/main/services/agent) |
 | Releases | Static Linux and macOS binaries, reproducible, with build attestations, signed with a pinned key: stable from tags ([latest](https://github.com/wckdboy/invincible/releases/latest)), edge from every green commit on main; `invincible update` and a rerunnable installer; fixes from an internal security review are in, the independent review is still to come |
 | Evals | 50 tasks from real code and 26 agent tasks, on local models and a frontier one (DeepSeek V3): 30/50 against 45/50 on the code tasks; every run kept, so the gap is followed over time |
 
@@ -252,6 +253,9 @@ secrets it left out, `work/`, the logs. The old home is kept as `~/.autobot.befo
 move it back to undo. Restart the service afterwards (`autobot service restart`).
 
 ```toml
+[delegate]                        # a delegated run's outcome, one JSON POST
+webhook = "https://example.com/autobot"
+webhook_secret_file = "delegate-webhook.secret"   # optional: signs the body
 [backup]                          # scheduled, while `autobot serve` runs
 every = "1d"                      # [default: off]
 keep = 7                          # the newest 7; older ones are removed
@@ -300,6 +304,22 @@ confirmed once per session, private work on local models.
 cd ~/src/my-project
 autobot code --model anthropic --approvals edits   # the first time
 autobot                                            # after that, in any git repository
+```
+
+From this checkout, without replacing the installed binaries or restarting the services:
+
+```sh
+cargo build --release -p invincible -p autobot
+./target/release/autobot doctor    # the node on 127.0.0.1:7777
+./target/release/autobot map       # what a coding session starts with
+./target/release/autobot code      # in a project
+./target/release/autobot review    # the current diff, read-only
+
+autobot thread start --name "fix checkout"   # a worktree and branch of its own
+autobot thread list
+autobot thread diff t-… --stat
+autobot thread pr t-… --title "Fix checkout" # gh, GH_TOKEN or a compare link
+autobot thread remove t-… --force
 ```
 
 Naming a provider the gateway does not have yet (`anthropic`, `deepseek`, …) sets it up there and
@@ -370,8 +390,17 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   in small edits, run the build and tests, never commit unless asked). `search` (regular
   expressions over the files, `.gitignore` respected) and `find_files` (globs) find code without a
   shell command to approve; `read_file` reads long files in parts.
+- **The map:** a coding session starts with a compact map of the project: its code directories,
+  the files with the most top-level symbols and those symbols, built from the files git tracks
+  (or a filtered walk outside git). It is a snapshot for orientation; `search`, `find_files` and
+  `read_file` are the current truth. It is built once per session, balanced across crates and
+  apps, and capped at 4 KiB. `autobot map` prints the same map for the current project.
+- **Review:** `autobot review` takes the current diff (`--staged` for staged changes, `--base <ref>`
+  against a branch) and sends it to a separate, read-only reviewer session. `--model <id>` chooses
+  a second model through the gateway. It changes nothing and prints only actionable findings.
 - **Control:** `edits` approvals let changes in the project run without asking (commands still
-  ask); `/undo` puts back every file the last turn changed and hands its request back to edit.
+  ask); `auto` lets commands and changes run in the project, closer to an unattended coding
+  agent; `/undo` puts back every file the last turn changed and hands its request back to edit.
   `@path` attaches a file (typing `@` lists the project's files, matched as you type; tab
   completes), `!command` runs one yourself and hands its output to the next message.
 - **Commands:** typing `/` opens a list of them with a line about each, narrowed as you type
@@ -409,7 +438,8 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   file:line references, so the main conversation keeps what it found and not every file it
   read; reads in one reply run at the same time.
 - **From other tools:** `autobot run -C DIR --model M --approvals edits --cloud "task"` does one
-  task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else); `--json`
+  task with nobody to ask (`--cloud` confirms cloud use for that run, nothing else). Each run
+  starts a fresh conversation; `--session NAME` continues one on purpose. `--json`
   prints every event as a JSON line (text, tool calls, outputs, diffs, receipts) and the answer
   last, so Claude Code, opencode or a CI job can hand Autobot work and read what it did.
   Nobody watches such a run, so its commands run sandboxed like a scheduled task's (see
@@ -425,6 +455,60 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   run, not a setting, so the workflow file shows it; the run prints it on standard error before
   it starts, and the action log marks each of its commands `"sandbox": "off"`. Scheduled tasks
   and the board stay confined.
+
+### Threads and pull requests
+
+A thread is a conversation with a checkout of its own. `autobot thread start` runs
+`git worktree add` from the project, on a branch `autobot/<id>`, and records the session id with
+it; every turn in that session uses the worktree, so two agents can work in parallel without
+touching each other's files. The registry is `$AUTOBOT_HOME/threads.json`; a removed thread leaves
+a tombstone, so its old session cannot silently fall back to the main checkout.
+
+`autobot thread diff` stages the worktree and shows it against its base, new files included.
+`autobot thread pr` commits, pushes, and opens a pull request: it uses `gh` when it is installed
+and signed in, otherwise the GitHub API with `GH_TOKEN` or `GITHUB_TOKEN`, otherwise it returns
+the compare link after the push. The panel's **Workspaces** room does the same with clicks; **Use**
+puts the thread's session in **Chat**.
+
+### Delegated turns
+
+**Keep going** (or `"delegated": true` on a turn) hands the task over for a while. The agent may
+continue itself after a routine question, with at most 2 nudges by default (at most 5), and a
+stalled turn (15 quiet minutes, or 45 while a tool runs) is stopped and nudged once. If your own
+words say to wait, not guess, ask first or confirm, the run does not nudge at all: the first
+question comes back to you. A usage limit that clears within 5 minutes is waited out; a longer one
+pauses the run with the retry time. The one thing delegation never does is accept an approval: a safety check is declined with
+a redirect, the stream reports `delegate.declined`, and after a decline the run stops for you
+instead of finding a way around it. The panel shows every nudge and decline in the transcript.
+Set `[delegate] webhook` to get one signed JSON POST when the run finishes or stops, with its
+answer, nudges, declines and retry time. [`spec/agent.md`](spec/agent.md) has the event grammar,
+the webhook payload and every bound.
+
+### Compare harnesses
+
+`evals/harness/` runs the same coding tasks through Autobot and other agent CLIs (Claude Code,
+Codex, Hermes Agent, OpenCode, Pi, Cursor Agent) in fresh directories, then checks the result by rule:
+exact file bytes, unchanged tests, a passing test command, JSON fields, text that must be gone.
+It is not graded by a model, and each agent's model and version are kept with the result.
+
+```sh
+python3 evals/harness/run.py --agents autobot
+python3 evals/harness/run.py --agents autobot,claude,codex,hermes,opencode,pi
+```
+
+Missing or signed-out agents are skipped. A report (`report.md`) and each run's logs and final
+tree are written under `evals/harness/runs/`. `tasks-hard.jsonl` adds a buried edit, a
+specification implementation and a cross-file bug, with their projects in `fixtures/`. To compare
+harnesses rather than models, point the agents at the same model first (Invincible serves both
+`/v1/chat/completions` and `/v1/messages`); the README in that directory shows how.
+[Harness²](https://github.com/google-research/harness2) is not another row: it improves a harness
+around a frozen model. Its official local demo ran here (2 tasks, 0 failed); a model-backed
+JobBench task ran through OpenCode with DeepSeek, through base, invariant, domain and aggregate
+candidates. `evals/harness/evolve.py` applies the same loop to Autobot: failures and slow passes
+become a general `AGENTS.md`, the suite is rerun, and the profile is kept only when it passes more
+checks or is at least 10% faster. On `spec-implementation` that took a 450s timeout to a pass in
+156.8s; the distilled rule is now in Autobot's coding prompt, which passed the same task in 267.5s
+without a profile. `--baseline` reuses an existing run.
 
 ### In your editor: Zed and other ACP editors
 
@@ -455,7 +539,7 @@ opened, with the same gateway, model, receipts and memory:
   task list is Zed's plan.
 - **Approvals:** what your approval mode asks about becomes Zed's permission prompt: allow once,
   always allow (for the session), or reject. The modes are the approval modes (`ask`, `edits`,
-  `allowlist`, `trust`), switched from Zed's mode menu; the model is picked there too, from
+  `auto`, `allowlist`, `trust`), switched from Zed's mode menu; the model is picked there too, from
   the gateway's models.
 - **Files and commands through the editor:** reads and edits go through Zed's open buffers
   (unsaved changes included), so the agent's edits land in the editor and its undo. Commands
@@ -532,6 +616,10 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     yes, always for this session, or no.
   - `edits`: like `ask`, but writes and edits in the working directory (not under dot names) run
     without asking; each is shown as a diff, and `/undo` puts it back. For coding.
+  - `auto`: for autonomous coding. Commands and writes in the working directory run without
+    asking; reads and writes outside it, hidden files, cloud, fetch, MCP and Home Assistant still
+    ask. Commands can reach outside the directory, so use it in a project you trust; `/undo`
+    still puts back file changes. `autobot code --approvals auto` is the one-flag version.
   - `allowlist`: for unattended use. Allowlisted commands and writes in the working directory run;
     everything else is refused without asking. An allowlist entry matches the whole command or the
     command plus arguments, never a chained one (`git status; rm -rf ~` does not match
@@ -540,6 +628,13 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
     touch hard-linked files, and writes under dot names (`.git/config`, `.envrc`) always ask,
     since they can make a later allowlisted command run something else.
   - `trust`: everything runs. Only for a machine you can throw away.
+- **Verification gate:** set `[agent] check = "cargo test"` (or `make check`, `npm test`) and a
+  turn that changed files runs it once before it may finish. A failure goes back to the model as a
+  user message with the output; after one retry the turn stops with the failure in the answer
+  instead of claiming success. The command is trusted because the owner wrote it: it runs where
+  commands run (the worktree, container or SSH machine), with `[agent] command_timeout` or at
+  least ten minutes, and no approval prompt. This is the deterministic half of "run the tests and
+  fix what you broke"; the repo map, threads, checkpoints and team are the rest.
 - **Sandbox:** commands with nobody watching (scheduled tasks, board work, phone recipes, hooks,
   Home Assistant's voice requests, the heartbeat, `autobot run`) run sandboxed: they read what you can, but write only in the
   working directory and temporary directories (macOS `sandbox-exec`; Linux `bwrap`, i.e.
@@ -807,6 +902,23 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   images (`"images"`: `data:` URLs, 10 MiB each), seen by the model as in the terminal; a model
   that cannot see answers `400 model_cannot_see_images`. Nothing new is exposed: the
   agent is reachable from this machine, and over a device session only where you granted it.
+
+### The panel
+
+The node and the agent share one operator surface: a zero-dependency Node panel, run with the
+gateway and Autobot in the same stack. It has a scrypt password, signed HttpOnly
+`SameSite=Strict` sessions, CSRF tokens, login rate limiting and a strict CSP. The browser talks
+only to the panel, which proxies the gateway and agent calls it needs with the node's token, so
+provider keys never reach it.
+
+The rooms are **Overview** (gateway, agent, today's tokens and cost, approvals), **Chat** (a
+transcript, a live turn, **Keep going** for a delegated run, a new conversation), **Workspaces**
+(a thread's worktree, diff and pull request), **Bots** (list, add, enable, disable, reload), **Integrations** (the connector
+matrix, write-only token files, MCP servers), **Usage** (tokens, cost, models, tools, failures,
+the gateway audit) and **Settings** (providers, the bot's model, approvals, tool groups and any
+advanced dotted key). Provider keys stay in the gateway; the panel shows the models and the
+policy, never a key. The alpha runs it behind Coolify's Traefik; the Docker Compose with Caddy is
+in [`platform/services/agent`](https://github.com/WCKDai/platform/tree/main/services/agent).
 
 ## Bots and channels
 
@@ -1099,7 +1211,15 @@ invincible cloud remove ds
 
 Presets know each provider's API, a model to start with, its context and its data policy;
 `egress = "never"` becomes `"ask"` with the first cloud model, and the gateway service is
-restarted to use it (a gateway started by hand needs a restart). Automatic routing never picks a model that trains on prompts (DeepSeek's API does), so with
+restarted to use it (a gateway started by hand needs a restart).
+
+A running gateway also has an admin API for the same thing: `GET /v1/admin/providers`,
+`POST /v1/admin/providers` (add or update; `{"id", "provider", "base_url", "upstream_model",
+"api_key", "context", "data_policy", "vision"}`) and `DELETE /v1/admin/providers/{id}`. It writes
+the config and a `keys/<id>` file (0600) and **hot-loads** the model for the next request, without
+a restart. A key is never returned. The panel's **Providers** page uses it. In the container, an
+existing `config.toml` is kept across restarts, so a provider added from the panel survives one;
+set `INVINCIBLE_CONFIG_FORCE=1` to regenerate it from the environment instead. Automatic routing never picks a model that trains on prompts (DeepSeek's API does), so with
 no local model, name one: `autobot code --model deepseek`, or `[gateway] model` in the agent's
 config (setup does this for a gateway with only cloud models).
 
@@ -1155,9 +1275,57 @@ data_policy = "retention:30"        # what the provider does with prompts
   the tokens; that usage is kept from a client that did not ask for it, whether it comes in a chunk
   of its own or on the last one (DeepSeek). OpenRouter reports usage unasked. Another endpoint gets
   the field only with `include_usage = true` in its `[[cloud]]` (some APIs refuse fields they do
-  not know); `false` turns it off for a preset.
+  not know); `false` turns it off for a preset. The admin API does not set it, and an update there
+  keeps it.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
+
+### Renting a GPU
+
+`[rent]` rents a cloud GPU in-process. There is no separate `wckd` binary. A rental does not
+start until the request is sent again with `invincible-confirmed: 1` (`invincible rent start
+--confirm`). The caps reject anything over them, and being under a cap is not approval. Idle
+pods and pods past their hours are drained and then deleted. Off by default. Details:
+[spec/rent.md](spec/rent.md).
+
+```toml
+[rent]
+enabled = true
+max_usd_per_hour = 1.0
+max_hours = 8
+monthly_cap_usd = 50
+idle_minutes = 15
+require_regions = ["EU-secure"]    # the default ceiling; ["EU"] opts into community
+runpod_key_file = "secrets/runpod.key"
+
+[rent.store]
+endpoint = "https://<account>.eu.r2.cloudflarestorage.com"
+bucket = "invincible"
+access_key_file = "secrets/r2.access"
+secret_key_file = "secrets/r2.secret"
+```
+
+The key files are mode 0600 under `~/.invincible`. An old `binary = "wckd"` line is ignored.
+Any other unknown `[rent]` key is an error. Autobot's `rent_gpu_start` shows the estimate and
+cannot confirm a rental by itself. The rent tools are off unless `[agent] tools` includes `rent`.
+
+The preset images are `ghcr.io/wckdboy/invincible-rent-vllm`, `invincible-rent-comfyui`, and
+`invincible-rent-dev-box` (`:edge` from `main`). A new GHCR package is private, and RunPod
+cannot pull it. Make the package public, or set `container_registry_auth_id` to the RunPod
+registry credential id. That id is not logged.
+
+```sh
+invincible rent presets
+invincible rent projects
+invincible rent offers --preset comfyui-minimax-h3 --hours 1
+invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1
+invincible rent start --project hailuo-tests --preset comfyui-minimax-h3 --hours 1 --confirm
+invincible rent status
+invincible rent stop <session-id>
+```
+
+A paired device reaches the same routes only with the `rent` scope (`invincible devices grant
+phone shard,rent`). Without it the answer is 403.
 
 ### Speech and images (optional)
 
@@ -1183,6 +1351,28 @@ for a private request, offline or under `egress = "never"`, and asked about when
 The text that leaves (what to say, the prompt) is redacted first. Every request gets a receipt
 (`api` `speech` or `images` in the audit log). `GET /v1/node` lists the backends, and the agent
 offers `speak` and `generate_image` when there are some.
+
+### Transcriptions and embeddings (optional)
+
+`POST /v1/audio/transcriptions` (multipart, OpenAI's shape) goes to a speech-to-text server on
+this machine, and `POST /v1/embeddings` to an embedding model the node serves itself:
+
+```toml
+[[transcription]]
+id = "whisper"
+base_url = "http://127.0.0.1:8080/v1"   # whisper.cpp's server, faster-whisper, … on this machine
+
+[[models]]
+id = "nomic-embed"
+path = "/models/nomic-embed-text-v1.5-Q8_0.gguf"
+embeddings = true                       # llama-server --embeddings: this engine only embeds
+```
+
+Neither ever leaves the node. Audio cannot be redacted the way text is, so a transcription
+backend off this machine is listed by `GET /v1/node` and refused (`audio_not_redactable`); there
+is no cloud embedding backend at all. An embedding engine is not offered to the chat router, and
+`GET /v1/models` marks it. Every request gets a receipt (`api` `transcriptions` or `embeddings`
+in the audit log), and the audio itself is never kept.
 
 ### Receipts
 
@@ -1264,10 +1454,11 @@ Every paired device is granted a small set of capabilities when it pairs
 routes above: `/v1/models`, `/v1/chat/completions`, `/v1/receipts/<id>`, `/v1/node` and the
 cluster's `/v1/cluster/node` and `/v1/cluster/meter`, with no token (the device's key
 authenticates it). `agent` adds `/v1/agent` — the Autobot proxy, which runs with the node's own
-token — `audit` adds that device's own entries in the audit log, and `dispatch` adds
-`/v1/dispatch`, a hop into your other nodes. Nothing else is reachable, and a route the device was
-not granted answers exactly as a path that does not exist, so a device cannot even learn it is
-there. Past that check, each route takes only the body it needs (32 MiB for a chat completion,
+token — `audit` adds that device's own entries in the audit log, `dispatch` adds
+`/v1/dispatch`, a hop into your other nodes, and `rent` adds `/v1/rent/*` (cloud GPUs,
+[spec/rent.md](spec/rent.md)). Nothing else is reachable. A route the device was not granted
+answers exactly as a path that does not exist, so a device cannot even learn it is there, except
+`rent`, which answers 403: a refusal to spend money says so. Past that check, each route takes only the body it needs (32 MiB for a chat completion,
 5 MiB for the meter), and the node holds at most `[node] max_buffered_bytes` of device request
 bodies at once — 256 MiB unless set, refusing with 503 and `Retry-After: 2` past it instead of
 running itself out of memory. A device outside its grant never reaches either check, so its 404
@@ -1532,6 +1723,12 @@ machine; `autobot` grew with the editor protocol, Home Assistant and WhatsApp.)
 ## Open questions
 
 - Region tier: trusted operators only, or a design that is safe with strangers' compute?
+
+## Where this fits
+
+Invincible is the compute brick: one node, every model, one endpoint, a signed receipt for every call. It is a separate product from Autobot, joined by one protocol; neither is a feature of the other. The node is the natural host for the rest of the stack's state, including the world layer while its shape is still open.
+
+[The brick map](https://wckd.ai/architecture/) · WCKD
 
 ## License
 

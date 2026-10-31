@@ -32,6 +32,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      # Rent is easy to skip if a later filter lands. This step is the rent suite and the
+      # sidecar (real rclone against the in-test S3 mock) on their own.
+      - run: cargo test -p invincible --test rent --test sidecar --locked
 
   deny:
     runs-on: ubuntu-latest
@@ -109,15 +112,16 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           if [ "$RUNNER_OS" = Linux ]; then
             sudo loginctl enable-linger "$USER"
-            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-            for i in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
+            XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            export XDG_RUNTIME_DIR
+            for _ in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
           fi
           autobot service install
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:7777/health && break; sleep 2; done
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:7777/health && break; sleep 2; done
           curl -sf http://127.0.0.1:7777/health
           # The agent API answers through the gateway once both run.
           token=$(cat "$HOME/.invincible/token")
-          for i in $(seq 1 30); do curl -sf -H "authorization: Bearer $token" http://127.0.0.1:7777/v1/agent && break; sleep 2; done
+          for _ in $(seq 1 30); do curl -sf -H "authorization: Bearer $token" http://127.0.0.1:7777/v1/agent && break; sleep 2; done
           curl -sf -H "authorization: Bearer $token" http://127.0.0.1:7777/v1/agent
           curl -sf http://127.0.0.1:7777/healthz
           curl -sf http://127.0.0.1:7792/healthz
@@ -125,7 +129,7 @@ jobs:
           # Again: converges; the services keep running (the binaries did not change).
           INVINCIBLE_FROM_SOURCE=1 INVINCIBLE_REF=${{ github.event.pull_request.head.sha || github.sha }} sh install.sh --no-setup
           # (Reloaded if its PATH changed: give it a moment.)
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:7777/healthz && break; sleep 2; done
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:7777/healthz && break; sleep 2; done
           curl -sf http://127.0.0.1:7777/healthz
           autobot service status
           autobot doctor || true

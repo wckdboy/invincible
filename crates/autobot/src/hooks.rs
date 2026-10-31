@@ -120,7 +120,7 @@ pub fn new_secret(home: &Path, name: &str) -> Result<String, String> {
 }
 
 /// HMAC-SHA256 of [body] with [key].
-fn hmac(key: &[u8], body: &[u8]) -> [u8; 32] {
+pub(crate) fn hmac(key: &[u8], body: &[u8]) -> [u8; 32] {
     let mut block = [0u8; 64];
     if key.len() > 64 {
         block[..32].copy_from_slice(&Sha256::digest(key));
@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn verifies_signatures_and_bearers() {
-        let secret = "0123456789abcdef0123";
+        let secret = "0123456789abcdef0123"; // gitleaks:allow test fixture, RFC 4231 body
         let body = br#"{"action":"opened"}"#;
         let hex: String = hmac(secret.as_bytes(), body).iter().map(|b| format!("{b:02x}")).collect();
         let mut headers = HeaderMap::new();
