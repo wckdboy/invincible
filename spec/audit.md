@@ -12,9 +12,11 @@ The Autobot Agent keeps a second log, of its actions ([below](#the-agents-action
 
 `$INVINCIBLE_HOME/audit.jsonl`, mode 0600, one JSON object per line, oldest first. Past 16 MiB it
 is renamed `audit.1.jsonl` (replacing an older one) and a new file continues the chain. There is no
-telemetry: the log is read on the node, by `GET /v1/audit` on loopback with the token, and by a
-paired device granted `audit` (spec/pairing.md, Capabilities), which reads its own entries only:
-the log holds every caller's model, decision, tokens, egress hosts and the cluster's topology.
+telemetry: the log is read on the node, by `GET /v1/audit` on loopback with the token. A paired
+device reads it only when the operator granted it `audit` ([pairing.md](pairing.md),
+Capabilities), which no device has by default, and then only its own entries, without `prev`
+([Reading it](#reading-it)): the log holds every caller's model, decision, tokens, egress hosts
+and the cluster's topology.
 
 ## An entry
 
@@ -125,14 +127,17 @@ or `GET /v1/agent/actions?since=&limit=` ([agent.md](agent.md)).
 
 | Value | The command ran |
 |---|---|
-| `bwrap` (Linux), `sandbox-exec` (macOS) | on this machine, able to write only in the working directory and temporary directories |
+| `bwrap` (Linux), `sandbox-exec` (macOS) | on this machine, write-confined: its own writes only in the working directory and temporary directories |
 | `off` | on this machine, unconfined |
 | `container` | in the `[agent.docker]` container |
 | `ssh` | on the `[agent.ssh]` machine |
 
 Commands with nobody watching (schedules, board work, recipes, hooks, Home Assistant's
-conversation agent, the heartbeat, `autobot run`) are confined unless `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned
-that off, so `off` on one of them is that choice on record; interactive turns are unconfined
-unless `[agent] sandbox = "always"`. `bwrap` or `sandbox-exec` says the command was confined, not
-that it succeeded: where bubblewrap is missing or cannot run, it is refused or fails as it
-starts. The field is absent on other kinds and on entries written before it was recorded.
+conversation agent, the heartbeat, `autobot run`) that run on this machine are write-confined
+unless `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned that off, so `off` on one
+of them is that choice on record; interactive turns, a delegated run's included, are unconfined
+unless `[agent] sandbox = "always"`.
+`bwrap` or `sandbox-exec` says the command was write-confined (its reads, the network and the
+programs it talks to are not limited), not that it succeeded: where bubblewrap is missing or
+cannot run, it is refused or fails as it starts. The field is absent on other kinds and on
+entries written before it was recorded.

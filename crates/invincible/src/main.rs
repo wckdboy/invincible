@@ -45,7 +45,8 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
         /// What the device that joins with this code may reach: any of `shard`, `agent`, `audit`,
-        /// `dispatch`, `rent`, comma-separated [default: shard, the least].
+        /// `dispatch`, `rent`, comma-separated. The list is the whole set, so keep `shard` for
+        /// chat (`shard,agent,audit` for the Autobot app) [default: shard, the least].
         #[arg(long, value_delimiter = ',')]
         capabilities: Vec<String>,
     },

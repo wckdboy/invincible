@@ -1,7 +1,36 @@
-//! Commands with nobody watching (scheduled tasks, board work, phone recipes, `autobot run`) run
-//! confined: they can read what the user can, but write only in the working directory and
-//! temporary directories. The allowlist says which commands may run; the sandbox bounds what an
-//! allowed command can do (an allowlisted `git` cannot rewrite `~/.zshrc`).
+//! Commands with nobody watching (scheduled tasks, board work, phone recipes, hooks, Home
+//! Assistant's voice requests, the heartbeat, `autobot run`) run write-confined on this machine
+//! (in `[agent.docker]` or over `[agent.ssh]` they run there instead): a command's own writes go
+//! only to the working directory and temporary directories. Reads, the network and the programs
+//! it can talk to are not restricted yet: it can read what the user can, reach any host, and have
+//! a program outside the sandbox write for it (`systemd-run --user`, `launchctl`, D-Bus, Docker's
+//! socket, the node's and agent's local APIs, any socket). The allowlist says which commands may
+//! run; the sandbox bounds what an allowed command can write itself (an allowlisted `git` cannot
+//! rewrite `~/.zshrc`).
+//!
+//! The working directory is writable and shared with interactive turns, which run unconfined on
+//! this machine unless the sandbox is `"always"` (in `[agent.docker]` or over `[agent.ssh]` they
+//! run there): a confined command can leave files there that a later unconfined interactive turn
+//! in that directory runs (`core.hooksPath` or `core.fsmonitor` in `.git/config`, a `Makefile`,
+//! `node_modules/.bin`, an `.envrc` once the owner runs `direnv allow`). A delegated run is
+//! confined as interactive turns are: nothing switches it to unattended ([crate::api]). Autobot's
+//! own `git` runs there on this machine, and in the thread worktrees made from it (which share its
+//! `.git/config` and hooks), unconfined whatever the sandbox and `[agent.docker]` say: the TUI's
+//! `/diff`, the project map ([crate::repo_map]) a coding session, `autobot run -C` or a thread
+//! starts with, `autobot review`, and every thread action ([crate::threads]), from the CLI, the
+//! API or the panel: starting one (`git worktree add`; with `[agent.docker]` or `[agent.ssh]` set
+//! the API and the panel refuse to start one, `autobot thread start` does not), listing them or
+//! showing one (`git status` in its worktree; the panel lists them while it is open), its diff and
+//! pull request, and removing one. So a `core.fsmonitor` left there, a diff driver or filter a
+//! `.gitattributes` names, or a hook one of them runs (`post-checkout` when a thread starts, those
+//! a commit or push runs), can run when one of them does. The approval rules hold back the agent's
+//! own writes under dot names: `ask`, `edits` and `auto` ask, `allowlist` refuses them and `trust`
+//! runs them. On the unattended paths above they are refused unless the mode is `trust`: scheduled
+//! tasks (hooks too), board work and the heartbeat switch to `allowlist`, and the approver of
+//! `autobot run` or of Home Assistant's voice requests says no. `autobot eval` has nobody to ask
+//! either, but its approver says yes to all but a GPU rental: each task runs in a throwaway
+//! directory with every command confined ([crate::eval]). The rules do not see what a command
+//! writes.
 //!
 //! macOS: `sandbox-exec` with a write-deny profile. Linux: `bwrap` (bubblewrap) with the system
 //! read-only and the working directory writable. Where neither is available, a confined
@@ -35,7 +64,7 @@ pub enum Mode {
     Always,
 }
 
-/// The command that runs [shell] (`sh -c`) in [workdir], confined to writing there.
+/// The command that runs [shell] (`sh -c`) in [workdir], its own writes confined there.
 pub fn command(shell: &str, workdir: &Path) -> Result<tokio::process::Command, String> {
     let workdir = workdir.canonicalize().map_err(|e| format!("{}: {e}", workdir.display()))?;
     let dir = workdir.to_str().ok_or("the working directory's path is not UTF-8")?;
@@ -61,7 +90,7 @@ pub fn command(shell: &str, workdir: &Path) -> Result<tokio::process::Command, S
     }
     if cfg!(target_os = "linux") {
         let bwrap = crate::find_on_path("bwrap")
-            .ok_or("unattended commands run sandboxed and bubblewrap (bwrap) is not installed: install the bubblewrap package (apt install bubblewrap, dnf install bubblewrap, apk add bubblewrap), or set [agent] sandbox = \"off\"")?;
+            .ok_or("unattended commands run write-confined and bubblewrap (bwrap) is not installed: install the bubblewrap package (apt install bubblewrap, dnf install bubblewrap, apk add bubblewrap), or set [agent] sandbox = \"off\"")?;
         let mut command = tokio::process::Command::new(bwrap);
         command
             .args(["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"])

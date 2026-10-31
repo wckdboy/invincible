@@ -206,8 +206,8 @@ pub struct AgentConfig {
     /// Seconds a command may run before it is stopped.
     #[serde(default = "command_timeout")]
     pub command_timeout: u64,
-    /// Which commands run sandboxed (writes only in the working directory): unattended (default),
-    /// always, off ([crate::sandbox]).
+    /// Which commands run write-confined (their own writes only in the working directory and temp;
+    /// [crate::sandbox] says what is not confined): unattended (default), always, off.
     #[serde(default)]
     pub sandbox: crate::sandbox::Mode,
     /// Only these tool groups for the main agent ([crate::tools::GROUPS]; default: all). A

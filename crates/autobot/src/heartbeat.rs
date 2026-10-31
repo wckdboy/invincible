@@ -1,7 +1,8 @@
 //! The heartbeat: every so often (`[agent] heartbeat = "30m"`), the agent works through the
 //! owner's checklist in `$AUTOBOT_HOME/HEARTBEAT.md` ("is the disk over 90%?", "did last night's
-//! backup run?") with its tools, unattended and sandboxed, and messages the owner on Telegram
-//! only when something needs them. A quiet check answers `OK` and says nothing.
+//! backup run?") with its tools, unattended (commands on this machine write-confined, or
+//! unconfined when `[agent] sandbox = "off"`; [crate::sandbox]), and messages the owner on
+//! Telegram only when something needs them. A quiet check answers `OK` and says nothing.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -19,7 +20,8 @@ pub fn quiet(answer: &str) -> bool {
     a == "ok" || a == "all ok" || a == "nothing" || a.is_empty()
 }
 
-/// One check: the agent's answer (unattended rules, sandboxed commands).
+/// One check: the agent's answer (unattended rules; commands on this machine write-confined, or
+/// unconfined when `[agent] sandbox = "off"`).
 pub async fn check(agent: &crate::agent::Agent, home: &Path, list: &str) -> Result<String, String> {
     let mut unattended = agent.clone();
     if unattended.approvals.mode != crate::config::ApprovalMode::Trust {

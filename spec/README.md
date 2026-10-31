@@ -8,10 +8,10 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 | [routing.md](routing.md) | **v0, normative** | Where one request runs: node model, cloud model, ask first, or refuse |
 | [pairing.md](pairing.md) | **v0, implemented, unaudited** | How a device and a node pair and talk (Noise); pairing-code vectors, and full handshake transcripts from snow (`noise.json`) |
 | [egress.md](egress.md) | **v0, normative** | Where one outbound request may go: blocked (the kill switch), direct, or through Tor or a SOCKS5 proxy; what counts as loopback |
-| [redaction.md](redaction.md) | **v0, normative** | What is replaced before a request leaves for the cloud, and how it is restored |
+| [redaction.md](redaction.md) | **v1, normative** | What is replaced before a request leaves for the cloud, and how it is restored |
 | [receipts.md](receipts.md) | **v1, normative** | The signed receipt for every request: where it ran, what left the node, and the request/answer pair, caller and time it binds; vectors from independent implementations |
 | [cluster.md](cluster.md) | **v0, phase 1 implemented, unaudited** | Inference split across your paired devices (llama.cpp RPC inside Noise shard links), the link and partitioning rules, and the plan for training across devices |
-| [dispatch.md](dispatch.md) | **v0, proposed; policy only** | Which owned node answers an independent request, and what a node advertises to be chosen for one |
+| [dispatch.md](dispatch.md) | **v0, implemented, unaudited** | Which owned node answers an independent request, and what a node advertises to be chosen for one |
 | [discovery.md](discovery.md) | **v0, implemented, unaudited** | Signed, expiring descriptors published to seeds and mDNS: how a node is found without a pasted code, and why finding one is not trust |
 | [audit.md](audit.md) | **v0, implemented** | The node's hash-chained log of every request, and the agent's log of its actions |
 | [agent.md](agent.md) | **v0, implemented** | The Autobot Agent's API, which the gateway passes through to paired devices |
@@ -36,8 +36,23 @@ share this instead: prose that defines each rule, and **conformance vectors** th
 - An implementation conforms when, for every case, its output equals `expect` exactly: the same
   fields, the same values, with absent fields absent.
 
-Invincible runs them in `cargo test` (`crates/invincible-policy/tests/vectors.rs` for routing,
-`crates/invincible/tests/vectors.rs` for the rest). Autobot runs the same files in its JVM tests.
+Invincible runs every file in `cargo test` (`crates/invincible-policy/tests/vectors.rs` for
+routing, egress and cluster, `crates/invincible/tests/noise_vectors.rs` for Noise,
+`crates/invincible/tests/vectors.rs` for the rest). Autobot runs five of them in its JVM tests,
+the ones for rules the phone applies itself:
+
+| File | Invincible | Autobot |
+|---|---|---|
+| `pairing-code.json` | yes | yes |
+| `noise.json` | yes | yes |
+| `receipts.json` | yes | yes |
+| `redaction.json` | yes | yes |
+| `egress.json` | yes | yes |
+| `routing.json` | yes | no: the node decides a node request's route, the app sends it there |
+| `cluster.json` | yes | no: the rules hold between nodes |
+
+Autobot copies the files with its `scripts/sync-invincible-spec.sh`, which records the commit
+they came from in `SOURCE`, so its copy is as new as its last sync and can lag a change here.
 
 ## Changing a rule
 

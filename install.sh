@@ -531,11 +531,14 @@ else
     ok "llama.cpp installed in $LLAMA_DIR"
 fi
 
-# --- The sandbox for unattended commands (Linux: bubblewrap) ----------------------------------
-# Scheduled tasks, board work, phone recipes and `autobot run` run commands sandboxed; without
+# --- Write confinement for unattended commands (Linux: bubblewrap) ------------------------------
+# Scheduled tasks, board work, phone recipes and `autobot run` run commands on this machine
+# write-confined: a command's own writes go only to its working directory and temp. Reads, the
+# network and the programs it can talk to (systemd or launchd, D-Bus, the node's and agent's local
+# APIs, any socket) are not restricted yet, so it can have one of them write elsewhere. Without
 # bwrap they are refused. macOS has sandbox-exec built in.
 if [ "$OS" = Linux ] && ! have bwrap; then
-    question="Install bubblewrap (the sandbox for unattended agent commands) with sudo?"
+    question="Install bubblewrap (write confinement for unattended agent commands) with sudo?"
     if have apt-get && ask_sudo "$question"; then
         sudo apt-get install -y -qq bubblewrap >&2 || warn "bubblewrap did not install"
     elif have dnf && ask_sudo "$question"; then

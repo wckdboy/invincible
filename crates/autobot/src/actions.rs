@@ -25,8 +25,8 @@ pub struct Entry {
     /// could be asked.
     pub by: String,
     /// On a command that ran: where, and how confined ([crate::tools::Tools::confinement]):
-    /// `bwrap` or `sandbox-exec` (here, writing only in the working directory), `off` (here,
-    /// unconfined), `container` or `ssh`. None on other kinds and on older entries.
+    /// `bwrap` or `sandbox-exec` (here, its own writes only in the working directory and temp),
+    /// `off` (here, unconfined), `container` or `ssh`. None on other kinds and on older entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<String>,
 }

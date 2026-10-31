@@ -205,7 +205,7 @@ pub async fn run(config: &Config, home: &Path) -> Vec<Check> {
                 let out = probe.run(&crate::tools::Call::Terminal { command: "echo sandboxed".into() }).await;
                 if out.starts_with("sandboxed") {
                     checks.push(ok(format!(
-                        "sandbox works ({:?}: unattended commands write only in the working directory)",
+                        "sandbox works ({:?}: an unattended command's own writes stay in the working directory and temp; reads, the network and other programs it talks to are not restricted)",
                         config.agent.sandbox
                     )));
                 } else {

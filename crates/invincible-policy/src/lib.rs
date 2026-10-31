@@ -1,7 +1,7 @@
 //! Invincible's policy rules, shared with Autobot through `spec/`.
 //!
 //! Everything here is pure: no I/O, no clock, no randomness. The conformance vectors in
-//! `spec/vectors/` pin the behaviour down, and Autobot runs the same vectors.
+//! `spec/vectors/` pin the behaviour down; Autobot runs the egress ones too (spec/README.md).
 
 mod cluster;
 mod dispatch;

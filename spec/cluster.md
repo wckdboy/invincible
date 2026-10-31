@@ -6,7 +6,7 @@
 > phase 1 is a design: concrete enough to build, open to change when it meets real hardware.
 
 Your devices together can run models none of them can run alone, and later train them. A Mac
-Studio, an older MacBook, a GPU box and a phone on the same desk hold 100+ GB between them. This
+Studio, an older MacBook and a GPU box on the same desk hold 100+ GB between them. This
 document covers what Invincible does with that: **inference** split across devices (pipeline
 parallel, as exo does, through llama.cpp), and **training** (LoRA fine-tuning on one device, then
 across devices with low-communication sync, DiLoCo-style).
@@ -46,7 +46,7 @@ across devices with low-communication sync, DiLoCo-style).
 | [DiLoCo](https://arxiv.org/abs/2311.08105), [OpenDiLoCo](https://arxiv.org/abs/2407.07852), [INTELLECT-1](https://arxiv.org/abs/2412.01152) | Many local steps (AdamW), then an outer step (Nesterov) on the averaged change: 500× less communication than data parallel, robust to workers coming and going | **The training sync** across devices (phase T2) |
 | [DeMo / DisTrO](https://arxiv.org/abs/2411.19870), [Psyche](https://nousresearch.com/nous-psyche/) | Decoupled momentum with DCT + top-k compression, 85× less than AdamW-DDP; Psyche coordinates over a chain with Iroh P2P | Later compression for slow links; not the first choice (DiLoCo is simpler and proven at LoRA scale) |
 | [Hivemind](https://github.com/learning-at-home/hivemind), [Gensyn Verde](https://arxiv.org/abs/2502.19405), [TOPLOC](https://arxiv.org/abs/2501.16007) | DHT and averaging for volunteer training; verification of untrusted compute | Only for a future strangers' tier; not needed among your own devices |
-| [FedIT](https://arxiv.org/abs/2305.05644), [FedSA-LoRA](https://arxiv.org/abs/2410.01463), [FLoRA](https://arxiv.org/abs/2409.05976), [Flower](https://flower.ai/docs/examples/flowertune-llm-code.html) | Federated LoRA: clients train adapters on private data, a server averages them | Phones as federated participants (phase T3), adapters only |
+| [FedIT](https://arxiv.org/abs/2305.05644), [FedSA-LoRA](https://arxiv.org/abs/2410.01463), [FLoRA](https://arxiv.org/abs/2409.05976), [Flower](https://flower.ai/docs/examples/flowertune-llm-code.html) | Federated LoRA: clients train adapters on private data, a server averages them | Federated participants (phase T3), adapters only; phones as participants deferred ([Phones](#phones)) |
 | [MLX distributed](https://ml-explore.github.io/mlx/build/html/usage/distributed.html), [mlx-lm LoRA](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/LORA.md) | `mx.distributed` over ring (TCP) or JACCL (RDMA over Thunderbolt 5); `mlx_lm.lora` with QLoRA and gradient checkpointing; pipeline and tensor sharded generation | **The training engine on Apple silicon** (phase T1) and a later inference engine for Apple-only clusters |
 
 What runs where:
@@ -61,8 +61,9 @@ What runs where:
   carry a memory figure (`parse_devices`, same file). A CPU-only head does not split either: with
   an empty device list the model runs on the head alone and the note says why (Known limits of
   phase 1).
-- **Phones:** llama.cpp and MNN already run on Autobot's devices. As inference shards only on
-  charge and on Wi-Fi (below); as federated LoRA participants (phase T3).
+- **Phones:** clients, not cluster members: they pair with a node and drive it, and are never
+  heads or shards. Phones as shards and as federated LoRA participants are deferred
+  ([Phones](#phones)).
 
 ## Trust model
 
@@ -580,6 +581,12 @@ split = "auto"                       # or "always"
 
 ## Phones
 
+> **Deferred.** Phones and tablets pair as clients, never as heads or shards. iOS does not let an
+> app start a child process at all, and on Android a phone would be a node only while awake,
+> plugged in and cool; serving them would need an engine linked into the app, against the rule
+> that engines are processes. The design below is kept for when that changes; nothing in phase 1
+> or the phases before 6 depends on it.
+
 - **Inference shards: only when charging, on Wi-Fi, and cool.** A phone gives a few GB of memory
   and its NPU/GPU, but sleeps, roams and throttles. Autobot would run `ggml-rpc-server` (it already
   embeds llama.cpp) behind the same shard link, and announce itself as a shard only while plugged
@@ -611,14 +618,16 @@ device that drops out misses rounds without stopping the run. The head is the co
 travel over shard links (a training mode of the same Noise session); a ring all-reduce among
 wired devices in phase T4.
 
-**T3 — Federated LoRA with phones.** As T2, but devices keep their data: each round sends only
-adapter deltas; FedSA-LoRA's rule (average A, keep B local) when personalisation matters. Optional
+**T3 — Federated LoRA with phones.** *Deferred ([Phones](#phones)); a laptop that sleeps could
+take the phone's place.* As T2, but devices keep their data: each round sends only adapter
+deltas; FedSA-LoRA's rule (average A, keep B local) when personalisation matters. Optional
 clipping and noise for differential privacy, off by default between your own devices.
 
 **T4 — Larger.** Full fine-tuning and continued pretraining of mid-size models across wired
 machines: pipeline parallel training (MLX, PyTorch) with DiLoCo outer steps between groups; DeMo
 compression for slow links. Distillation from frontier traces (the eval harness's training data
-export) is a natural first dataset.
+export) is pending a licence gate, which is not built: a provider's terms can forbid using its
+outputs to train another model.
 
 **Datasets and privacy.**
 
@@ -663,10 +672,10 @@ export) is a natural first dataset.
 | 3. Resilience | Resume after reshard (replay prompt + tokens); relaunch when idle when a peer returns; micro-batched prefill | Pulling a shard's cable mid-answer gives a pause and a complete answer; no request errors in a 1-hour soak with a shard toggling every 5 minutes |
 | 4. Placement | Whole-model placement on a peer (forwarded over a session), the router picking head, peer or split by measured speed | A model that fits only on the GPU box is served from there via the head, its receipt naming the box |
 | 5. Wired fast paths | Tensor parallel within RDMA/10 GbE groups (MLX JACCL or llama.cpp `--split-mode tensor`), opt-in RDMA between owned machines | 4 Macs over TB5 beat one Mac on a model that fits one (exo's claim: 1.8× on 2) |
-| 6. Phones as shards | Autobot runs `ggml-rpc-server` behind a shard link when charging, on Wi-Fi, cool | A phone holds 10% of a model's layers; unplugging it reshards within 30 s |
+| 6. Phones as shards (**deferred**, [Phones](#phones)) | Autobot runs `ggml-rpc-server` behind a shard link when charging, on Wi-Fi, cool | A phone holds 10% of a model's layers; unplugging it reshards within 30 s |
 | T1. LoRA on one device | `invincible train` (mlx-lm / PEFT as an engine), datasets with manifests, adapters served as models, eval gate, training receipts | A LoRA trained on 1k records from your sessions beats its base on your eval tasks, served under a new id |
 | T2. DiLoCo LoRA | Data-parallel LoRA over shard links with outer steps every H steps | Two Macs reach the same eval score as one in ≤ 60% of the wall time, moving < 1% of the bytes per-step sync would |
-| T3. Federated with phones | Adapter deltas from phones, FedSA-LoRA option | Three devices (one phone) improve a shared adapter without any record leaving its device (checked by receipts) |
+| T3. Federated with phones (**deferred**, [Phones](#phones)) | Adapter deltas from phones, FedSA-LoRA option | Three devices (one phone) improve a shared adapter without any record leaving its device (checked by receipts) |
 | T4. Larger | Pipeline-parallel training across machines, DeMo compression | A 7B full fine-tune across two machines that neither fits alone |
 
 ## Phase 1: what was measured

@@ -1,4 +1,6 @@
-//! Runs the conformance vectors in `spec/vectors/` (spec/README.md). Autobot runs the same files.
+//! Runs the conformance vectors in `spec/vectors/` for routing, egress and cluster
+//! (spec/README.md). The Autobot app runs the egress file too, not the other two: the node decides
+//! a node request's route, and the cluster rules hold between nodes.
 
 use std::path::PathBuf;
 
