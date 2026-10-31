@@ -63,8 +63,8 @@ next sweep stops it, forced: a pod with its name is deleted, and with none, noth
 sweeper always deletes after the drain attempt: a pod does not outlive the hours it was paid for,
 and an idle ready or hydrating pod (no status read for `idle_minutes`) is stopped the same way. A
 `failed` session that still has a pod is deleted too. On startup and on each sweep, a pod named
-`invincible-<session>` with no live tracked session is drained on a best-effort basis and then
-terminated.
+`invincible-<node id>-<session>` with no live tracked session is drained on a best-effort basis and
+then terminated.
 Going over `monthly_cap_usd` stops whatever is still running.
 
 Hydrate, on start, lists `projects/<id>/workspace/` and writes `sessions/<id>/hydrate.json`, then
