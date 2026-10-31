@@ -689,14 +689,15 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   (`git diff --no-color`, `git ls-files --others --exclude-standard`), `git ls-files` for the
   project map that `autobot code`, `autobot run -C`, Zed and a thread start with (and
   `autobot map`), `autobot review`, and every thread action, from `autobot thread`, the API or
-  the panel: starting one (`git worktree add`), listing them or showing one
-  (`git status --porcelain` in its worktree, for `autobot thread`, `thread list`, `thread show`,
-  `GET /v1/agent/threads` and `GET /v1/agent/threads/<id>`; the panel lists them while it is
-  open), a thread's diff and pull request (`git add -A`, `git commit`, `git push`) and removing
-  one (`git worktree remove`, `git branch -D`). So a `core.fsmonitor`, diff driver or filter left
-  in `.git/config` (the last two named in a `.gitattributes`), or a hook one of them runs
-  (`post-checkout` when a thread starts, those a commit or push runs), can run when one of them
-  does.
+  the panel: starting one (`git worktree add`; with `[agent.docker]` or `[agent.ssh]` set the
+  API and the panel refuse to start one, `autobot thread start` does not), listing them or
+  showing one (`git status --porcelain` in its worktree, for `autobot thread`, `thread list`,
+  `thread show`, `GET /v1/agent/threads` and `GET /v1/agent/threads/<id>`; the panel lists them
+  while it is open), a thread's diff and pull request (`git add -A`, `git commit`, `git push`)
+  and removing one (`git worktree remove`, `git branch -D`). So a `core.fsmonitor`, diff driver
+  or filter left in `.git/config` (the last two named in a `.gitattributes`), or a hook one of
+  them runs (`post-checkout` when a thread starts, those a commit or push runs), can run when one
+  of them does.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands

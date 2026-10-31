@@ -72,11 +72,12 @@ describe is a finding.
   hooks), unconfined even with `[agent.docker]` set or `[agent] sandbox = "always"`: `/diff`, the
   project map that `autobot code`, `autobot run -C`, Zed and a thread start with, `autobot map`,
   `autobot review`, and every thread action, from `autobot thread`, the API or the panel:
-  starting one (`git worktree add`), listing them or showing one (`git status` in its worktree;
-  the panel lists them while it is open), a thread's diff and pull request, and removing one. So
-  a `core.fsmonitor` left in `.git/config`, a diff driver or filter there that a `.gitattributes`
-  names, or a hook one of them runs (`post-checkout` when a thread starts, those a commit or push
-  runs), can run when one of them does.
+  starting one (`git worktree add`; with `[agent.docker]` or `[agent.ssh]` set the API and the panel
+  refuse to start one, `autobot thread start` does not), listing them or showing one (`git status`
+  in its worktree; the panel lists them while it is open), a thread's diff and pull request, and
+  removing one. So a `core.fsmonitor` left in `.git/config`, a diff driver or filter there that a
+  `.gitattributes` names, or a hook one of them runs (`post-checkout` when a thread starts, those a
+  commit or push runs), can run when one of them does.
 - The node has had an internal security review, not yet an independent one; pairing, remote
   access and discovery are implemented and unaudited ([README](README.md#status)).
 - Data on disk is not encrypted at rest. Keys, tokens and the audit log are files only the owner's
