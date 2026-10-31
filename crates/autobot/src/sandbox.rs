@@ -14,18 +14,21 @@
 //! in that directory runs (`core.hooksPath` or `core.fsmonitor` in `.git/config`, a `Makefile`,
 //! `node_modules/.bin`, an `.envrc` once the owner runs `direnv allow`). A delegated run is
 //! confined as interactive turns are: nothing switches it to unattended ([crate::api]). Autobot's
-//! own `git` runs there on this machine, unconfined whatever the sandbox and `[agent.docker]` say:
-//! the TUI's `/diff`, the project map ([crate::repo_map]) a coding session, `autobot run -C` or a
-//! thread starts with, `autobot review`, and a thread's diff and pull request ([crate::threads]).
-//! So a `core.fsmonitor` left there, a diff driver or filter a `.gitattributes` names, or a hook
-//! a commit or push runs, can run when one of them does. The approval rules hold back the agent's
-//! own writes under dot names: `ask`, `edits` and `auto` ask, `allowlist` refuses them and `trust`
-//! runs them. On the unattended paths above they are refused unless the mode is `trust`:
-//! scheduled tasks (hooks too), board work and the heartbeat switch to `allowlist`, and the
-//! approver of `autobot run` or of Home Assistant's voice requests says no. `autobot eval` has
-//! nobody to ask either, but its approver says yes to all but a GPU rental: each task runs in a
-//! throwaway directory with every command confined ([crate::eval]). The rules do not see what a
-//! command writes.
+//! own `git` runs there on this machine, and in the thread worktrees made from it (which share its
+//! `.git/config` and hooks), unconfined whatever the sandbox and `[agent.docker]` say: the TUI's
+//! `/diff`, the project map ([crate::repo_map]) a coding session, `autobot run -C` or a thread
+//! starts with, `autobot review`, and every thread action ([crate::threads]), from the CLI, the
+//! API or the panel: starting one (`git worktree add`), listing them or showing one (`git status`
+//! in its worktree; the panel lists them while it is open), its diff and pull request, and
+//! removing one. So a `core.fsmonitor` left there, a diff driver or filter a `.gitattributes`
+//! names, or a hook one of them runs (`post-checkout` when a thread starts, those a commit or push
+//! runs), can run when one of them does. The approval rules hold back the agent's own writes under
+//! dot names: `ask`, `edits` and `auto` ask, `allowlist` refuses them and `trust` runs them. On
+//! the unattended paths above they are refused unless the mode is `trust`: scheduled tasks (hooks
+//! too), board work and the heartbeat switch to `allowlist`, and the approver of `autobot run` or
+//! of Home Assistant's voice requests says no. `autobot eval` has nobody to ask either, but its
+//! approver says yes to all but a GPU rental: each task runs in a throwaway directory with every
+//! command confined ([crate::eval]). The rules do not see what a command writes.
 //!
 //! macOS: `sandbox-exec` with a write-deny profile. Linux: `bwrap` (bubblewrap) with the system
 //! read-only and the working directory writable. Where neither is available, a confined
