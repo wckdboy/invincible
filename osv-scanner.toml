@@ -1,0 +1,11 @@
+# osv-scanner suppressions for invincible.
+#
+# Rule: an entry here is a reviewed, time-boxed exception for a dependency whose
+# fix is controlled by an upstream crate, not by this repository. Each entry names
+# the upstream that has to move. Do NOT add an entry for something this repo can
+# upgrade itself — upgrade it instead. Re-check on the ignoreUntil date.
+
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+reason = "block-buffer 0.10.4 arrives through snow 0.10.0 -> blake2/sha2 0.10 -> digest 0.10; the fix is block-buffer 0.12.1 (digest 0.11), which snow 0.10.0 (newest release) does not use. The advisory is a panic on an internal buffer-position overflow in the hash primitive, not attacker-controlled input. Tracked upstream: rustsec/rustsec (snow)."
+ignoreUntil = 2027-01-31

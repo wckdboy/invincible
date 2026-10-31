@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -51,6 +52,8 @@ pub struct ApiState {
     failed: Vec<(String, String)>,
     /// Prices for `/usage` and `/insights`, for every bot; each bot's own `[prices]` without.
     prices: Option<crate::insights::Prices>,
+    /// Paused delegated runs, in `delegations.json` under the served root.
+    jobs: Arc<crate::delegations::Jobs>,
 }
 
 /// One bot as the API serves it.
@@ -61,6 +64,8 @@ pub struct BotApi {
     open: Mutex<HashMap<String, (Shared, std::time::Instant)>>,
     /// Messages for a session's running turn (`…/steer`).
     inboxes: Mutex<HashMap<String, crate::tools::Inbox>>,
+    /// Threads in this bot's home: the session-to-worktree map.
+    threads: Arc<crate::threads::Threads>,
 }
 
 /// The questions turns are waiting on, by id: where to send the answer, and the question as
@@ -78,11 +83,43 @@ struct Open {
 
 impl BotApi {
     fn new(runtime: Arc<Runtime>, info: Value) -> Arc<Self> {
-        Arc::new(Self { runtime, info, open: Mutex::default(), inboxes: Mutex::default() })
+        let threads = Arc::new(crate::threads::Threads::new(runtime.home.clone()));
+        Arc::new(Self { runtime, info, open: Mutex::default(), inboxes: Mutex::default(), threads })
     }
 
     fn agent(&self) -> Arc<Agent> {
         self.runtime.agent()
+    }
+
+    /// The bot as the settings editor sees it: its file, home and current configuration.
+    fn def(&self) -> crate::bots::Def {
+        crate::bots::Def {
+            name: self.runtime.name.clone(),
+            root: self.runtime.root.clone(),
+            home: self.runtime.home.clone(),
+            config: self.runtime.config.clone(),
+            default: self.runtime.default,
+        }
+    }
+
+    /// The agent for [session]: the bot's own, or a copy whose tools and project map run in a
+    /// thread's worktree.
+    fn agent_for(&self, session: &str) -> Result<Arc<Agent>, String> {
+        let base = self.agent();
+        let Some(thread) = self.threads.get(session)? else {
+            if self.threads.is_removed(session)? {
+                return Err(format!("thread {session} was removed; its worktree is gone"));
+            }
+            return Ok(base);
+        };
+        if !thread.worktree.is_dir() {
+            return Err(format!("the worktree for thread {} is gone ({})", thread.id, thread.worktree.display()));
+        }
+        let mut agent = (*base).clone();
+        agent.tools = agent.tools.clone().with_workdir(thread.worktree.clone());
+        agent.options.repo_map = crate::repo_map::render(&thread.worktree, 4096);
+        agent.options.project_root = Some(thread.repo.clone());
+        Ok(Arc::new(agent))
     }
 
     fn home(&self) -> &std::path::Path {
@@ -134,6 +171,7 @@ impl ApiState {
     /// schedules beside them), described by [info].
     pub fn new(agent: Arc<Agent>, token: String, home: std::path::PathBuf, info: Value) -> Self {
         let runtime = Runtime::standalone(crate::bots::DEFAULT, &home, agent);
+        let jobs = Arc::new(crate::delegations::Jobs::new(&home));
         Self {
             token,
             bots: Mutex::new(vec![BotApi::new(runtime, info)]),
@@ -142,12 +180,14 @@ impl ApiState {
             root: None,
             failed: Vec::new(),
             prices: None,
+            jobs,
         }
     }
 
     /// The bots [fleet] runs, as it runs them now (`autobot serve`).
     pub fn for_fleet(token: String, fleet: Arc<Fleet>) -> Self {
         let root = Some(fleet.root().to_owned());
+        let jobs = Arc::new(crate::delegations::Jobs::new(fleet.root()));
         Self {
             token,
             bots: Mutex::default(),
@@ -156,6 +196,7 @@ impl ApiState {
             root,
             failed: Vec::new(),
             prices: None,
+            jobs,
         }
     }
 
@@ -195,7 +236,9 @@ impl ApiState {
         failed: Vec<(String, String)>,
     ) -> Self {
         let bots = runtimes.iter().map(|r| BotApi::new(r.clone(), info_of(r))).collect();
-        Self { token, bots: Mutex::new(bots), fleet: None, waiting: Arc::default(), root, failed, prices: None }
+        let home = root.clone().or_else(|| runtimes.first().map(|r| r.home.clone())).unwrap_or_default();
+        let jobs = Arc::new(crate::delegations::Jobs::new(home));
+        Self { token, bots: Mutex::new(bots), fleet: None, waiting: Arc::default(), root, failed, prices: None, jobs }
     }
 
     /// With these prices, for costs in `/usage` and `/insights`, instead of each bot's `[prices]`.
@@ -223,6 +266,102 @@ impl ApiState {
     }
 }
 
+impl ApiState {
+    /// Starts the background resumer: on boot it recovers runs interrupted by a restart, then
+    /// every ten seconds it starts the paused runs whose retry time has come. A paused job is
+    /// resumed in the same conversation and worktree, with no client attached.
+    pub fn start_resumer(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let state = self.clone();
+        tokio::spawn(async move {
+            match state.jobs.recover(crate::delegations::now()) {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("recovering {n} delegated run(s) interrupted by a restart"),
+                Err(e) => tracing::warn!("delegations: {e}"),
+            }
+            // Finished jobs are history; keep a month of it.
+            if let Err(e) = state.jobs.prune(30) {
+                tracing::warn!("delegations: {e}");
+            }
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                state.resume_due().await;
+            }
+        })
+    }
+
+    /// Starts every paused delegation that is due now. Each start is exclusive: [claim] moves
+    /// the job to running before its task exists, so two resumers cannot both take it.
+    async fn resume_due(self: &Arc<Self>) {
+        let due = match self.jobs.due(crate::delegations::now()) {
+            Ok(due) => due,
+            Err(e) => {
+                tracing::warn!("delegations: {e}");
+                return;
+            }
+        };
+        for job in due {
+            if job.resumes >= crate::delegations::MAX_RESUMES {
+                let _ = self.jobs.finish(
+                    &job.id,
+                    crate::delegations::State::Failed,
+                    "the run used its automatic resumes; send the task again",
+                );
+                continue;
+            }
+            let claimed = match self.jobs.claim(&job.id, crate::delegations::now()) {
+                Ok(Some(job)) => job,
+                Ok(None) => continue,
+                Err(e) => {
+                    tracing::warn!("delegations: {e}");
+                    continue;
+                }
+            };
+            if let Err(e) = self.start_resume(claimed.clone()) {
+                tracing::warn!(delegation = %job.id, "{e}");
+                let _ = self.jobs.release(&job.id, crate::delegations::now() + 60, &e);
+            }
+        }
+    }
+
+    /// One resumed delegated run, on its own task. Its events go to a channel nobody reads:
+    /// the answer and the webhook report are the result; the panel shows the registry.
+    fn start_resume(&self, job: crate::delegations::Job) -> Result<(), String> {
+        let bot = self.named(&job.bot).ok_or_else(|| format!("bot {:?} is not running", job.bot))?;
+        let open = bot.open(&job.session)?;
+        let guard =
+            open.clone().try_lock_owned().map_err(|_| format!("session {} is busy; it will try again", job.session))?;
+        let agent = bot.agent_for(&job.session)?;
+        let inbox = bot.inbox(&job.session);
+        let runtime = bot.runtime.clone();
+        let jobs = self.jobs.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        tokio::spawn(async move {
+            let approver = DelegatedApprover {
+                events: tx.clone(),
+                bot: runtime.name.clone(),
+                declined: Arc::new(AtomicU32::new(0)),
+            };
+            run_delegated(
+                agent,
+                guard,
+                crate::delegate::resume_task(&job.scope),
+                Vec::new(),
+                job.scope.clone(),
+                approver,
+                tx,
+                inbox,
+                runtime,
+                false,
+                job.owner_controls,
+                Resumption { jobs, id: Some(job.id.clone()), resumes: job.resumes },
+            )
+            .await;
+        });
+        Ok(())
+    }
+}
+
 fn unknown_bot(name: &str) -> Response {
     error(StatusCode::NOT_FOUND, "unknown_bot", &format!("no bot {name:?} here"))
 }
@@ -232,6 +371,7 @@ pub fn info_of(runtime: &Runtime) -> Value {
     let agent = runtime.agent();
     json!({
         "name": if runtime.default { "Autobot".to_owned() } else { runtime.name.clone() },
+        "version": invincible::version::VERSION,
         "model": agent.gateway.model(),
         "workdir": agent.tools.workdir().display().to_string(),
         "approvals": format!("{:?}", agent.approvals.mode).to_lowercase(),
@@ -384,7 +524,7 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/healthz", get(|| async { Json(json!({ "status": "ok", "version": invincible::version::VERSION })) }));
     let guarded = Router::new()
         .route("/v1/agent", get(info))
-        .route("/v1/agent/bots", get(bots))
+        .route("/v1/agent/bots", get(bots).post(add_bot))
         .route("/v1/agent/bots/{name}/enable", post(enable_bot))
         .route("/v1/agent/bots/{name}/disable", post(disable_bot))
         .route("/v1/agent/bots/reload", post(reload_bots))
@@ -392,12 +532,33 @@ pub fn app(state: Arc<ApiState>) -> Router {
         .route("/v1/agent/openai/v1/chat/completions", post(openai_chat))
         .route("/v1/agent/sessions", get(sessions))
         .route("/v1/agent/sessions/{id}", get(history))
+        .route("/v1/agent/plan", get(plan))
+        .route("/v1/agent/project", get(project).post(set_project).delete(remove_project))
         // A turn may carry images (base64: a third larger than they are).
         .route("/v1/agent/sessions/{id}/turns", post(turn).layer(axum::extract::DefaultBodyLimit::max(TURN_BODY_LIMIT)))
         .route("/v1/agent/sessions/{id}/retry", post(retry))
         .route("/v1/agent/sessions/{id}/reset", post(reset))
         .route("/v1/agent/sessions/{id}/steer", post(steer))
         .route("/v1/agent/sessions/{id}/fork", post(fork))
+        .route("/v1/agent/threads", get(list_threads).post(new_thread))
+        .route("/v1/agent/threads/{id}", get(thread_info).delete(remove_thread))
+        .route("/v1/agent/threads/{id}/diff", get(thread_diff))
+        .route("/v1/agent/threads/{id}/pr", post(thread_pr))
+        .route("/v1/agent/settings", get(settings).post(set_setting))
+        .route("/v1/agent/model", post(set_model))
+        .route("/v1/agent/tools", post(set_tool))
+        .route("/v1/agent/secrets", get(secrets).post(set_secret))
+        .route("/v1/agent/secrets/{name}", axum::routing::delete(remove_secret))
+        .route("/v1/agent/variables", get(variables).post(set_variable))
+        .route("/v1/agent/variables/{key}", axum::routing::delete(remove_variable))
+        .route("/v1/agent/subscriptions", get(subscriptions).post(set_subscription))
+        .route("/v1/agent/subscriptions/{id}", axum::routing::delete(remove_subscription))
+        .route("/v1/agent/providers", get(providers))
+        .route("/v1/agent/adapters", get(adapters))
+        .route("/v1/agent/adapters/{name}/run", post(run_adapter))
+        .route("/v1/agent/delegations", get(delegations))
+        .route("/v1/agent/delegations/{id}/resume", post(resume_delegation))
+        .route("/v1/agent/delegations/{id}/cancel", post(cancel_delegation))
         .route("/v1/agent/approvals", get(approvals))
         .route("/v1/agent/approvals/{id}", post(approve))
         .route("/v1/agent/schedules", get(schedules).post(add_schedule))
@@ -490,6 +651,507 @@ async fn info(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot) -> Json<Valu
     info["bot"] = json!(bot.runtime.name);
     info["bots"] = json!(state.bots().iter().map(|b| b.runtime.name.clone()).collect::<Vec<_>>());
     Json(info)
+}
+
+/// `GET /v1/agent/secrets`: the secret files in the bot's home, without their values.
+async fn secrets(Bot(bot, _): Bot) -> Response {
+    match crate::secrets::list(bot.home()) {
+        Ok(secrets) => Json(json!({ "secrets": secrets })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/secrets/{name}`: remove a secret file from the bot's home.
+async fn remove_secret(Bot(bot, _): Bot, Path(name): Path<String>) -> Response {
+    match crate::secrets::remove(bot.home(), &name) {
+        Ok(true) => Json(json!({ "ok": true, "name": name })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no secret file {name:?}")),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct VariableBody {
+    key: String,
+    value: String,
+    #[serde(default)]
+    description: String,
+}
+
+/// `GET /v1/agent/variables`: operator variables, values included (they are not secrets).
+async fn variables(Bot(bot, _): Bot) -> Response {
+    match crate::variables::Variables::new(bot.home()).list() {
+        Ok(list) => Json(json!({ "variables": list.iter().map(crate::variables::Variable::view).collect::<Vec<_>>() }))
+            .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/variables {"key", "value", "description"?}`: add or replace one.
+async fn set_variable(Bot(bot, _): Bot, Json(body): Json<VariableBody>) -> Response {
+    match crate::variables::Variables::new(bot.home()).set(&body.key, &body.value, &body.description) {
+        Ok(variable) => Json(json!({ "ok": true, "variable": variable.view() })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/variables/{key}`.
+async fn remove_variable(Bot(bot, _): Bot, Path(key): Path<String>) -> Response {
+    if let Err(e) = crate::variables::validate_key(&key) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e);
+    }
+    match crate::variables::Variables::new(bot.home()).remove(&key) {
+        Ok(true) => Json(json!({ "ok": true, "key": key })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no variable {key:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `GET /v1/agent/subscriptions`: plans, totals per currency and renewals in the next 30 days.
+async fn subscriptions(Bot(bot, _): Bot) -> Response {
+    match crate::subscriptions::Subscriptions::new(bot.home()).summary() {
+        Ok(summary) => Json(summary).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/subscriptions`: add or replace a plan (an id replaces one).
+async fn set_subscription(Bot(bot, _): Bot, Json(body): Json<crate::subscriptions::Subscription>) -> Response {
+    match crate::subscriptions::Subscriptions::new(bot.home()).upsert(body) {
+        Ok(subscription) => Json(json!({ "ok": true, "subscription": subscription.view() })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/subscriptions/{id}`.
+async fn remove_subscription(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    match crate::subscriptions::Subscriptions::new(bot.home()).remove(&id) {
+        Ok(true) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no subscription {id:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `GET /v1/agent/providers`: Autobot and the external coding CLIs installed on this machine.
+async fn providers() -> Response {
+    match tokio::task::spawn_blocking(crate::providers::detect).await {
+        Ok(providers) => Json(json!({ "providers": providers })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("provider detection: {e}")),
+    }
+}
+
+/// `GET /v1/agent/adapters`: the installed coding CLIs, their auth and what they can do.
+async fn adapters() -> Response {
+    match tokio::task::spawn_blocking(crate::adapters::list).await {
+        Ok(adapters) => Json(json!({ "adapters": adapters })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("adapter detection: {e}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct AdapterRunBody {
+    task: String,
+    /// The thread whose worktree the adapter works in.
+    thread: String,
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+    /// Stream `adapter.started`, `adapter.output` lines and a final event, instead of one JSON
+    /// answer at the end.
+    #[serde(default)]
+    stream: bool,
+}
+
+/// `POST /v1/agent/adapters/{name}/run {"task", "thread", "timeout_seconds"?, "stream"?}`: run one
+/// external coding CLI in a thread's worktree. It uses its own account, so the answer is not a
+/// gateway receipt and is marked as such. One run at a time per worktree; with `stream`, output
+/// lines arrive as they happen.
+async fn run_adapter(Bot(bot, _): Bot, Path(name): Path<String>, Json(body): Json<AdapterRunBody>) -> Response {
+    let task = body.task.trim();
+    if task.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the task is empty");
+    }
+    if task.chars().count() > 8_000 {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the task is longer than 8000 characters");
+    }
+    let thread = match bot.threads.get(&body.thread) {
+        Ok(Some(thread)) => thread,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {:?}", body.thread)),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    };
+    if !thread.worktree.is_dir() {
+        return error(
+            StatusCode::CONFLICT,
+            "worktree_gone",
+            &format!("the worktree for thread {} is gone ({})", thread.id, thread.worktree.display()),
+        );
+    }
+    let timeout = Duration::from_secs(body.timeout_seconds.unwrap_or(1800).clamp(30, 7200));
+    let workdir = thread.worktree.clone();
+    let thread_id = thread.id.clone();
+    if body.stream {
+        let prepared = match crate::adapters::prepare(&name, task, &workdir).await {
+            Ok(prepared) => prepared,
+            Err(e) => return adapter_failure(&e),
+        };
+        return stream_adapter(prepared, thread_id, workdir, timeout);
+    }
+    match crate::adapters::run(&name, task, &workdir, timeout).await {
+        Ok(out) => Json(json!({
+            "adapter": out.adapter,
+            "thread": thread_id,
+            "workdir": workdir.display().to_string(),
+            "exit_code": out.exit_code,
+            "seconds": out.seconds,
+            "stdout": out.stdout,
+            "stderr": out.stderr,
+            "truncated": out.truncated,
+        }))
+        .into_response(),
+        Err(e) => adapter_failure(&e),
+    }
+}
+
+/// The status for an adapter that could not start, or that failed before it ran.
+fn adapter_failure(e: &str) -> Response {
+    let status = if e.contains("unknown adapter") {
+        StatusCode::NOT_FOUND
+    } else if e.contains("timed out") {
+        StatusCode::GATEWAY_TIMEOUT
+    } else if e.contains("not installed")
+        || e.contains("not logged in")
+        || e.contains("credentials are not ready")
+        || e.contains("already running")
+        || e.contains("native")
+    {
+        StatusCode::CONFLICT
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    error(status, "adapter_error", e)
+}
+
+/// An adapter run as it happens: one `adapter.output` event per complete line, then
+/// `adapter.finished` or `adapter.error`. The process keeps running if the client goes away;
+/// the worktree keeps its changes either way.
+fn stream_adapter(
+    prepared: crate::adapters::Prepared,
+    thread: String,
+    workdir: std::path::PathBuf,
+    limit: Duration,
+) -> Response {
+    let (tx, rx) = mpsc::unbounded_channel::<Value>();
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(bool, String)>();
+    let (drained_tx, drained_rx) = oneshot::channel();
+    let events = tx.clone();
+    tokio::spawn(async move {
+        while let Some((stdout, delta)) = out_rx.recv().await {
+            let event = json!({
+                "v": 1, "type": "adapter.output",
+                "stream": if stdout { "stdout" } else { "stderr" },
+                "delta": delta,
+            });
+            if events.send(event).is_err() {
+                break;
+            }
+        }
+        let _ = drained_tx.send(());
+    });
+    let _ = tx.send(json!({
+        "v": 1, "type": "adapter.started",
+        "adapter": prepared.name(), "label": prepared.label(),
+        "thread": thread, "workdir": workdir.display().to_string(),
+    }));
+    tokio::spawn(async move {
+        let result = crate::adapters::execute(prepared, limit, Some(out_tx)).await;
+        let _ = drained_rx.await;
+        match result {
+            Ok(out) => {
+                let _ = tx.send(json!({
+                    "v": 1, "type": "adapter.finished",
+                    "adapter": out.adapter, "exit_code": out.exit_code,
+                    "seconds": out.seconds, "truncated": out.truncated,
+                }));
+            }
+            Err(e) => {
+                let _ = tx.send(json!({ "v": 1, "type": "adapter.error", "text": e }));
+            }
+        }
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        let event = rx.recv().await?;
+        Some((Ok::<_, std::convert::Infallible>(Bytes::from(format!("data: {event}\n\n"))), rx))
+    });
+    let mut response = Response::new(Body::from_stream(stream));
+    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+}
+
+/// `GET /v1/agent/delegations`: delegated runs that paused on a usage limit, and where they
+/// are now. The registry survives restarts; `autobot serve` resumes a due one by itself.
+async fn delegations(State(state): State<Arc<ApiState>>) -> Response {
+    match state.jobs.list() {
+        Ok(jobs) => {
+            let paused = jobs.iter().filter(|job| job.state == crate::delegations::State::Paused).count();
+            let running = jobs.iter().filter(|job| job.state == crate::delegations::State::Running).count();
+            Json(json!({
+                "delegations": jobs.iter().map(crate::delegations::Job::view).collect::<Vec<_>>(),
+                "paused": paused,
+                "running": running,
+                "max_resumes": crate::delegations::MAX_RESUMES,
+            }))
+            .into_response()
+        }
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/delegations/{id}/resume`: makes a paused run due now. It starts within a few
+/// seconds, in the same conversation and worktree.
+async fn resume_delegation(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+    match state.jobs.retry_now(&id) {
+        Ok(true) => {
+            let state = state.clone();
+            tokio::spawn(async move { state.resume_due().await });
+            Json(json!({ "ok": true, "id": id })).into_response()
+        }
+        Ok(false) => error(
+            StatusCode::CONFLICT,
+            "not_paused",
+            "that delegation is not paused (it is running, finished or cancelled)",
+        ),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/delegations/{id}/cancel`: drops a paused run; a running one is left to finish.
+async fn cancel_delegation(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
+    match state.jobs.cancel(&id) {
+        Ok(true) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(false) => error(StatusCode::CONFLICT, "not_paused", "only a paused delegation can be cancelled"),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `GET /v1/agent/settings`: what an operator can change, without any secret value.
+async fn settings(Bot(bot, _): Bot) -> Json<Value> {
+    let config = &bot.runtime.config;
+    let home = &bot.runtime.home;
+    let channels: Vec<Value> = [
+        ("telegram", config.telegram.enabled),
+        ("discord", config.discord.enabled),
+        ("slack", config.slack.enabled),
+        ("email", config.email.enabled),
+        ("signal", config.signal.enabled),
+        ("matrix", config.matrix.enabled),
+        ("whatsapp", config.whatsapp.enabled),
+    ]
+    .into_iter()
+    .map(|(name, on)| json!({ "name": name, "on": on }))
+    .collect();
+    let tools: Vec<Value> = crate::settings::tool_states(config)
+        .into_iter()
+        .map(|(group, on, items)| {
+            json!({
+                "group": group,
+                "on": on,
+                "tools": items.into_iter().map(|(name, on)| json!({ "name": name, "on": on })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Json(json!({
+        "bot": bot.runtime.name,
+        "default": bot.runtime.default,
+        "description": config.bot.description,
+        "gateway": {
+            "url": config.gateway.url,
+            "model": config.gateway.model,
+            "private": config.gateway.private,
+        },
+        "agent": {
+            "workdir": config.agent.workdir(home).display().to_string(),
+            "max_steps": config.agent.max_steps,
+            "check": config.agent.check,
+            "sandbox": config.agent.sandbox,
+            "context_kib": config.agent.context_kib,
+            "tools": tools,
+            "disabled_tools": config.agent.disabled_tools,
+        },
+        "approvals": { "mode": config.approvals.mode, "allow": config.approvals.allow },
+        "personality": crate::personality::active(home),
+        "channels": channels,
+        "mcp": config.mcp.keys().collect::<Vec<_>>(),
+        "serve": config.serve.listen.to_string(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SettingBody {
+    key: String,
+    #[serde(default)]
+    value: String,
+    /// Store the value as a string, even when it looks like a number or an array (a token).
+    #[serde(default)]
+    literal: bool,
+}
+
+/// `POST /v1/agent/settings {"key", "value", "literal"?}`: a dotted configuration key. The
+/// result is checked as a whole before it is written; `autobot serve` reloads it within seconds.
+async fn set_setting(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Json(body): Json<SettingBody>) -> Response {
+    let key = body.key.trim();
+    if key.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the key is empty");
+    }
+    let item = if body.literal { crate::settings::literal(&body.value) } else { crate::settings::value(&body.value) };
+    match crate::settings::change(&bot.def(), key, Some(item)) {
+        Ok(_) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let effective = crate::settings::effective(&bot.def(), key).ok();
+            let mut answer = json!({ "ok": true, "key": key });
+            if let Some((value, from)) = effective {
+                answer["value"] = json!(value);
+                answer["from"] = json!(from);
+            }
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_config", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ModelBody {
+    model: String,
+}
+
+/// `POST /v1/agent/model {"model"}`: the model this bot uses (a gateway id, or `auto`).
+async fn set_model(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Json(body): Json<ModelBody>) -> Response {
+    let models = bot.agent().gateway.model_info().await.unwrap_or_default();
+    match crate::settings::set_model(&bot.def(), body.model.trim(), Some(&models)) {
+        Ok(said) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let mut answer = json!({ "ok": true, "model": body.model.trim(), "said": said });
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ToolBody {
+    target: String,
+    on: bool,
+}
+
+/// `POST /v1/agent/tools {"target", "on"}`: turn a tool group or a tool on or off.
+async fn set_tool(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Json(body): Json<ToolBody>) -> Response {
+    match crate::settings::set_tool(&bot.def(), body.target.trim(), body.on) {
+        Ok(said) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let mut answer = json!({ "ok": true, "said": said });
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct NewBotBody {
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    soul: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    tools: Option<Vec<String>>,
+    #[serde(default)]
+    approvals: Option<String>,
+    #[serde(default)]
+    workdir: Option<std::path::PathBuf>,
+    #[serde(default)]
+    telegram_token: Option<String>,
+    #[serde(default)]
+    discord_token: Option<String>,
+    #[serde(default)]
+    slack_app_token: Option<String>,
+    #[serde(default)]
+    slack_bot_token: Option<String>,
+}
+
+/// `POST /v1/agent/bots`: add a bot; it starts with the next fleet reload.
+async fn add_bot(State(state): State<Arc<ApiState>>, Json(body): Json<NewBotBody>) -> Response {
+    let Some(root) = &state.root else {
+        return error(StatusCode::CONFLICT, "not_configurable", "this agent has no bot configuration to change");
+    };
+    let new = crate::bots::NewBot {
+        description: body.description,
+        soul: body.soul,
+        model: body.model,
+        tools: body.tools,
+        approvals: body.approvals,
+        workdir: body.workdir,
+        telegram_token: body.telegram_token,
+        discord_token: body.discord_token,
+        slack_app_token: body.slack_app_token,
+        slack_bot_token: body.slack_bot_token,
+    };
+    match crate::bots::add(root, body.name.trim(), &new) {
+        Ok(path) => {
+            let warning = state.fleet.as_ref().and_then(|fleet| fleet.reload().err().map(|e| e.to_string()));
+            let mut answer = json!({ "ok": true, "name": body.name.trim(), "path": path.display().to_string() });
+            if let Some(warning) = warning {
+                answer["warning"] = json!(warning);
+            }
+            Json(answer).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct SecretBody {
+    /// A file name in the bot's home: `telegram.token`, `slack-bot.token`, `email.password`.
+    file: String,
+    value: String,
+}
+
+/// `POST /v1/agent/secrets {"file", "value"}`: write a connector token (or password) into the
+/// bot's home with mode 0600. The value is never returned or logged. Only a plain file name is
+/// accepted: not a path, so it cannot leave the home.
+async fn set_secret(Bot(bot, _): Bot, Json(body): Json<SecretBody>) -> Response {
+    let file = body.file.trim();
+    if file.is_empty()
+        || file == "."
+        || file == ".."
+        || file.contains('/')
+        || file.contains('\\')
+        || file.contains('\0')
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "the file must be a name in the bot's home, like telegram.token",
+        );
+    }
+    let value = body.value.trim();
+    if value.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the value is empty");
+    }
+    let path = bot.home().join(file);
+    match invincible::fsutil::replace_private(&path, &format!("{value}\n")) {
+        Ok(()) => Json(json!({ "ok": true, "file": file })).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 /// `GET /v1/agent/bots`: every bot, running or not, with how it is doing.
@@ -601,6 +1263,138 @@ async fn openai_chat(State(state): State<Arc<ApiState>>, Bot(bot, chosen): Bot, 
     crate::homeassistant::conversation(bot.runtime.clone(), &body).await
 }
 
+/// `GET /v1/agent/threads`: every thread in the bot's home.
+async fn list_threads(Bot(bot, _): Bot) -> Response {
+    match bot.threads.list() {
+        Ok(list) => Json(json!({
+            "threads": list.iter().map(|thread| bot.threads.view(thread)).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct NewThread {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    base: Option<String>,
+}
+
+/// `POST /v1/agent/threads`: a new worktree and conversation from the bot's project.
+async fn new_thread(Bot(bot, _): Bot, Json(body): Json<NewThread>) -> Response {
+    let agent = bot.agent();
+    if agent.tools.ssh().is_some() || agent.tools.docker().is_some() {
+        return error(
+            StatusCode::CONFLICT,
+            "not_supported",
+            "threads need a local project; this agent runs commands over SSH or in a container",
+        );
+    }
+    let repo = agent.tools.workdir().to_path_buf();
+    let threads = bot.threads.clone();
+    let name = body.name;
+    let base = body.base;
+    let made = tokio::task::spawn_blocking(move || threads.create(&repo, base.as_deref(), &name)).await;
+    match made {
+        Ok(Ok(thread)) => Json(bot.threads.view(&thread)).into_response(),
+        Ok(Err(e)) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the thread task: {e}")),
+    }
+}
+
+/// `GET /v1/agent/threads/<id>`.
+async fn thread_info(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    match bot.threads.get(&id) {
+        Ok(Some(thread)) => Json(bot.threads.view(&thread)).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {id:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `GET /v1/agent/threads/<id>/diff`: the worktree against its base, new files included.
+async fn thread_diff(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    let threads = bot.threads.clone();
+    let wanted = id.clone();
+    match bot.threads.get(&id) {
+        Ok(Some(_)) => {}
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {id:?}")),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+    let made = tokio::task::spawn_blocking(move || threads.diff(&wanted, false)).await;
+    match made {
+        Ok(Ok(diff)) => Json(json!({ "id": id, "diff": diff })).into_response(),
+        Ok(Err(e)) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the diff task: {e}")),
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct PrBody {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    base: Option<String>,
+}
+
+/// `POST /v1/agent/threads/<id>/pr`: stage, commit, push and open the pull request. A branch
+/// can be pushed without a PR (no remote, no `gh`, no token); the compare link comes back.
+async fn thread_pr(Bot(bot, _): Bot, Path(id): Path<String>, Json(body): Json<PrBody>) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    if let Ok(None) = bot.threads.get(&id) {
+        return error(StatusCode::NOT_FOUND, "not_found", &format!("there is no thread {id:?}"));
+    }
+    let threads = bot.threads.clone();
+    let wanted = id.clone();
+    let prepared = tokio::task::spawn_blocking(move || {
+        threads.prepare_pr(&wanted, body.title.as_deref(), body.body.as_deref(), body.base.as_deref())
+    })
+    .await;
+    let prepared = match prepared {
+        Ok(Ok(prepared)) => prepared,
+        Ok(Err(e)) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the PR task: {e}")),
+    };
+    let outcome = crate::threads::open_pr(&prepared).await;
+    let warning = bot.threads.record_pr(&id, &outcome).err();
+    let mut value = serde_json::to_value(&outcome).unwrap_or_else(|_| json!({}));
+    if let Some(warning) = warning {
+        value["warning"] = json!(warning);
+    }
+    Json(value).into_response()
+}
+
+/// `DELETE /v1/agent/threads/<id>[?force=1]`: remove the worktree and the branch.
+async fn remove_thread(
+    Bot(bot, _): Bot,
+    Path(id): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    if !valid(&id) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a thread id");
+    }
+    let force = query.get("force").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let threads = bot.threads.clone();
+    let wanted = id.clone();
+    let removed = tokio::task::spawn_blocking(move || threads.remove(&wanted, force)).await;
+    match removed {
+        Ok(Ok(_)) => Json(json!({ "removed": id })).into_response(),
+        Ok(Err(e)) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &format!("the remove task: {e}")),
+    }
+}
+
 /// `GET /v1/agent/sessions`: every bot's conversations, newest first; `?bot=` only one's.
 async fn sessions(State(state): State<Arc<ApiState>>, query: Query<HashMap<String, String>>) -> Response {
     let bots: Vec<Arc<BotApi>> = match query.get("bot").filter(|b| !b.is_empty()) {
@@ -637,7 +1431,110 @@ async fn history(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
             Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
         },
     };
-    Json(json!({ "id": id, "messages": messages })).into_response()
+    let plan = crate::plans::load(bot.home(), &id).ok().flatten().map(|plan| plan.view());
+    Json(json!({ "id": id, "messages": messages, "plan": plan })).into_response()
+}
+
+/// `GET /v1/agent/plan?session=`: the task list the agent keeps with `todo` for that
+/// conversation, or an empty one.
+async fn plan(Bot(bot, _): Bot, Query(query): Query<PlanQuery>) -> Response {
+    if !valid(&query.session) {
+        return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
+    }
+    match crate::plans::load(bot.home(), &query.session) {
+        Ok(Some(plan)) => Json(plan.view()).into_response(),
+        Ok(None) => Json(json!({
+            "session": query.session, "items": [], "updated_at": null, "done": 0, "total": 0,
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct PlanQuery {
+    session: String,
+}
+
+#[derive(Deserialize)]
+struct ProjectQuery {
+    #[serde(default)]
+    thread: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProjectBody {
+    #[serde(default)]
+    thread: Option<String>,
+    brief: String,
+}
+
+/// The project a request is about: a thread's repository, or the agent's working directory.
+fn project_root(bot: &BotApi, thread: Option<&str>) -> Result<std::path::PathBuf, (StatusCode, &'static str, String)> {
+    match thread {
+        Some(id) => match bot.threads.get(id) {
+            Ok(Some(thread)) => Ok(crate::briefs::root_for(&thread.repo)),
+            Ok(None) => Err((StatusCode::NOT_FOUND, "unknown_thread", format!("there is no thread {id:?}"))),
+            Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, "internal_error", e)),
+        },
+        None => Ok(crate::briefs::root_for(bot.agent().tools.workdir())),
+    }
+}
+
+fn project_view(bot: &BotApi, root: &std::path::Path, brief: Option<crate::briefs::Brief>) -> Value {
+    let name =
+        root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string());
+    let mut view = match brief {
+        Some(brief) => brief.view(),
+        None => json!({
+            "root": root.display().to_string(),
+            "name": name,
+            "brief": "",
+            "characters": 0,
+            "updated_at": null,
+        }),
+    };
+    view["check"] = json!(bot.agent().options.check);
+    view
+}
+
+/// `GET /v1/agent/project?thread=`: the owner's brief for the project (a thread's repository, or
+/// the agent's working directory), with the configured verification command.
+async fn project(Bot(bot, _): Bot, Query(query): Query<ProjectQuery>) -> Response {
+    let root = match project_root(&bot, query.thread.as_deref()) {
+        Ok(root) => root,
+        Err((status, code, message)) => return error(status, code, &message),
+    };
+    match crate::briefs::get(bot.home(), &root) {
+        Ok(brief) => Json(project_view(&bot, &root, brief)).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/agent/project {"brief", "thread"?}`: writes the brief; empty text removes it.
+async fn set_project(Bot(bot, _): Bot, Json(body): Json<ProjectBody>) -> Response {
+    let root = match project_root(&bot, body.thread.as_deref()) {
+        Ok(root) => root,
+        Err((status, code, message)) => return error(status, code, &message),
+    };
+    match crate::briefs::set(bot.home(), &root, &body.brief) {
+        Ok(brief) => Json(project_view(&bot, &root, brief)).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+    }
+}
+
+/// `DELETE /v1/agent/project?thread=`: forgets the brief; the project's files are untouched.
+async fn remove_project(Bot(bot, _): Bot, Query(query): Query<ProjectQuery>) -> Response {
+    let root = match project_root(&bot, query.thread.as_deref()) {
+        Ok(root) => root,
+        Err((status, code, message)) => return error(status, code, &message),
+    };
+    match crate::briefs::remove(bot.home(), &root) {
+        Ok(removed) => {
+            Json(json!({ "ok": true, "removed": removed, "root": root.display().to_string() })).into_response()
+        }
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 async fn reset(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
@@ -655,6 +1552,9 @@ async fn reset(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
         return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e);
     }
     open.grants.clear();
+    if let Err(e) = crate::plans::remove(bot.home(), &id) {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e);
+    }
     Json(json!({ "id": id })).into_response()
 }
 
@@ -671,6 +1571,10 @@ struct TurnBody {
     /// `{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,…"}}`.
     #[serde(default)]
     images: Vec<Value>,
+    /// Run the turn in delegated mode: `true`, or `{"max_nudges": 2, "stall_seconds": 600,
+    /// "until": "…"}` ([crate::delegate]).
+    #[serde(default)]
+    delegated: Option<crate::delegate::Request>,
 }
 
 /// The data: URL of an image part (`image_url` an object with `url`, or the URL itself).
@@ -743,7 +1647,14 @@ async fn fork(Bot(bot, _): Bot, Path(id): Path<String>, body: Bytes) -> Response
     let forked =
         crate::session::Session::open(&bot.sessions_dir(), &id).and_then(|s| s.fork(&bot.sessions_dir(), &to, at));
     match forked {
-        Ok(copy) => Json(json!({ "id": copy.id, "messages": copy.messages.len() })).into_response(),
+        Ok(copy) => {
+            // The plan is the work state, not a message: the fork starts with it too.
+            if let Ok(Some(plan)) = crate::plans::load(bot.home(), &id) {
+                let items = serde_json::to_value(&plan.items).unwrap_or_default();
+                let _ = crate::plans::save(bot.home(), &copy.id, &items);
+            }
+            Json(json!({ "id": copy.id, "messages": copy.messages.len() })).into_response()
+        }
         Err(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
     }
 }
@@ -774,8 +1685,15 @@ async fn turn(
     if !valid(&id) {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "not a session id");
     }
-    let Ok(TurnBody { text, bot: named, personality, images }) = serde_json::from_slice(&body) else {
+    let Ok(TurnBody { text, bot: named, personality, images, delegated }) = serde_json::from_slice(&body) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request_error", "the body must be {\"text\": \"...\"}");
+    };
+    let delegated = match delegated {
+        Some(request) => match request.scope() {
+            Ok(scope) => scope,
+            Err(e) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
+        },
+        None => None,
     };
     // A new conversation may name its bot; one that exists keeps the bot it has.
     let bot = match named.filter(|n| !n.is_empty()) {
@@ -819,7 +1737,7 @@ async fn turn(
         Ok(images) => images,
         Err(e) => return error(StatusCode::BAD_REQUEST, "invalid_request_error", &e),
     };
-    stream_turn(&state, bot, id, guard, text, images, Overrides { personality, vision })
+    stream_turn(&state, bot, id, guard, text, images, delegated, Overrides { personality, vision })
 }
 
 /// `POST …/retry`: the last turn leaves the conversation and its request runs again, streamed
@@ -840,80 +1758,155 @@ async fn retry(State(state): State<Arc<ApiState>>, Bot(bot, _): Bot, Path(id): P
         Err(e) => return error(StatusCode::NOT_FOUND, "not_found", &e),
     };
     let text = request["content"].as_str().unwrap_or_default().to_owned();
-    stream_turn(&state, bot, id, guard, text, crate::images::of(&request), Overrides::default())
+    stream_turn(&state, bot, id, guard, text, crate::images::of(&request), None, Overrides::default())
 }
 
-/// Runs a turn of [bot] on its own task and streams its events.
+/// One event in the stable turn stream (`spec/agent.md`, Turn events). Text and reasoning arrive
+/// as deltas; a diff and a tool result are capped so one event cannot flood a client.
+fn stream_event(event: Event) -> Value {
+    let mut value = match event {
+        Event::Text(text) => json!({ "type": "text", "delta": text }),
+        Event::Reasoning(text) => json!({ "type": "reasoning", "delta": text }),
+        Event::Tool(text) => json!({ "type": "tool", "text": text }),
+        Event::Refused(text) => json!({ "type": "refused", "text": text }),
+        Event::Diff(diff) => json!({ "type": "diff", "text": cap_event(diff, 64 * 1024) }),
+        Event::Change { path, before, after } => json!({
+            "type": "change",
+            "path": path.display().to_string(),
+            "before_bytes": before.len(),
+            "after_bytes": after.len(),
+        }),
+        Event::Output { name, text } => json!({
+            "type": "tool_output",
+            "name": name,
+            "text": cap_event(text, 8 * 1024),
+        }),
+        Event::Usage { input, output, cached } => {
+            json!({ "type": "usage", "input": input, "output": output, "cached": cached })
+        }
+        Event::Receipt { id, model, tier } => {
+            json!({ "type": "receipt", "id": id, "model": model, "tier": tier })
+        }
+        Event::Member { name, text } => json!({ "type": "member", "agent": name, "text": text }),
+    };
+    value["v"] = json!(1);
+    value
+}
+
+fn cap_event(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut cut = max;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}\n… {} bytes more (truncated in the event; the full result is in the conversation)",
+        &text[..cut],
+        text.len() - cut
+    )
+}
+
+/// What a delegated run needs to outlive a long usage limit: the store, and the job it already
+/// is (None for the first request, which creates one when it pauses).
+#[derive(Clone)]
+struct Resumption {
+    jobs: Arc<crate::delegations::Jobs>,
+    id: Option<String>,
+    resumes: u8,
+}
+
+impl Resumption {
+    /// Records a pause at [retry_at], creating the job on the first run and moving the existing
+    /// one back to paused on a resume. None when every automatic resume is spent.
+    #[allow(clippy::too_many_arguments)]
+    fn pause(
+        &self,
+        session: &str,
+        bot: &str,
+        scope: &crate::delegate::Scope,
+        task: &str,
+        owner_controls: bool,
+        retry_at: u64,
+        error: &str,
+    ) -> Result<Option<crate::delegations::Job>, String> {
+        if let Some(id) = &self.id {
+            if self.resumes >= crate::delegations::MAX_RESUMES {
+                return Ok(None);
+            }
+            self.jobs.release(id, retry_at, error)?;
+            return self.jobs.get(id);
+        }
+        let job = crate::delegations::Job::new(session, bot, task, scope.clone(), retry_at, owner_controls)?;
+        self.jobs.pause(job).map(Some)
+    }
+}
+
+/// Runs a turn of [bot] on its own task and streams its events. A delegated turn may run more
+/// than one turn ([crate::delegate]); its events use the same grammar.
+#[allow(clippy::too_many_arguments)]
 fn stream_turn(
     state: &Arc<ApiState>,
     bot: Arc<BotApi>,
     id: String,
-    mut guard: tokio::sync::OwnedMutexGuard<Open>,
+    guard: tokio::sync::OwnedMutexGuard<Open>,
     text: String,
     images: Vec<crate::images::Attachment>,
+    delegated: Option<crate::delegate::Scope>,
     Overrides { personality, vision }: Overrides,
 ) -> Response {
     let inbox = bot.inbox(&id);
     let (tx, rx) = mpsc::unbounded_channel::<Value>();
-    let agent = if personality.is_some() || vision.is_some() {
-        let mut agent = (*bot.agent()).clone();
-        if personality.is_some() {
-            agent.options.personality = personality;
-        }
-        if vision.is_some() {
-            agent.options.vision = vision;
-        }
-        Arc::new(agent)
-    } else {
-        bot.agent()
+    let mut agent = match bot.agent_for(&id) {
+        Ok(agent) => (*agent).clone(),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
     };
+    if personality.is_some() {
+        agent.options.personality = personality;
+    }
+    if vision.is_some() {
+        agent.options.vision = vision;
+    }
+    let agent = Arc::new(agent);
     let with_images = !images.is_empty();
     let waiting = state.waiting.clone();
     let runtime = bot.runtime.clone();
+    let jobs = state.jobs.clone();
+    let _ = tx.send(json!({ "v": 1, "type": "turn.started", "session": id }));
+    let owner_controls = crate::delegate::owner_controls(&text);
+    if let Some(scope) = &delegated {
+        let _ = tx.send(scope.started(owner_controls));
+    }
     // The turn runs on its own: a client that goes away does not stop it.
     tokio::spawn(async move {
-        let approver = ApiApprover { events: tx.clone(), waiting, session: id.clone(), bot: bot.runtime.name.clone() };
-        let events = {
-            let tx = tx.clone();
-            move |event: Event| {
-                let _ = tx.send(match event {
-                    // The app shows the answer when it is done, and tool lines.
-                    Event::Text(_)
-                    | Event::Reasoning(_)
-                    | Event::Diff(_)
-                    | Event::Change { .. }
-                    | Event::Output { .. }
-                    | Event::Usage { .. } => return,
-                    Event::Tool(text) => json!({ "type": "tool", "text": text }),
-                    Event::Refused(text) => json!({ "type": "refused", "text": text }),
-                    Event::Receipt { id, model, tier } => {
-                        json!({ "type": "receipt", "id": id, "model": model, "tier": tier })
-                    }
-                    Event::Member { name, text } => json!({ "type": "member", "agent": name, "text": text }),
-                });
+        match delegated {
+            Some(scope) => {
+                let approver = DelegatedApprover {
+                    events: tx.clone(),
+                    bot: bot.runtime.name.clone(),
+                    declined: Arc::new(AtomicU32::new(0)),
+                };
+                run_delegated(
+                    agent,
+                    guard,
+                    text,
+                    images,
+                    scope,
+                    approver,
+                    tx,
+                    inbox,
+                    runtime,
+                    with_images,
+                    owner_controls,
+                    Resumption { jobs, id: None, resumes: 0 },
+                )
+                .await;
             }
-        };
-        let Open { session, grants } = &mut *guard;
-        let context = crate::tools::TurnContext { inbox: Some(inbox), ..Default::default() };
-        let turn = agent.turn_with(session, &text, &images, &approver, grants, &events);
-        let last = match crate::tools::TURN.scope(context, turn).await {
-            Ok(outcome) => json!({ "type": "answer", "text": outcome.text, "receipts": outcome.receipts }),
-            // The router picked a model that cannot see, found out only now.
-            Err(e) if with_images && crate::images::refuses_images(&e) => {
-                json!({ "type": "error", "code": "model_cannot_see_images", "text": e })
-            }
-            Err(e) => json!({ "type": "error", "text": e }),
-        };
-        // The nudge, when it is time, on its own copy: the conversation is free again; what it
-        // kept follows the answer as `kept` events before the stream ends.
-        let nudge = runtime.nudge(agent, &guard.session.messages);
-        drop(guard);
-        let _ = tx.send(last);
-        if let Some(nudge) = nudge
-            && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
-        {
-            for line in kept {
-                let _ = tx.send(json!({ "type": "kept", "text": line }));
+            None => {
+                let approver =
+                    ApiApprover { events: tx.clone(), waiting, session: id.clone(), bot: bot.runtime.name.clone() };
+                run_single(agent, guard, text, images, approver, tx, inbox, runtime, with_images).await;
             }
         }
     });
@@ -926,6 +1919,337 @@ fn stream_turn(
     response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
+}
+
+/// One ordinary turn: the answer, then what the profile nudge kept.
+#[allow(clippy::too_many_arguments)]
+async fn run_single(
+    agent: Arc<Agent>,
+    mut guard: tokio::sync::OwnedMutexGuard<Open>,
+    text: String,
+    images: Vec<crate::images::Attachment>,
+    approver: ApiApprover,
+    tx: mpsc::UnboundedSender<Value>,
+    inbox: crate::tools::Inbox,
+    runtime: Arc<Runtime>,
+    with_images: bool,
+) {
+    let events = {
+        let tx = tx.clone();
+        move |event: Event| {
+            let _ = tx.send(stream_event(event));
+        }
+    };
+    let Open { session, grants } = &mut *guard;
+    let context = crate::tools::TurnContext { inbox: Some(inbox), ..Default::default() };
+    let turn = agent.turn_with(session, &text, &images, &approver, grants, &events);
+    let last = match crate::tools::TURN.scope(context, turn).await {
+        Ok(outcome) => json!({
+            "v": 1, "type": "answer", "text": outcome.text, "receipts": outcome.receipts
+        }),
+        // The router picked a model that cannot see, found out only now.
+        Err(e) if with_images && crate::images::refuses_images(&e) => {
+            json!({ "v": 1, "type": "error", "code": "model_cannot_see_images", "text": e })
+        }
+        Err(e) => json!({ "v": 1, "type": "error", "text": e }),
+    };
+    // The nudge, when it is time, on its own copy: the conversation is free again; what it
+    // kept follows the answer as `kept` events before the stream ends.
+    let nudge = runtime.nudge(agent, &guard.session.messages);
+    drop(guard);
+    let _ = tx.send(last);
+    if let Some(nudge) = nudge
+        && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
+    {
+        for line in kept {
+            let _ = tx.send(json!({ "v": 1, "type": "kept", "text": line }));
+        }
+    }
+}
+
+/// A delegated run: bounded turns, no accepted approvals, a stall limit and a short limit wait.
+#[allow(clippy::too_many_arguments)]
+async fn run_delegated(
+    agent: Arc<Agent>,
+    mut guard: tokio::sync::OwnedMutexGuard<Open>,
+    text: String,
+    images: Vec<crate::images::Attachment>,
+    scope: crate::delegate::Scope,
+    approver: DelegatedApprover,
+    tx: mpsc::UnboundedSender<Value>,
+    inbox: crate::tools::Inbox,
+    runtime: Arc<Runtime>,
+    with_images: bool,
+    owner_controls: bool,
+    resumption: Resumption,
+) {
+    let started = std::time::Instant::now();
+    let session_id = guard.session.id.clone();
+    let task = text.clone();
+    let mut current = text;
+    let mut attempts = 0u8;
+    let mut nudges = 0u8;
+    let mut receipts: Vec<String> = Vec::new();
+    let mut fatal: Option<String> = None;
+    let mut code: Option<&'static str> = None;
+    let mut last_text = String::new();
+    let mut finished = false;
+    let mut waiting_for_owner = false;
+    let mut paused: Option<Value> = None;
+    while attempts < crate::delegate::MAX_ATTEMPTS {
+        attempts += 1;
+        let (activity, ticks) = mpsc::unbounded_channel();
+        let (stall_tx, mut stalled) = oneshot::channel();
+        let seconds = scope.stall_seconds;
+        let in_tool = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let watching = in_tool.clone();
+        let watchdog = tokio::spawn(async move {
+            crate::delegate::idle_limit(ticks, Duration::from_secs(seconds), watching).await;
+            let _ = stall_tx.send(());
+        });
+        let events = {
+            let tx = tx.clone();
+            let in_tool = in_tool.clone();
+            move |event: Event| {
+                match &event {
+                    Event::Tool(_) => in_tool.store(true, Ordering::Relaxed),
+                    Event::Output { .. } | Event::Refused(_) => in_tool.store(false, Ordering::Relaxed),
+                    _ => {}
+                }
+                let _ = activity.send(());
+                let _ = tx.send(stream_event(event));
+            }
+        };
+        let context = crate::tools::TurnContext { inbox: Some(inbox.clone()), ..Default::default() };
+        // The owner's images belong to the request, not to each resumed turn.
+        let sent = if attempts == 1 { images.as_slice() } else { &[] };
+        let outcome = {
+            let Open { session, grants } = &mut *guard;
+            let turn = agent.turn_with(session, &current, sent, &approver, grants, &events);
+            tokio::select! {
+                outcome = crate::tools::TURN.scope(context, turn) => Some(outcome),
+                _ = &mut stalled => None,
+            }
+        };
+        watchdog.abort();
+        let Some(outcome) = outcome else {
+            // The turn was stopped mid-step: give the session a coherent tail before the nudge.
+            if let Err(e) = guard.session.close_dangling() {
+                fatal = Some(e);
+                break;
+            }
+            let _ = tx.send(json!({
+                "v": 1, "type": "delegate.stalled", "seconds": scope.stall_seconds,
+            }));
+            if nudges >= scope.max_nudges || owner_controls {
+                fatal = Some(format!("the delegated turn produced nothing for {} s", scope.stall_seconds));
+                break;
+            }
+            nudges += 1;
+            current = crate::delegate::stall_nudge(scope.stall_seconds);
+            let _ = tx.send(json!({
+                "v": 1, "type": "delegate.nudge", "number": nudges, "of": scope.max_nudges,
+                "reason": "stalled", "text": current,
+            }));
+            continue;
+        };
+        match outcome {
+            Ok(outcome) => {
+                receipts.extend(outcome.receipts.iter().cloned());
+                let waiting = crate::delegate::waiting_reason(&outcome.text);
+                // A declined approval is the owner's decision, not a routine question: never nudge
+                // the agent to find a way around it. Stop and report it instead.
+                let declined = approver.declined.load(Ordering::Relaxed);
+                if let Some(reason) = waiting
+                    && nudges < scope.max_nudges
+                    && declined == 0
+                    && !owner_controls
+                {
+                    nudges += 1;
+                    current = crate::delegate::nudge(&scope, nudges, reason);
+                    let _ = tx.send(json!({
+                        "v": 1, "type": "delegate.nudge", "number": nudges, "of": scope.max_nudges,
+                        "reason": reason, "text": current,
+                    }));
+                    continue;
+                }
+                waiting_for_owner = waiting.is_some() || crate::delegate::needs_owner(&outcome.text);
+                let _ = tx.send(json!({
+                    "v": 1, "type": "delegate.finished",
+                    "nudges": nudges,
+                    "declined": declined,
+                    "turns": attempts,
+                    "seconds": started.elapsed().as_secs(),
+                    "waiting_on_owner": waiting_for_owner,
+                }));
+                last_text = outcome.text.clone();
+                finished = true;
+                let _ = tx.send(json!({
+                    "v": 1, "type": "answer", "text": outcome.text, "receipts": receipts.clone(),
+                }));
+                break;
+            }
+            Err(e) => {
+                if with_images && crate::images::refuses_images(&e) {
+                    code = Some("model_cannot_see_images");
+                    fatal = Some(e);
+                    break;
+                }
+                if let Some(seconds) = crate::delegate::wait_seconds(&e) {
+                    if seconds <= crate::delegate::MAX_LIMIT_WAIT {
+                        let _ = tx.send(json!({
+                            "v": 1, "type": "delegate.waiting", "reason": "usage_limit", "seconds": seconds,
+                        }));
+                        wait_out(seconds, &tx).await;
+                        current = crate::delegate::resume_nudge();
+                        continue;
+                    }
+                    let event = crate::delegate::paused(Some(seconds), None, true, resumption.resumes);
+                    let retry_at = event["retry_at"].as_u64().unwrap_or_else(|| crate::delegations::now() + seconds);
+                    match resumption.pause(&session_id, &runtime.name, &scope, &task, owner_controls, retry_at, &e) {
+                        Ok(Some(job)) => {
+                            let mut event = event;
+                            event["job_id"] = json!(job.id);
+                            event["resumes"] = json!(job.resumes);
+                            let at = event["retry_at_local"].as_str().unwrap_or("later").to_owned();
+                            paused = Some(event.clone());
+                            let _ = tx.send(event);
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached; this run is paused and will resume automatically after {at}"
+                            ));
+                        }
+                        Ok(None) => {
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached and this run has used its {} automatic resumes; send the task again ({e})",
+                                crate::delegations::MAX_RESUMES
+                            ));
+                        }
+                        Err(error) => fatal = Some(format!("{e}; the pause could not be saved: {error}")),
+                    }
+                    break;
+                }
+                if crate::delegate::is_usage_limit(&e) {
+                    // No retry time: wait a conservative half hour, then the limit may be gone.
+                    let seconds = 1_800;
+                    let event = crate::delegate::paused(Some(seconds), None, true, resumption.resumes);
+                    let retry_at = crate::delegations::now() + seconds;
+                    match resumption.pause(&session_id, &runtime.name, &scope, &task, owner_controls, retry_at, &e) {
+                        Ok(Some(job)) => {
+                            let mut event = event;
+                            event["job_id"] = json!(job.id);
+                            event["resumes"] = json!(job.resumes);
+                            let at = event["retry_at_local"].as_str().unwrap_or("later").to_owned();
+                            paused = Some(event.clone());
+                            let _ = tx.send(event);
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached; this run is paused and will resume automatically after {at}"
+                            ));
+                        }
+                        Ok(None) => {
+                            fatal = Some(format!(
+                                "the provider's usage limit is reached and this run has used its {} automatic resumes; send the task again ({e})",
+                                crate::delegations::MAX_RESUMES
+                            ));
+                        }
+                        Err(error) => fatal = Some(format!("{e}; the pause could not be saved: {error}")),
+                    }
+                    break;
+                }
+                fatal = Some(e);
+                break;
+            }
+        }
+    }
+    if fatal.is_none() && attempts >= crate::delegate::MAX_ATTEMPTS {
+        fatal = Some("the delegated run used its turn budget".to_owned());
+    }
+    if let Some(id) = &resumption.id {
+        if finished {
+            if let Err(e) = resumption.jobs.finish(id, crate::delegations::State::Done, &last_text) {
+                tracing::warn!(bot = %runtime.name, "{e}");
+            }
+        } else if paused.is_none()
+            && let Some(e) = &fatal
+            && let Err(error) = resumption.jobs.finish(id, crate::delegations::State::Failed, e)
+        {
+            tracing::warn!(bot = %runtime.name, "{error}");
+        }
+    }
+    // The report for the operator's webhook, if one is configured. It is sent on its own task,
+    // so a slow endpoint never delays the answer; a failure is logged, not retried.
+    let report = json!({
+        "v": 1,
+        "event": if finished { "delegate.finished" } else { "delegate.stopped" },
+        "bot": runtime.name,
+        "session": session_id,
+        "text": if finished { last_text.clone() } else { fatal.clone().unwrap_or_default() },
+        "nudges": nudges,
+        "declined": approver.declined.load(Ordering::Relaxed),
+        "turns": attempts,
+        "seconds": started.elapsed().as_secs(),
+        "waiting_on_owner": waiting_for_owner,
+        "owner_controls": owner_controls,
+        "paused": paused.is_some(),
+        "retry_at": paused.as_ref().map(|p| p["retry_at"].clone()).unwrap_or(Value::Null),
+        "retry_at_local": paused.as_ref().map(|p| p["retry_at_local"].clone()).unwrap_or(Value::Null),
+        "receipts": receipts,
+        "at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+    });
+    if let Some(url) = runtime.config.delegate.webhook.clone() {
+        let home = runtime.home.clone();
+        let config = runtime.config.delegate.clone();
+        let bot = runtime.name.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::delegate::post(&url, &home, &config, &report).await {
+                tracing::warn!(bot = %bot, "{e}");
+            }
+        });
+    }
+    // The profile/memory nudge, as a normal turn has; it is not part of the answer.
+    let nudge = runtime.nudge(agent, &guard.session.messages);
+    drop(guard);
+    if let Some(e) = fatal {
+        let reason = if crate::delegate::is_usage_limit(&e) {
+            "usage_limit"
+        } else if e.contains("stalled") || e.contains("produced nothing") {
+            "stalled"
+        } else {
+            "error"
+        };
+        let _ = tx.send(json!({
+            "v": 1, "type": "delegate.stopped", "reason": reason, "text": e,
+            "nudges": nudges, "declined": approver.declined.load(Ordering::Relaxed),
+        }));
+        let mut error = json!({ "v": 1, "type": "error", "text": e });
+        if let Some(code) = code {
+            error["code"] = json!(code);
+        }
+        let _ = tx.send(error);
+    }
+    if let Some(nudge) = nudge
+        && let Ok(Ok(kept)) = tokio::time::timeout(NUDGE_WAIT, nudge).await
+    {
+        for line in kept {
+            let _ = tx.send(json!({ "v": 1, "type": "kept", "text": line }));
+        }
+    }
+}
+
+/// Waits out a short usage limit, keeping the event stream alive while it does.
+async fn wait_out(seconds: u64, tx: &mpsc::UnboundedSender<Value>) {
+    let mut left = seconds;
+    while left > 0 {
+        let step = left.min(30);
+        tokio::time::sleep(Duration::from_secs(step)).await;
+        left -= step;
+        if left > 0 {
+            let _ = tx.send(json!({
+                "v": 1, "type": "delegate.waiting", "reason": "usage_limit", "seconds": left,
+            }));
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1185,6 +2509,40 @@ async fn remove_schedule(Bot(bot, _): Bot, Path(id): Path<String>) -> Response {
     }
 }
 
+/// What a delegated run tells the agent when a safety check asks for permission. It never says
+/// yes, and it never waits: the run keeps moving on a safer path, and the owner sees the refusal.
+const DELEGATED_REDIRECT: &str = "Delegated mode: the owner did not approve this, so it is not allowed. \
+     Do not retry it or work around it; use a safer way or skip this step and keep going.";
+
+/// In a delegated run: never accept an approval, say why, and keep going.
+struct DelegatedApprover {
+    events: mpsc::UnboundedSender<Value>,
+    bot: String,
+    declined: Arc<AtomicU32>,
+}
+
+impl Approver for DelegatedApprover {
+    fn channel(&self) -> &'static str {
+        "delegated"
+    }
+
+    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        Box::pin(async move {
+            self.declined.fetch_add(1, Ordering::Relaxed);
+            let _ = self.events.send(json!({
+                "v": 1,
+                "type": "delegate.declined",
+                "text": format!("{}{}", crate::approval::asker(), action.describe()),
+                "action": describe(action),
+                "reason": "delegated mode never accepts approvals",
+                "redirect": DELEGATED_REDIRECT,
+                "bot": self.bot,
+            }));
+            Answer::Instead(DELEGATED_REDIRECT.to_owned())
+        })
+    }
+}
+
 /// Asks through the turn's event stream; the answer comes back on `POST /v1/agent/approvals/{id}`.
 struct ApiApprover {
     events: mpsc::UnboundedSender<Value>,
@@ -1206,6 +2564,7 @@ impl Approver for ApiApprover {
             let id = invincible::token::hex(&bytes);
             let (tx, rx) = oneshot::channel();
             let mut event = json!({
+                "v": 1,
                 "type": "approval",
                 "id": id,
                 "text": format!("{}{}", crate::approval::asker(), action.describe()),
@@ -1250,5 +2609,39 @@ pub fn describe(action: &Action) -> Value {
         Action::Home { service, entities, data } => {
             json!({ "kind": "home", "service": service, "entities": entities, "data": data })
         }
+        Action::Rent { summary } => json!({ "kind": "rent", "summary": summary }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn events_are_versioned_and_typed() {
+        let text = stream_event(Event::Text("hi"));
+        assert_eq!(text["v"], 1);
+        assert_eq!(text["type"], "text");
+        assert_eq!(text["delta"], "hi");
+
+        let usage = stream_event(Event::Usage { input: 1, output: 2, cached: 3 });
+        assert_eq!(usage["v"], 1);
+        assert_eq!(usage["type"], "usage");
+        assert_eq!(usage["cached"], 3);
+
+        let change = stream_event(Event::Change { path: Path::new("a.txt"), before: "x", after: "xy" });
+        assert_eq!(change["type"], "change");
+        assert_eq!(change["before_bytes"], 1);
+        assert_eq!(change["after_bytes"], 2);
+    }
+
+    #[test]
+    fn a_large_tool_result_is_capped() {
+        let text = "x".repeat(9_000);
+        let event = stream_event(Event::Output { name: "read_file", text: &text });
+        let output = event["text"].as_str().unwrap();
+        assert!(output.len() < 9_000);
+        assert!(output.contains("truncated in the event"));
     }
 }

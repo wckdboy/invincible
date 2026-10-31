@@ -1,5 +1,6 @@
-//! Engines: inference servers the node runs as child processes and never links in, so a crashing
-//! engine cannot take the node down. v0 has one kind, llama.cpp's `llama-server`.
+//! Engines: programs the node runs as child processes and never links in, so a crashing engine
+//! cannot take the node down. v0's inference engine is llama.cpp's `llama-server`. GPU rental
+//! is in-process ([crate::rent]), not a child.
 //!
 //! An engine answers the node and no one else. Its port is on loopback, which every process and
 //! every user on the machine can reach, so each engine gets its own random key ([new_key]), in a
@@ -37,6 +38,8 @@ pub struct Engine {
     pub base_url: String,
     /// Whether it takes images (None: not known).
     pub vision: Option<bool>,
+    /// An embedding engine: it answers `/v1/embeddings` and nothing else ([crate::embed]).
+    pub embeddings: bool,
     /// For a model split across paired nodes: which devices hold it now (spec/cluster.md).
     pub cluster: Option<Arc<crate::cluster::ClusterRun>>,
     /// The key the engine requires ([KEY_FILE_FLAG]); None for one that requires none.
@@ -52,10 +55,17 @@ impl Engine {
             context,
             base_url: base_url.trim_end_matches('/').to_owned(),
             vision: None,
+            embeddings: false,
             cluster: None,
             key: None,
             healthy: Arc::new(AtomicBool::new(healthy)),
         }
+    }
+
+    /// The same engine, as an embedding engine or not.
+    pub fn with_embeddings(mut self, embeddings: bool) -> Self {
+        self.embeddings = embeddings;
+        self
     }
 
     /// The same engine, requiring [key] (the one its [Launch] was given).
@@ -132,6 +142,8 @@ pub struct Launch {
     pub env: Vec<(String, String)>,
     /// A key and the file it goes in ([KEY_FILE_FLAG]), written (mode 0600) before each start.
     pub key_file: Option<(PathBuf, String)>,
+    /// Working directory. `None` inherits the node's.
+    pub cwd: Option<PathBuf>,
 }
 
 impl Launch {
@@ -165,6 +177,9 @@ impl Launch {
         if let Some(mmproj) = &model.mmproj {
             args.extend(["--mmproj".to_owned(), mmproj.display().to_string()]);
         }
+        if model.embeddings {
+            args.push("--embeddings".to_owned());
+        }
         args.extend(engine.extra_args.iter().cloned());
         Self {
             program: engine.llama_server.clone(),
@@ -172,6 +187,7 @@ impl Launch {
             log: logs.join(format!("{}.log", model.id)),
             env: Vec::new(),
             key_file: Some((key_file.to_owned(), key.to_owned())),
+            cwd: None,
         }
     }
 }
@@ -192,6 +208,7 @@ impl std::fmt::Debug for Launch {
             .field("log", &self.log)
             .field("env", &env)
             .field("key_file", &self.key_file.as_ref().map(|(path, _)| path))
+            .field("cwd", &self.cwd)
             .finish()
     }
 }
@@ -586,6 +603,10 @@ fn spawn(launch: &Launch) -> std::io::Result<Running> {
         .stdout(log.try_clone()?)
         .stderr(log)
         .kill_on_drop(true);
+    if let Some(dir) = &launch.cwd {
+        std::fs::create_dir_all(dir)?;
+        command.current_dir(dir);
+    }
     // A group of its own, numbered as the process is ([Running]). A terminal's Ctrl-C then reaches
     // the node alone, which stops its engines as it shuts down.
     #[cfg(unix)]
@@ -714,6 +735,7 @@ mod tests {
             log: dir.join("logs/m.log"),
             env: vec![],
             key_file: Some((file.clone(), "k3y".into())),
+            cwd: None,
         };
         // Written even when the program then cannot start, and again (whole) at the next start.
         assert!(spawn(&launch).is_err());

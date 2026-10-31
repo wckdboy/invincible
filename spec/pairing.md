@@ -112,13 +112,15 @@ pairing ([Capabilities](#capabilities)):
 | `GET /v1/audit` | `audit` | That device's own entries in the audit log, and no one else's ([audit.md](audit.md), Reading it). |
 | `GET /v1/dispatch`, `POST /v1/dispatch/chat/completions` | `dispatch` | The peers the operator owns, and a hop into them ([dispatch.md](dispatch.md)). |
 | `/v1/agent`, `/v1/agent/{path}` (any method) | `agent` | The Autobot Agent proxy, which runs with the node's own token (spec/agent.md). |
+| `/v1/rent/health`, `/v1/rent/offers`, `/v1/rent/sessions`, `/v1/rent/sessions/{id}`, `/v1/rent/sessions/{id}/stop` | `rent` | Cloud GPU rental ([rent.md](rent.md)). A device without `rent` is **403**, not 404: spending money is refused in the open. |
 
 Nothing else is mounted. Every other path — `/v1/fetch`, `/v1/messages`, `/v1/audio/speech`,
 `/v1/images/generations`, the rest of `/v1/cluster*`, `/v1/admin/*` — answers exactly as a path
 that does not exist: the same 404 and the same body. **A route whose capability the device does not
-hold answers with that same 404, byte for byte.** Deliberately not a 403: a 403 would map which
-routes exist and which grants the caller lacks, and a device has no business learning either. So a
-device cannot tell an operator route from no route at all, nor whether another device holds more.
+hold answers with that same 404, byte for byte**, except `rent` (above). Deliberately not a 403 for
+the rest: a 403 would map which routes exist and which grants the caller lacks, and a device has no
+business learning either. So a device cannot tell an operator route from no route at all, nor
+whether another device holds more. Rent is the exception because a refusal to spend has to be legible.
 
 ## Capabilities
 
@@ -133,6 +135,7 @@ own.
 | `agent` | `/v1/agent*`: the Autobot proxy on this machine, with this node's token — agent turns with its tools, schedules, bots. |
 | `audit` | `GET /v1/audit`: that device's own audit entries, found by the key recorded in each as `caller_key` ([audit.md](audit.md)). |
 | `dispatch` | `GET /v1/dispatch` and `POST /v1/dispatch/chat/completions`: the operator's other nodes. |
+| `rent` | `/v1/rent/*`: offers, sessions and health for the in-process GPU engine ([rent.md](rent.md)). Not in the default. A device without it gets 403. |
 
 - **The default is `shard`, and only `shard`.** A code minted with no capabilities grants it, and
   every answer that hands out a code says which set it carries, so the default is visible where the

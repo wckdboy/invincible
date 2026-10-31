@@ -37,6 +37,10 @@ pub struct Tools {
     ha: Option<std::sync::Arc<crate::homeassistant::Home>>,
     /// What speech and image backends the node has ([crate::media]).
     media: crate::media::Cache,
+    /// The `rent` group is on for this agent. Channel, delegated and scheduled runs clear it
+    /// unless their tool list names a `rent_gpu_*` tool. Definitions are still withheld until
+    /// `/v1/rent/health` answers ([crate::agent]).
+    rent: bool,
     /// Files read and written through someone else: an editor that holds them open
     /// ([crate::acp]).
     files: Option<std::sync::Arc<dyn Files>>,
@@ -83,7 +87,86 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ("schedule", &["schedule_task", "list_schedules", "cancel_schedule"]),
     // Made by the node's speech and image backends.
     ("media", &["speak", "generate_image"]),
+    ("rent", &["rent_gpu_offers", "rent_gpu_start", "rent_gpu_status", "rent_gpu_stop"]),
 ];
+
+pub(crate) fn rent_definitions() -> Vec<Value> {
+    let function = |name: &str, description: &str, properties: Value, required: &[&str]| {
+        json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": { "type": "object", "properties": properties, "required": required },
+            },
+        })
+    };
+    vec![
+        function(
+            "rent_gpu_offers",
+            "List cloud GPU offers from the owner's node (GET /v1/rent/offers). Needs the rent scope. Does not start a pod. Prices are catalog $/hr, not an invoice.",
+            json!({
+                "preset": { "type": "string", "description": "vllm, comfyui-minimax-h3, dev-box, or another preset the node has." },
+                "hours": { "type": "number", "description": "How long it would run, in (0, 24]." },
+                "require_regions": { "type": "string", "description": "Optional narrower region filter, comma-separated. The node's ceiling still applies." },
+            }),
+            &["preset", "hours"],
+        ),
+        function(
+            "rent_gpu_start",
+            "Ask to rent a GPU. The node returns an estimate (offer, region, $/hr, hours, total) and starts nothing until the owner approves that estimate in this conversation. You cannot confirm it yourself: there is no confirm argument. Stop is separate and does not need approval.",
+            json!({
+                "project_id": { "type": "string" },
+                "preset_id": { "type": "string" },
+                "hours": { "type": "number", "description": "Hours to keep the pod, in (0, 24]." },
+                "offer_id": { "type": "string", "description": "Optional. Lock one offer from rent_gpu_offers." },
+                "require_regions": { "type": "string", "description": "Optional narrower region filter." },
+            }),
+            &["project_id", "preset_id", "hours"],
+        ),
+        function(
+            "rent_gpu_status",
+            "List GPU rentals, or one session when session_id is set. Does not change anything.",
+            json!({ "session_id": { "type": "string", "description": "Omit to list them." } }),
+            &[],
+        ),
+        function(
+            "rent_gpu_stop",
+            "Stop a GPU rental. Always allowed: it drains project data, then deletes the pod. force deletes even if the drain does not finish.",
+            json!({
+                "session_id": { "type": "string" },
+                "force": { "type": "boolean", "description": "Delete even if the drain does not finish (default false)." },
+            }),
+            &["session_id"],
+        ),
+    ]
+}
+
+fn number(args: &Value, key: &str) -> Result<f64, String> {
+    args.get(key)
+        .and_then(Value::as_f64)
+        .filter(|n| n.is_finite() && *n > 0.0)
+        .ok_or_else(|| format!("`{key}` is a positive number"))
+}
+
+fn region_list(value: Option<&Value>) -> Option<Vec<String>> {
+    match value {
+        Some(Value::Array(items)) => {
+            let regions: Vec<String> = items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            (!regions.is_empty()).then_some(regions)
+        }
+        Some(Value::String(text)) if !text.trim().is_empty() => {
+            Some(text.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect())
+        }
+        _ => None,
+    }
+}
 
 /// The tool names [groups] allow.
 pub fn tools_for(groups: &[String]) -> Vec<String> {
@@ -234,6 +317,9 @@ pub enum Call {
         prompt: String,
         size: Option<String>,
     },
+    /// A cloud GPU through the node's `/v1/rent/*` ([crate::rent]). `start` asks the owner after
+    /// the node's estimate; the model cannot confirm it.
+    Rent(crate::rent::Op),
 }
 
 impl Tools {
@@ -253,6 +339,7 @@ impl Tools {
             ha: None,
             media: Default::default(),
             files: None,
+            rent: false,
         }
     }
 
@@ -327,9 +414,24 @@ impl Tools {
     }
 
     /// For a run with nobody watching: commands are confined unless the sandbox is off.
+    /// Rent is dropped unless this run's tool list already names it.
     pub fn unattended(mut self) -> Self {
         self.confined = self.sandbox != crate::sandbox::Mode::Off;
+        let granted = self.only.as_ref().is_some_and(|only| only.iter().any(|name| name.starts_with("rent_gpu_")));
+        if !granted {
+            self.rent = false;
+        }
         self
+    }
+
+    /// Turn the rent tool group on or off. Off by default.
+    pub fn with_rent(mut self, rent: bool) -> Self {
+        self.rent = rent;
+        self
+    }
+
+    pub fn rents(&self) -> bool {
+        self.rent && self.offered("rent_gpu_offers")
     }
 
     /// Where commands run and how they are confined, as the action log says it: `ssh` or
@@ -349,6 +451,7 @@ impl Tools {
 
     /// Offers and runs only [tools] (by name).
     pub fn only(mut self, tools: Vec<String>) -> Self {
+        self.rent = tools.iter().any(|name| name.starts_with("rent_gpu_"));
         self.only = Some(tools);
         self
     }
@@ -365,11 +468,20 @@ impl Tools {
     }
 
     fn offered(&self, name: &str) -> bool {
+        if name.starts_with("rent_gpu_") && !self.rent {
+            return false;
+        }
         self.only.as_ref().is_none_or(|only| only.iter().any(|t| t == name)) && !self.off.iter().any(|t| t == name)
     }
 
     pub fn workdir(&self) -> &Path {
         &self.workdir
+    }
+
+    /// The same tools in another checkout (a thread's worktree).
+    pub fn with_workdir(mut self, workdir: PathBuf) -> Self {
+        self.workdir = workdir;
+        self
     }
 
     pub fn home(&self) -> Option<&Path> {
@@ -532,7 +644,7 @@ impl Tools {
             ),
             function(
                 "todo",
-                "Keep a task list for a job with several steps: send the whole list each time, with each item's status. Mark an item doing when you start it and done when it is finished. The owner sees it.",
+                "Keep the plan for a job with several steps: send the whole list each time, with each item's status. Mark an item doing when you start it and done when it is finished. It is saved with the conversation, carried into every step and every resumed run, and shown to the owner; an empty list clears it.",
                 json!({ "items": { "type": "array", "items": { "type": "object", "properties": {
                     "text": { "type": "string" },
                     "status": { "type": "string", "enum": ["pending", "doing", "done"] },
@@ -784,6 +896,33 @@ impl Tools {
                 )?,
                 code: text("code")?,
             },
+            "rent_gpu_offers" => Call::Rent(crate::rent::Op::Offers {
+                preset: text("preset")?,
+                hours: number(args, "hours")?,
+                regions: args.get("require_regions").and_then(Value::as_str).map(str::to_owned),
+            }),
+            "rent_gpu_start" => Call::Rent(crate::rent::Op::Start {
+                project: text("project_id")?,
+                preset: text("preset_id")?,
+                hours: number(args, "hours")?,
+                offer: args
+                    .get("offer_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .filter(|id| !id.trim().is_empty()),
+                regions: region_list(args.get("require_regions")),
+            }),
+            "rent_gpu_status" => Call::Rent(crate::rent::Op::Status {
+                id: args
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .filter(|id| !id.trim().is_empty()),
+            }),
+            "rent_gpu_stop" => Call::Rent(crate::rent::Op::Stop {
+                id: text("session_id")?,
+                force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
+            }),
             other => {
                 return Err(format!("there is no tool named {other:?}; the tools are: {}", self.names().join(", ")));
             }
@@ -853,7 +992,8 @@ impl Tools {
             | Call::Process { .. }
             | Call::Todo { .. } => None,
             // Asked for in the agent, when it leaves the machine ([crate::media]).
-            Call::Speak { .. } | Call::Image { .. } => None,
+            // A rental asks after the node's estimate ([crate::rent]), not before the call.
+            Call::Speak { .. } | Call::Image { .. } | Call::Rent(_) => None,
         }
     }
 
@@ -889,7 +1029,13 @@ impl Tools {
                 }
             }
             Call::ReadFile { path, offset, limit } => read_lines(path, *offset, *limit, self.limit).await,
-            Call::Todo { items } => todo(items),
+            Call::Todo { items } => {
+                let saved = match &self.home {
+                    Some(home) => crate::plans::save(home, &current_session(), items).map(|_| ()),
+                    None => Ok(()),
+                };
+                saved.and_then(|()| todo(items))
+            }
             Call::WriteFile { path, content } => write(path, content).await,
             Call::EditFile { path, old, new, all } => edit(path, old, new, *all).await,
             Call::ListDir { path } => list(path).await,
@@ -934,6 +1080,7 @@ impl Tools {
                 None => Err("Home Assistant is not set up here ([homeassistant] url)".to_owned()),
             },
             Call::ExecuteCode { .. } => Err("execute_code runs in the agent".to_owned()),
+            Call::Rent(_) => Err("rent_gpu runs in the agent".to_owned()),
             Call::Browser(act) => {
                 let shots = self.home.as_ref().map_or_else(std::env::temp_dir, |h| h.join("attachments"));
                 crate::browser::run(act, &shots, self.limit).await.map(|(text, _)| text)
@@ -1150,14 +1297,24 @@ impl Tools {
     /// What runs [command] (`sh -c`) where commands run: here (sandboxed when confined), in the
     /// container, or on the SSH machine; stopped there after the timeout.
     pub async fn shell_command(&self, command: &str) -> Result<tokio::process::Command, String> {
+        self.shell_command_for(command, self.timeout).await
+    }
+
+    /// [Tools::shell_command], with [timeout] on the SSH machine or in the container instead of
+    /// the command timeout (the verification gate allows a longer check).
+    pub async fn shell_command_for(
+        &self,
+        command: &str,
+        timeout: std::time::Duration,
+    ) -> Result<tokio::process::Command, String> {
         if self.ssh.is_none() {
             tokio::fs::create_dir_all(&self.workdir).await.map_err(|e| format!("{}: {e}", self.workdir.display()))?;
         }
         let mut child = if let Some(ssh) = &self.ssh {
-            ssh.command(command, &self.workdir, Some(self.timeout.as_secs()))
+            ssh.command(command, &self.workdir, Some(timeout.as_secs()))
         } else if let Some(docker) = &self.docker {
             let name = docker.ensure(&self.workdir).await?;
-            docker.command(&name, command, &self.workdir, Some(self.timeout.as_secs()))
+            docker.command(&name, command, &self.workdir, Some(timeout.as_secs()))
         } else if self.confined {
             crate::sandbox::command(command, &self.workdir)?
         } else {
@@ -1279,8 +1436,7 @@ impl Tools {
 
     /// The git branch, when the working directory is a repository.
     pub fn git_branch(&self) -> Option<String> {
-        let head = std::fs::read_to_string(self.workdir.join(".git/HEAD")).ok()?;
-        Some(head.trim().strip_prefix("ref: refs/heads/").unwrap_or("(detached)").to_owned())
+        git_branch_at(&self.workdir)
     }
 
     /// [path] relative to the working directory, with `~` expanded and `.`/`..` folded.
@@ -1340,6 +1496,11 @@ impl Tools {
 
 fn turn_context() -> TurnContext {
     TURN.try_with(Clone::clone).unwrap_or_default()
+}
+
+/// The conversation this turn is for (`""` outside a turn).
+pub fn current_session() -> String {
+    turn_context().session
 }
 
 /// `schedule_task`: a schedule made by the agent, answering to the chat it was asked in.
@@ -1904,11 +2065,41 @@ fn ceil(s: &str, mut i: usize) -> usize {
     i
 }
 
+/// The branch of the repository at [workdir]. In a linked worktree `.git` is a file holding
+/// `gitdir: …`; the branch's HEAD lives in that directory, not in the worktree.
+fn git_branch_at(workdir: &Path) -> Option<String> {
+    let dot = workdir.join(".git");
+    let head = if dot.is_dir() {
+        dot.join("HEAD")
+    } else {
+        let text = std::fs::read_to_string(&dot).ok()?;
+        let dir = text.trim().strip_prefix("gitdir:")?.trim();
+        let dir = Path::new(dir);
+        let dir = if dir.is_absolute() { dir.to_path_buf() } else { workdir.join(dir) };
+        dir.join("HEAD")
+    };
+    let text = std::fs::read_to_string(head).ok()?;
+    let text = text.trim();
+    Some(text.strip_prefix("ref: refs/heads/").unwrap_or("(detached)").to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Call, RESULT_LIMIT, Tools, cut};
     use crate::approval::Action;
     use std::time::Duration;
+
+    #[test]
+    fn rent_tools_are_off_unless_the_group_is_granted() {
+        let (tools, dir) = tools();
+        assert!(!tools.definitions().to_string().contains("rent_gpu"), "rent is not in the default set");
+        assert!(!tools.rents());
+        assert!(!tools.clone().unattended().rents());
+        let granted = tools.only(crate::tools::tools_for(&["rent".into()]));
+        assert!(granted.rents(), "an explicit rent group grants the tools");
+        assert!(granted.clone().unattended().rents(), "a granted list keeps them when unattended");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn tools() -> (Tools, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("autobot-tools-{}-{}", std::process::id(), rand()));
@@ -2149,5 +2340,24 @@ mod tests {
         let cut = cut(text);
         assert!(cut.starts_with("start") && cut.ends_with("end") && cut.contains("bytes cut"));
         assert!(cut.len() < RESULT_LIMIT + 100);
+    }
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::git_branch_at;
+
+    #[test]
+    fn reads_the_branch_from_a_linked_worktree() {
+        let base = std::env::temp_dir().join(format!("autobot-worktree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        let wt = base.join("wt");
+        std::fs::create_dir_all(repo.join(".git/worktrees/wt")).unwrap();
+        std::fs::write(repo.join(".git/worktrees/wt/HEAD"), "ref: refs/heads/feature/dev\n").unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: ../repo/.git/worktrees/wt\n").unwrap();
+        assert_eq!(git_branch_at(&wt).as_deref(), Some("feature/dev"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

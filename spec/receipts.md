@@ -61,7 +61,7 @@ Both endpoints are on the loopback API (behind the token) and on the device API.
 | `request_id` | always | as in the response header | Which response this receipt belongs to |
 | `node` | always | the node's receipt public key | Which key signed it — and the only key that can verify it |
 | `at` | always | unix seconds when the receipt was signed | The node asserts this time. It is inside the signature, so it cannot be edited; whether the clock was right is another matter (below) |
-| `api` | always | `chat`, `messages`, `fetch`, `speech`, `images` or `dispatch` | Which endpoint received the request; part of the request hash |
+| `api` | always | `chat`, `messages`, `fetch`, `speech`, `images`, `dispatch`, `rent.start` or `rent.stop` | Which endpoint received the request; part of the request hash |
 | `caller` | always | `{"kind": "local"}` for the node's own API; `{"kind": "device", "name", "key", "fingerprint"}` for a paired device | That **this device's key** asked. `key` is the static key pinned at pairing; `fingerprint` is the readable form of it (`devices::fingerprint`, the first 8 bytes in hex groups). `name` is a label the owner may change and is not an identity |
 | `request_sha256` | always | SHA-256 (hex) of the canonical request (below) | That the node is talking about one exact request, byte for byte, including every parameter |
 | `answer_sha256` | always | SHA-256 (hex) of the answer body bytes the client received | That the node is talking about one exact answer — the bytes that arrived, not a re-serialisation of them |

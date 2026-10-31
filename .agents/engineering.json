@@ -1,0 +1,54 @@
+{
+  "schema": "eng-config/v1",
+  "project": "invincible",
+  "commands": {
+    "fast": [
+      {
+        "name": "fmt",
+        "run": "cargo fmt --check",
+        "timeout": 300
+      },
+      {
+        "name": "clippy",
+        "run": "cargo clippy --all-targets -- -D warnings",
+        "timeout": 900
+      },
+      {
+        "name": "test",
+        "run": "cargo test --quiet",
+        "timeout": 900
+      }
+    ],
+    "full": [
+      {
+        "name": "test-all",
+        "run": "cargo test --all-targets --quiet",
+        "timeout": 1800
+      }
+    ]
+  },
+  "security": {
+    "required": [
+      "gitleaks",
+      "semgrep"
+    ],
+    "optional": [
+      "osv-scanner",
+      "actionlint"
+    ],
+    "gitleaks_config": ".agents/config/gitleaks.toml",
+    "semgrep_config": ".agents/config/semgrep.yml",
+    "gitleaks_history": false,
+    "timeout": 600
+  },
+  "budgets": {
+    "fast_seconds": 300,
+    "full_seconds": 1800
+  },
+  "parallel": {
+    "max_worktrees": 4
+  },
+  "impact": {
+    "base": "origin/main"
+  }
+}

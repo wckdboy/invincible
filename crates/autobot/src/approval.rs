@@ -44,6 +44,11 @@ pub enum Action {
         entities: String,
         data: String,
     },
+    /// Rent a GPU. The summary is the node's estimate (offer, region, $/hr, hours, total).
+    /// Trust mode does not skip this: spending is asked for in the conversation.
+    Rent {
+        summary: String,
+    },
 }
 
 impl Action {
@@ -58,6 +63,7 @@ impl Action {
             Self::Mcp { .. } => "mcp",
             Self::Type { .. } => "type",
             Self::Home { .. } => "home",
+            Self::Rent { .. } => "rent",
         }
     }
 
@@ -90,6 +96,7 @@ impl Action {
                 }
                 line
             }
+            Self::Rent { summary } => summary.clone(),
         }
     }
 }
@@ -141,6 +148,10 @@ pub enum Verdict {
 
 /// The policy's answer before anyone is asked.
 pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
+    // A rental is asked for every time, including trust mode. An allowlist entry cannot spend.
+    if matches!(action, Action::Rent { .. }) {
+        return Verdict::Ask;
+    }
     if config.mode == ApprovalMode::Trust {
         return Verdict::Run;
     }
@@ -180,6 +191,13 @@ pub fn check(config: &ApprovalConfig, action: &Action) -> Verdict {
             .any(|a| url == a || url.strip_prefix(a).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('?')))
     {
         return Verdict::Run;
+    }
+    if config.mode == ApprovalMode::Auto {
+        return match action {
+            Action::Command(_) => Verdict::Run,
+            Action::Write { inside: true, hidden: false, .. } => Verdict::Run,
+            _ => Verdict::Ask,
+        };
     }
     match (config.mode, action) {
         // Unattended, the agent may still work in its own directory.
@@ -282,5 +300,11 @@ mod tests {
         assert_eq!(check(&config(ApprovalMode::Edits), &hidden), Verdict::Ask);
         assert_eq!(check(&config(ApprovalMode::Edits), &outside), Verdict::Ask);
         assert_eq!(check(&config(ApprovalMode::Edits), &command), Verdict::Ask);
+        // Auto: commands and project writes run; everything beyond the project asks.
+        assert_eq!(check(&config(ApprovalMode::Auto), &command), Verdict::Run);
+        assert_eq!(check(&config(ApprovalMode::Auto), &write), Verdict::Run);
+        assert_eq!(check(&config(ApprovalMode::Auto), &hidden), Verdict::Ask);
+        assert_eq!(check(&config(ApprovalMode::Auto), &outside), Verdict::Ask);
+        assert_eq!(check(&config(ApprovalMode::Auto), &Action::Cloud("x".into())), Verdict::Ask);
     }
 }

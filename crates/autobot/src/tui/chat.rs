@@ -71,7 +71,7 @@ impl Remembered {
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "commands and keys"),
     ("/model", "pick a model, or switch: /model deepseek"),
-    ("/approvals", "show or set: ask, edits (changes in the project run), allowlist, trust"),
+    ("/approvals", "show or set: ask, edits (changes in the project run), auto, allowlist, trust"),
     ("/private", "on: local models only; off: cloud models allowed"),
     ("/tools", "show the tools, or keep only some groups: /tools files-read,terminal (or all)"),
     ("/context", "the files in play (AGENTS.md, SOUL.md …) and how much each call sends; or set it in KiB"),
@@ -197,6 +197,7 @@ fn question(action: &Action, workdir: &Path) -> (String, String) {
             "Change this in the house?",
             format!("{} {entities} {}", style::code(service), style::gray(&data.chars().take(300).collect::<String>())),
         ),
+        Action::Rent { summary } => ("Rent this GPU?", style::code(summary)),
         Action::Type { page, field, text, submit } => {
             let page = style::underline(page);
             match (text.is_empty(), submit) {
@@ -1065,6 +1066,7 @@ impl Chat {
         match self.agent.approvals.mode {
             ApprovalMode::Ask => "ask",
             ApprovalMode::Edits => "edits",
+            ApprovalMode::Auto => "auto",
             ApprovalMode::Allowlist => "allowlist",
             ApprovalMode::Trust => "trust",
         }
@@ -1723,15 +1725,19 @@ impl Chat {
                     self.agent.approvals.mode = match arg {
                         "ask" => ApprovalMode::Ask,
                         "edits" => ApprovalMode::Edits,
+                        "auto" => ApprovalMode::Auto,
                         "allowlist" => ApprovalMode::Allowlist,
                         "trust" => ApprovalMode::Trust,
-                        other => return Err(format!("{other:?}: ask, edits, allowlist or trust")),
+                        other => return Err(format!("{other:?}: ask, edits, auto, allowlist or trust")),
                     };
                     self.remember();
                 }
                 let what = match self.agent.approvals.mode {
                     ApprovalMode::Ask => "everything that changes something asks first",
                     ApprovalMode::Edits => "changes in the project run (diffs shown, /undo puts back); commands ask",
+                    ApprovalMode::Auto => {
+                        "commands and project changes run; network, outside reads and hidden files ask"
+                    }
                     ApprovalMode::Allowlist => "allowlisted commands and project changes run; the rest is refused",
                     ApprovalMode::Trust => "everything runs without asking",
                 };

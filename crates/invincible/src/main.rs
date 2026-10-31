@@ -45,8 +45,8 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
         /// What the device that joins with this code may reach: any of `shard`, `agent`, `audit`,
-        /// `dispatch`, comma-separated. The list is the whole set, so keep `shard` for chat
-        /// (`shard,agent,audit` for the Autobot app) [default: shard, the least].
+        /// `dispatch`, `rent`, comma-separated. The list is the whole set, so keep `shard` for
+        /// chat (`shard,agent,audit` for the Autobot app) [default: shard, the least].
         #[arg(long, value_delimiter = ',')]
         capabilities: Vec<String>,
     },
@@ -133,6 +133,12 @@ enum Command {
     Cloud {
         #[command(subcommand)]
         action: CloudAction,
+    },
+    /// Rent a cloud GPU through the in-process engine (spec/rent.md). Nothing starts
+    /// until `start --confirm`; the caps in `[rent]` are a ceiling, not a permission.
+    Rent {
+        #[command(subcommand)]
+        action: RentAction,
     },
     /// Run a task file against models the node serves, checking every answer by rule (spec/evals.md).
     /// Each run is kept in $INVINCIBLE_HOME/evals/history.jsonl; `--history` shows them.
@@ -242,8 +248,8 @@ enum DevicesAction {
         /// The device, by the name `invincible devices` lists.
         name: String,
         /// Any of `shard` (chat, and what a cluster head needs of this node), `agent` (the
-        /// Autobot Agent, which runs with this node's token), `audit` (its own audit entries) and
-        /// `dispatch` (a hop into your other nodes), comma-separated.
+        /// Autobot Agent, which runs with this node's token), `audit` (its own audit entries),
+        /// `dispatch` (a hop into your other nodes) and `rent` (cloud GPUs), comma-separated.
         #[arg(value_delimiter = ',', required = true)]
         capabilities: Vec<String>,
     },
@@ -373,6 +379,79 @@ enum CloudAction {
         id: String,
         #[arg(long)]
         config: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RentAction {
+    /// The presets the node ships, and any added under rent/presets.
+    Presets {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Project ids that have a session on this node.
+    Projects {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// List offers for a preset. Does not start a pod.
+    Offers {
+        /// The preset id (`vllm`, `comfyui-minimax-h3`, `dev-box`, or one added under rent/presets).
+        #[arg(long)]
+        preset: String,
+        /// How long the rental would run, in hours, in (0, 24].
+        #[arg(long)]
+        hours: f64,
+        /// How many offers to ask for.
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Region filter, comma-separated. Omit it and the node's `[rent] require_regions` applies.
+        #[arg(long)]
+        require_regions: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask to start a rental. Without `--confirm` the node returns the cost and starts nothing.
+    Start {
+        /// Project id, a single path segment.
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        preset: String,
+        #[arg(long)]
+        hours: f64,
+        /// Lock this offer. Without it, the node may fail over inside the priced window, then pins the preview.
+        #[arg(long)]
+        offer: Option<String>,
+        /// The owner's approval. Required to provision; the caps are checked either way.
+        #[arg(long)]
+        confirm: bool,
+        #[arg(long)]
+        require_regions: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One session, or every session when no id is given.
+    Status {
+        id: Option<String>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop a session. `--force` deletes the pod even when the drain does not finish.
+    Stop {
+        id: String,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -516,8 +595,10 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 upstream_model: &model,
                 base_url: &base_url,
                 api_key_file: Some(&key_rel),
+                api_key_env: None,
                 context,
                 data_policy: &policy,
+                vision: None,
             };
             if let Err(e) = cloud::add_to_config(&config_path, &entry) {
                 let _ = std::fs::remove_file(&key_path);
@@ -628,6 +709,7 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Serve { config } => {
             let home = config::home()?;
+            let config_path = config.clone().unwrap_or_else(|| home.join("config.toml"));
             let config = config_for(config, &home)?;
             let token = token::load_or_create(&home.join("token"))?;
             tracing_subscriber::fmt().with_target(false).init();
@@ -635,7 +717,7 @@ fn run(cli: Cli) -> Result<(), String> {
             #[cfg(unix)]
             hangup_ignored();
             let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
-            runtime.block_on(serve(config, token, home))
+            runtime.block_on(serve(config, token, home, config_path))
         }
         Command::Token => {
             println!("{}", token::load_or_create(&config::home()?.join("token"))?);
@@ -812,6 +894,7 @@ fn run(cli: Cli) -> Result<(), String> {
             runtime.block_on(invincible::discovery::serve_seed(seed, listen))
         }
         Command::Cloud { action } => cloud_command(action),
+        Command::Rent { action } => rent_command(action),
         Command::Cluster { action: ClusterAction::Status { config, json } } => {
             let status = admin(config, reqwest::Method::GET, "/v1/cluster")?;
             if json {
@@ -1241,7 +1324,7 @@ fn run(cli: Cli) -> Result<(), String> {
     }
 }
 
-async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), String> {
+async fn serve(config: Config, token: String, home: PathBuf, config_path: PathBuf) -> Result<(), String> {
     let logs = home.join("logs");
     let mut engines = Vec::new();
     // Aborted at shutdown, which kills their engines (a handle dropped would leave its task running).
@@ -1278,6 +1361,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         let key = engine::new_key()?;
         let mut engine = Engine::attached(&model.id, &format!("http://127.0.0.1:{port}"), model.context, false)
             .with_vision(model.vision(&config.engine))
+            .with_embeddings(model.embeddings)
             .with_key(&key);
         let launch = Launch::llama_server(&config.engine, model, port, &key, &engine::key_file(&home, n), &logs);
         if model.cluster.is_empty() {
@@ -1331,6 +1415,10 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     } else {
         None
     };
+    let rent = invincible::rent::start(&config.rent, &home)?;
+    if rent.is_some() {
+        tracing::info!("rent engine in-process");
+    }
     if engines.is_empty() && config.cloud.is_empty() {
         tracing::warn!(
             "no models configured: every request will be blocked (`invincible model add` or `invincible cloud add`)"
@@ -1339,20 +1427,7 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
         tracing::info!("no local models: requests go to cloud models only, so private ones are refused");
     }
 
-    let mut cloud = Vec::new();
-    for c in &config.cloud {
-        let policy = invincible_policy::DataPolicy::parse(&c.data_policy);
-        let upstream = c.upstream_model.clone().unwrap_or_else(|| c.id.clone());
-        let model = match c.key(&home) {
-            Ok(key) => invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, key, c.context, policy),
-            Err(e) => {
-                tracing::warn!(model = %c.id, "cloud backend disabled: {e}");
-                invincible::cloud::CloudModel::new(&c.id, &upstream, &c.base_url, None, c.context, policy).disabled()
-            }
-        }
-        .with_vision(c.vision);
-        cloud.push(model);
-    }
+    let cloud = invincible::cloud::models(&config, &home);
     if !config.cloud.is_empty() && config.node.settings().network.is_offline() {
         tracing::info!("the node is offline: cloud backends are configured but will not be used");
     }
@@ -1405,10 +1480,15 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
     };
     let speech = invincible::synth::from_config(&config.speech, &home);
     let images = invincible::synth::from_config(&config.images, &home);
+    let transcription = invincible::synth::from_config(&config.transcription, &home);
+    for backend in transcription.iter().filter(|b| b.tier != invincible_policy::Tier::Node) {
+        tracing::warn!(backend = %backend.id, "a transcription backend off this machine is never used: audio cannot be redacted");
+    }
     let mut state = AppState::new(engines, config.node.settings(), token)
         .with_max_buffered_bytes(config.node.max_buffered_bytes)
         .with_cloud(cloud)
         .with_media(speech, images)
+        .with_transcription(transcription)
         .with_receipt_key(&config.remote.name(), receipt_key)
         .with_audit(invincible::audit::AuditLog::new(&home))
         .with_agent(&config.agent.url)
@@ -1419,6 +1499,15 @@ async fn serve(config: Config, token: String, home: PathBuf) -> Result<(), Strin
             seeds: config.discovery.seeds.clone(),
         })
         .with_dispatch(dispatch);
+    if let Some(gateway) = rent {
+        state = state.with_rent(gateway);
+    }
+    let clouds = state.cloud.clone();
+    state = state.with_provider_admin(Arc::new(invincible::providers_admin::ProviderAdmin::new(
+        home.clone(),
+        config_path.clone(),
+        clouds,
+    )));
     if config.remote.enabled() {
         let key = node_key.ok_or("no static key for pairing")?;
         let mut pairing = Pairing::new(
@@ -1591,10 +1680,20 @@ fn update_command(args: UpdateArgs) -> Result<(), String> {
                     let refreshed = std::process::Command::new(bin.join("autobot"))
                         .args(["service", "install"])
                         .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status();
-                    if !refreshed.is_ok_and(|s| s.success()) {
-                        say(brand::warn("the service definitions did not update (`autobot service install` says why)"));
+                        .stderr(std::process::Stdio::piped())
+                        .output();
+                    match refreshed {
+                        Ok(out) if out.status.success() => {}
+                        Ok(out) => {
+                            let why = String::from_utf8_lossy(&out.stderr);
+                            let why = why.lines().last().unwrap_or("no error text").trim();
+                            say(brand::warn(&format!(
+                                "the service definitions did not update: {why} (run `autobot service install`)"
+                            )));
+                        }
+                        Err(e) => say(brand::warn(&format!(
+                            "could not run the new autobot: {e} (run `autobot service install`)"
+                        ))),
                     }
                 }
                 let restarted = invincible::service::restart(
@@ -1604,6 +1703,8 @@ fn update_command(args: UpdateArgs) -> Result<(), String> {
                 );
                 if !restarted.is_empty() {
                     say(brand::ok(&format!("restarted {}", restarted.join(" and "))));
+                } else if installed {
+                    say(brand::warn("the services are installed but not running: `autobot service install`"));
                 }
             }
         }
@@ -1788,12 +1889,20 @@ fn audit_line(entry: &serde_json::Value) -> String {
     if let Some(client) = entry["client"].as_str() {
         who = format!("{who} ({client})");
     }
-    let what = match decision["action"].as_str() {
-        Some("run") => {
-            format!("{} on {}", decision["model"].as_str().unwrap_or("?"), decision["tier"].as_str().unwrap_or("?"))
+    let what = if let Some(action) = entry["rent"]["action"].as_str() {
+        let id = entry["rent"]["session_id"].as_str().unwrap_or("?");
+        match entry["rent"]["cost_estimate_usd"].as_f64() {
+            Some(usd) => format!("rent {action} {id} (${usd:.2})"),
+            None => format!("rent {action} {id}"),
         }
-        Some(action) => format!("{action}: {}", decision["reason"].as_str().unwrap_or("?")),
-        None => "?".to_owned(),
+    } else {
+        match decision["action"].as_str() {
+            Some("run") => {
+                format!("{} on {}", decision["model"].as_str().unwrap_or("?"), decision["tier"].as_str().unwrap_or("?"))
+            }
+            Some(action) => format!("{action}: {}", decision["reason"].as_str().unwrap_or("?")),
+            None => "?".to_owned(),
+        }
     };
     let tokens =
         receipt["tokens"].as_object().map(|t| format!("{}→{} tokens", t["input"], t["output"])).unwrap_or_default();
@@ -2043,6 +2152,226 @@ fn discover_command(
         println!("{advice}");
     }
     Ok(())
+}
+
+/// `invincible rent`: the node's `/v1/rent/*`, with the local token. Provider keys stay on the node.
+fn rent_command(action: RentAction) -> Result<(), String> {
+    match action {
+        RentAction::Presets { config } => {
+            let home = rent_home(config)?;
+            for (id, name) in invincible::rent::preset_names(&home)? {
+                if name.is_empty() {
+                    println!("{id}");
+                } else {
+                    println!("{id}\t{name}");
+                }
+            }
+            Ok(())
+        }
+        RentAction::Projects { config } => {
+            let home = rent_home(config)?;
+            let projects = invincible::rent::project_ids(&home)?;
+            if projects.is_empty() {
+                println!("{}", brand::ash("no projects"));
+            }
+            for id in projects {
+                println!("{id}");
+            }
+            Ok(())
+        }
+        RentAction::Offers { preset, hours, limit, require_regions, config, json } => {
+            let mut path = format!("/v1/rent/offers?preset={}&hours={hours}", query_escape(&preset));
+            if let Some(limit) = limit {
+                path.push_str(&format!("&limit={limit}"));
+            }
+            if let Some(regions) = require_regions {
+                path.push_str(&format!("&require_regions={}", query_escape(&regions)));
+            }
+            let (status, body) = rent_call(config, reqwest::Method::GET, &path, None, false)?;
+            if json {
+                println!("{body}");
+            } else if !status.is_success() {
+                return Err(rent_message(&body, status));
+            } else {
+                println!("{}", rent_offers_text(&body));
+            }
+            Ok(())
+        }
+        RentAction::Start { project, preset, hours, offer, confirm, require_regions, config, json } => {
+            let mut payload = serde_json::json!({ "project_id": project, "preset_id": preset, "hours": hours });
+            if let Some(offer) = offer {
+                payload["offer_id"] = serde_json::json!(offer);
+            }
+            if let Some(regions) = require_regions {
+                let regions: Vec<&str> =
+                    regions.split(',').map(str::trim).filter(|region| !region.is_empty()).collect();
+                payload["require_regions"] = serde_json::json!(regions);
+            }
+            let (status, body) = rent_call(config, reqwest::Method::POST, "/v1/rent/sessions", Some(payload), confirm)?;
+            if json {
+                println!("{body}");
+                return if status.is_success() { Ok(()) } else { Err(rent_message(&body, status)) };
+            }
+            if status.as_u16() == 409 {
+                let estimate = body["cost_estimate_usd"].as_f64();
+                let offer = body["offer"]["id"].as_str().unwrap_or("the top offer");
+                println!(
+                    "{}",
+                    brand::warn(&format!(
+                        "not started. {} for {offer}. Run the same command with --confirm to rent it.",
+                        estimate.map_or_else(|| "cost unknown".to_owned(), |usd| format!("estimate ${usd:.4}"))
+                    ))
+                );
+                return Ok(());
+            }
+            if !status.is_success() {
+                return Err(rent_message(&body, status));
+            }
+            println!(
+                "{}",
+                brand::ok(&format!(
+                    "session {} is {} (estimate ${})",
+                    body["id"].as_str().unwrap_or("?"),
+                    body["phase"].as_str().unwrap_or("?"),
+                    body["cost_estimate_usd"].as_f64().unwrap_or(0.0)
+                ))
+            );
+            Ok(())
+        }
+        RentAction::Status { id, config, json } => {
+            let path = match &id {
+                Some(id) => format!("/v1/rent/sessions/{id}"),
+                None => "/v1/rent/sessions".to_owned(),
+            };
+            let (status, body) = rent_call(config, reqwest::Method::GET, &path, None, false)?;
+            if !status.is_success() {
+                return Err(rent_message(&body, status));
+            }
+            if json {
+                println!("{body}");
+            } else if id.is_some() {
+                println!("{}", rent_session_line(&body));
+            } else {
+                let sessions = body["sessions"].as_array().cloned().unwrap_or_default();
+                if sessions.is_empty() {
+                    println!("{}", brand::ash("no sessions"));
+                }
+                for session in sessions {
+                    println!("{}", rent_session_line(&session));
+                }
+            }
+            Ok(())
+        }
+        RentAction::Stop { id, force, config, json } => {
+            let (status, body) = rent_call(
+                config,
+                reqwest::Method::POST,
+                &format!("/v1/rent/sessions/{id}/stop"),
+                Some(serde_json::json!({ "force": force })),
+                false,
+            )?;
+            if json {
+                println!("{body}");
+            }
+            if !status.is_success() {
+                return Err(rent_message(&body, status));
+            }
+            if !json {
+                println!("{}", brand::ok(&rent_session_line(&body)));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn rent_offers_text(body: &serde_json::Value) -> String {
+    let regions = body["require_regions"]
+        .as_array()
+        .map(|regions| regions.iter().filter_map(|region| region.as_str()).collect::<Vec<_>>().join(","))
+        .unwrap_or_default();
+    let mut lines = vec![format!(
+        "{}  {}h  regions {regions}",
+        body["preset_id"].as_str().unwrap_or("?"),
+        body["hours"].as_f64().unwrap_or(0.0)
+    )];
+    let offers = body["offers"].as_array().cloned().unwrap_or_default();
+    if offers.is_empty() {
+        lines.push(brand::ash("no offers"));
+    }
+    for offer in offers {
+        lines.push(format!(
+            "  {}  ${}/h  estimate ${}  {}",
+            offer["id"].as_str().unwrap_or("?"),
+            offer["usd_per_hr"].as_f64().unwrap_or(0.0),
+            offer["estimate_usd"].as_f64().unwrap_or(0.0),
+            offer["region"].as_str().unwrap_or("")
+        ));
+    }
+    lines.join("\n")
+}
+
+fn rent_session_line(session: &serde_json::Value) -> String {
+    format!(
+        "{}  {}  {}  {}h  estimate ${}",
+        session["id"].as_str().unwrap_or("?"),
+        session["phase"].as_str().unwrap_or("?"),
+        session["preset_id"].as_str().unwrap_or("?"),
+        session["hours"].as_f64().unwrap_or(0.0),
+        session["cost_estimate_usd"].as_f64().unwrap_or(0.0)
+    )
+}
+
+fn rent_message(body: &serde_json::Value, status: reqwest::StatusCode) -> String {
+    body["error"]["message"].as_str().map(str::to_owned).unwrap_or_else(|| status.to_string())
+}
+
+fn query_escape(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// The rent API, including a 409 the caller wants to print rather than treat as a transport error.
+fn rent_home(config: Option<PathBuf>) -> Result<PathBuf, String> {
+    match config {
+        Some(config) => Ok(config.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))),
+        None => config::home(),
+    }
+}
+
+fn rent_call(
+    config: Option<PathBuf>,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+    confirm: bool,
+) -> Result<(reqwest::StatusCode, serde_json::Value), String> {
+    let home = config::home()?;
+    let config = Config::load(&config.unwrap_or_else(|| home.join("config.toml")))?;
+    let token = token::load_or_create(&home.join("token"))?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("runtime: {e}"))?;
+    runtime.block_on(async {
+        let mut request = invincible::egress::local()
+            .build()
+            .map_err(|e| e.to_string())?
+            .request(method, format!("http://{}{path}", config.listen))
+            .bearer_auth(token);
+        if confirm {
+            request = request.header(invincible::server::CONFIRMED_HEADER, "1");
+        }
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request.send().await.map_err(|e| format!("is the node running (`invincible serve`)? {e}"))?;
+        let status = response.status();
+        let body = response.json().await.unwrap_or_else(|_| serde_json::json!({}));
+        Ok((status, body))
+    })
 }
 
 /// Calls the running node's admin API on loopback, with the local token.

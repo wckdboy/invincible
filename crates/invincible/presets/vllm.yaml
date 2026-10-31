@@ -1,0 +1,42 @@
+# Ported from the wckd-gpu preset schema (MIT). Copyright (c) 2026 wckdboy.
+apiVersion: wckd.gpu/v1
+kind: Preset
+metadata:
+  id: vllm
+  name: vLLM
+  version: 1
+spec:
+  workload_class: llm
+  constraints:
+    min_vram_gb: 24
+    min_ram_gb: 32
+    min_disk_gb: 80
+    gpu_families: ["H200", "H100", "A100", "L40S", "5090", "4090"]
+    reliability: any
+    prefer_regions: ["EU"]
+    require_regions: ["EU"]
+  runtime:
+    # Sidecar layered on vllm/vllm-openai. `entrypoint` is INVINCIBLE_WORKLOAD.
+    image: "ghcr.io/wckdboy/invincible-rent-vllm:edge"
+    entrypoint: ["vllm", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    env:
+      VLLM_PORT: "8000"
+    ports:
+      - name: api
+        container: 8000
+        expose: tunnel
+    healthcheck:
+      http_get: "http://127.0.0.1:8000/health"
+      interval_sec: 15
+      start_period_sec: 180
+  sync:
+    hydrate:
+      - from: "workspace/"
+        to: "/workspace"
+    drain:
+      - from: "/workspace"
+        to: "workspace/"
+        exclude: ["**/.cache/**"]
+  notes: |
+    OpenAI-compatible server. Weights stay in the project prefix and are
+    hydrated on start. Registering the pod as a model backend is later.

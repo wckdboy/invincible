@@ -25,7 +25,7 @@ use invincible_policy::{Action, DataPolicy, Decision, Model, NodeSettings, Reaso
 use serde_json::{Value, json};
 
 use crate::audit::{AuditLog, Caller};
-use crate::cloud::{CloudError, CloudModel};
+use crate::cloud::{CloudError, Clouds};
 use crate::devices::{Capabilities as DeviceCapabilities, Capability};
 use crate::engine::Engine;
 use crate::membership::{self, Membership};
@@ -82,7 +82,7 @@ pub struct AppState {
     pub client: reqwest::Client,
     /// Remote access; `None` when the config does not enable it.
     pub pairing: Option<Arc<Pairing>>,
-    pub cloud: Vec<CloudModel>,
+    pub cloud: Clouds,
     /// For requests that leave the node; `None` when the node is offline.
     pub egress: Option<reqwest::Client>,
     pub name: String,
@@ -95,11 +95,15 @@ pub struct AppState {
     /// Speech and image backends ([crate::synth]).
     pub speech: Vec<crate::synth::Backend>,
     pub images: Vec<crate::synth::Backend>,
+    /// Speech-to-text backends ([crate::transcribe]).
+    pub transcription: Vec<crate::synth::Backend>,
     /// Cluster membership and the models split across paired nodes (spec/cluster.md).
     pub cluster: Option<Arc<crate::cluster::ClusterState>>,
     /// Dispatch across the nodes this machine owns (spec/dispatch.md); `None` on a node that does
     /// not dispatch.
     pub dispatch: Option<Arc<crate::dispatch::Dispatch>>,
+    /// Cloud providers can be added, changed and removed while this runs (spec/agent.md).
+    pub providers: Option<Arc<crate::providers_admin::ProviderAdmin>>,
     /// This machine's cluster membership (`nodes.json`, `device.key`); `None` in a process with
     /// no home directory, which then cannot join or forget nodes.
     pub membership: Option<Arc<Membership>>,
@@ -110,6 +114,9 @@ pub struct AppState {
     /// max_buffered_bytes`, spec/pairing.md, Limits). The operator's own loopback requests are
     /// not counted: the ceiling is for the callers the node does not sit behind.
     pub buffered: Arc<Budget>,
+    /// The in-process rent engine and the rental caps (spec/rent.md). `None` when `[rent] enabled`
+    /// is false: the routes answer that rent is off.
+    pub rent: Option<Arc<crate::rent::Gateway>>,
 }
 
 impl AppState {
@@ -128,21 +135,36 @@ impl AppState {
             token,
             client,
             pairing: None,
-            cloud: Vec::new(),
+            cloud: Clouds::default(),
             egress,
             name: "invincible".to_owned(),
             receipt_key,
             receipts: Arc::default(),
             audit: None,
+            providers: None,
             agent_url: "http://127.0.0.1:7792".to_owned(),
             speech: Vec::new(),
             images: Vec::new(),
+            transcription: Vec::new(),
             cluster: None,
             dispatch: None,
             membership: None,
             discovery: None,
             buffered: Arc::new(Budget::new(crate::config::DEFAULT_MAX_BUFFERED_BYTES)),
+            rent: None,
         }
+    }
+
+    /// With the rent gateway ([crate::rent]). The sweeper runs inside the node.
+    pub fn with_rent(mut self, rent: Arc<crate::rent::Gateway>) -> Self {
+        self.rent = Some(rent);
+        self
+    }
+
+    /// With speech-to-text backends ([crate::transcribe]).
+    pub fn with_transcription(mut self, transcription: Vec<crate::synth::Backend>) -> Self {
+        self.transcription = transcription;
+        self
     }
 
     /// How many bytes of device request bodies this node holds at once (`[node]
@@ -193,21 +215,29 @@ impl AppState {
         self
     }
 
-    pub fn with_cloud(mut self, cloud: Vec<CloudModel>) -> Self {
-        self.cloud = cloud;
+    pub fn with_cloud(mut self, cloud: Vec<crate::cloud::CloudModel>) -> Self {
+        self.cloud = Clouds::new(cloud);
         self
     }
 
-    /// Every model the router can choose from: the node's engines, then the cloud backends.
+    /// The provider admin (the config file and hot-reloaded cloud models); `None` in a process
+    /// with no home directory, which cannot add providers.
+    pub fn with_provider_admin(mut self, admin: Arc<crate::providers_admin::ProviderAdmin>) -> Self {
+        self.providers = Some(admin);
+        self
+    }
+
+    /// Every model the router can choose from for a chat: the node's engines (an embedding
+    /// engine cannot chat), then the cloud backends.
     fn route_models(&self) -> Vec<Model> {
-        let node = self.engines.iter().map(|e| Model {
+        let node = self.engines.iter().filter(|e| !e.embeddings).map(|e| Model {
             id: e.id.clone(),
             tier: Tier::Node,
             healthy: e.healthy(),
             context: e.context,
             data_policy: DataPolicy::Owned,
         });
-        let cloud = self.cloud.iter().map(|c| Model {
+        let cloud = self.cloud.list().into_iter().map(|c| Model {
             id: c.id.clone(),
             tier: Tier::Cloud,
             healthy: c.healthy() && self.egress.is_some(),
@@ -220,7 +250,7 @@ impl AppState {
     /// Whether model [id] takes images (None: not known, or no such model).
     pub fn vision(&self, id: &str) -> Option<bool> {
         let engine = self.engines.iter().find(|e| e.id == id).map(|e| e.vision);
-        engine.or_else(|| self.cloud.iter().find(|c| c.id == id).map(|c| c.vision)).flatten()
+        engine.or_else(|| self.cloud.find(id).map(|c| c.vision)).flatten()
     }
 
     pub fn with_pairing(mut self, pairing: Arc<Pairing>) -> Self {
@@ -434,6 +464,11 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/messages", post(messages).layer(Extension(BodyLimit(MAX_REQUEST))))
         .route("/v1/audio/speech", post(crate::synth::speech))
         .route("/v1/images/generations", post(crate::synth::images))
+        .route("/v1/embeddings", post(crate::embed::embeddings).layer(Extension(BodyLimit(MAX_REQUEST))))
+        .route(
+            "/v1/audio/transcriptions",
+            post(crate::transcribe::transcriptions).layer(Extension(BodyLimit(crate::transcribe::MAX_AUDIO))),
+        )
         .route("/v1/receipts/{id}", get(receipt))
         .route("/v1/audit", get(audit))
         .route("/v1/node", get(node_info))
@@ -441,6 +476,11 @@ fn api() -> Router<Arc<AppState>> {
         .route("/v1/cluster/meter", post(cluster_meter).layer(Extension(BodyLimit(LOOPBACK_METER_BODY))))
         .route("/v1/agent", any(agent))
         .route("/v1/agent/{*rest}", any(agent))
+        .route("/v1/rent/health", get(crate::rent::health))
+        .route("/v1/rent/offers", get(crate::rent::offers))
+        .route("/v1/rent/sessions", get(crate::rent::list).post(crate::rent::create))
+        .route("/v1/rent/sessions/{id}", get(crate::rent::session))
+        .route("/v1/rent/sessions/{id}/stop", post(crate::rent::stop))
 }
 
 /// A path the agent proxy passes on: under `/v1/agent`, plain segments only (no `.`/`..`, no
@@ -586,6 +626,8 @@ async fn node_info(State(state): State<Arc<AppState>>) -> Json<Value> {
         "receipt_key": state.receipt_key.public(),
         "speech": list(&state.speech),
         "images": list(&state.images),
+        "transcription": list(&state.transcription),
+        "embeddings": state.engines.iter().filter(|e| e.embeddings).map(|e| json!({ "id": e.id, "healthy": e.healthy() })).collect::<Vec<_>>(),
     }))
 }
 
@@ -828,6 +870,8 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/admin/devices", get(list_devices))
         // `PATCH` sets what a device may reach (spec/pairing.md, Capabilities); `DELETE` unpairs.
         .route("/v1/admin/devices/{name}", patch(grant_device).delete(remove_device))
+        .route("/v1/admin/providers", get(list_providers).post(add_provider))
+        .route("/v1/admin/providers/{id}", axum::routing::delete(remove_provider))
         .route("/v1/cluster", get(cluster_status))
         .route("/v1/dispatch", get(dispatch_status))
         // Discovery (spec/discovery.md): what this node announces, and the verified descriptors
@@ -868,6 +912,10 @@ fn capability_for(path: &str) -> Option<Capability> {
         "/v1/agent" => Some(Capability::Agent),
         path if path.starts_with("/v1/agent/") => Some(Capability::Agent),
         path if path.starts_with("/v1/receipts/") => Some(Capability::Shard),
+        // Rent spends money, so it is its own grant (spec/rent.md). A device without it is
+        // refused with 403, not the fallback 404: the refusal has to say that the grant is missing.
+        "/v1/rent" => Some(Capability::Rent),
+        path if path.starts_with("/v1/rent/") => Some(Capability::Rent),
         _ => None,
     }
 }
@@ -878,7 +926,8 @@ fn capability_for(path: &str) -> Option<Capability> {
 /// A device that lacks it gets the router's fallback answer, byte for byte (status, body and
 /// headers), including its `content-type`: `404` with `{"error":{"message":"no such endpoint",
 /// "type":"not_found","code":"not_found"}}`. Deliberately not a 403 — a 403 would map which
-/// routes exist, and to whom.
+/// routes exist, and to whom. Rent is the exception: missing `rent` is 403, because a refusal to
+/// spend money has to say so (spec/rent.md).
 async fn require_capability(
     State(state): State<Arc<AppState>>,
     caller: Option<Extension<Caller>>,
@@ -899,6 +948,10 @@ async fn require_capability(
     };
     match granted {
         Some(capabilities) if capabilities.contains(needed) => next.run(request).await,
+        // Rent is the exception to the 404 below (spec/rent.md). The other grants stay invisible.
+        _ if needed == Capability::Rent => {
+            error(StatusCode::FORBIDDEN, "forbidden", "this device cannot rent; it was not granted the rent scope")
+        }
         _ => error(StatusCode::NOT_FOUND, "not_found", "no such endpoint"),
     }
 }
@@ -960,6 +1013,13 @@ fn device_api(budget: Arc<Budget>) -> Router<Arc<AppState>> {
         // A dispatched completion arrives here whole, so it buffers and is bounded exactly like
         // the chat route above: the same `MAX_REQUEST`, the same admission against the ceiling.
         .route("/v1/dispatch/chat/completions", admitted(post(dispatch_completion), budget, MAX_REQUEST))
+        // Rent is mounted so the capability gate can refuse it with 403 (spec/rent.md). A device
+        // granted `rent` reaches the same proxy the operator's token does.
+        .route("/v1/rent/health", get(crate::rent::health))
+        .route("/v1/rent/offers", get(crate::rent::offers))
+        .route("/v1/rent/sessions", get(crate::rent::list).post(crate::rent::create))
+        .route("/v1/rent/sessions/{id}", get(crate::rent::session))
+        .route("/v1/rent/sessions/{id}/stop", post(crate::rent::stop))
         .fallback(|| async { error(StatusCode::NOT_FOUND, "not_found", "no such endpoint") })
 }
 
@@ -1034,6 +1094,57 @@ async fn fetch(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(body
         state.receipts.clone(),
         state.audit.clone(),
     )
+}
+
+/// `GET /v1/admin/providers`: the cloud providers this node is configured with, without keys.
+async fn list_providers(State(state): State<Arc<AppState>>) -> Response {
+    let Some(admin) = &state.providers else {
+        return error(
+            StatusCode::CONFLICT,
+            "not_configurable",
+            "this gateway has no home directory, so providers cannot be edited here",
+        );
+    };
+    match admin.list() {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
+}
+
+/// `POST /v1/admin/providers`: add or update a cloud provider and hot-load it. The key is
+/// written to the gateway's `keys/` directory (0600) and never returned.
+async fn add_provider(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<crate::providers_admin::ProviderBody>,
+) -> Response {
+    let Some(admin) = &state.providers else {
+        return error(
+            StatusCode::CONFLICT,
+            "not_configurable",
+            "this gateway has no home directory, so providers cannot be edited here",
+        );
+    };
+    match admin.upsert(&body) {
+        Ok(provider) => Json(provider).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, "provider_error", &e),
+    }
+}
+
+/// `DELETE /v1/admin/providers/{id}`: remove a cloud provider and its key file, and hot-unload
+/// it. The running gateway is one model poorer on the next request.
+async fn remove_provider(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    let Some(admin) = &state.providers else {
+        return error(
+            StatusCode::CONFLICT,
+            "not_configurable",
+            "this gateway has no home directory, so providers cannot be edited here",
+        );
+    };
+    match admin.remove(&id) {
+        Ok(true) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", &format!("there is no provider {id:?}")),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &e),
+    }
 }
 
 /// `POST /v1/admin/pairing`: opens a pairing code. Body optional; `{"capabilities": [...]}`
@@ -1381,7 +1492,7 @@ async fn require_token(State(state): State<Arc<AppState>>, request: HttpRequest,
 }
 
 async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let data: Vec<Value> = state
+    let mut data: Vec<Value> = state
         .route_models()
         .iter()
         .map(|m| {
@@ -1410,6 +1521,21 @@ async fn models(State(state): State<Arc<AppState>>) -> Json<Value> {
             model
         })
         .collect();
+    // Embedding engines too, marked, so a client that lists models finds them.
+    data.extend(state.engines.iter().filter(|e| e.embeddings).map(|e| {
+        json!({
+            "id": e.id,
+            "object": "model",
+            "owned_by": "invincible",
+            "invincible": {
+                "tier": Tier::Node,
+                "healthy": e.healthy(),
+                "context": e.context,
+                "data_policy": "owned",
+                "embeddings": true,
+            },
+        })
+    }));
     Json(json!({ "object": "list", "data": data }))
 }
 
@@ -1529,9 +1655,9 @@ async fn infer(
                 forward(&state.client, engine, api.path(), body.0.clone(), streaming).await
             }
             (Action::Run, _) => {
-                let cloud = state.cloud.iter().find(|c| Some(&c.id) == decision.model.as_ref()).expect("decided model");
+                let cloud = state.cloud.find(decision.model.as_deref().unwrap_or_default()).expect("decided model");
                 let client = state.egress.as_ref().expect("a healthy cloud model implies an egress client");
-                let (outgoing, vault) = crate::cloud::prepare(cloud, parsed.clone());
+                let (outgoing, vault) = crate::cloud::prepare(cloud.as_ref(), parsed.clone());
                 for (kind, n) in vault.found() {
                     let seen = draft.redactions.entry(kind).or_insert(0);
                     *seen = (*seen).max(n);
@@ -1546,7 +1672,7 @@ async fn infer(
                 });
                 draft.data_policy = Some(data_policy_code(cloud.data_policy));
                 let streaming = parsed.get("stream").and_then(Value::as_bool) == Some(true);
-                match crate::cloud::forward(client, cloud, outgoing, vault, received, streaming).await {
+                match crate::cloud::forward(client, cloud.as_ref(), outgoing, vault, received, streaming).await {
                     Ok(response) => response,
                     Err(CloudError::Failover(why)) => {
                         tracing::warn!(model = %cloud.id, "cloud backend failed ({why}); routing again");
@@ -1658,7 +1784,7 @@ pub(crate) fn reason_code(reason: Reason) -> String {
     serde_json::to_value(reason).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
-fn ask_message(decision: &Decision) -> &'static str {
+pub(crate) fn ask_message(decision: &Decision) -> &'static str {
     match decision.reason {
         Reason::Trains => "this model trains on prompts; send again with `invincible-confirmed: 1` to use it",
         Reason::Sensitive => "this request looks sensitive; send again with `invincible-confirmed: 1` to use the cloud",
@@ -1682,7 +1808,7 @@ pub(crate) fn ask(decision: &Decision) -> Response {
 }
 
 /// An error in the OpenAI shape.
-pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
+pub fn error(status: StatusCode, code: &str, message: &str) -> Response {
     (status, Json(json!({ "error": { "message": message, "type": code, "code": code } }))).into_response()
 }
 

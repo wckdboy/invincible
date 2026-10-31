@@ -239,7 +239,7 @@ pub fn rpc_launch(program: &Path, port: u16, cache: Option<&Path>, logs: &Path) 
     }
     // TCP inside the tunnel: RDMA would go around it.
     env.push(("GGML_RPC_NO_RDMA".to_owned(), "1".to_owned()));
-    Launch { program: program.to_owned(), args, log: logs.join("ggml-rpc-server.log"), env, key_file: None }
+    Launch { program: program.to_owned(), args, log: logs.join("ggml-rpc-server.log"), env, key_file: None, cwd: None }
 }
 
 // ---------------------------------------------------------------------------------------------

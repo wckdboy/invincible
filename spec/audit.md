@@ -38,7 +38,8 @@ and the cluster's topology.
 | `at` | always | Unix seconds when the answer finished |
 | `caller` | always | `local` (the loopback API, with the token) or `device:<name>` (a paired device, by the name it was pinned under; a node that sends work here, as a cluster head or a dispatcher, paired the same way and is one too) |
 | `client` | when sent | What the caller says it is, from the `invincible-client` request header (64 printable ASCII characters at most). The Autobot Agent sends `autobot-agent`. Not authenticated: `caller` is. |
-| `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`) or `fetch` (`/v1/fetch`) |
+| `api` | always | `chat` (`/v1/chat/completions`), `messages` (`/v1/messages`), `speech` (`/v1/audio/speech`), `images` (`/v1/images/generations`), `transcriptions` (`/v1/audio/transcriptions`), `embeddings` (`/v1/embeddings`), `fetch` (`/v1/fetch`), `rent.start` or `rent.stop` ([rent.md](rent.md)) |
+| `rent` | a rental that started or stopped | `{"action": "start"\|"stop", "session_id", "cost_estimate_usd", ...}`. Not signed. Never a provider or object-store key |
 | `prev` | always, but not in a device's read | Lowercase hex SHA-256 of the previous entry's line (its exact bytes, without the newline); 64 zeros for the first entry ever written. A device reading its own entries is not given it ([Reading it](#reading-it)) |
 | `receipt` | always | The signed receipt envelope, exactly as `GET /v1/receipts/{id}` returns it |
 | `request_id` | since ids were recorded | The request's id, the same one the client was given in the `invincible-request-id` response header and the same one inside its receipt's `request_id`. It is what `invincible receipt verify <id>` looks the entry up by. Entries written before this field existed carry no id: they still verify, but only the id inside their receipt (absent on a version 0 receipt) can reach them |

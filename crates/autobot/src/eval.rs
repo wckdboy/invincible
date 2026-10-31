@@ -121,8 +121,9 @@ pub fn parse(text: &str) -> Result<Vec<Task>, String> {
 struct Yes;
 
 impl Approver for Yes {
-    fn approve<'a>(&'a self, _: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
-        Box::pin(async { Answer::Once })
+    fn approve<'a>(&'a self, action: &'a Action) -> Pin<Box<dyn Future<Output = Answer> + Send + 'a>> {
+        let rent = matches!(action, Action::Rent { .. });
+        Box::pin(async move { if rent { Answer::Deny } else { Answer::Once } })
     }
 
     fn channel(&self) -> &'static str {
@@ -265,6 +266,9 @@ fn verify(check: &Check, work: &Path, answer: &str, called: &[String]) -> Result
             if text.contains(value.as_str()) { Err(format!("{path} still contains {value:?}")) } else { Ok(()) }
         }
         Check::CommandOk { command } => {
+            // The command comes from the operator-authored eval spec and running it is
+            // the check's purpose; the spec is trusted input, not agent output.
+            // nosemgrep: agents.config.eng-rust-command-shell
             let out = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(command)

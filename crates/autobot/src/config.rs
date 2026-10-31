@@ -15,7 +15,7 @@ use serde::Deserialize;
 /// max_steps = 24                     # model calls per turn, tool rounds included
 ///
 /// [approvals]
-/// mode = "ask"                       # ask, edits, allowlist, trust
+/// mode = "ask"                       # ask, edits, auto, allowlist, trust
 /// allow = ["git status", "ls"]       # commands that run without asking (exact or prefix + space)
 ///
 /// [telegram]
@@ -30,6 +30,25 @@ use serde::Deserialize;
 /// [terminal]
 /// notify = "auto"                    # a long turn ended, a question waits: auto, bell, off
 /// ```
+/// Delegated runs' outcome webhook: one POST when a run finishes or stops.
+///
+/// ```toml
+/// [delegate]
+/// webhook = "https://example.com/autobot"           # optional
+/// webhook_secret_file = "delegate-webhook.secret"   # optional HMAC key (default path below)
+/// ```
+///
+/// The body is JSON; with a secret, `X-Invincible-Signature: sha256=<hex>` is its HMAC-SHA256.
+/// The default secret file is `$AUTOBOT_HOME/delegate-webhook.secret` when it exists.
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegateConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_secret_file: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -65,6 +84,9 @@ pub struct Config {
     /// About this bot ([crate::bots]).
     #[serde(default)]
     pub bot: crate::bots::BotConfig,
+    /// Where a delegated run's outcome goes ([crate::delegate]).
+    #[serde(default)]
+    pub delegate: DelegateConfig,
     #[serde(default)]
     pub slack: crate::slack::SlackConfig,
     #[serde(default)]
@@ -205,6 +227,10 @@ pub struct AgentConfig {
     /// How often the heartbeat works through `HEARTBEAT.md` (`30m`, `2h`; `off`).
     #[serde(default = "heartbeat")]
     pub heartbeat: String,
+    /// A command run after a turn changed files, before the agent may finish. The owner
+    /// configured it, so it runs without an approval; it is the project's build, lint or test.
+    #[serde(default)]
+    pub check: Option<String>,
     /// Keep every finished turn in `$AUTOBOT_HOME/trajectories`, for fine-tuning a local model
     /// on the agent's own work ([crate::trajectory]).
     #[serde(default)]
@@ -268,6 +294,7 @@ impl Default for AgentConfig {
             tools: None,
             disabled_tools: Vec::new(),
             heartbeat: heartbeat(),
+            check: None,
             trajectories: false,
             context_kib: None,
             stream: true,
@@ -297,6 +324,10 @@ pub enum ApprovalMode {
     /// without asking: for coding, where every change is shown as a diff and `/undo` puts it
     /// back.
     Edits,
+    /// Commands and writes in the working directory run without asking; reads and writes
+    /// outside it, hidden files, cloud, fetch, MCP and Home Assistant still ask. The autonomous
+    /// coding mode.
+    Auto,
     /// Run allowlisted commands and writes in the working directory; refuse everything else
     /// without asking (unattended use).
     Allowlist,

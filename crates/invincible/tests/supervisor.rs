@@ -52,6 +52,7 @@ async fn restarts_a_crashed_engine_and_tracks_its_health() {
         log: log.clone(),
         env: vec![],
         key_file: None,
+        cwd: None,
     };
     let engine = Engine::attached("stand-in", &format!("http://127.0.0.1:{port}"), None, false);
     let task = supervise(engine.clone(), launch);
@@ -74,6 +75,7 @@ async fn an_engine_that_cannot_start_stays_unhealthy() {
         log: dir.join("x.log"),
         env: vec![],
         key_file: None,
+        cwd: None,
     };
     let engine = Engine::attached("missing", "http://127.0.0.1:9", None, false);
     let task = supervise(engine.clone(), launch);
@@ -96,6 +98,7 @@ async fn an_engine_that_answers_without_its_key_is_stopped_for_good() {
         log: log.clone(),
         env: vec![],
         key_file: Some((dir.join("engine.key"), "k3y".into())),
+        cwd: None,
     };
     let engine = Engine::attached("unkeyed", &format!("http://127.0.0.1:{port}"), None, false).with_key("k3y");
     let task = supervise(engine.clone(), launch);
@@ -123,6 +126,7 @@ async fn a_split_model_whose_engine_answers_without_its_key_is_not_run_again() {
         log: log.clone(),
         env: vec![],
         key_file: Some((dir.join("engine.key"), "k3y".into())),
+        cwd: None,
     };
     let engine = Engine::attached("unkeyed", &format!("http://127.0.0.1:{port}"), None, false).with_key("k3y");
     // No peers and no GPU: the plan is to run on this machine alone.
