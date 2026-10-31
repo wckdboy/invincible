@@ -598,6 +598,7 @@ fn cloud_command(action: CloudAction) -> Result<(), String> {
                 context,
                 data_policy: &policy,
                 vision: None,
+                include_usage: None,
             };
             if let Err(e) = cloud::add_to_config(&config_path, &entry) {
                 let _ = std::fs::remove_file(&key_path);

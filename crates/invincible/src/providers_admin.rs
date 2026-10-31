@@ -146,6 +146,8 @@ impl ProviderAdmin {
             .or_else(|| existing.map(|c| c.data_policy.clone()))
             .unwrap_or_else(|| "unknown".to_owned());
         let vision = body.vision.or_else(|| existing.and_then(|c| c.vision));
+        // Not in the body: an update keeps what the config says.
+        let include_usage = existing.and_then(|c| c.include_usage);
 
         let given = body.api_key.as_deref().map(str::trim).filter(|key| !key.is_empty());
         let (api_key_file, api_key_env) = match given {
@@ -179,6 +181,7 @@ impl ProviderAdmin {
                 context,
                 data_policy: &data_policy,
                 vision,
+                include_usage,
             },
         )?;
         self.reload()?;

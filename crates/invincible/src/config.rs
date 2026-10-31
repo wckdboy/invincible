@@ -170,6 +170,7 @@ impl MediaConfig {
             context: None,
             data_policy: String::new(),
             vision: None,
+            include_usage: None,
         }
         .key(home)
     }
@@ -238,6 +239,7 @@ impl Default for AgentLink {
 /// context = 200000
 /// data_policy = "retention:30"               # owned, no-retention, retention:<days>, trains, unknown
 /// vision = true                              # takes images (default: known for common models)
+/// include_usage = true                       # streams ask for token usage (default: presets that take it)
 /// ```
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -257,6 +259,10 @@ pub struct CloudConfig {
     /// Whether it takes images; unset: guessed from the model's name ([crate::cloud::guess_vision]).
     #[serde(default)]
     pub vision: Option<bool>,
+    /// Whether a streamed request asks for its token usage; unset: for the presets' APIs that take
+    /// it ([crate::cloud::CloudModel::include_usage]).
+    #[serde(default)]
+    pub include_usage: Option<bool>,
 }
 
 fn unknown_policy() -> String {
@@ -928,6 +934,9 @@ mod tests {
         let ok = "[[cloud]]\nid = \"claude\"\nbase_url = \"https://api.anthropic.com/v1\"\napi_key_env = \"K\"\n";
         let config = Config::parse(ok).unwrap();
         assert_eq!(config.cloud[0].data_policy, "unknown");
+        assert_eq!(config.cloud[0].include_usage, None);
+        let off = Config::parse(&format!("{ok}include_usage = false\n")).unwrap();
+        assert_eq!(off.cloud[0].include_usage, Some(false));
         let http = "[[cloud]]\nid = \"c\"\nbase_url = \"http://api.example.org/v1\"\n";
         assert!(Config::parse(http).unwrap_err().contains("HTTPS"));
         let clash =

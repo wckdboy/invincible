@@ -6,8 +6,9 @@
 //! matches its one character of context instead and captures the core in group 1. Leftmost-first
 //! matching picks the same core a backtracking engine with look-around would.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use regex::{Regex, RegexBuilder};
 use serde_json::Value;
@@ -204,7 +205,12 @@ static LINK: LazyLock<Regex> =
     LazyLock::new(|| re(r#"(?i)\b(?:https?|ftp|file|wss?)://[^\s<>"'`)\]]+|\bwww\.[^\s<>"'`)\]]+"#));
 static PLACEHOLDER: LazyLock<Regex> =
     LazyLock::new(|| re(r"(\[|%5[Bb])(PERSON|EMAIL|PHONE|ADDRESS|CARD|IBAN|ACCOUNT)_([0-9]{1,5})(?:\]|%5[Dd])"));
-static DIGIT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"\+?[0-9](?:[ \-./]?[0-9])*"));
+// Digits with at most one separator between two: a space of any width (also a no-break or narrow
+// no-break space, as web pages, office documents and contacts write it), `-`, `.` or `/`. Not a
+// tab or a line break: those separate cells and lines, not the groups of one number.
+static DIGIT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"\+?[0-9](?:[\p{Zs}\-./]?[0-9])*"));
+static LATIN: LazyLock<Regex> = LazyLock::new(|| re(r"\p{Latin}"));
+static CASED: LazyLock<Regex> = LazyLock::new(|| re(r"[\p{Latin}\p{Cased}]"));
 
 fn words(list: &'static str) -> HashSet<&'static str> {
     list.split_whitespace().collect()
@@ -410,6 +416,11 @@ impl Found<'_> {
 
 /// Personal data in [text], non-overlapping, in order.
 pub fn detect(text: &str) -> Vec<Span> {
+    find(text, true)
+}
+
+/// [detect]; names and addresses ([Kind::wordy]) only with [words].
+fn find(text: &str, words: bool) -> Vec<Span> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -420,8 +431,10 @@ pub fn detect(text: &str) -> Vec<Span> {
     cards(text, &guards, &mut found);
     accounts(text, &guards, &mut found);
     phones(text, &guards, &mut found);
-    addresses(text, &guards, &mut found);
-    people(text, &guards, &mut found);
+    if words {
+        addresses(text, &guards, &mut found);
+        people(text, &guards, &mut found);
+    }
 
     // The most reliable first, then the longest, then the earliest; keep what does not overlap.
     let mut list = found.list;
@@ -660,7 +673,9 @@ const MIN_TERM: usize = 3;
 const MAX_TERM: usize = 120;
 const MIN_DIGITS: usize = 4;
 
-/// [literal]: placeholder-shaped text the user wrote themselves ("[PERSON_1]").
+/// [literal]: placeholder-shaped text the user wrote themselves ("[PERSON_1]"). [unescaped]: what
+/// [value] stood for, where it was found written as inside a JSON string (`12a,\n10115 Berlin` in
+/// JSON lines, a line break): it goes back into JSON as that, and into text as it was written.
 struct Entry {
     kind: Kind,
     value: String,
@@ -668,6 +683,7 @@ struct Entry {
     digits: Option<String>,
     forms: Vec<String>,
     literal: bool,
+    unescaped: Option<String>,
 }
 
 /// The placeholders of one request, as Autobot's `RedactionVault`: each personal value gets a
@@ -698,11 +714,122 @@ fn digits_of(kind: Kind, value: &str) -> Option<String> {
     (kind.numeric() && !value.chars().any(char::is_alphabetic) && digits.len() >= MIN_DIGITS).then_some(digits)
 }
 
-/// Not part of a longer word or number.
-fn bounded(text: &str, start: usize, end: usize) -> bool {
-    let before = text[..start].chars().next_back().unwrap_or(' ');
-    let after = text[end..].chars().next().unwrap_or(' ');
-    !before.is_alphanumeric() && before != '_' && !after.is_alphanumeric() && after != '_'
+fn word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Whether [c] next to a value of [kind] makes it part of a longer word or number: for phone, card
+/// and account numbers an ASCII letter, digit or `_`, as their patterns read it; for names and
+/// addresses a digit, `_` or a letter of the Latin script or of another script with case (Greek,
+/// Cyrillic), the scripts they are found in by their capitals; for the rest a digit, `_` or a
+/// letter of the Latin script. A letter of a script without case does not: a particle or word in
+/// it may follow a value without a space (`010-1234-5678으로`, `Annaさん`, `bob@posteo.deまで`).
+fn joins(kind: Kind, c: char) -> bool {
+    if kind.numeric() {
+        return c.is_ascii_alphanumeric() || c == '_';
+    }
+    let letters = if kind.wordy() { &CASED } else { &LATIN };
+    c.is_numeric() || c == '_' || (c.is_alphabetic() && letters.is_match(c.encode_utf8(&mut [0; 4])))
+}
+
+/// Not part of a longer word or number ([joins]). A JSON escape next to it counts as what it
+/// stands for: in `"Hi,\nHannah"` the `n` of `\n` is a line break, not a letter.
+fn bounded(text: &str, start: usize, end: usize, kind: Kind) -> bool {
+    let before = escape_before(text, start).or_else(|| text[..start].chars().next_back()).unwrap_or(' ');
+    let after = escape_at(text, end).map(|(c, _)| c).or_else(|| text[end..].chars().next()).unwrap_or(' ');
+    !joins(kind, before) && !joins(kind, after)
+}
+
+/// What the JSON escape at [at] stands for (`\n`, `\u00e9`), and its length in bytes. None where
+/// there is none, or where its backslash is itself escaped (`\\n` is a backslash and an `n`).
+fn escape_at(text: &str, at: usize) -> Option<(char, usize)> {
+    let bytes = text.as_bytes();
+    if bytes.get(at) != Some(&b'\\') || bytes[..at].iter().rev().take_while(|&&b| b == b'\\').count() % 2 == 1 {
+        return None;
+    }
+    match bytes.get(at + 1)? {
+        b'n' => Some(('\n', 2)),
+        b'r' => Some(('\r', 2)),
+        b't' => Some(('\t', 2)),
+        b'b' => Some(('\u{8}', 2)),
+        b'f' => Some(('\u{c}', 2)),
+        b'u' => {
+            let hex = text.get(at + 2..at + 6).filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()))?;
+            let code = u32::from_str_radix(hex, 16).ok()?;
+            // Half of a surrogate pair: not a letter on its own.
+            Some((char::from_u32(code).unwrap_or(char::REPLACEMENT_CHARACTER), 6))
+        }
+        _ => None,
+    }
+}
+
+/// What a JSON escape that ends at [at] stands for.
+fn escape_before(text: &str, at: usize) -> Option<char> {
+    [2, 6].into_iter().find_map(|len| escape_at(text, at.checked_sub(len)?).filter(|&(_, l)| l == len).map(|(c, _)| c))
+}
+
+/// [at], or the end of the JSON escape it lies inside: an email's local part may begin with the `u`
+/// and hex digits of the `\u306f` before it.
+fn past_escape(text: &str, at: usize) -> usize {
+    (1..6)
+        .filter_map(|back| at.checked_sub(back))
+        .find_map(|start| escape_at(text, start).map(|(_, len)| start + len))
+        .filter(|&end| end > at)
+        .unwrap_or(at)
+}
+
+/// [text] as detection reads it: a JSON escape that stands for something other than a letter, a
+/// digit or `_` is written as spaces, ending in the line break or tab it stands for, so a value
+/// right after `\n` is found without the `n` and every offset holds in [text].
+fn spaced(text: &str) -> Cow<'_, str> {
+    if !text.contains('\\') {
+        return Cow::Borrowed(text);
+    }
+    let mut out = text.as_bytes().to_vec();
+    let mut at = 0;
+    while at < out.len() {
+        if out[at] != b'\\' {
+            at += 1;
+            continue;
+        }
+        // A run of backslashes is read once: its pairs are `\\`, kept as written, and only an odd
+        // one out at its end can start an escape (asking [escape_at] at each pair would recount
+        // the run every time).
+        let run = out[at..].iter().take_while(|&&b| b == b'\\').count();
+        at += run - run % 2;
+        if run % 2 == 0 {
+            continue;
+        }
+        match escape_at(text, at) {
+            Some((c, len)) if !word_char(c) => {
+                out[at..at + len].fill(b' ');
+                if matches!(c, '\n' | '\r' | '\t') {
+                    out[at + len - 1] = c as u8;
+                }
+                at += len;
+            }
+            Some((_, len)) => at += len,
+            // `\"`, or a backslash that escapes nothing: kept as written.
+            None => at += 2,
+        }
+    }
+    Cow::Owned(String::from_utf8(out).expect("only ASCII bytes replaced by ASCII"))
+}
+
+/// What [raw] stands for as the inside of a JSON string, where it has an escape and reads as one.
+fn unescape(raw: &str) -> Option<String> {
+    raw.contains('\\').then(|| serde_json::from_str(&format!("\"{raw}\"")).ok()).flatten()
+}
+
+/// [value] as it is written inside a JSON string (a line break as `\n`).
+fn json_escape(value: &str) -> String {
+    let quoted = Value::String(value.to_owned()).to_string();
+    quoted[1..quoted.len() - 1].to_owned()
+}
+
+/// [e]'s forms as written inside a JSON string, where that differs from the form.
+fn escaped_forms(e: &Entry) -> Vec<String> {
+    e.forms.iter().map(|f| json_escape(f)).filter(|f| !e.forms.contains(f)).collect()
 }
 
 fn percent_encode(value: &str) -> String {
@@ -768,6 +895,7 @@ impl Vault {
             digits: None,
             forms: vec![bracket.clone()],
             literal: true,
+            unescaped: None,
         };
         match owner {
             // Kept as written: it stands for itself.
@@ -782,16 +910,19 @@ impl Vault {
         }
     }
 
-    fn register(&mut self, kind: Kind, value: &str) {
+    /// The entry for a detected value, new or known. It gets its placeholder when it is replaced.
+    /// A new value with an escape, found in a JSON text read as text ([json]), is also known by what
+    /// it stands for, so the same value read unescaped later (in a JSON document, a message) is the
+    /// same. A known value stays as it was first registered.
+    fn register(&mut self, kind: Kind, value: &str, json: bool) -> usize {
         let k = key(kind, value);
-        if let Some(&i) = self.index.get(&k) {
+        let unescaped = if json { unescape(value) } else { None };
+        let unescaped_key = unescaped.as_deref().map(|u| key(kind, u));
+        if let Some(&i) = self.index.get(&k).or_else(|| self.index.get(unescaped_key.as_ref()?)) {
             if !self.entries[i].1.forms.iter().any(|f| f == value) {
                 self.entries[i].1.forms.push(value.to_owned());
             }
-            if self.entries[i].1.placeholder.is_none() {
-                self.number(i);
-            }
-            return;
+            return i;
         }
         let i = self.insert(
             k,
@@ -799,12 +930,15 @@ impl Vault {
                 kind,
                 value: value.to_owned(),
                 placeholder: None,
-                digits: digits_of(kind, value),
-                forms: vec![value.to_owned()],
+                digits: digits_of(kind, unescaped.as_deref().unwrap_or(value)),
+                forms: std::iter::once(value.to_owned()).chain(unescaped.clone()).collect(),
                 literal: false,
+                unescaped,
             },
         );
-        self.number(i);
+        if let Some(unescaped_key) = unescaped_key {
+            self.index.insert(unescaped_key, i);
+        }
         // The parts of a full name get their own placeholders when they appear alone.
         if kind == Kind::Person {
             let parts: Vec<&str> = value
@@ -821,6 +955,7 @@ impl Vault {
                 }
             }
         }
+        i
     }
 
     fn candidate(&mut self, kind: Kind, raw: &str) {
@@ -841,35 +976,140 @@ impl Vault {
                 digits: digits_of(kind, value),
                 forms: vec![value.to_owned()],
                 literal: false,
+                unescaped: None,
             },
         );
     }
 
     /// [text] with its personal data replaced.
     pub fn redact(&mut self, text: &str) -> String {
+        self.redact_with(text, Form::Text)
+    }
+
+    /// [Vault::redact] for a tool's description, which goes with every request: only what is
+    /// found without guessing at words (emails, phone, card, IBAN and account numbers), so "a file
+    /// called Report" or "Hi Claude," names no one who would then be replaced in every message.
+    /// Values already known are replaced as in any text.
+    pub fn redact_description(&mut self, text: &str) -> String {
+        self.redact_with(text, Form::Description)
+    }
+
+    /// [Vault::redact] for a text that is often JSON (a tool result, tool-call arguments). When it
+    /// parses, each string in it (keys too) is redacted as what it stands for, unescaped, and
+    /// written back escaped; a number is redacted as written and becomes a string if it changes. So
+    /// a value right after a `\n` is found whole and the text stays JSON. Each string is redacted
+    /// as a message is, so JSON text in one (an MCP tool's result) is read as text: a new value
+    /// found across its `\n` is registered with the backslash and the `n`. Other text (JSON lines,
+    /// JSON inside prose) is redacted as text, and a value with an escape found in it is taken as
+    /// written inside a JSON string ([Entry::unescaped]).
+    pub fn redact_json(&mut self, text: &str) -> String {
+        // Parsed as a [Value], so each string below decodes: text with a lone surrogate (`\ud800`)
+        // is not JSON here.
+        if serde_json::from_str::<Value>(text).is_err() {
+            return self.redact_with(text, Form::Json);
+        }
+        // As in a text, placeholder-shaped text anywhere in it comes first.
+        for c in PLACEHOLDER.captures_iter(text) {
+            self.literal(&c[1], &c[2], &c[3]);
+        }
+        let bytes = text.as_bytes();
+        let mut out = String::with_capacity(text.len());
+        let (mut cursor, mut at) = (0, 0);
+        while at < bytes.len() {
+            // Valid JSON: outside a string, a `-` or a digit starts a number.
+            let end = match bytes[at] {
+                b'"' => {
+                    let mut end = at + 1;
+                    while bytes[end] != b'"' {
+                        end += if bytes[end] == b'\\' { 2 } else { 1 };
+                    }
+                    end + 1
+                }
+                b'-' | b'0'..=b'9' => {
+                    at + bytes[at..]
+                        .iter()
+                        .take_while(|b| matches!(b, b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E'))
+                        .count()
+                }
+                _ => {
+                    at += 1;
+                    continue;
+                }
+            };
+            let token = &text[at..end];
+            let value =
+                if bytes[at] == b'"' { serde_json::from_str(token).expect("a JSON string") } else { token.to_owned() };
+            let redacted = self.redact(&value);
+            if redacted != value {
+                out.push_str(&text[cursor..at]);
+                out.push_str(&Value::String(redacted).to_string());
+                cursor = end;
+            }
+            at = end;
+        }
+        out.push_str(&text[cursor..]);
+        out
+    }
+
+    fn redact_with(&mut self, text: &str, form: Form) -> String {
         if text.trim().is_empty() {
             return text.to_owned();
         }
-        let spans = detect(text);
+        let read = spaced(text);
+        let spans = find(&read, form != Form::Description);
         // Placeholder-shaped text the user wrote comes first: its numbers are never handed out.
         let literals: Vec<(String, String, String)> =
             PLACEHOLDER.captures_iter(text).map(|c| (c[1].to_owned(), c[2].to_owned(), c[3].to_owned())).collect();
         for (open, tag, n) in &literals {
             self.literal(open, tag, n);
         }
+        // What is detected inside a known value written escaped (`12a,\n10115 Berlin`) is part of
+        // that value, not a new one.
+        let escaped = self.escaped_hits(text);
+        let mut found = Vec::new();
         for span in spans {
-            self.register(span.kind, &text[span.start..span.end]);
+            let start = past_escape(text, span.start);
+            if start >= span.end {
+                continue;
+            }
+            found.push(match escaped.iter().find(|&&(s, e, _)| s <= start && span.end <= e) {
+                Some(&hit) => hit,
+                None => (start, span.end, self.register(span.kind, &text[start..span.end], form == Form::Json)),
+            });
         }
-        self.replace(text)
+        self.replace(text, &read, found)
     }
 
-    /// Replaces every occurrence of a known value (longest first, no overlaps).
-    fn replace(&mut self, text: &str) -> String {
-        let guards = Guards::new(text);
+    /// Where a known value is written escaped for a JSON string, and differently from how it was
+    /// found (a value with a line break or a quote, echoed in JSON): (start, end, entry).
+    fn escaped_hits(&self, text: &str) -> Vec<(usize, usize, usize)> {
+        if !text.contains('\\') {
+            return Vec::new();
+        }
+        let mut hits = Vec::new();
+        for (i, (_, e)) in self.entries.iter().enumerate() {
+            for form in escaped_forms(e) {
+                let found = text.match_indices(form.as_str()).map(|(at, f)| (at, at + f.len(), i));
+                hits.extend(found.filter(|&(start, end, _)| bounded(text, start, end, e.kind)));
+            }
+        }
+        hits
+    }
+
+    /// Replaces what detection found in [text] ([detected]: start, end, entry) where it was found,
+    /// whatever is next to it, and every occurrence of a known value (earliest, then longest first,
+    /// no overlaps), also where it is written escaped for a JSON string (a tool result, tool-call
+    /// arguments). A known value that overlaps what was found is replaced only where it covers it.
+    /// [read] is [text] as detection read it ([spaced]), where a link ends at an escaped line break.
+    fn replace(&mut self, text: &str, read: &str, mut detected: Vec<(usize, usize, usize)>) -> String {
+        let guards = Guards::new(read);
         let mut lower: Option<String> = None;
         let mut hits: Vec<(usize, usize, usize)> = Vec::new();
+        // An escaped form that differs has a backslash.
+        let json = text.contains('\\');
         for (i, (_, e)) in self.entries.iter().enumerate() {
-            for form in &e.forms {
+            let escaped = if json { escaped_forms(e) } else { Vec::new() };
+            for form in e.forms.iter().chain(&escaped) {
                 let found: Vec<(usize, usize)> = if e.kind == Kind::Email && form.is_ascii() {
                     // Any case: ASCII lowercasing keeps every byte where it was, so the offsets
                     // hold in [text] (no pattern compiled for each address and each text).
@@ -889,7 +1129,7 @@ impl Vault {
                         hits.push((start, end, i));
                         continue;
                     }
-                    if !bounded(text, start, end) || (e.kind.wordy() && guards.blocked(start, end)) {
+                    if !bounded(text, start, end, e.kind) || (e.kind.wordy() && guards.blocked(start, end)) {
                         continue;
                     }
                     hits.push((start, end, i));
@@ -901,28 +1141,53 @@ impl Vault {
             self.entries.iter().enumerate().filter_map(|(i, (_, e))| e.digits.as_deref().map(|d| (d, i))).collect();
         if !by_digits.is_empty() {
             for m in DIGIT_RUN.find_iter(text) {
-                let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
+                // A run that begins in the hex digits of a `\uXXXX` begins after it, at its first
+                // digit (`\ud63801012345678` and `\ud638 01012345678` are 호 and a number).
+                let from = past_escape(text, m.start());
+                if from >= m.end() {
+                    continue;
+                }
+                let run = text[from..m.end()].trim_start_matches(|c: char| !c.is_ascii_digit() && c != '+');
+                let digits: String = run.chars().filter(char::is_ascii_digit).collect();
                 if let Some(&i) = by_digits.get(digits.as_str()) {
                     // A `+` the value was found without stays in the text (it would not come
                     // back: the value is restored as it was found).
-                    let plus = m.as_str().starts_with('+') && !self.entries[i].1.value.starts_with('+');
-                    let start = m.start() + usize::from(plus);
-                    if bounded(text, start, m.end()) {
+                    let plus = run.starts_with('+') && !self.entries[i].1.value.starts_with('+');
+                    let start = m.end() - run.len() + usize::from(plus);
+                    if bounded(text, start, m.end(), self.entries[i].1.kind) {
                         hits.push((start, m.end(), i));
                     }
                 }
             }
         }
-        if hits.is_empty() {
+        if hits.is_empty() && detected.is_empty() {
             return text.to_owned();
         }
+        // What was found, without overlaps (the spans inside a known value written escaped are all
+        // that value).
+        detected.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
+        detected.dedup_by(|next, kept| next.0 < kept.1);
         hits.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
-        let mut out = String::with_capacity(text.len());
-        let mut cursor = 0;
+        let mut taken: Vec<(usize, usize, usize)> = Vec::new();
+        let mut covered = vec![false; detected.len()];
         for (start, end, i) in hits {
-            if start < cursor {
+            if taken.last().is_some_and(|&(_, last, _)| start < last) {
                 continue;
             }
+            // The spans found that this hit overlaps (sorted, apart): it must cover each of them.
+            let from = detected.partition_point(|&(_, e, _)| e <= start);
+            let to = from + detected[from..].partition_point(|&(s, _, _)| s < end);
+            if detected[from..to].iter().any(|&(s, e, _)| s < start || e > end) {
+                continue;
+            }
+            covered[from..to].fill(true);
+            taken.push((start, end, i));
+        }
+        taken.extend(detected.into_iter().zip(covered).filter(|&(_, covered)| !covered).map(|(hit, _)| hit));
+        taken.sort_by_key(|&(start, _, _)| start);
+        let mut out = String::with_capacity(text.len());
+        let mut cursor = 0;
+        for (start, end, i) in taken {
             if self.entries[i].1.placeholder.is_none() {
                 self.number(i);
             }
@@ -936,22 +1201,45 @@ impl Vault {
 
     /// [text] with this vault's placeholders turned back into their values (unknown ones stay).
     pub fn restore(&self, text: &str) -> String {
+        self.restore_in(text, false)
+    }
+
+    /// [Vault::restore] for JSON text (tool-call arguments): values come back escaped for a JSON
+    /// string, so a value with a line break leaves the arguments valid JSON. A value first found
+    /// written as inside a JSON string comes back as it was written there, so it reads as it did.
+    pub fn restore_json(&self, text: &str) -> String {
+        self.restore_in(text, true)
+    }
+
+    fn restore_in(&self, text: &str, json: bool) -> String {
         if self.by_placeholder.is_empty() || (!text.contains('[') && !text.contains('%')) {
             return text.to_owned();
         }
         PLACEHOLDER
             .replace_all(text, |caps: &regex::Captures| {
                 let bracket = format!("[{}_{}]", &caps[2], &caps[3]);
-                match self.by_placeholder.get(&bracket) {
-                    Some(&i) if &caps[1] == "[" => self.entries[i].1.value.clone(),
-                    Some(&i) => percent_encode(&self.entries[i].1.value),
-                    None => caps[0].to_owned(),
+                let Some(&i) = self.by_placeholder.get(&bracket) else { return caps[0].to_owned() };
+                let e = &self.entries[i].1;
+                match (&caps[1] == "[", json, e.unescaped.as_deref()) {
+                    (true, true, None) => json_escape(&e.value),
+                    (true, _, _) => e.value.clone(),
+                    (false, true, Some(unescaped)) => percent_encode(unescaped),
+                    (false, _, _) => percent_encode(&e.value),
                 }
             })
             .into_owned()
     }
 
-    /// Distinct personal values hidden, per kind tag.
+    /// Drops the placeholders [shown] does not hold: their values are neither counted nor restored.
+    fn keep_shown(&mut self, shown: &HashSet<&str>) {
+        for (_, e) in &mut self.entries {
+            if let Some(p) = e.placeholder.take_if(|p| !e.literal && !shown.contains(p.as_str())) {
+                self.by_placeholder.remove(&p);
+            }
+        }
+    }
+
+    /// Distinct personal values hidden, per kind tag: each value counts once it was replaced.
     pub fn found(&self) -> BTreeMap<&'static str, usize> {
         let mut found = BTreeMap::new();
         for (_, e) in &self.entries {
@@ -970,26 +1258,149 @@ impl Vault {
 // ---------------------------------------------------------------------------------------------
 // Requests and answers
 
-/// The texts of a chat completion request that redaction covers, in order.
-fn request_texts(body: &mut Value) -> Vec<&mut String> {
-    let mut texts = Vec::new();
-    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else { return texts };
-    for message in messages {
-        let Some(message) = message.as_object_mut() else { continue };
+/// How a text of a request is redacted.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Form {
+    /// [Vault::redact].
+    Text,
+    /// A tool result or tool-call arguments: [Vault::redact_json] (in [Vault::redact_with], one
+    /// that is not a JSON document, read as text).
+    Json,
+    /// A tool's description: [Vault::redact_description].
+    Description,
+}
+
+/// The texts of a chat completion request that redaction covers, in order. What stays the same for
+/// a whole conversation (the `user` field, the tools) comes first, so its placeholders keep their
+/// numbers as the conversation grows.
+fn request_texts(body: &mut Value) -> Vec<(&mut String, Form)> {
+    let (mut user, mut tools, mut messages) = (Vec::new(), Vec::new(), Vec::new());
+    let Some(body) = body.as_object_mut() else { return messages };
+    for (field, value) in body.iter_mut() {
+        match (field.as_str(), value) {
+            ("user", Value::String(s)) => user.push((s, Form::Text)),
+            ("tools", Value::Array(list)) => {
+                for tool in list {
+                    if let Some(function) = tool.get_mut("function") {
+                        descriptions(function, &mut tools);
+                    }
+                }
+            }
+            ("messages", Value::Array(list)) => {
+                for message in list {
+                    message_texts(message, &mut messages);
+                }
+            }
+            _ => {}
+        }
+    }
+    user.extend(tools);
+    user.extend(messages);
+    user
+}
+
+/// Every string `description` in a tool's function: its own, and its parameters' at any depth (a
+/// property that is itself called `description` is a schema, not a string, and is looked into).
+fn descriptions<'a>(value: &'a mut Value, out: &mut Vec<(&'a mut String, Form)>) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map.iter_mut() {
+                match value {
+                    Value::String(s) => {
+                        if key == "description" {
+                            out.push((s, Form::Description));
+                        }
+                    }
+                    other => descriptions(other, out),
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                descriptions(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A message's texts: its content (a tool result's as JSON), its reasoning (`reasoning_content`,
+/// `reasoning`), then its tool calls' arguments.
+fn message_texts<'a>(message: &'a mut Value, out: &mut Vec<(&'a mut String, Form)>) {
+    let Some(message) = message.as_object_mut() else { return };
+    let result = matches!(message.get("role").and_then(Value::as_str), Some("tool" | "function"));
+    let content = if result { Form::Json } else { Form::Text };
+    let (mut reasoning, mut calls) = (Vec::new(), Vec::new());
+    for (field, value) in message.iter_mut() {
+        match (field.as_str(), value) {
+            ("content", Value::String(s)) => out.push((s, content)),
+            ("content", Value::Array(parts)) => {
+                for part in parts {
+                    if let Some(Value::String(s)) = part.get_mut("text") {
+                        out.push((s, content));
+                    }
+                }
+            }
+            ("reasoning_content" | "reasoning", Value::String(s)) => reasoning.push((s, Form::Text)),
+            ("tool_calls", Value::Array(list)) => {
+                for call in list {
+                    if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
+                        calls.push((args, Form::Json));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out.extend(reasoning);
+    out.extend(calls);
+}
+
+/// Redacts a chat completion request in place; the vault restores the answer.
+pub fn redact_request(body: &mut Value) -> Vault {
+    let mut vault = Vault::default();
+    let mut texts = request_texts(body);
+    let mut descriptions = Vec::new();
+    for (at, (text, form)) in texts.iter_mut().enumerate() {
+        **text = match form {
+            Form::Text => vault.redact(text),
+            Form::Json => vault.redact_json(text),
+            Form::Description => {
+                descriptions.push((at, text.clone()));
+                vault.redact_description(text)
+            }
+        };
+    }
+    // The descriptions come first, for their numbers; written again from what they were, they also
+    // lose the values the messages brought.
+    if !descriptions.is_empty() {
+        for (at, original) in descriptions {
+            *texts[at].0 = vault.redact_description(&original);
+        }
+        // A value the first pass hid that the second covers with a longer one is hidden nowhere.
+        let shown: HashSet<&str> =
+            texts.iter().flat_map(|(text, _)| PLACEHOLDER.find_iter(text).map(|m| m.as_str())).collect();
+        vault.keep_shown(&shown);
+    }
+    vault
+}
+
+/// The fields of a message, or of a streamed delta, that carry text: the answer and its reasoning.
+const TEXT_FIELDS: [&str; 3] = ["content", "reasoning_content", "reasoning"];
+
+/// Restores a whole (non-streamed) chat completion response in place: each message's text, its
+/// reasoning and its tool calls' arguments.
+pub fn restore_response(vault: &Vault, body: &mut Value) {
+    let Some(choices) = body.get_mut("choices").and_then(Value::as_array_mut) else { return };
+    for choice in choices {
+        let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else { continue };
         for (field, value) in message.iter_mut() {
             match (field.as_str(), value) {
+                (field, Value::String(s)) if TEXT_FIELDS.contains(&field) => *s = vault.restore(s),
                 ("tool_calls", Value::Array(calls)) => {
                     for call in calls {
                         if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
-                            texts.push(args);
-                        }
-                    }
-                }
-                ("content", Value::String(s)) => texts.push(s),
-                ("content", Value::Array(parts)) => {
-                    for part in parts {
-                        if let Some(Value::String(s)) = part.get_mut("text") {
-                            texts.push(s);
+                            *args = vault.restore_json(args);
                         }
                     }
                 }
@@ -997,41 +1408,28 @@ fn request_texts(body: &mut Value) -> Vec<&mut String> {
             }
         }
     }
-    texts
 }
 
-/// Redacts a chat completion request in place; the vault restores the answer.
-pub fn redact_request(body: &mut Value) -> Vault {
-    let mut vault = Vault::default();
-    for text in request_texts(body) {
-        *text = vault.redact(text);
-    }
-    vault
+/// A text a streamed answer sends in pieces: one of a choice's [TEXT_FIELDS], or the arguments of
+/// one of its tool calls (by the call's index).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Channel {
+    Text(&'static str),
+    Arguments(u64),
 }
 
-/// Restores a whole (non-streamed) chat completion response in place.
-pub fn restore_response(vault: &Vault, body: &mut Value) {
-    let Some(choices) = body.get_mut("choices").and_then(Value::as_array_mut) else { return };
-    for choice in choices {
-        if let Some(Value::String(s)) = choice.pointer_mut("/message/content") {
-            *s = vault.restore(s);
-        }
-        if let Some(calls) = choice.pointer_mut("/message/tool_calls").and_then(Value::as_array_mut) {
-            for call in calls {
-                if let Some(Value::String(args)) = call.pointer_mut("/function/arguments") {
-                    *args = vault.restore(args);
-                }
-            }
-        }
-    }
-}
-
-/// Restores streamed (SSE) chat completion chunks. A placeholder split across chunks is held back
-/// until it is whole or its choice finishes.
+/// Restores streamed (SSE) chat completion chunks: the text, the reasoning and the tool calls'
+/// arguments. A placeholder split across chunks is held back until it is whole or its choice
+/// finishes.
 pub struct StreamRestorer {
     vault: Vault,
     line: Vec<u8>,
-    carry: BTreeMap<u64, String>,
+    /// What is held back, per choice index and channel.
+    carry: BTreeMap<(u64, Channel), String>,
+    /// Where the usage goes instead of to the client ([StreamRestorer::withholding_usage]).
+    usage: Option<Arc<Mutex<Option<Value>>>>,
+    /// Set after a chunk was kept back: the blank line that ended its event goes too.
+    drop_blank: bool,
 }
 
 /// The longest tail of [text] that could still grow into a placeholder (`[`, `[EMA`, `[EMAIL_1`).
@@ -1046,9 +1444,28 @@ fn open_tail(text: &str) -> usize {
     if could_grow { text.len() - i } else { 0 }
 }
 
+/// [choice]'s delta, made when it has none.
+fn delta_of(choice: &mut serde_json::Map<String, Value>) -> Option<&mut serde_json::Map<String, Value>> {
+    let delta = choice.entry("delta").or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if delta.is_null() {
+        *delta = Value::Object(serde_json::Map::new());
+    }
+    delta.as_object_mut()
+}
+
 impl StreamRestorer {
     pub fn new(vault: Vault) -> Self {
-        Self { vault, line: Vec::new(), carry: BTreeMap::new() }
+        Self { vault, line: Vec::new(), carry: BTreeMap::new(), usage: None, drop_blank: false }
+    }
+
+    /// Also keeps the usage from the client: the node asked the provider for it and the client did
+    /// not. It goes to [into] from whichever chunk carries it: one of its own (`"choices": []`,
+    /// as OpenAI sends it), which is then not sent, or the last one with the finished choice (as
+    /// DeepSeek sends it), which is sent without it. The other chunks lose the `"usage": null`
+    /// that asking added.
+    pub fn withholding_usage(mut self, into: Arc<Mutex<Option<Value>>>) -> Self {
+        self.usage = Some(into);
+        self
     }
 
     /// Feeds bytes from the upstream stream; returns the bytes to send on.
@@ -1077,16 +1494,45 @@ impl StreamRestorer {
 
     fn flush_all(&mut self) -> Vec<u8> {
         let mut out = Vec::new();
-        for (index, text) in std::mem::take(&mut self.carry) {
-            if !text.is_empty() {
-                let chunk = serde_json::json!({ "choices": [{ "index": index, "delta": { "content": self.vault.restore(&text) } }] });
-                out.extend(format!("data: {chunk}\n\n").into_bytes());
+        for ((index, channel), text) in std::mem::take(&mut self.carry) {
+            if text.is_empty() {
+                continue;
             }
+            let delta = match channel {
+                Channel::Text(field) => {
+                    serde_json::Map::from_iter([(field.to_owned(), Value::String(self.vault.restore(&text)))]).into()
+                }
+                Channel::Arguments(call) => serde_json::json!({ "tool_calls": [
+                    { "index": call, "function": { "arguments": self.vault.restore_json(&text) } }
+                ] }),
+            };
+            let chunk = serde_json::json!({ "choices": [{ "index": index, "delta": delta }] });
+            out.extend(format!("data: {chunk}\n\n").into_bytes());
         }
         out
     }
 
+    /// The next piece of [channel] to send on: [piece] (if this chunk has one) after what was held
+    /// back of it, restored, with a tail that may still become a placeholder held back unless the
+    /// choice has [finished].
+    fn pass(&mut self, choice: u64, channel: Channel, piece: Option<&str>, finished: bool) -> String {
+        let mut text = self.carry.remove(&(choice, channel)).unwrap_or_default();
+        text.push_str(piece.unwrap_or_default());
+        let keep = if finished { 0 } else { open_tail(&text) };
+        let (send, hold) = text.split_at(text.len() - keep);
+        if !hold.is_empty() {
+            self.carry.insert((choice, channel), hold.to_owned());
+        }
+        match channel {
+            Channel::Text(_) => self.vault.restore(send),
+            Channel::Arguments(_) => self.vault.restore_json(send),
+        }
+    }
+
     fn line_out(&mut self, line: &[u8]) -> Vec<u8> {
+        if std::mem::take(&mut self.drop_blank) && line.trim_ascii().is_empty() {
+            return Vec::new();
+        }
         let Ok(text) = std::str::from_utf8(line) else { return line.to_vec() };
         let Some(data) = text.strip_prefix("data:") else { return line.to_vec() };
         let data = data.trim();
@@ -1096,37 +1542,80 @@ impl StreamRestorer {
             return out;
         }
         let Ok(mut chunk) = serde_json::from_str::<Value>(data) else { return line.to_vec() };
+        // Usage the node asked for leaves every chunk: the one that carries it for [into], the
+        // others' `"usage": null` for nothing.
+        if let Some(into) = &self.usage
+            && let Some(object) = chunk.as_object_mut()
+            && let Some(usage) = object.remove("usage")
+            && usage.is_object()
+        {
+            *into.lock().expect("usage lock") = Some(usage);
+            // Nothing left for the client.
+            if object.get("choices").and_then(Value::as_array).is_none_or(Vec::is_empty) {
+                self.drop_blank = true;
+                return Vec::new();
+            }
+        }
         if let Some(choices) = chunk.get_mut("choices").and_then(Value::as_array_mut) {
             for choice in choices {
-                let index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
-                let finished = choice.get("finish_reason").is_some_and(|f| !f.is_null());
-                let held = self.carry.remove(&index).unwrap_or_default();
-                let delta = choice.pointer_mut("/delta/content");
-                let mut text = held;
-                if let Some(Value::String(s)) = &delta {
-                    text.push_str(s);
-                }
-                let keep = if finished { 0 } else { open_tail(&text) };
-                let (send, hold) = text.split_at(text.len() - keep);
-                if !hold.is_empty() {
-                    self.carry.insert(index, hold.to_owned());
-                }
-                let restored = self.vault.restore(send);
-                match delta {
-                    Some(slot) => *slot = Value::String(restored),
-                    None if !restored.is_empty() => {
-                        if let Some(obj) = choice.as_object_mut() {
-                            let d = obj.entry("delta").or_insert_with(|| serde_json::json!({}));
-                            if let Some(d) = d.as_object_mut() {
-                                d.insert("content".into(), Value::String(restored));
-                            }
-                        }
-                    }
-                    None => {}
-                }
+                self.restore_choice(choice);
             }
         }
         format!("data: {chunk}\n").into_bytes()
+    }
+
+    fn restore_choice(&mut self, choice: &mut Value) {
+        let index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let finished = choice.get("finish_reason").is_some_and(|f| !f.is_null());
+        let Some(choice) = choice.as_object_mut() else { return };
+        for field in TEXT_FIELDS {
+            let piece = choice.get("delta").and_then(|d| d.get(field)).and_then(Value::as_str).map(str::to_owned);
+            let restored = self.pass(index, Channel::Text(field), piece.as_deref(), finished);
+            if (piece.is_some() || !restored.is_empty())
+                && let Some(delta) = delta_of(choice)
+            {
+                delta.insert(field.to_owned(), Value::String(restored));
+            }
+        }
+        // Each call's arguments are held back on their own. A call without an index (a server
+        // that sends whole calls) is restored as it comes.
+        if let Some(calls) = choice.get_mut("delta").and_then(|d| d.get_mut("tool_calls")).and_then(Value::as_array_mut)
+        {
+            for call in calls {
+                let at = call.get("index").and_then(Value::as_u64);
+                let Some(Value::String(args)) = call.pointer_mut("/function/arguments") else { continue };
+                *args = match at {
+                    Some(at) => self.pass(index, Channel::Arguments(at), Some(args.as_str()), finished),
+                    None => self.vault.restore_json(args),
+                };
+            }
+        }
+        if !finished {
+            return;
+        }
+        // The choice is done: what is still held of calls this chunk does not continue goes with it.
+        let held: Vec<u64> = self
+            .carry
+            .keys()
+            .filter_map(|&(c, channel)| match channel {
+                Channel::Arguments(at) if c == index => Some(at),
+                _ => None,
+            })
+            .collect();
+        for at in held {
+            let restored = self.pass(index, Channel::Arguments(at), None, true);
+            if restored.is_empty() {
+                continue;
+            }
+            let Some(delta) = delta_of(choice) else { continue };
+            let calls = delta.entry("tool_calls").or_insert_with(|| Value::Array(Vec::new()));
+            if !calls.is_array() {
+                *calls = Value::Array(Vec::new());
+            }
+            if let Some(calls) = calls.as_array_mut() {
+                calls.push(serde_json::json!({ "index": at, "function": { "arguments": restored } }));
+            }
+        }
     }
 }
 
@@ -1134,6 +1623,7 @@ impl StreamRestorer {
 mod tests {
     use super::{StreamRestorer, Vault, open_tail, redact_request, restore_response};
     use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[test]
     fn every_pattern_compiles() {
@@ -1282,6 +1772,42 @@ mod tests {
     }
 
     #[test]
+    fn json_is_redacted_as_json_and_undone_exactly() {
+        crate::testgen::cases("redact_json/restore_json", |g| {
+            let list: Vec<String> = (0..g.below(4)).map(|_| g.assemble(PIECES, 8)).collect();
+            // A string that holds JSON text, as an MCP tool's result does. Its strings hold
+            // characters JSON escapes, in values too: a line break, a quote, an `ß` (half the time
+            // written `\u00df`, as Python's `json.dumps` writes it). It holds a number too.
+            let escaped = ["Hauptstraße 12a,\n10115 Berlin", "\"Zork Blax\"", "ß"];
+            let pieces: Vec<&str> = PIECES.iter().copied().chain(escaped).collect();
+            let mut inner =
+                json!({ "d": g.assemble(&pieces, 8), "e": [g.assemble(&pieces, 4)], "n": 4111111111111111u64 })
+                    .to_string();
+            if g.one_in(2) {
+                inner = inner.replace('ß', r"\u00df");
+            }
+            let text = json!({ "a": g.assemble(PIECES, 12), "b": list, "c": inner, "n": -1.5e3 }).to_string();
+            let mut vault = Vault::default();
+            let redacted = vault.redact_json(&text);
+            let parsed = serde_json::from_str::<serde_json::Value>(&redacted).expect("still JSON");
+            // Into tool-call arguments the document comes back as it was, and into the answer's
+            // text the JSON text in its string comes back as it was written.
+            let restored = [
+                (vault.restore_json(&redacted), &text),
+                (vault.restore(parsed["c"].as_str().expect("a string")), &inner),
+            ];
+            for (restored, original) in restored {
+                if text.contains("Bob@Posteo.DE") {
+                    let lower = original.to_ascii_lowercase();
+                    assert_eq!(restored.to_ascii_lowercase(), lower, "redacted as {redacted:?}");
+                } else {
+                    assert_eq!(&restored, original, "redacted as {redacted:?}");
+                }
+            }
+        });
+    }
+
+    #[test]
     fn a_stream_restores_the_same_however_it_is_cut() {
         crate::testgen::cases("stream restore", |g| {
             let make = || {
@@ -1314,6 +1840,800 @@ mod tests {
             }
             out.extend(r.finish());
             assert_eq!(content_of(&out), whole);
+        });
+    }
+
+    /// The texts of a streamed answer put back together: (content, reasoning_content, reasoning,
+    /// each call's arguments by index).
+    fn channels_of(sse: &[u8]) -> (String, String, String, BTreeMap<u64, String>) {
+        let (mut content, mut reasoning_content, mut reasoning) = (String::new(), String::new(), String::new());
+        let mut calls = BTreeMap::new();
+        for data in String::from_utf8_lossy(sse).lines().filter_map(|l| l.strip_prefix("data: ")) {
+            let Ok(chunk) = serde_json::from_str::<serde_json::Value>(data) else { continue };
+            let delta = &chunk["choices"][0]["delta"];
+            content.push_str(delta["content"].as_str().unwrap_or(""));
+            reasoning_content.push_str(delta["reasoning_content"].as_str().unwrap_or(""));
+            reasoning.push_str(delta["reasoning"].as_str().unwrap_or(""));
+            for call in delta["tool_calls"].as_array().into_iter().flatten() {
+                let Some(at) = call["index"].as_u64() else { continue };
+                let args: &mut String = calls.entry(at).or_default();
+                args.push_str(call["function"]["arguments"].as_str().unwrap_or(""));
+            }
+        }
+        (content, reasoning_content, reasoning, calls)
+    }
+
+    fn sse(delta: serde_json::Value) -> String {
+        format!("data: {}\n\n", json!({ "choices": [{ "index": 0, "delta": delta }] }))
+    }
+
+    #[test]
+    fn streams_restore_tool_call_arguments_and_reasoning() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("bob@posteo.de, +44 20 7946 0958"), "[EMAIL_1], [PHONE_1]");
+        assert_eq!(vault.redact("Hauptstraße 12a,\n10115 Berlin"), "[ADDRESS_1]");
+        let mut restorer = StreamRestorer::new(vault);
+        let args = |at: u64, s: &str| json!({ "tool_calls": [{ "index": at, "function": { "arguments": s } }] });
+        let mut out = Vec::new();
+        for event in [
+            sse(json!({ "role": "assistant", "content": null, "reasoning_content": "mail [EM" })),
+            sse(json!({ "reasoning_content": "AIL_1] or call [PHO", "reasoning": "[PH" })),
+            sse(
+                json!({ "tool_calls": [{ "index": 0, "id": "a", "function": { "name": "mail", "arguments": "{\"to\":\"[EMAIL" } }] }),
+            ),
+            sse(
+                json!({ "tool_calls": [{ "index": 1, "id": "b", "function": { "name": "call", "arguments": "{\"n\":\"[PHONE_" } }] }),
+            ),
+            sse(args(0, "_1]\"}")),
+            sse(json!({ "reasoning_content": "NE_1]", "reasoning": "ONE_1]" })),
+            // A server that sends whole calls, without an index. Their arguments are JSON too.
+            sse(json!({ "tool_calls": [{ "id": "c", "function": {
+                "name": "mail", "arguments": "{\"cc\":\"[EMAIL_1]\",\"to\":\"[ADDRESS_1]\"}"
+            } }] })),
+        ] {
+            let sent = restorer.push(event.as_bytes());
+            assert!(!String::from_utf8_lossy(&sent).contains("[EMAIL_1]"), "{}", String::from_utf8_lossy(&sent));
+            out.extend(sent);
+        }
+        // Call 1 still holds `[PHONE_`, which can only become `[PHONE_1…`: it goes with the finish.
+        let finish = restorer.push(
+            format!("data: {}\n\n", json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] }))
+                .as_bytes(),
+        );
+        assert!(String::from_utf8_lossy(&finish).contains(r#""finish_reason":"tool_calls""#));
+        out.extend(finish);
+        out.extend(restorer.push(b"data: [DONE]\n\n"));
+        out.extend(restorer.finish());
+        let (content, reasoning_content, reasoning, calls) = channels_of(&out);
+        assert_eq!(content, "");
+        assert_eq!(reasoning_content, "mail bob@posteo.de or call +44 20 7946 0958");
+        assert_eq!(reasoning, "+44 20 7946 0958");
+        assert_eq!(calls[&0], r#"{"to":"bob@posteo.de"}"#);
+        assert_eq!(calls[&1], r#"{"n":"[PHONE_"#);
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains(r#""arguments":"{\"cc\":\"bob@posteo.de\",\"to\":\"Hauptstraße 12a,\\n10115 Berlin\"}""#),
+            "{text}"
+        );
+        // Nothing to add to a `content` that was null: it stays null.
+        assert!(text.contains(r#""content":null"#), "{text}");
+    }
+
+    #[test]
+    fn values_with_a_line_break_stay_valid_json_in_tool_arguments() {
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin please" }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], "Ship to [ADDRESS_1] please");
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": "To [ADDRESS_1].",
+            "reasoning_content": "The address is [ADDRESS_1]",
+            "reasoning": "[ADDRESS_1]",
+            "tool_calls": [{ "function": { "name": "ship", "arguments": "{\"to\":\"[ADDRESS_1]\"}" } }]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        assert_eq!(message["content"], "To Hauptstraße 12a,\n10115 Berlin.");
+        assert_eq!(message["reasoning_content"], "The address is Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(message["reasoning"], "Hauptstraße 12a,\n10115 Berlin");
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
+        assert_eq!(parsed["to"], "Hauptstraße 12a,\n10115 Berlin");
+
+        // Sent back on the next turn as the client got it, escaped, the value is found again.
+        let mut next = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin please" },
+            { "role": "assistant", "tool_calls": [{ "function": { "name": "ship", "arguments": args } }] }
+        ] });
+        let vault = redact_request(&mut next);
+        assert_eq!(next["messages"][1]["tool_calls"][0]["function"]["arguments"], r#"{"to":"[ADDRESS_1]"}"#);
+        assert_eq!(vault.found()["ADDRESS"], 1);
+    }
+
+    #[test]
+    fn a_known_value_written_escaped_is_hidden_in_every_text() {
+        // The tool got the address escaped in its arguments, and echoes it in a JSON result.
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin please" },
+            { "role": "tool", "tool_call_id": "c1", "content": "{\"shipped_to\":\"Hauptstraße 12a,\\n10115 Berlin\"}" },
+            { "role": "user", "content": [{ "type": "text", "text": "It said \"Hauptstraße 12a,\\n10115 Berlin\"" }] }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][1]["content"], r#"{"shipped_to":"[ADDRESS_1]"}"#);
+        assert_eq!(body["messages"][2]["content"][0]["text"], r#"It said "[ADDRESS_1]""#);
+        // What detection sees inside the escaped value is part of it, not a value of its own.
+        assert_eq!(vault.found()["ADDRESS"], 1);
+        // Escaped as spec/redaction.md says.
+        assert_eq!(super::json_escape("\"\\\n\r\t\u{8}\u{c}\u{1}\u{7f}ß"), "\\\"\\\\\\n\\r\\t\\b\\f\\u0001\u{7f}ß");
+    }
+
+    #[test]
+    fn a_value_right_after_a_json_escape_is_hidden() {
+        let label = json!({ "label": "Recipient:\nHauptstraße 12a,\n10115 Berlin" }).to_string();
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "Ship to Hauptstraße 12a,\n10115 Berlin for Hannah Weber, account number is 12345678" },
+            { "role": "assistant", "tool_calls": [{ "function": { "name": "label", "arguments": label } }] },
+            { "role": "tool", "tool_call_id": "c1", "content": json!({
+                "note": "Hi,\nHannah Weber",
+                "from": "From:\nbob@posteo.de",
+                "account": 12345678,
+            }).to_string() },
+            // JSON that escapes non-ASCII, and a tool result as text parts.
+            { "role": "tool", "tool_call_id": "c2", "content": [
+                { "type": "text", "text": r#"{"to":"Hauptstra\u00dfe 12a,\n10115 Berlin"}"# }
+            ] }
+        ] });
+        let vault = redact_request(&mut body);
+        let messages = &body["messages"];
+        assert_eq!(messages[0]["content"], "Ship to [ADDRESS_1] for [PERSON_1], account number is [ACCOUNT_1]");
+        let args = messages[1]["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(args, r#"{"label":"Recipient:\n[ADDRESS_1]"}"#);
+        let result = messages[2]["content"].as_str().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(result).expect("still JSON"),
+            json!({ "note": "Hi,\n[PERSON_1]", "from": "From:\n[EMAIL_1]", "account": "[ACCOUNT_1]" })
+        );
+        assert_eq!(messages[3]["content"][0]["text"], r#"{"to":"[ADDRESS_1]"}"#);
+        // The email after `From:\n`, not `nbob@posteo.de`.
+        assert_eq!(vault.restore("[EMAIL_1]"), "bob@posteo.de");
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("ADDRESS", 1), ("EMAIL", 1), ("PERSON", 1)]));
+        assert_eq!(vault.restore_json(args), label);
+
+        // Text that is not JSON: an escape before a value is a word boundary there too, and what
+        // detection finds after one starts after it.
+        let text = r#"Result: {"label":"Recipient:\nHauptstraße 12a,\n10115 Berlin","note":"Hi,\nHannah Weber","from":"From:\ncarol@posteo.de"}"#;
+        let mut vault = vault;
+        let redacted = vault.redact(text);
+        assert_eq!(
+            redacted,
+            r#"Result: {"label":"Recipient:\n[ADDRESS_1]","note":"Hi,\n[PERSON_1]","from":"From:\n[EMAIL_2]"}"#
+        );
+        assert_eq!(vault.restore("[EMAIL_2]"), "carol@posteo.de");
+        assert_eq!(vault.restore_json(&redacted), text);
+        // An escaped backslash before an `n` is a backslash and a letter.
+        assert_eq!(vault.redact(r"C:\\nHannah Weber"), r"C:\\nHannah [PERSON_2]");
+    }
+
+    #[test]
+    fn a_value_beside_a_letter_of_another_script_is_hidden_and_counted() {
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "My number is +49 171 2345678, account number is 12345678" },
+            // JSON as Python's json.dumps writes it, non-ASCII escaped: "+49 171 2345678로 전화".
+            { "role": "tool", "tool_call_id": "c1", "content": r#"{"m":"+49 171 2345678\ub85c \uc804\ud654"}"# },
+            // JSON lines are not one JSON document: they are read as text.
+            { "role": "tool", "tool_call_id": "c2", "content": concat!(
+                r#"{"ok":1}"#, "\n", r#"{"m":"010-1234-5678\uc73c\ub85c"}"#, "\n",
+                r#"{"m":"\u30e1\u30fc\u30eb\u306fbob@posteo.de\u307e\u3067"}"#
+            ) },
+            { "role": "user", "content": "010-1234-5678으로 연락주세요" },
+            { "role": "user", "content": "카드 4111 1111 1111 1111로, 12345678번 계좌" }
+        ] });
+        let vault = redact_request(&mut body);
+        let messages = &body["messages"];
+        assert_eq!(messages[0]["content"], "My number is [PHONE_1], account number is [ACCOUNT_1]");
+        assert_eq!(messages[1]["content"], r#"{"m":"[PHONE_1]로 전화"}"#);
+        assert_eq!(
+            messages[2]["content"],
+            concat!(
+                r#"{"ok":1}"#,
+                "\n",
+                r#"{"m":"[PHONE_2]\uc73c\ub85c"}"#,
+                "\n",
+                r#"{"m":"\u30e1\u30fc\u30eb\u306f[EMAIL_1]\u307e\u3067"}"#
+            )
+        );
+        assert_eq!(messages[3]["content"], "[PHONE_2]으로 연락주세요");
+        assert_eq!(messages[4]["content"], "카드 [CARD_1]로, [ACCOUNT_1]번 계좌");
+        assert_eq!(vault.restore("[PHONE_2] [EMAIL_1]"), "010-1234-5678 bob@posteo.de");
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("CARD", 1), ("EMAIL", 1), ("PHONE", 2)]));
+    }
+
+    #[test]
+    fn a_known_number_after_an_escape_that_ends_in_a_digit_is_hidden_and_counted() {
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": "My number is 010-1234-5678, card 4111 1111 1111 1111, account number is 12345678" },
+            // JSON lines from Python's json.dumps: "전화번호01012345678", "카드번호4111111111111111",
+            // "계좌번호1234-5678", "계좌 번호 1234 5678". The `\ud638` of 호 ends in hex digits that a
+            // number would read on.
+            { "role": "tool", "tool_call_id": "c1", "content": concat!(
+                r#"{"ok":1}"#, "\n",
+                r#"{"m":"\uc804\ud654\ubc88\ud63801012345678"}"#, "\n",
+                r#"{"m":"\uce74\ub4dc\ubc88\ud6384111111111111111"}"#, "\n",
+                r#"{"m":"\uacc4\uc88c\ubc88\ud6381234-5678"}"#, "\n",
+                r#"{"m":"\uacc4\uc88c \ubc88\ud638 1234 5678"}"#
+            ) }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(
+            body["messages"][1]["content"],
+            concat!(
+                r#"{"ok":1}"#,
+                "\n",
+                r#"{"m":"\uc804\ud654\ubc88\ud638[PHONE_1]"}"#,
+                "\n",
+                r#"{"m":"\uce74\ub4dc\ubc88\ud638[CARD_1]"}"#,
+                "\n",
+                r#"{"m":"\uacc4\uc88c\ubc88\ud638[ACCOUNT_1]"}"#,
+                "\n",
+                r#"{"m":"\uacc4\uc88c \ubc88\ud638 [ACCOUNT_1]"}"#
+            )
+        );
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("CARD", 1), ("PHONE", 1)]));
+    }
+
+    #[test]
+    fn names_and_addresses_are_still_hidden_only_as_whole_words() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("I am Anna Berg, Via Roma 10"), "I am [PERSON_1], [ADDRESS_1]");
+        // A Latin letter makes a longer word; a letter of a script without case does not.
+        assert_eq!(
+            vault.redact("Annabelle, Annaïs, Bergmann, Via Roma 10a; Anna와 Berg에게, Via Roma 10에서"),
+            "Annabelle, Annaïs, Bergmann, Via Roma 10a; [PERSON_2]와 [PERSON_3]에게, [ADDRESS_1]에서"
+        );
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1), ("PERSON", 3)]));
+    }
+
+    #[test]
+    fn a_known_name_is_a_whole_word_in_its_own_script() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my friend Иван Петров"), "my friend [PERSON_1]");
+        // A letter of its own script makes a longer word: a village, a park, a surname.
+        let text = "Ивановка и Петровский парк, Иванов";
+        assert_eq!(vault.redact(text), text);
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 1)]));
+
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my friend Νίκος Παππάς"), "my friend [PERSON_1]");
+        assert_eq!(vault.redact("Νίκοςς"), "Νίκοςς");
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 1)]));
+    }
+
+    #[test]
+    fn later_mentions_of_a_known_value_are_hidden_as_words_of_their_own() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my friend Иван Петров, +49 171 2345678"), "my friend [PERSON_1], [PHONE_1]");
+        // In a later text: a number with other spacing, a name with a word of a script without
+        // case right after it.
+        assert_eq!(
+            vault.redact("Иван Петров: +49-171-2345678, Иванに, Петров에게"),
+            "[PERSON_1]: [PHONE_1], [PERSON_2]に, [PERSON_3]에게"
+        );
+        // Not inside a longer word of its script, inflected, or in code.
+        let text = "Ивановка, Ивана и Петрова, `Иван Петров`";
+        assert_eq!(vault.redact(text), text);
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 3), ("PHONE", 1)]));
+    }
+
+    #[test]
+    fn a_known_number_may_be_split_by_one_space_of_any_width() {
+        let mut vault = Vault::default();
+        assert_eq!(
+            vault.redact("I am Anna Berg, call +49 171 2345678, card 4111 1111 1111 1111"),
+            "I am [PERSON_1], call [PHONE_1], card [CARD_1]"
+        );
+        // A no-break or narrow no-break space, as web pages, office documents and contacts write it.
+        assert_eq!(
+            vault.redact("+49\u{a0}171\u{a0}2345678, 4111\u{202f}1111\u{202f}1111\u{202f}1111"),
+            "[PHONE_1], [CARD_1]"
+        );
+        // After a `\uXXXX` escape (`호`), the space stays in the text.
+        assert_eq!(vault.redact("\\ud638\u{a0}4111111111111111"), "\\ud638\u{a0}[CARD_1]");
+        // As the README says: not two spaces, a tab or a line break, and a name only with the same
+        // capitals.
+        let text = "+49  171  2345678, 4111\t1111\t1111\t1111, 4111\n1111\n1111\n1111, ANNA BERG, anna berg";
+        assert_eq!(vault.redact(text), text);
+        assert_eq!(vault.found(), BTreeMap::from([("CARD", 1), ("PERSON", 1), ("PHONE", 1)]));
+    }
+
+    #[test]
+    fn what_was_found_is_hidden_where_it_was_found() {
+        let mut vault = Vault::default();
+        // The account rule reads on after `is`, where the number is not a whole word.
+        assert_eq!(vault.redact("My account number is12345678."), "My account number is[ACCOUNT_1].");
+        // The address rule finds `Weber Straße 5`, which the known `Hannah Weber` overlaps.
+        assert_eq!(
+            vault.redact("I am Hannah Weber. Ship to Hannah Weber Straße 5"),
+            "I am [PERSON_1]. Ship to [PERSON_2] [ADDRESS_1]"
+        );
+        assert_eq!(vault.restore("[PERSON_2] [ADDRESS_1]"), "Hannah Weber Straße 5");
+        assert_eq!(vault.found(), BTreeMap::from([("ACCOUNT", 1), ("ADDRESS", 1), ("PERSON", 2)]));
+
+        // The listed-name rule finds `Hannah Lisa` inside the known `Hannah Lisa Weber`: it is
+        // hidden with it, and not counted as a value of its own.
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("my sister Hannah Lisa Weber"), "my sister [PERSON_1]");
+        assert_eq!(vault.redact("Hannah Lisa Weber called"), "[PERSON_1] called");
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 1)]));
+    }
+
+    #[test]
+    fn a_value_found_across_a_json_escape_comes_back_as_written_and_reads_as_it_did() {
+        // A tool result that is not one JSON document is read as text, as written: its `\n` is a
+        // line break in the JSON it holds.
+        let mut body = json!({ "messages": [
+            { "role": "tool", "tool_call_id": "c1", "content": r#"Order 7: {"to":"Hauptstraße 12a,\n10115 Berlin"}"# }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], r#"Order 7: {"to":"[ADDRESS_1]"}"#);
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": "It goes to [ADDRESS_1].",
+            "tool_calls": [{ "function": { "name": "label", "arguments": r#"{"to":"[ADDRESS_1]"}"# } }]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        // Into text as it was written; into a tool call as what it stood for, a line break.
+        assert_eq!(message["content"], r"It goes to Hauptstraße 12a,\n10115 Berlin.");
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(args, r#"{"to":"Hauptstraße 12a,\n10115 Berlin"}"#);
+        let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
+        assert_eq!(parsed["to"], "Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(vault.restore_json("%5BADDRESS_1%5D"), "Hauptstra%C3%9Fe%2012a%2C%0A10115%20Berlin");
+        assert_eq!(vault.restore("%5BADDRESS_1%5D"), "Hauptstra%C3%9Fe%2012a%2C%5Cn10115%20Berlin");
+
+        // The same when streamed.
+        let mut restorer = StreamRestorer::new(vault);
+        let mut out = Vec::new();
+        for event in [
+            sse(json!({ "content": "It goes to [ADDR" })),
+            sse(
+                json!({ "content": "ESS_1].", "tool_calls": [{ "index": 0, "function": { "arguments": "{\"to\":\"[ADD" } }] }),
+            ),
+            sse(json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "RESS_1]\"}" } }] })),
+        ] {
+            out.extend(restorer.push(event.as_bytes()));
+        }
+        out.extend(restorer.push(b"data: [DONE]\n\n"));
+        out.extend(restorer.finish());
+        let (content, _, _, calls) = channels_of(&out);
+        assert_eq!(content, r"It goes to Hauptstraße 12a,\n10115 Berlin.");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&calls[&0]).unwrap()["to"],
+            "Hauptstraße 12a,\n10115 Berlin"
+        );
+    }
+
+    #[test]
+    fn a_value_written_escaped_and_unescaped_is_one() {
+        let address = "Hauptstraße 12a,\n10115 Berlin";
+        let lines = concat!(r#"{"ok":1}"#, "\n", r#"{"to":"Hauptstraße 12a,\n10115 Berlin"}"#);
+        let document = json!({ "shipped_to": address }).to_string();
+        // Found in JSON lines first, then in a JSON document and in a message.
+        let mut body = json!({ "messages": [
+            { "role": "tool", "tool_call_id": "c1", "content": lines },
+            { "role": "tool", "tool_call_id": "c2", "content": document },
+            { "role": "user", "content": format!("Ship to {address} please") }
+        ] });
+        let vault = redact_request(&mut body);
+        let messages = &body["messages"];
+        assert_eq!(messages[0]["content"], concat!(r#"{"ok":1}"#, "\n", r#"{"to":"[ADDRESS_1]"}"#));
+        assert_eq!(messages[1]["content"], r#"{"shipped_to":"[ADDRESS_1]"}"#);
+        assert_eq!(messages[2]["content"], "Ship to [ADDRESS_1] please");
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1)]));
+        // As it was first written.
+        assert_eq!(vault.restore("[ADDRESS_1]"), r"Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(vault.restore_json("[ADDRESS_1]"), r"Hauptstraße 12a,\n10115 Berlin");
+
+        // The other way round: found in a JSON document first.
+        let mut body = json!({ "messages": [
+            { "role": "tool", "tool_call_id": "c1", "content": document },
+            { "role": "tool", "tool_call_id": "c2", "content": lines }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][1]["content"], concat!(r#"{"ok":1}"#, "\n", r#"{"to":"[ADDRESS_1]"}"#));
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1)]));
+        assert_eq!(vault.restore("[ADDRESS_1]"), address);
+        assert_eq!(vault.restore_json("[ADDRESS_1]"), r"Hauptstraße 12a,\n10115 Berlin");
+
+        // The same characters written in a message first (code outside backticks): a backslash and
+        // an `n`, in a tool call too.
+        let code = r#"addr = "Hauptstraße 12a,\n10115 Berlin""#;
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": code },
+            { "role": "tool", "tool_call_id": "c1", "content": lines }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][1]["content"], concat!(r#"{"ok":1}"#, "\n", r#"{"to":"[ADDRESS_1]"}"#));
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1)]));
+        assert_eq!(vault.restore("[ADDRESS_1]"), r"Hauptstraße 12a,\n10115 Berlin");
+        assert_eq!(vault.restore_json("[ADDRESS_1]"), r"Hauptstraße 12a,\\n10115 Berlin");
+    }
+
+    #[test]
+    fn a_value_comes_back_exactly_as_it_was_written() {
+        // Code in a message: the `\n` in its string is a backslash and an `n`, not a line break.
+        let text = r#"addr = "Hauptstraße 12a,\n10115 Berlin""#;
+        let mut body = json!({ "messages": [{ "role": "user", "content": text }] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], r#"addr = "[ADDRESS_1]""#);
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": r#"addr = "[ADDRESS_1]""#,
+            "tool_calls": [{ "function": { "name": "write", "arguments": r#"{"code":"addr = \"[ADDRESS_1]\""}"# } }]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        assert_eq!(message["content"], text);
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(args).expect("valid JSON");
+        assert_eq!(parsed["code"], text);
+    }
+
+    #[test]
+    fn a_json_text_in_a_string_of_a_tool_result_is_read_as_text() {
+        // An MCP tool's result passed on as text: a JSON document whose string holds JSON text.
+        // That text is read as a message is, so a value found across its `\n` is the backslash and
+        // the `n` as written there.
+        let address = "Hauptstraße 12a,\n10115 Berlin";
+        let written = r"Hauptstraße 12a,\n10115 Berlin";
+        let inner = json!({ "to": address }).to_string();
+        let content = json!([{ "type": "text", "text": inner }]).to_string();
+        let hidden = json!([{ "type": "text", "text": r#"{"to":"[ADDRESS_1]"}"# }]).to_string();
+        let mut body = json!({ "messages": [{ "role": "tool", "tool_call_id": "c1", "content": content }] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], hidden);
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": "It goes to [ADDRESS_1].",
+            "tool_calls": [
+                { "function": { "name": "label", "arguments": r#"{"to":"[ADDRESS_1]"}"# } },
+                { "function": { "name": "write", "arguments": hidden } }
+            ]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        // Text gets it back exactly as written.
+        assert_eq!(message["content"], format!("It goes to {written}."));
+        // A tool gets it as written too: a backslash and an `n`, not a line break.
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(args).expect("valid JSON")["to"], written);
+        // So the JSON text written back into a string comes back as it was, and is still JSON.
+        let args = message["tool_calls"][1]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(args, content);
+        let text = serde_json::from_str::<serde_json::Value>(args).unwrap()[0]["text"].as_str().unwrap().to_owned();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).expect("valid JSON")["to"], address);
+
+        // Written first in a message with a backslash and an `n`: one value.
+        let code = format!(r#"addr = "{written}""#);
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": code },
+            { "role": "tool", "tool_call_id": "c1", "content": content }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][1]["content"], hidden);
+        assert_eq!(vault.found(), BTreeMap::from([("ADDRESS", 1)]));
+
+        // A number in that text is replaced where it is, not quoted, and comes back so.
+        let mut vault = Vault::default();
+        let text = json!({ "c": r#"{"n": 4111111111111111}"# }).to_string();
+        let redacted = vault.redact_json(&text);
+        assert_eq!(redacted, json!({ "c": r#"{"n": [CARD_1]}"# }).to_string());
+        assert_eq!(vault.restore_json(&redacted), text);
+    }
+
+    #[test]
+    fn code_in_a_string_of_a_tool_result_reaches_a_tool_as_code() {
+        // A file read whole: a `\n` still in its string once unescaped is a backslash and an `n`.
+        let code = r#"addr = "Hauptstraße 12a,\n10115 Berlin""#;
+        let mut body = json!({ "messages": [
+            { "role": "tool", "tool_call_id": "c1", "content": json!({ "content": code }).to_string() }
+        ] });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["messages"][0]["content"], json!({ "content": r#"addr = "[ADDRESS_1]""# }).to_string());
+        let mut answer = json!({ "choices": [{ "message": {
+            "content": r#"addr = "[ADDRESS_1]""#,
+            "tool_calls": [{ "function": { "name": "write", "arguments": r#"{"code":"addr = \"[ADDRESS_1]\""}"# } }]
+        } }] });
+        restore_response(&vault, &mut answer);
+        let message = &answer["choices"][0]["message"];
+        assert_eq!(message["content"], code);
+        let args = message["tool_calls"][0]["function"]["arguments"].as_str().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(args).expect("valid JSON")["code"], code);
+    }
+
+    #[test]
+    fn json_text_with_a_lone_surrogate_is_read_as_text() {
+        // `\ud800` is not a character: JSON text holding it is redacted as text, not string by
+        // string.
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact_json(r#"{"a":"\ud800 bob@posteo.de"}"#), r#"{"a":"\ud800 [EMAIL_1]"}"#);
+    }
+
+    #[test]
+    fn a_link_ends_at_a_json_escape_in_text_that_is_not_json() {
+        let mut vault = Vault::default();
+        assert_eq!(vault.redact("My friend Zork Blax"), "My friend [PERSON_1]");
+        assert_eq!(
+            vault.redact(r"GET https://api.example.org/x\nZork Blax called"),
+            r"GET https://api.example.org/x\n[PERSON_1] called"
+        );
+    }
+
+    #[test]
+    fn json_escapes_are_read_as_what_they_stand_for() {
+        use super::{Kind, bounded, escape_at, spaced};
+        let text = r#"a\nb\\nc\u00e9d\u000ae\ud83d\"f"#;
+        assert_eq!(escape_at(text, 1), Some(('\n', 2)));
+        assert_eq!(escape_at(text, 4), None);
+        assert_eq!(escape_at(text, 5), None);
+        assert_eq!(escape_at(text, 8), Some(('é', 6)));
+        assert_eq!(escape_at(text, 15), Some(('\n', 6)));
+        assert_eq!(escape_at(text, 22), Some((char::REPLACEMENT_CHARACTER, 6)));
+        assert_eq!(escape_at(r"\uzzzz", 0), None);
+        // `b` follows a line break; `c` an escaped backslash and an `n`; `d` an `é`.
+        assert!(bounded(text, 3, 4, Kind::Person));
+        assert!(!bounded(text, 7, 8, Kind::Person));
+        assert!(!bounded(text, 14, 15, Kind::Person));
+        assert!(bounded(text, 21, 22, Kind::Person));
+        let spaced = spaced(text);
+        assert_eq!(spaced.len(), text.len());
+        assert_eq!(spaced, "a \nb\\\\nc\\u00e9d     \ne      \\\"f");
+    }
+
+    #[test]
+    fn a_run_of_backslashes_is_read_once() {
+        use super::spaced;
+        // Pairs are kept as written; only an odd one out at the end of a run escapes what follows.
+        assert_eq!(spaced(r"a\\\nb"), "a\\\\ \nb");
+        assert_eq!(spaced(r"a\\\\nb"), r"a\\\\nb");
+        // A request can hold a run as long as its body. Reading it takes time in its length, not
+        // its square: a million backslashes took minutes when each pair recounted the run.
+        let text = format!("{}n mail erin@posteo.de", "\\".repeat(1_000_001));
+        let started = std::time::Instant::now();
+        let read = spaced(&text);
+        assert_eq!(read.len(), text.len());
+        assert!(read.ends_with(" \n mail erin@posteo.de"));
+        let mut vault = Vault::default();
+        let redacted = vault.redact(&text);
+        assert!(redacted.ends_with("n mail [EMAIL_1]"), "{}", &redacted[redacted.len() - 40..]);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn tool_descriptions_name_no_one() {
+        let mut body = json!({
+            "tools": [{ "type": "function", "function": {
+                "name": "file",
+                "description": "Create a new file called Report. My name is Weather Bot.\nHi Claude, mail erin@posteo.de",
+                "parameters": { "type": "object", "properties": {
+                    "to": { "type": "string", "description": "Hauptstraße 12a, 10115 Berlin, or Hannah Weber, +49 171 2345678" }
+                } }
+            } }],
+            "messages": [{ "role": "user", "content": "Make the Report, Claude. I am Hannah Weber." }]
+        });
+        let vault = redact_request(&mut body);
+        let function = &body["tools"][0]["function"];
+        // Only what is found without guessing at words: no Report, Weather Bot or Claude.
+        assert_eq!(
+            function["description"],
+            "Create a new file called Report. My name is Weather Bot.\nHi Claude, mail [EMAIL_1]"
+        );
+        assert_eq!(body["messages"][0]["content"], "Make the Report, Claude. I am [PERSON_1].");
+        // A name the user's own messages gave is hidden in the descriptions too, though they come first.
+        assert_eq!(
+            function["parameters"]["properties"]["to"]["description"],
+            "Hauptstraße 12a, 10115 Berlin, or [PERSON_1], [PHONE_1]"
+        );
+        assert_eq!(vault.found(), BTreeMap::from([("EMAIL", 1), ("PERSON", 1), ("PHONE", 1)]));
+    }
+
+    #[test]
+    fn a_value_the_request_does_not_show_is_not_counted() {
+        // The description's first pass hides the known `Hannah`; its second hides the longer
+        // `Hannah Weberling` the message brought instead.
+        let mut body = json!({
+            "user": "my friend Hannah Weber",
+            "tools": [{ "type": "function", "function": { "name": "ask", "description": "ask Hannah Weberling" } }],
+            "messages": [{ "role": "user", "content": "my colleague Hannah Weberling" }]
+        });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["user"], "my friend [PERSON_1]");
+        assert_eq!(body["tools"][0]["function"]["description"], "ask [PERSON_3]");
+        assert_eq!(body["messages"][0]["content"], "my colleague [PERSON_3]");
+        assert_eq!(vault.found(), BTreeMap::from([("PERSON", 2)]));
+        assert_eq!(vault.restore("[PERSON_1] [PERSON_2] [PERSON_3]"), "Hannah Weber [PERSON_2] Hannah Weberling");
+    }
+
+    #[test]
+    fn requests_redact_the_user_tools_and_reasoning_in_order() {
+        let mut body = json!({
+            "user": "dora@posteo.de",
+            "tools": [
+                { "type": "function", "function": {
+                    "name": "mail",
+                    "description": "Mails as erin@posteo.de",
+                    "parameters": { "type": "object", "properties": {
+                        "to": { "type": "string", "description": "like fred@posteo.de", "enum": ["gina@posteo.de"] },
+                        "description": { "type": "string", "description": "the property is called description" }
+                    } }
+                } },
+                { "type": "web_search", "description": "not a function: hal@posteo.de" }
+            ],
+            "messages": [
+                { "role": "assistant", "tool_calls": [{ "function": { "name": "mail", "arguments": "{\"to\":\"ivy@posteo.de\"}" } }],
+                  "reasoning": "jan@posteo.de", "reasoning_content": "kim@posteo.de", "content": "dora@posteo.de" }
+            ]
+        });
+        let vault = redact_request(&mut body);
+        assert_eq!(body["user"], "[EMAIL_1]");
+        let function = &body["tools"][0]["function"];
+        assert_eq!(function["description"], "Mails as [EMAIL_2]");
+        assert_eq!(function["parameters"]["properties"]["to"]["description"], "like [EMAIL_3]");
+        // Only descriptions: what a parameter may be is the client's to decide.
+        assert_eq!(function["parameters"]["properties"]["to"]["enum"][0], "gina@posteo.de");
+        assert_eq!(function["parameters"]["properties"]["description"]["type"], "string");
+        assert_eq!(body["tools"][1]["description"], "not a function: hal@posteo.de");
+        let message = &body["messages"][0];
+        assert_eq!(message["content"], "[EMAIL_1]");
+        assert_eq!(message["reasoning"], "[EMAIL_4]");
+        assert_eq!(message["reasoning_content"], "[EMAIL_5]");
+        assert_eq!(message["tool_calls"][0]["function"]["arguments"], r#"{"to":"[EMAIL_6]"}"#);
+        assert_eq!(vault.found()["EMAIL"], 6);
+    }
+
+    #[test]
+    fn a_usage_chunk_is_kept_back_only_when_asked() {
+        // With usage asked for, the other chunks say `"usage": null`.
+        let events = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({ "choices": [{ "index": 0, "delta": { "content": "hi" } }], "usage": null }),
+            json!({ "choices": [], "usage": { "prompt_tokens": 5, "completion_tokens": 1 } })
+        );
+        let usage = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut kept = StreamRestorer::new(Vault::default()).withholding_usage(usage.clone());
+        let mut out = kept.push(events.as_bytes());
+        out.extend(kept.finish());
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                json!({ "choices": [{ "index": 0, "delta": { "content": "hi" } }] })
+            )
+        );
+        assert_eq!(*usage.lock().unwrap(), Some(json!({ "prompt_tokens": 5, "completion_tokens": 1 })));
+
+        let mut passed = StreamRestorer::new(Vault::default());
+        let mut out = passed.push(events.as_bytes());
+        out.extend(passed.finish());
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains(r#""prompt_tokens":5"#) && out.contains(r#""usage":null"#), "{out}");
+    }
+
+    #[test]
+    fn usage_on_the_last_chunk_is_kept_back_and_the_chunk_sent() {
+        // As DeepSeek sends it: no chunk of its own, the usage rides with the finished choice.
+        let usage = json!({ "prompt_tokens": 5, "completion_tokens": 2 });
+        let events = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({ "choices": [{ "index": 0, "delta": { "content": "to [EMA" }, "finish_reason": null }], "usage": null }),
+            json!({ "choices": [{ "index": 0, "delta": { "content": "IL_1]" }, "finish_reason": "stop" }], "usage": usage })
+        );
+        let vault = || {
+            let mut vault = Vault::default();
+            vault.redact("bob@posteo.de");
+            vault
+        };
+        let into = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut kept = StreamRestorer::new(vault()).withholding_usage(into.clone());
+        let mut out = kept.push(events.as_bytes());
+        out.extend(kept.finish());
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({ "choices": [{ "index": 0, "delta": { "content": "to " }, "finish_reason": null }] }),
+                json!({ "choices": [{ "index": 0, "delta": { "content": "bob@posteo.de" }, "finish_reason": "stop" }] })
+            )
+        );
+        assert_eq!(*into.lock().unwrap(), Some(usage.clone()));
+
+        // The client asked for it: the chunks go as they came, restored.
+        let mut passed = StreamRestorer::new(vault());
+        let mut out = passed.push(events.as_bytes());
+        out.extend(passed.finish());
+        let out = String::from_utf8(out).unwrap();
+        let last = json!({ "choices": [{ "index": 0, "delta": { "content": "bob@posteo.de" }, "finish_reason": "stop" }], "usage": usage });
+        assert!(out.contains(&format!("data: {last}\n")) && out.contains(r#""usage":null"#), "{out}");
+    }
+
+    #[test]
+    fn every_channel_restores_the_same_however_it_is_cut() {
+        crate::testgen::cases("stream restore, every channel", |g| {
+            // An address with a line break, which JSON escapes.
+            let make = || {
+                let mut vault = Vault::default();
+                for known in ["bob@posteo.de", "call +44 20 7946 0958", "to Hauptstraße 12a,\n10115 Berlin"] {
+                    vault.redact(known);
+                }
+                vault
+            };
+            let vault = make();
+            // Each channel's whole text, cut anywhere (placeholders too: only `[` tails are held
+            // back, so no percent-encoded ones), the pieces of the channels interleaved. A call's
+            // arguments are JSON: one of those texts in a string.
+            let mut pieces: Vec<&str> = PIECES.iter().copied().filter(|p| !p.contains('%')).collect();
+            pieces.push("[ADDRESS_1]");
+            let texts: Vec<String> = (0..5).map(|_| g.assemble(&pieces, 6)).collect();
+            let wanted: Vec<String> = texts
+                .iter()
+                .enumerate()
+                .map(|(channel, text)| if channel < 3 { text.clone() } else { json!({ "to": text }).to_string() })
+                .collect();
+            let mut cuts: Vec<std::collections::VecDeque<String>> = wanted
+                .iter()
+                .map(|text| {
+                    let mut cut = std::collections::VecDeque::from([String::new()]);
+                    for c in text.chars() {
+                        if g.one_in(3) {
+                            cut.push_back(String::new());
+                        }
+                        cut.back_mut().expect("one piece").push(c);
+                    }
+                    cut
+                })
+                .collect();
+            let mut sse = Vec::new();
+            loop {
+                let open: Vec<usize> = (0..5).filter(|&c| !cuts[c].is_empty()).collect();
+                if open.is_empty() {
+                    break;
+                }
+                let channel = *g.pick(&open);
+                let piece = cuts[channel].pop_front().expect("open");
+                let delta = match channel {
+                    0 => json!({ "content": piece }),
+                    1 => json!({ "reasoning_content": piece }),
+                    2 => json!({ "reasoning": piece }),
+                    at => json!({ "tool_calls": [{ "index": at - 3, "function": { "arguments": piece } }] }),
+                };
+                sse.extend(super::tests::sse(delta).bytes());
+            }
+            if g.one_in(2) {
+                sse.extend(
+                    format!(
+                        "data: {}\n\n",
+                        json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }] })
+                    )
+                    .bytes(),
+                );
+            }
+            sse.extend(b"data: [DONE]\n\n");
+            let mut r = StreamRestorer::new(make());
+            let mut out = Vec::new();
+            for part in g.split(&sse) {
+                out.extend(r.push(part));
+            }
+            out.extend(r.finish());
+            let (content, reasoning_content, reasoning, calls) = channels_of(&out);
+            assert_eq!(content, vault.restore(&wanted[0]));
+            assert_eq!(reasoning_content, vault.restore(&wanted[1]));
+            assert_eq!(reasoning, vault.restore(&wanted[2]));
+            for at in 0..2 {
+                let args = calls.get(&at).map_or("", String::as_str);
+                assert_eq!(args, vault.restore_json(&wanted[3 + at as usize]), "call {at}");
+                // Put back together, the arguments are JSON again and hold the real values.
+                let parsed: serde_json::Value =
+                    serde_json::from_str(args).unwrap_or_else(|e| panic!("call {at}: {e} in {args:?}"));
+                assert_eq!(parsed["to"], vault.restore(&texts[3 + at as usize]), "call {at}");
+            }
         });
     }
 

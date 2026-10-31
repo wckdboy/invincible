@@ -122,3 +122,37 @@ async fn an_environment_key_survives_an_update() {
     assert!(!text.contains("api_key_file"), "{text}");
     let _ = std::fs::remove_dir_all(home);
 }
+
+/// A streamed request's usage setting is the config's, not the panel's: an update keeps it, and
+/// the reloaded model honours it.
+#[tokio::test]
+async fn include_usage_survives_an_update() {
+    let home = temp("usage");
+    std::fs::write(
+        home.join("config.toml"),
+        "[node]\nnetwork = \"direct\"\negress = \"auto\"\n\n[[cloud]]\nid = \"gpt\"\nbase_url = \"https://api.openai.com/v1\"\nupstream_model = \"gpt-5\"\napi_key_env = \"CLOUD_API_KEY\"\ndata_policy = \"retention:30\"\ninclude_usage = false\n",
+    )
+    .unwrap();
+    let settings = NodeSettings { network: NetworkMode::Direct, egress: Egress::Auto };
+    let state = AppState::new(Vec::new(), settings, TOKEN.to_owned());
+    let clouds = state.cloud.clone();
+    let admin = Arc::new(ProviderAdmin::new(home.clone(), home.join("config.toml"), state.cloud.clone()));
+    let state = state.with_provider_admin(admin);
+    let url = serve(app(Arc::new(state))).await;
+    let update = json!({ "id": "gpt", "upstream_model": "gpt-5.1" });
+    let updated = reqwest::Client::new()
+        .post(format!("{url}/v1/admin/providers"))
+        .bearer_auth(TOKEN)
+        .json(&update)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(updated.status(), 200);
+    let text = std::fs::read_to_string(home.join("config.toml")).unwrap();
+    assert!(text.contains("include_usage = false"), "{text}");
+    // OpenAI's API takes the field, so only the config keeps the reloaded model from asking.
+    let model = clouds.find("gpt").expect("hot-loaded");
+    assert_eq!(model.upstream_model, "gpt-5.1");
+    assert!(!model.include_usage);
+    let _ = std::fs::remove_dir_all(home);
+}

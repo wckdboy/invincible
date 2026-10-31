@@ -1237,6 +1237,7 @@ base_url = "https://api.anthropic.com/v1"
 api_key_file = "keys/anthropic"     # relative to ~/.invincible; or api_key_env = "ANTHROPIC_API_KEY"
 context = 200000
 data_policy = "retention:30"        # what the provider does with prompts
+# include_usage = true              # streams ask for token usage (default: the presets that take it)
 ```
 
 - The cloud is used only as [spec/routing.md](spec/routing.md) allows: never for
@@ -1244,9 +1245,38 @@ data_policy = "retention:30"        # what the provider does with prompts
   that train on prompts) answer 409 until the request is sent again with `invincible-confirmed: 1`.
 - Before a request leaves, names, emails, phone numbers, street addresses, card numbers, IBANs and
   account numbers become placeholders (`[PERSON_1]`, `[EMAIL_1]`), with the same rules as Autobot
-  ([spec/redaction.md](spec/redaction.md)); later mentions of a known value are hidden too. The
-  answer gets the real values back, streams included, and the `invincible-redacted` header counts
-  what was hidden.
+  ([spec/redaction.md](spec/redaction.md)): in the messages, the model's earlier reasoning and tool
+  calls, the tools' descriptions and the `user` field. Later mentions of a known value are hidden
+  too, as words of their own and written as before, with the same capitals (`ANNA BERG` is not
+  `Anna Berg`), an email in any case. A phone, card or account number of digits only may have its
+  digits grouped differently, split by one space of any width (a no-break one too), `-`, `.` or
+  `/`, but not by two spaces, a tab or a line break, and not where it runs on into another number
+  (`2 4111111111111111`). A name or an address is not hidden inside a longer word, next to a digit,
+  `_` or a letter of a script with case (`Иван` in `Ивановка` or `Ивана`, `Anna` in `Annaй`), nor
+  in code or links. A word of a script without case may follow a value without a space
+  (`Annaさん`, `010-1234-5678으로`). A tool result or tool call that is JSON is read string by
+  string, unescaped; a `\n` still in a string once unescaped (in a file's text, say) is a backslash
+  and an `n`, and a value first found across one comes back with them, in tool calls too. JSON text
+  inside a JSON string, as an MCP tool result has, is read as text: a value first found there across
+  an escape reaches a tool as written. Other text (JSON lines, JSON inside prose) is read as written
+  too. In both, a known value is found where its line breaks or quotes are escaped, but not where
+  its non-ASCII letters are (`Hauptstra\u00dfe`, as Python's `json.dumps` writes it). A value first
+  found in JSON lines or JSON inside prose across an escape (`12a,\n10115 Berlin`) comes back in the
+  answer's text as written, and in its tool calls as what it stood for, a line break; the same
+  address read later with a line break is the same value. A value seen in more than one form comes
+  back as it was first seen, also once JSON lines bring it again: written first in a message with a
+  backslash and an `n`, it reaches a tool with them; seen first with a line break, it comes back in
+  the text with one. In tool descriptions only emails and numbers are looked for, so a tool's
+  wording names no one, but known values are hidden there too. The answer gets the real values back
+  in its text, its reasoning and its tool calls' arguments, streams included, and the
+  `invincible-redacted` header counts what was hidden.
+- A streamed request to OpenAI, Anthropic or DeepSeek asks for its token usage
+  (`stream_options.include_usage`) when the client sets no `stream_options`, so the receipt counts
+  the tokens; that usage is kept from a client that did not ask for it, whether it comes in a chunk
+  of its own or on the last one (DeepSeek). OpenRouter reports usage unasked. Another endpoint gets
+  the field only with `include_usage = true` in its `[[cloud]]` (some APIs refuse fields they do
+  not know); `false` turns it off for a preset. The admin API does not set it, and an update there
+  keeps it.
 - A backend that fails (no connection, 429, 5xx) is skipped for 30 seconds, and the request is
   routed again: usually to a local model, with `"fallback": true` and the reason `cloud-down`.
 
