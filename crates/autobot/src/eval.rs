@@ -115,9 +115,9 @@ pub fn parse(text: &str) -> Result<Vec<Task>, String> {
     Ok(tasks)
 }
 
-/// Says yes to everything: the working directory is a throwaway, and commands' own writes go only
-/// there and to temporary directories ([crate::sandbox]; reads, the network and the programs a
-/// command talks to are not confined).
+/// Says yes to everything but a GPU rental: the working directory is a throwaway, and commands'
+/// own writes go only there and to temporary directories ([crate::sandbox]; reads, the network and
+/// the programs a command talks to are not confined).
 struct Yes;
 
 impl Approver for Yes {

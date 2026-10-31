@@ -29,7 +29,7 @@ Early, and used daily. What is built, and what is not yet:
 | Privacy | Personal data redacted before anything leaves ([spec/redaction.md](spec/redaction.md)); a signed receipt per request ([spec/receipts.md](spec/receipts.md)); a hash-chained audit log ([spec/audit.md](spec/audit.md)) |
 | Pairing | Devices pair over Noise ([spec/pairing.md](spec/pairing.md)): implemented, **not yet independently reviewed** |
 | Discovery | Signed, expiring descriptors published to seeds and mDNS, so a node is found without a pasted code — and still only usable after pairing ([spec/discovery.md](spec/discovery.md)): implemented, unaudited |
-| Cluster | **Phase 1 on edge** (on main, not yet in a stable release), **unaudited**, off unless configured: one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
+| Cluster | **Phase 1** (in stable releases since 0.0.22), **unaudited**, off unless configured: one model split layer-wise across your paired nodes through llama.cpp's RPC backend, inside encrypted shard links; `invincible cluster status`; receipts name the nodes ([spec/cluster.md](spec/cluster.md), with the plan for training across devices) |
 | Autobot Agent | On the gateway on a VPS or desktop: coding in the terminal (images included) and in editors (Zed, over ACP), tools, approvals, a team, schedules, webhooks, several bots (live), Telegram, Discord, Slack, email, Signal, Matrix, WhatsApp, Home Assistant; backups and restore, health alerts to your chat, `autobot logs` |
 | Autobot app | Android and iOS drive the agent through the paired node, approvals and schedules included, and show the node's receipts (since [Autobot 1.10.0](https://github.com/wckdboy/autobot/releases/tag/v1.10.0); the latest is [1.14.0](https://github.com/wckdboy/autobot/releases/tag/v1.14.0)) |
 | Control panel | A zero-dependency authenticated panel with rooms for chat, workspaces, bots, integrations, usage and settings: live sessions and transcripts, delegated runs that report every nudge and declined approval, a thread with its own worktree and one-click PR, a connector matrix and token files, today's tokens and cost, model/approval/tool settings and advanced dotted keys; scrypt, signed sessions, CSRF, CSP; no provider keys in the browser. Working on the alpha stack (gateway + Autobot + panel behind Traefik); the Docker Compose with Caddy is in [platform/services/agent](https://github.com/WCKDai/platform/tree/main/services/agent) |
@@ -107,7 +107,7 @@ Invincible is built for Autobot first, and shares its rules instead of re-implem
 | Redaction before cloud calls | Phone → node needs no redaction (you own both ends). Node → cloud passes the same redaction, the phone's rules ported pattern for pattern ([spec/redaction.md](spec/redaction.md)); a larger detection model than a phone can run is not built |
 | Receipts per answer | The node signs a receipt per request (tier, model, tokens, whether anything left the node); Autobot merges it into its own receipt |
 | Recipes: on-device only, 8-minute limit | Recipes can be **handed to the node**: always on, no time limit, results delivered to the phone |
-| Private vault (on-device RAG) | Planned: the vault syncs end-to-end encrypted to the node for larger indexes and faster embedding (it needs `/v1/embeddings`, [ROADMAP.md](ROADMAP.md) milestone 1); the index still never leaves hardware you own |
+| Private vault (on-device RAG) | Planned: the vault syncs end-to-end encrypted to the node for larger indexes and faster embedding ([ROADMAP.md](ROADMAP.md) milestone 1: the node's `/v1/embeddings` is built, the sync is not); the index still never leaves hardware you own |
 | `:agent:core` (Kotlin Multiplatform, JVM + iOS) | The **Autobot Agent** (`autobot`, Rust) runs next to the gateway with the same semantics (session log, tool loop, fail-closed approvals), and the app drives it through the paired gateway |
 
 ### One set of rules, two languages
@@ -461,14 +461,15 @@ service restarted. The model and approvals are remembered (`~/.autobot/code.json
   to `DIR` and temporary directories, so a build that writes caches in your home (`~/.cargo`,
   `~/.npm`) fails there. With the sandbox on and no bubblewrap on Linux, commands are refused and
   the run says so before it starts; where bubblewrap cannot make its namespaces (some containers),
-  each command fails with bubblewrap's error. Either way nothing runs unconfined: install it
-  (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine you can
-  throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack bubblewrap or
-  the namespaces it needs and are themselves the boundary. It is a flag for one run, not a setting,
-  so the workflow file shows it; the run prints it on standard error before it starts, and the
-  action log marks each of its commands `"sandbox": "off"`. With the flag, scheduled tasks and the
-  board stay confined. Under `[agent] sandbox = "off"` the run says the same on standard error,
-  naming the setting, and the action log marks its commands `"sandbox": "off"` too.
+  each command fails with bubblewrap's error. Either way none of its commands runs unconfined:
+  install it (`sudo apt install bubblewrap`, or `dnf`, `apk`), or pass `--no-sandbox` on a machine
+  you can throw away. `--no-sandbox` is for CI containers and throwaway VMs, which often lack
+  bubblewrap or the namespaces it needs and are themselves the boundary. It is a flag for one run,
+  not a setting, so the workflow file shows it; the run prints it on standard error before it
+  starts, and the action log marks each of its commands `"sandbox": "off"`. With the flag,
+  scheduled tasks and the board stay confined. Under `[agent] sandbox = "off"` the run says the
+  same on standard error, naming the setting, and the action log marks its commands
+  `"sandbox": "off"` too.
 
 ### Threads and pull requests
 
@@ -640,14 +641,16 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   - `allowlist`: for unattended use. Writes in the working directory (not under dot names) run, and
     so does what the allowlist names: commands, `cloud`, MCP tools (`mcp:<server>/<tool>`), Home
     Assistant services (`home:light.turn_on`, `home:light.*`) and sites (`https://docs.rs`).
-    Everything else is refused without asking. Scheduled tasks (hooks too), board work and the
-    heartbeat use it unless the mode is `trust`. A command matches an entry when it is the entry,
-    or the entry plus arguments; a chained one never does (`git status; rm -rf ~` does not match
+    Everything else is refused without asking; a GPU rental is asked about in every mode, and
+    refused where nobody can answer. Scheduled tasks (hooks too), board work and the heartbeat use
+    it unless the mode is `trust`. A command matches an entry when it is the entry, or the entry
+    plus arguments; a chained one never does (`git status; rm -rf ~` does not match
     `git status`). Arguments are not checked: an allowlisted `cat` reads any file you can, so allow
     only commands that are safe with any arguments. Writes never follow symbolic links or touch
     hard-linked files, and writes under dot names (`.git/config`, `.envrc`) are refused, since they
     can make a later allowlisted command run something else.
-  - `trust`: everything runs. Only for a machine you can throw away.
+  - `trust`: everything runs but a GPU rental, which still asks. Only for a machine you can throw
+    away.
 - **Verification gate:** set `[agent] check = "cargo test"` (or `make check`, `npm test`) and a
   turn that changed files runs it once before it may finish. A failure goes back to the model as a
   user message with the output; after one retry the turn stops with the failure in the answer
@@ -672,16 +675,22 @@ provider, so the gateway's rules hold for every agent turn: routing, redaction, 
   `core.fsmonitor` in `.git/config`, a `Makefile`, `node_modules/.bin`, an `.envrc` once you
   `direnv allow` it) that run unconfined when a later interactive turn, or your own shell, works
   in that directory. `[agent] sandbox = "always"` confines interactive turns too (not your shell);
-  `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run. Commands in
+  `"off"` turns it off; `autobot run --no-sandbox` turns it off for one run. A delegated run
+  (**Keep going**) is not on the list above: its commands run as the session's interactive turns
+  do, so what its approval mode lets run without asking (allowlisted commands, any command under
+  `auto` or `trust`) runs unconfined unless the sandbox is `"always"`. Commands in
   `[agent.docker]` or over `[agent.ssh]` run there instead, not confined by this sandbox: the
   container or the other machine is what holds them. The container mounts the working directory
   read-write, though, and with `[agent.docker]` set interactive turns run there too, so what a
   command leaves in that directory can run unconfined when your own shell, or a turn without
-  `[agent.docker]`, works in it. Autobot's own `/diff` runs `git diff --no-color` and
-  `git ls-files --others --exclude-standard` in the working directory on this machine, unconfined
-  even with `[agent.docker]` set or `sandbox = "always"`, so a `core.fsmonitor`, diff driver or
-  filter left in `.git/config` (the last two named in a `.gitattributes`) runs when you type
-  `/diff`.
+  `[agent.docker]`, works in it. Autobot's own `git` runs in the working directory on this
+  machine, unconfined even with `[agent.docker]` set or `sandbox = "always"`: `/diff`
+  (`git diff --no-color`, `git ls-files --others --exclude-standard`), `git ls-files` for the
+  project map that `autobot code`, `autobot run -C`, Zed and a thread start with (and
+  `autobot map`), `autobot review`, and a thread's diff and pull request (`git add -A`,
+  `git commit`, `git push`). So a `core.fsmonitor`, diff driver or filter left in `.git/config`
+  (the last two named in a `.gitattributes`), or a hook a commit or push runs, can run when one of
+  them does.
 - **Commands in a container:** on a VPS, `[agent.docker]` runs the agent's commands in a Linux
   container instead of on the host: one per working directory (`autobot-<hash>`), made on first
   use and kept, with the working directory mounted at the same path, so file tools and commands

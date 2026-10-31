@@ -135,8 +135,8 @@ or `GET /v1/agent/actions?since=&limit=` ([agent.md](agent.md)).
 Commands with nobody watching (schedules, board work, recipes, hooks, Home Assistant's
 conversation agent, the heartbeat, `autobot run`) that run on this machine are write-confined
 unless `[agent] sandbox = "off"` or `autobot run --no-sandbox` turned that off, so `off` on one
-of them is that choice on record; interactive turns are unconfined unless
-`[agent] sandbox = "always"`.
+of them is that choice on record; interactive turns, a delegated run's included, are unconfined
+unless `[agent] sandbox = "always"`.
 `bwrap` or `sandbox-exec` says the command was write-confined (its reads, the network and the
 programs it talks to are not limited), not that it succeeded: where bubblewrap is missing or
 cannot run, it is refused or fails as it starts. The field is absent on other kinds and on

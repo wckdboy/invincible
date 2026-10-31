@@ -28,8 +28,8 @@ In scope, everything in this repository:
 
 - **The node** (`invincible`: `crates/invincible`, `crates/invincible-policy`): the local API and
   its token, pairing and remote access over Noise, device capabilities, discovery, cluster shard
-  links, dispatch, routing, redaction, receipts, the audit log, egress and the kill switch,
-  updates.
+  links, dispatch, routing, redaction, receipts, the audit log, egress and the kill switch, GPU
+  rental (`[rent]`, `/v1/rent/*`, the images in `sidecar/`), updates.
 - **The agent** (`autobot`: `crates/autobot`): approvals and the allowlist, write confinement of
   unattended commands, the agent API, channels and bots, webhooks, skills, MCP, backups.
 - **The installer** (`install.sh`) and `invincible update`: the signature and checksum checks, and
@@ -48,8 +48,8 @@ Not in scope here:
 - llama.cpp, other engines and model weights themselves: report those to their projects. How the
   node runs them (the ports it opens, what it passes them) is in scope.
 - What a cloud provider does with what it receives.
-- Settings that do what they say: the `trust` approval mode, `[agent] sandbox = "off"`, a
-  capability the operator granted.
+- Settings that do what they say: the `trust` and `auto` approval modes, `[agent] sandbox = "off"`,
+  a capability the operator granted.
 
 **Limits that are already documented.** These are known; a way around them that the docs do not
 describe is a finding.
@@ -60,15 +60,19 @@ describe is a finding.
   other socket) are not restricted yet, so it can read what the owner can, reach any host and
   have a program outside the sandbox write for it ([README](README.md), Sandbox). Over
   `[agent.ssh]` the other machine is what holds a command, and in `[agent.docker]` the
-  container, which mounts the working directory read-write.
+  container, which mounts the working directory read-write. A delegated run (**Keep going**) is
+  not unattended in this sense: what its approval mode lets run without asking runs as in an
+  interactive turn, unconfined unless `[agent] sandbox = "always"`.
 - The working directory is shared between unattended and interactive work. A confined command,
   or one in the `[agent.docker]` container, can leave files there (`core.hooksPath` or
   `core.fsmonitor` in `.git/config`, a `Makefile`, `node_modules/.bin`, an `.envrc` once someone
   runs `direnv allow` on it) that a later unconfined interactive turn, or the owner's own shell,
-  runs in that directory ([README](README.md), Sandbox). Autobot's `/diff` runs `git diff` and
-  `git ls-files` there on the agent's machine, unconfined even with `[agent.docker]` set or
-  `[agent] sandbox = "always"`, so a `core.fsmonitor` left in `.git/config`, or a diff driver or
-  filter there that a `.gitattributes` names, runs when the owner types `/diff`.
+  runs in that directory ([README](README.md), Sandbox). Autobot's own `git` runs there on the
+  agent's machine, unconfined even with `[agent.docker]` set or `[agent] sandbox = "always"`:
+  `/diff`, the project map that `autobot code`, `autobot run -C`, Zed and a thread start with,
+  `autobot map`, `autobot review`, and a thread's diff and pull request. So a `core.fsmonitor`
+  left in `.git/config`, a diff driver or filter there that a `.gitattributes` names, or a hook a
+  commit or push runs, can run when one of them does.
 - The node has had an internal security review, not yet an independent one; pairing, remote
   access and discovery are implemented and unaudited ([README](README.md#status)).
 - Data on disk is not encrypted at rest. Keys, tokens and the audit log are files only the owner's
