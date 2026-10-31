@@ -117,8 +117,8 @@ async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool, raise: bool)
         slow,
         hostile,
         raise,
-        fail_create: tag == "create-fail",
-        hold_create: tag == "hold-create" || tag == "delete-once",
+        fail_create: tag == "create-fail" || tag == "hold-fail",
+        hold_create: tag == "hold-create" || tag == "delete-once" || tag == "hold-fail",
         release_create: Arc::new(tokio::sync::Notify::new()),
         hold_hydrate: tag == "hold-hydrate",
         release_hydrate: Arc::new(tokio::sync::Notify::new()),
@@ -998,14 +998,17 @@ async fn a_stop_during_create_is_not_revived_when_the_pod_appears() {
     assert_eq!(status, 201, "{created}");
     assert_eq!(created["phase"], "stopped", "{created}");
     assert_eq!(created["drain_ok"], true, "{created}");
-    assert!(created["cost_actual_usd"].as_f64().is_some(), "{created}");
+    assert_eq!(created["forced"], false, "a plain stop was recorded as forced: {created}");
+    assert!(created["cost_actual_usd"].as_f64().is_some_and(|cost| cost > 0.0), "{created}");
+    assert!(created["ended_at"].is_string(), "{created}");
     assert_eq!(created["id"], session_id);
     let receipt_key = format!("sessions/{session_id}/receipt.json");
     let receipt_bytes = stack.mocks.objects.lock().unwrap().get(&receipt_key).cloned().expect("stop receipt");
     let receipt: Value = serde_json::from_slice(&receipt_bytes).unwrap();
     assert_eq!(receipt["instance_id"], created["instance_id"], "{receipt}");
     assert_eq!(receipt["drain_ok"], true, "{receipt}");
-    assert!(receipt["cost_actual_usd"].as_f64().is_some(), "{receipt}");
+    assert_eq!(receipt["cost_actual_usd"], created["cost_actual_usd"], "{receipt}");
+    assert_eq!(receipt["ended_at"], created["ended_at"], "{receipt}");
     let deadline = Instant::now() + Duration::from_secs(8);
     while !log_of(&stack.mocks).iter().any(|line| line.starts_with("runpod:delete:")) {
         assert!(Instant::now() < deadline, "the late pod was not deleted\n{}", log_of(&stack.mocks).join("\n"));
@@ -1078,12 +1081,60 @@ async fn a_failed_delete_of_a_late_pod_stays_open_for_another_stop() {
     .await;
     assert_eq!(status, 200, "{again}");
     assert_eq!(again["phase"], "stopped", "{again}");
-    assert!(again["cost_actual_usd"].as_f64().is_some(), "{again}");
+    assert!(again["cost_actual_usd"].as_f64().is_some_and(|cost| cost > 0.0), "{again}");
     assert!(stack.mocks.pods.lock().unwrap().is_empty(), "the retry did not delete the pod");
     let receipt_bytes = stack.mocks.objects.lock().unwrap().get(&receipt_key).cloned().expect("retry receipt");
     let receipt: Value = serde_json::from_slice(&receipt_bytes).unwrap();
     assert_eq!(receipt["instance_id"], again["instance_id"], "{receipt}");
-    assert!(receipt["cost_actual_usd"].as_f64().is_some(), "{receipt}");
+    assert_eq!(receipt["cost_actual_usd"], again["cost_actual_usd"], "{receipt}");
+}
+
+#[tokio::test]
+async fn a_create_that_fails_after_a_stop_is_a_503_and_the_stop_finishes() {
+    let (stack, _node) = stack("hold-fail", "monthly_cap_usd = 50\n", false, false, false).await;
+    ready(&stack.url, &stack.dir).await;
+    let url = stack.url.clone();
+    let create = tokio::spawn(async move {
+        call(
+            &url,
+            reqwest::Method::POST,
+            "/v1/rent/sessions",
+            Some(create_body("comfyui-minimax-h3", 1.0, false)),
+            true,
+        )
+        .await
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !log_of(&stack.mocks).iter().any(|line| line == "runpod:create-waiting") {
+        assert!(Instant::now() < deadline, "create did not reach the vendor");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let (status, listed) = call(&stack.url, reqwest::Method::GET, "/v1/rent/sessions", None, false).await;
+    assert_eq!(status, 200, "{listed}");
+    let session_id = listed["sessions"][0]["id"].as_str().unwrap().to_owned();
+    let (status, stopped) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        &format!("/v1/rent/sessions/{session_id}/stop"),
+        Some(json!({})),
+        false,
+    )
+    .await;
+    assert_eq!(status, 200, "{stopped}");
+    assert_eq!(stopped["phase"], "draining", "{stopped}");
+    stack.mocks.release_create.notify_one();
+    let (status, created) = create.await.unwrap();
+    assert_eq!(status, 503, "a create with no pod was reported as started: {created}");
+    assert_eq!(created["error"]["code"], "rent_unavailable", "{created}");
+    let (status, session) =
+        call(&stack.url, reqwest::Method::GET, &format!("/v1/rent/sessions/{session_id}"), None, false).await;
+    assert_eq!(status, 200, "{session}");
+    assert_eq!(session["phase"], "stopped", "the stop was left waiting for a pod: {session}");
+    assert!(session["instance_id"].is_null(), "{session}");
+    assert!(stack.mocks.pods.lock().unwrap().is_empty(), "{:?}", log_of(&stack.mocks));
+    let audit = std::fs::read_to_string(stack.dir.join("audit.jsonl")).unwrap_or_default();
+    assert!(!audit.contains("rent.start"), "a failed create was audited as a start: {audit}");
+    assert!(audit.contains("rent.stop"), "{audit}");
 }
 
 #[tokio::test]
