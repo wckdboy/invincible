@@ -1131,7 +1131,11 @@ async fn a_create_that_fails_after_a_stop_is_a_503_and_the_stop_finishes() {
     assert_eq!(status, 200, "{session}");
     assert_eq!(session["phase"], "stopped", "the stop was left waiting for a pod: {session}");
     assert!(session["instance_id"].is_null(), "{session}");
-    assert!(stack.mocks.pods.lock().unwrap().is_empty(), "{:?}", log_of(&stack.mocks));
+    assert_eq!(session["drain_ok"], true, "{session}");
+    assert_eq!(session["forced"], false, "a plain stop was recorded as forced: {session}");
+    assert_eq!(session["cost_actual_usd"], 0.0, "no pod ran, so nothing is charged: {session}");
+    let log = log_of(&stack.mocks);
+    assert!(!log.iter().any(|line| line.starts_with("runpod:delete")), "{log:?}");
     let audit = std::fs::read_to_string(stack.dir.join("audit.jsonl")).unwrap_or_default();
     assert!(!audit.contains("rent.start"), "a failed create was audited as a start: {audit}");
     assert!(audit.contains("rent.stop"), "{audit}");

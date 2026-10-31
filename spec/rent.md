@@ -43,23 +43,25 @@ Phases: `provisioning` → `hydrating` → `ready` → `draining` → `stopped`,
 (`quoting`) writes nothing: no session file, no object, no pod.
 
 A stop writes `sessions/<id>/control.json` (`action: drain`), waits for `drain-ok.json`, and only
-then deletes the pod. `force` deletes after that wait even when the marker never arrives. A stop
-that lands before the pod id exists stays `draining`, and the create that is still running
-settles it: the sweeper and reconciliation leave that session and its pod alone until the create
-ends, except that a deadline or the monthly cap marks the stop forced. A later plain stop does
-not undo an earlier forced one. When the pod appears, a forced stop deletes it immediately; a
-plain stop waits for the drain marker and, if it never arrives, stays `draining` with the
-instance id so the sweeper deletes it. The session then records the offer the pod was made from,
-at the vendor's price when that is higher. If no pod comes, the create answers 503
-`rent_unavailable` with its error, no `rent.start` is logged, and the stop is finished. A failed
-delete is not recorded as `stopped`: the session stays `draining` with the instance id, so the
-next stop and the sweeper retry it. Create re-reads the session under its lock before each save,
-so a stop during hydrate is not overwritten by `ready`. The
-sweeper always deletes after the drain attempt: a pod does not outlive the hours it was paid for,
-and an idle ready or hydrating pod (no status read for `idle_minutes`) is stopped the same way.
-A `failed` session that still has a pod is deleted too. On startup and on each sweep, a pod
-named `invincible-<session>` with no live tracked session is drained on a best-effort basis
-and then terminated.
+then deletes the pod. `force` deletes after that wait even when the marker never arrives, and a stop
+that is still under way stays forced: a later plain stop does not undo it. A stop that lands before
+the pod id exists stays `draining`, and the create that is still running settles it: the sweeper and
+reconciliation leave that session and its pod alone until the create ends. A deadline or the monthly
+cap still stops it: a pod RunPod already lists under the session's name is deleted then, and
+otherwise the stop is marked forced. When the pod appears, a forced stop deletes it immediately; a
+plain stop waits for the drain marker and, if it never arrives, stays `draining` with the instance
+id so the sweeper deletes it. The session records the offer the pod was made from, at the vendor's
+price when that is higher. If no pod comes, the create answers 503 `rent_unavailable` with its
+error, no `rent.start` is logged, and the stop is finished with nothing charged
+(`cost_basis: no_pod`). A failed delete is not recorded as `stopped`: the session stays `draining`
+with the instance id, so the next stop and the sweeper retry it. Create re-reads the session under
+its lock before each save, so a stop during hydrate is not overwritten by `ready`. A `provisioning`
+session that no create is running for (the node stopped mid-create) is stopped by the next sweep,
+and a pod with its name is deleted. The sweeper always deletes after the drain attempt: a pod does
+not outlive the hours it was paid for, and an idle ready or hydrating pod (no status read for
+`idle_minutes`) is stopped the same way. A `failed` session that still has a pod is deleted too. On
+startup and on each sweep, a pod named `invincible-<session>` with no live tracked session is
+drained on a best-effort basis and then terminated.
 Going over `monthly_cap_usd` stops whatever is still running.
 
 Hydrate, on start, lists `projects/<id>/workspace/` and writes `sessions/<id>/hydrate.json`, then

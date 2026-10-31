@@ -373,7 +373,10 @@ impl Engine {
             return Err(RentError::Unavailable(session.error.clone()));
         };
         let now = self.now();
-        if !session.instance_id.is_empty() {
+        if stored.phase == Phase::Stopped && !stored.instance_id.is_empty() && stored.instance_id == session.instance_id
+        {
+            // A stop found this pod by its name and deleted it after the create's own delete failed.
+        } else if !session.instance_id.is_empty() {
             stored.instance_id = session.instance_id.clone();
             stored.data_center = session.data_center.clone();
             stored.error = session.error.clone();
@@ -384,9 +387,10 @@ impl Engine {
             }
             self.sessions.save(&stored).map_err(&unrecorded)?;
         } else if stored.phase == Phase::Draining && stored.instance_id.is_empty() {
-            // No pod came and none will: nothing ran, so there was nothing to drain.
-            stored.note(now, format!("create failed after the stop: {}", session.error));
-            self.finish(&mut stored, true, false).await?;
+            // No pod came and none will. Nothing ran: nothing to drain and nothing to charge.
+            let forced = stored.forced;
+            let why = format!("the create failed before a pod existed: {}", session.error);
+            self.close(&mut stored, true, forced, Some(why)).await?;
         }
         Err(RentError::Unavailable(session.error.clone()))
     }
@@ -404,8 +408,15 @@ impl Engine {
         if let Ok(Some(latest)) = self.sessions.get(&session.id) {
             *session = latest;
         }
-        // A stop that found this pod by its name has already deleted it.
+        // A stop that found this pod by its name has already deleted it. Its record still takes
+        // the offer and price the pod was made at.
         if session.phase == Phase::Stopped && session.instance_id == instance.id {
+            adopt(session, candidate, instance);
+            if let Some(ended_at) = session.ended_at {
+                session.cost_actual_usd = elapsed_cost(session, ended_at);
+            }
+            self.put_receipt(session, true).await;
+            self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
             return Ok(session.public());
         }
         // The pod that bills is the one the vendor made, at the vendor's price.
@@ -520,6 +531,8 @@ impl Engine {
         if session.phase == Phase::Stopped && !session.instance_id.is_empty() {
             return Ok(session.public());
         }
+        // A forced stop that is still under way stays forced, whatever a later stop asks.
+        let force = force || (session.phase == Phase::Draining && session.forced);
         let failed = session.phase == Phase::Failed;
         if session.phase != Phase::Draining && session.phase != Phase::Stopped {
             session.go(Phase::Draining, self.now(), "drain requested").map_err(RentError::Unavailable)?;
@@ -543,8 +556,8 @@ impl Engine {
                 return Ok(session.public());
             }
             // The vendor call may still return a pod. Stay draining and remember whether that
-            // pod may be deleted without a finished drain. A later plain stop does not undo a force.
-            session.forced = session.forced || force || must_delete;
+            // pod may be deleted without a finished drain (`force` already keeps an earlier force).
+            session.forced = force || must_delete;
             self.sessions.save(&session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
             // While the create runs it settles this stop, whether a pod comes or not.
             if must_delete && !self.creating(&session.id) {
@@ -586,6 +599,18 @@ impl Engine {
         Ok(session.public())
     }
 
+    /// Stop a create that no longer runs, after checking again under the session lock: the list
+    /// the sweeper read can be older than a create that just finished.
+    async fn stop_abandoned(&self, id: &str) -> Result<(), RentError> {
+        let _guard = self.session_lock(id).lock_owned().await;
+        let stored = self.sessions.get(id).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        if stored.is_some_and(|session| session.phase == Phase::Provisioning) && !self.creating(id) {
+            tracing::warn!(session = id, "stopping a create the node did not finish");
+            self.stop_locked(id, true, true).await?;
+        }
+        Ok(())
+    }
+
     pub async fn sweep(&self) {
         let (sessions, warnings) = match self.sessions.list() {
             Ok(listed) => listed,
@@ -625,6 +650,15 @@ impl Engine {
                 && let Err(err) = self.stop(&session.id, true, true).await
             {
                 tracing::warn!(session = %session.id, "{}", self.scrubbed(err));
+                continue;
+            }
+            // Provisioning with no create running: the node stopped mid-create. Its pod, if the
+            // vendor made one, bills until it is found by its name and deleted.
+            if session.phase == Phase::Provisioning
+                && !self.creating(&session.id)
+                && let Err(err) = self.stop_abandoned(&session.id).await
+            {
+                tracing::warn!(session = %session.id, "abandoned create: {}", self.scrubbed(err));
             }
         }
         self.reconcile().await;
@@ -655,12 +689,14 @@ impl Engine {
         for pod in pods {
             let Some(id) = pod.name.strip_prefix(&prefix).filter(|id| !id.is_empty()) else { continue };
             // A create still running settles its own pod, a stop that landed meanwhile included.
-            if self.creating(id) || sessions.iter().any(|session| session.id == id && keeps_pod(session, &pod.id)) {
+            let creating = self.creating(id);
+            if sessions.iter().any(|session| session.id == id && keeps_pod(session, &pod.id, creating)) {
                 continue;
             }
             let _guard = self.session_lock(id).lock_owned().await;
             match self.sessions.get(id) {
-                Ok(Some(session)) if keeps_pod(&session, &pod.id) => continue,
+                Ok(Some(session)) if keeps_pod(&session, &pod.id, self.creating(id)) => continue,
+                Ok(None) if self.creating(id) => continue,
                 Ok(_) => {}
                 Err(err) => {
                     tracing::warn!(
@@ -741,14 +777,38 @@ impl Engine {
     }
 
     async fn finish(&self, session: &mut Session, drain_ok: bool, forced: bool) -> Result<(), RentError> {
+        self.close(session, drain_ok, forced, None).await
+    }
+
+    /// Record the stop and its receipt. `no_pod` says why the session ended without a pod ever
+    /// running: nothing is charged for it.
+    async fn close(
+        &self,
+        session: &mut Session,
+        drain_ok: bool,
+        forced: bool,
+        no_pod: Option<String>,
+    ) -> Result<(), RentError> {
         let now = self.now();
         session.go(Phase::Stopped, now, "terminated").map_err(RentError::Unavailable)?;
         session.drain_ok = drain_ok;
         session.forced = forced;
         session.ended_at = Some(now);
-        let elapsed = now.signed_duration_since(session.created_at).num_milliseconds().max(0) as f64 / 3_600_000.0;
-        session.cost_actual_usd = session.offer.usd_per_hr * elapsed;
-        session.error = if forced { "terminated before drain completed".to_owned() } else { String::new() };
+        let ran = no_pod.is_none();
+        session.cost_actual_usd = if ran { elapsed_cost(session, now) } else { 0.0 };
+        session.error = match no_pod {
+            Some(why) => why,
+            None if forced => "terminated before drain completed".to_owned(),
+            None => String::new(),
+        };
+        self.put_receipt(session, ran).await;
+        self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))
+    }
+
+    /// Write `sessions/<id>/receipt.json` from what the stopped session records. `ran` is false
+    /// when no pod ever ran for it.
+    async fn put_receipt(&self, session: &mut Session, ran: bool) {
+        let ended_at = session.ended_at.unwrap_or_else(|| self.now());
         let receipt = json!({
             "session_id": session.id,
             "project_id": session.project_id,
@@ -760,11 +820,11 @@ impl Engine {
             "hours_requested": session.hours,
             "cost_estimate_usd": session.cost_estimate_usd,
             "started_at": session.created_at.to_rfc3339(),
-            "ended_at": now.to_rfc3339(),
+            "ended_at": ended_at.to_rfc3339(),
             "cost_actual_usd": session.cost_actual_usd,
-            "cost_basis": "catalog_usd_per_hr_times_elapsed",
-            "drain_ok": drain_ok,
-            "forced": forced,
+            "cost_basis": if ran { "catalog_usd_per_hr_times_elapsed" } else { "no_pod" },
+            "drain_ok": session.drain_ok,
+            "forced": session.forced,
             "instance_id": session.instance_id,
         });
         if let Ok(bytes) = serde_json::to_vec_pretty(&receipt)
@@ -772,7 +832,6 @@ impl Engine {
         {
             session.warning = format!("pod terminated but receipt upload failed: {}", self.scrubbed(err));
         }
-        self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))
     }
 
     async fn write_project(&self, session: &Session) -> Result<(), String> {
@@ -912,6 +971,12 @@ fn adopt(session: &mut Session, candidate: &Offer, instance: &Instance) {
     session.endpoints = instance.endpoints.clone();
 }
 
+/// Catalog (or vendor) $/hr times the time from create to `end`.
+fn elapsed_cost(session: &Session, end: DateTime<Utc>) -> f64 {
+    let hours = end.signed_duration_since(session.created_at).num_milliseconds().max(0) as f64 / 3_600_000.0;
+    session.offer.usd_per_hr * hours
+}
+
 /// A stop finished before its pod existed, and that pod has to be deleted after all. The session
 /// is not over: clear what [Engine::finish] recorded until a delete succeeds.
 fn reopen(session: &mut Session, now: DateTime<Utc>, why: impl Into<String>) {
@@ -940,10 +1005,11 @@ impl Drop for Creating<'_> {
     }
 }
 
-/// Only a create still in `provisioning` protects a pod whose id was not saved yet.
-/// A stopped or failed session with an empty id does not: that pod would bill forever.
-fn keeps_pod(session: &Session, pod_id: &str) -> bool {
-    if session.phase == Phase::Provisioning {
+/// Only a create that is still running protects a pod whose id was not saved yet; it settles a
+/// stop that landed meanwhile too. A `provisioning` session no create runs for (the node stopped
+/// mid-create), or a stopped or failed session with an empty id, does not: that pod would bill.
+fn keeps_pod(session: &Session, pod_id: &str, creating: bool) -> bool {
+    if creating && session.instance_id.is_empty() {
         return true;
     }
     session.instance_id == pod_id && (session.phase.active() || session.phase == Phase::Failed)
@@ -1051,6 +1117,8 @@ mod tests {
         ghost: bool,
         fail_deletes: Arc<std::sync::atomic::AtomicU32>,
         pods: Arc<Mutex<Vec<PodRef>>>,
+        /// Hold each create until notified, the way a slow vendor call does.
+        hold: Option<Arc<tokio::sync::Notify>>,
     }
 
     impl Provider for Fake {
@@ -1078,8 +1146,13 @@ mod tests {
             let pods = Arc::clone(&self.pods);
             let freeze = self.freeze;
             let ghost = self.ghost;
+            let hold = self.hold.clone();
             let name = request.name.clone();
             Box::pin(async move {
+                if let Some(hold) = hold {
+                    events.lock().unwrap().push("create-waiting".into());
+                    hold.notified().await;
+                }
                 if ghost {
                     pods.lock().unwrap().push(PodRef { id: "pod-ghost".into(), name });
                     events.lock().unwrap().push("create-timeout".into());
@@ -1179,6 +1252,7 @@ mod tests {
         node: String,
         pods: Arc<Mutex<Vec<PodRef>>>,
         fail_deletes: Arc<std::sync::atomic::AtomicU32>,
+        release: Arc<tokio::sync::Notify>,
     }
 
     fn engine(label: &str, freeze: bool, fail_store: bool) -> Opened {
@@ -1186,6 +1260,10 @@ mod tests {
     }
 
     fn open_engine(label: &str, freeze: bool, fail_store: bool, ghost: bool) -> Opened {
+        open_with(label, freeze, fail_store, ghost, false)
+    }
+
+    fn open_with(label: &str, freeze: bool, fail_store: bool, ghost: bool, held: bool) -> Opened {
         let path = std::env::temp_dir().join(format!("invincible-rent-engine-{}-{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         let node = super::load_node_id(&path).unwrap();
@@ -1193,6 +1271,7 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let pods = Arc::new(Mutex::new(Vec::new()));
         let fail_deletes = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let release = Arc::new(tokio::sync::Notify::new());
         let mut engine = Engine::open(Open {
             provider: Arc::new(Fake {
                 state: state.clone(),
@@ -1201,6 +1280,7 @@ mod tests {
                 ghost,
                 fail_deletes: Arc::clone(&fail_deletes),
                 pods: Arc::clone(&pods),
+                hold: held.then(|| Arc::clone(&release)),
             }),
             objects: Arc::new(Mem { events: Arc::clone(&events), fail: fail_store }),
             home: path.clone(),
@@ -1216,7 +1296,7 @@ mod tests {
         .unwrap();
         engine.drain_wait = std::time::Duration::from_millis(30);
         engine.drain_poll = std::time::Duration::from_millis(5);
-        Opened { engine: Arc::new(engine), events, home: Home { path, state }, node, pods, fail_deletes }
+        Opened { engine: Arc::new(engine), events, home: Home { path, state }, node, pods, fail_deletes, release }
     }
 
     fn sample(id: &str, phase: crate::rent::session::Phase, instance: &str) -> crate::rent::session::Session {
@@ -1309,9 +1389,24 @@ mod tests {
         let Opened { engine, events, home, node, pods, .. } = engine("race", false, false);
         pods.lock().unwrap().push(PodRef { id: "pod-fresh".into(), name: format!("invincible-{node}-sess_fresh") });
         write_session(&home.state, &sample("sess_fresh", crate::rent::session::Phase::Provisioning, ""));
+        let _creating = Creating::new(&engine.creating, "sess_fresh");
         engine.sweep().await;
         let events = events.lock().unwrap().clone();
         assert!(!events.iter().any(|line| line.contains("pod-fresh")), "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn a_create_the_node_did_not_finish_loses_its_pod() {
+        let Opened { engine, events, home, node, pods, .. } = engine("abandoned", false, false);
+        // The node stopped while the vendor was making this pod: no create runs for the session.
+        pods.lock().unwrap().push(PodRef { id: "pod-left".into(), name: format!("invincible-{node}-sess_left") });
+        write_session(&home.state, &sample("sess_left", crate::rent::session::Phase::Provisioning, ""));
+        engine.sweep().await;
+        let events = events.lock().unwrap().clone();
+        assert!(events.iter().any(|line| line == "terminate:pod-left"), "the pod bills until its deadline: {events:?}");
+        let stored = read_session(&home.state, "sess_left");
+        assert_eq!(stored.phase, crate::rent::session::Phase::Stopped, "{:?}", stored.events);
+        assert_eq!(stored.instance_id, "pod-left");
     }
 
     #[tokio::test]
@@ -1539,21 +1634,111 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_late_pod_a_stop_already_deleted_is_left_alone() {
+    async fn a_late_pod_a_stop_already_deleted_is_not_deleted_again() {
         let Opened { engine, events, home, .. } = engine("already-gone", false, false);
         let mut done = sample("sess_gone", crate::rent::session::Phase::Stopped, "pod-gone");
-        done.ended_at = Some(chrono::Utc::now());
+        let ended = done.created_at + chrono::TimeDelta::minutes(30);
+        done.ended_at = Some(ended);
         done.drain_ok = true;
         write_session(&home.state, &done);
         let mut current = read_session(&home.state, "sess_gone");
-        let offer = current.offer.clone();
+        let mut candidate = current.offer.clone();
+        candidate.usd_per_hr = 0.8;
         let instance = Instance { id: "pod-gone".into(), status: "RUNNING".into(), ..Instance::default() };
         let out =
-            engine.discard_after_stop(&mut current, &instance, &offer).await.unwrap_or_else(|err| panic!("{err}"));
+            engine.discard_after_stop(&mut current, &instance, &candidate).await.unwrap_or_else(|err| panic!("{err}"));
         assert_eq!(out["phase"], "stopped", "{out}");
         assert_eq!(out["drain_ok"], true, "{out}");
         let seen = events.lock().unwrap().clone();
-        assert!(seen.is_empty(), "{seen:?}");
+        assert!(!seen.iter().any(|line| line.starts_with("terminate") || line.ends_with("/control.json")), "{seen:?}");
+        assert!(seen.iter().any(|line| line == "put:sessions/sess_gone/receipt.json"), "{seen:?}");
+        let stored = read_session(&home.state, "sess_gone");
+        assert_eq!(stored.ended_at, Some(ended), "the stop's end time moved");
+        assert!((stored.offer.usd_per_hr - 0.8).abs() < 1e-9);
+        assert!((stored.cost_actual_usd - 0.4).abs() < 1e-9, "{}", stored.cost_actual_usd);
+    }
+
+    #[tokio::test]
+    async fn a_failed_create_does_not_reopen_a_stop_that_deleted_its_pod() {
+        let Opened { engine, home, .. } = engine("fail-same-pod", false, false);
+        let mut done = sample("sess_same", crate::rent::session::Phase::Stopped, "pod-same");
+        done.ended_at = Some(done.created_at + chrono::TimeDelta::minutes(2));
+        done.cost_actual_usd = 0.25;
+        write_session(&home.state, &done);
+        let mut local = sample("sess_same", crate::rent::session::Phase::Provisioning, "pod-same");
+        local.error = "provision timed out (terminate: still present after delete)".into();
+        local.go(crate::rent::session::Phase::Failed, chrono::Utc::now(), local.error.clone()).unwrap();
+        assert!(engine.fail(&local).await.is_err(), "a failed create reported success");
+        let stored = read_session(&home.state, "sess_same");
+        assert_eq!(stored.phase, crate::rent::session::Phase::Stopped, "{:?}", stored.events);
+        assert_eq!(stored.ended_at, done.ended_at);
+        assert!((stored.cost_actual_usd - 0.25).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn a_plain_stop_after_a_forced_one_still_deletes_the_pod() {
+        let Opened { engine, events, home, .. } = engine("forced-then-plain", false, false);
+        // A forced stop during create whose delete of the late pod failed.
+        let mut open = sample("sess_retry", crate::rent::session::Phase::Draining, "pod-retry");
+        open.forced = true;
+        write_session(&home.state, &open);
+        let out = engine.stop("sess_retry", false, false).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(out["phase"], "stopped", "a plain stop undid the force: {out}");
+        assert_eq!(out["forced"], true, "{out}");
+        let seen = events.lock().unwrap().clone();
+        assert!(seen.iter().any(|line| line == "terminate:pod-retry"), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_running_create_keeps_its_stop_and_pod_from_the_sweeper() {
+        let Opened { engine, events, home, node, pods, release, .. } = open_with("held", false, false, false, true);
+        let task = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            async move {
+                engine
+                    .provision(Ask {
+                        project_id: "hailuo".into(),
+                        preset_id: "comfyui-minimax-h3".into(),
+                        hours: 1.0,
+                        offer_id: None,
+                        regions: vec!["EU-secure".into()],
+                        approved_usd_per_hr: None,
+                    })
+                    .await
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !events.lock().unwrap().iter().any(|line| line == "create-waiting") {
+            assert!(std::time::Instant::now() < deadline, "the create did not reach the vendor");
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let id = std::fs::read_dir(&home.state)
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str()?.strip_suffix(".json").map(str::to_owned))
+            .next()
+            .expect("the create saved its session");
+        assert!(engine.creating(&id), "provision does not mark its session as being created");
+        let stopped = engine.stop(&id, false, false).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(stopped["phase"], "draining", "{stopped}");
+        // The vendor lists the pod before the create hears back.
+        pods.lock().unwrap().push(PodRef { id: "pod-crash".into(), name: format!("invincible-{node}-{id}") });
+        engine.sweep().await;
+        let held = read_session(&home.state, &id);
+        assert_eq!(held.phase, crate::rent::session::Phase::Draining, "{:?}", held.events);
+        assert!(!held.forced, "the sweeper turned a plain stop into a forced one");
+        assert!(
+            !events.lock().unwrap().iter().any(|line| line.starts_with("terminate")),
+            "{:?}",
+            events.lock().unwrap()
+        );
+        release.notify_one();
+        let out = task.await.unwrap().unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(out["phase"], "draining", "{out}");
+        assert_eq!(out["instance_id"], "pod-crash", "{out}");
+        assert!(!engine.creating(&id), "the create left its mark behind");
+        let seen = events.lock().unwrap().clone();
+        assert!(seen.iter().any(|line| line == &format!("put:sessions/{id}/control.json")), "{seen:?}");
     }
 
     #[tokio::test]
@@ -1573,6 +1758,26 @@ mod tests {
         assert_eq!(stored.phase, crate::rent::session::Phase::Stopped, "{:?}", stored.events);
         assert!(stored.drain_ok && !stored.forced, "nothing ran, so nothing was cut short");
         assert!(stored.instance_id.is_empty());
+        assert_eq!(stored.cost_actual_usd, 0.0, "no pod ran, so nothing is charged");
+        assert!(stored.error.contains("before a pod existed"), "{}", stored.error);
+    }
+
+    #[tokio::test]
+    async fn a_forced_stop_stays_forced_when_the_create_fails() {
+        let Opened { engine, events, home, .. } = engine("fail-forced", false, false);
+        write_session(&home.state, &sample("sess_ff", crate::rent::session::Phase::Provisioning, ""));
+        let _creating = Creating::new(&engine.creating, "sess_ff");
+        engine.stop("sess_ff", true, false).await.unwrap_or_else(|err| panic!("{err}"));
+        let mut local = sample("sess_ff", crate::rent::session::Phase::Provisioning, "");
+        local.error = "provision runpod:secure:4090: status 500".into();
+        local.go(crate::rent::session::Phase::Failed, chrono::Utc::now(), local.error.clone()).unwrap();
+        assert!(engine.fail(&local).await.is_err());
+        let stored = read_session(&home.state, "sess_ff");
+        assert_eq!(stored.phase, crate::rent::session::Phase::Stopped, "{:?}", stored.events);
+        assert!(stored.forced, "the receipt contradicts the forced rent.stop");
+        assert_eq!(stored.cost_actual_usd, 0.0);
+        let seen = events.lock().unwrap().clone();
+        assert!(seen.iter().any(|line| line == "put:sessions/sess_ff/receipt.json"), "{seen:?}");
     }
 
     #[tokio::test]
