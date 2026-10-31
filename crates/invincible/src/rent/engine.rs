@@ -442,7 +442,8 @@ impl Engine {
         let force = session.forced;
         self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
         let drained = if force {
-            false
+            // A stop that found this pod by its name may have drained it already.
+            self.objects.exists(&drain_key(&session.id)).await.unwrap_or(false)
         } else {
             let control = json!({ "action": "drain", "requested_at": self.now().to_rfc3339() });
             let bytes = serde_json::to_vec(&control).map_err(|e| RentError::Unavailable(e.to_string()))?;
@@ -546,7 +547,20 @@ impl Engine {
         }
         // A forced stop that is still under way stays forced, whatever a later stop asks.
         let force = force || (session.phase == Phase::Draining && session.forced);
-        let failed = session.phase == Phase::Failed;
+        // A failed create with no pod saved has nothing to stop unless the vendor lists one under
+        // the session's name. Look before writing anything: a draining file would read as a stop.
+        if session.phase == Phase::Failed && session.instance_id.is_empty() {
+            match self.named_pod(&session.id).await? {
+                Some(pod_id) => session.instance_id = pod_id,
+                None => {
+                    return Err(RentError::Bad(if session.error.is_empty() {
+                        format!("session {} failed", session.id)
+                    } else {
+                        format!("session {} failed: {}", session.id, session.error)
+                    }));
+                }
+            }
+        }
         let mut changed = false;
         if session.phase != Phase::Draining && session.phase != Phase::Stopped {
             session.go(Phase::Draining, self.now(), "drain requested").map_err(RentError::Unavailable)?;
@@ -567,13 +581,6 @@ impl Engine {
             self.sessions.save(&session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
         }
         if session.instance_id.is_empty() {
-            if failed {
-                return Err(RentError::Bad(if session.error.is_empty() {
-                    format!("session {} failed", session.id)
-                } else {
-                    format!("session {} failed: {}", session.id, session.error)
-                }));
-            }
             if session.phase == Phase::Stopped {
                 return Ok(session.public());
             }
@@ -1226,11 +1233,13 @@ mod tests {
     struct Mem {
         events: Arc<Mutex<Vec<String>>>,
         fail: bool,
+        keys: Arc<Mutex<HashSet<String>>>,
     }
 
     impl ObjectStore for Mem {
         fn put<'a>(&'a self, key: &'a str, _body: &'a [u8]) -> StoreFut<'a, ()> {
             let events = Arc::clone(&self.events);
+            let keys = Arc::clone(&self.keys);
             let key = key.to_owned();
             let fail = self.fail;
             Box::pin(async move {
@@ -1238,13 +1247,15 @@ mod tests {
                     return Err("store down".to_owned());
                 }
                 events.lock().unwrap().push(format!("put:{key}"));
+                keys.lock().unwrap().insert(key);
                 Ok(())
             })
         }
 
-        fn exists<'a>(&'a self, _key: &'a str) -> StoreFut<'a, bool> {
+        fn exists<'a>(&'a self, key: &'a str) -> StoreFut<'a, bool> {
             let fail = self.fail;
-            Box::pin(async move { if fail { Err("store down".to_owned()) } else { Ok(false) } })
+            let found = self.keys.lock().unwrap().contains(key);
+            Box::pin(async move { if fail { Err("store down".to_owned()) } else { Ok(found) } })
         }
 
         fn list_prefix<'a>(&'a self, _prefix: &'a str) -> StoreFut<'a, Vec<String>> {
@@ -1305,7 +1316,7 @@ mod tests {
                 pods: Arc::clone(&pods),
                 hold: held.then(|| Arc::clone(&release)),
             }),
-            objects: Arc::new(Mem { events: Arc::clone(&events), fail: fail_store }),
+            objects: Arc::new(Mem { events: Arc::clone(&events), fail: fail_store, keys: Arc::default() }),
             home: path.clone(),
             secrets: Vec::new(),
             bucket: "rent".into(),
@@ -1411,7 +1422,9 @@ mod tests {
     async fn a_create_in_flight_is_not_reconciled_away() {
         let Opened { engine, events, home, node, pods, .. } = engine("race", false, false);
         pods.lock().unwrap().push(PodRef { id: "pod-fresh".into(), name: format!("invincible-{node}-sess_fresh") });
-        write_session(&home.state, &sample("sess_fresh", crate::rent::session::Phase::Provisioning, ""));
+        let mut fresh = sample("sess_fresh", crate::rent::session::Phase::Provisioning, "");
+        fresh.created_at -= chrono::TimeDelta::hours(1);
+        write_session(&home.state, &fresh);
         let _creating = Creating::new(&engine.creating, "sess_fresh");
         engine.sweep().await;
         let events = events.lock().unwrap().clone();
@@ -1451,6 +1464,39 @@ mod tests {
         assert_eq!(stored.phase, crate::rent::session::Phase::Stopped, "{:?}", stored.events);
         assert_eq!(stored.cost_actual_usd, 0.0, "an hour was charged for a pod that never existed");
         assert!(stored.error.contains("no pod"), "{}", stored.error);
+    }
+
+    #[tokio::test]
+    async fn stopping_a_failed_create_with_no_pod_writes_nothing() {
+        let Opened { engine, home, .. } = engine("failed-no-pod", false, false);
+        let mut failed = sample("sess_failed", crate::rent::session::Phase::Failed, "");
+        failed.error = "provision timed out".into();
+        write_session(&home.state, &failed);
+        match engine.stop("sess_failed", false, false).await {
+            Err(RentError::Bad(message)) => assert!(message.contains("provision timed out"), "{message}"),
+            Err(other) => panic!("unexpected error {other}"),
+            Ok(body) => panic!("a failed create was stopped: {body}"),
+        }
+        let stored = read_session(&home.state, "sess_failed");
+        assert_eq!(stored.phase, crate::rent::session::Phase::Failed, "{:?}", stored.events);
+    }
+
+    #[tokio::test]
+    async fn a_forced_late_pod_that_already_drained_is_recorded_as_drained() {
+        let Opened { engine, home, .. } = open_with("forced-drained", false, false, false, false);
+        let mut open = sample("sess_drained", crate::rent::session::Phase::Draining, "pod-drained");
+        open.forced = true;
+        write_session(&home.state, &open);
+        // The marker a stop's drain left before its delete failed.
+        engine.objects.put(&drain_key("sess_drained"), b"{}").await.unwrap();
+        let mut current = read_session(&home.state, "sess_drained");
+        let offer = current.offer.clone();
+        let instance = Instance { id: "pod-drained".into(), status: "RUNNING".into(), ..Instance::default() };
+        let out =
+            engine.discard_after_stop(&mut current, &instance, &offer).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(out["phase"], "stopped", "{out}");
+        assert_eq!(out["drain_ok"], true, "the drain finished but was recorded as cut short: {out}");
+        assert_eq!(out["forced"], false, "{out}");
     }
 
     #[tokio::test]
@@ -1640,6 +1686,7 @@ mod tests {
     async fn a_deadline_during_create_forces_the_stop_and_leaves_it_to_the_create() {
         let Opened { engine, home, .. } = engine("deadline-inflight", false, false);
         let mut expired = sample("sess_due", crate::rent::session::Phase::Provisioning, "");
+        expired.created_at -= chrono::TimeDelta::hours(2);
         expired.deadline_at = chrono::Utc::now() - chrono::TimeDelta::minutes(1);
         write_session(&home.state, &expired);
         let _creating = Creating::new(&engine.creating, "sess_due");

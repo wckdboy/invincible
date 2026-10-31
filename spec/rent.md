@@ -56,13 +56,15 @@ create answers 503 `rent_unavailable` with its error, no `rent.start` is logged,
 finished with nothing charged (`cost_basis: no_pod`). A failed delete is not recorded as `stopped`:
 the session stays `draining` with the instance id, so the next stop and the sweeper retry it. Create
 re-reads the session under its lock before each save, so a stop during hydrate is not overwritten by
-`ready`. A `provisioning` session that no create is running for and that is older than any create
-lasts (30 minutes; the node stopped mid-create) is stopped by the next sweep: a pod with its name is
-deleted, and with none, nothing is charged. The sweeper always deletes after the drain attempt: a
-pod does not outlive the hours it was paid for, and an idle ready or hydrating pod (no status read
-for `idle_minutes`) is stopped the same way. A `failed` session that still has a pod is deleted too.
-On startup and on each sweep, a pod named `invincible-<session>` with no live tracked session is
-drained on a best-effort basis and then terminated.
+`ready`. A `provisioning` or `draining` session with no pod id that no create is running for (the
+node stopped mid-create) is left alone, and so is a pod with its name, until it is older than any
+create lasts (30 minutes): another node process on the same home may still be creating it. Then the
+next sweep stops it, forced: a pod with its name is deleted, and with none, nothing is charged. The
+sweeper always deletes after the drain attempt: a pod does not outlive the hours it was paid for,
+and an idle ready or hydrating pod (no status read for `idle_minutes`) is stopped the same way. A
+`failed` session that still has a pod is deleted too. On startup and on each sweep, a pod named
+`invincible-<session>` with no live tracked session is drained on a best-effort basis and then
+terminated.
 Going over `monthly_cap_usd` stops whatever is still running.
 
 Hydrate, on start, lists `projects/<id>/workspace/` and writes `sessions/<id>/hydrate.json`, then
