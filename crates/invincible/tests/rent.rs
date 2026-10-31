@@ -32,6 +32,11 @@ struct Mocks {
     hostile: bool,
     raise: bool,
     fail_create: bool,
+    hold_create: bool,
+    release_create: Arc<tokio::sync::Notify>,
+    hold_hydrate: bool,
+    release_hydrate: Arc<tokio::sync::Notify>,
+    delete_failures: Arc<Mutex<u32>>,
     catalogs: Arc<Mutex<u32>>,
     pods: Arc<Mutex<Vec<String>>>,
     named: Arc<Mutex<Vec<Value>>>,
@@ -113,6 +118,11 @@ async fn stack(tag: &str, monthly: &str, slow: bool, hostile: bool, raise: bool)
         hostile,
         raise,
         fail_create: tag == "create-fail",
+        hold_create: tag == "hold-create" || tag == "delete-once",
+        release_create: Arc::new(tokio::sync::Notify::new()),
+        hold_hydrate: tag == "hold-hydrate",
+        release_hydrate: Arc::new(tokio::sync::Notify::new()),
+        delete_failures: Arc::new(Mutex::new(u32::from(tag == "delete-once"))),
         catalogs: Arc::new(Mutex::new(0)),
         pods: Arc::new(Mutex::new(Vec::new())),
         named: Arc::new(Mutex::new(Vec::new())),
@@ -323,6 +333,10 @@ async fn create_pod(
         *seq += 1;
         format!("pod-{}", *seq)
     };
+    if mocks.hold_create {
+        mocks.log.lock().unwrap().push("runpod:create-waiting".into());
+        mocks.release_create.notified().await;
+    }
     mocks.log.lock().unwrap().push("runpod:create".into());
     if mocks.fail_create {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "unavailable"}))).into_response();
@@ -365,6 +379,14 @@ async fn delete_pod(State(mocks): State<Mocks>, headers: HeaderMap, UrlPath(id):
     if !bearer_ok(&headers, &mocks.key) {
         return StatusCode::UNAUTHORIZED;
     }
+    {
+        let mut left = mocks.delete_failures.lock().unwrap();
+        if *left > 0 {
+            *left -= 1;
+            mocks.log.lock().unwrap().push(format!("runpod:delete-fail:{id}"));
+            return StatusCode::CONFLICT;
+        }
+    }
     mocks.log.lock().unwrap().push(format!("runpod:delete:{id}"));
     mocks.pods.lock().unwrap().retain(|pod| pod != &id);
     mocks.named.lock().unwrap().retain(|pod| pod["id"].as_str() != Some(id.as_str()));
@@ -393,17 +415,28 @@ async fn put_object(
     body: axum::body::Bytes,
 ) -> StatusCode {
     assert_sigv4(&headers);
-    let mut objects = mocks.objects.lock().unwrap();
-    objects.insert(key.clone(), body.to_vec());
-    if key.ends_with("/control.json") {
-        mocks.log.lock().unwrap().push("s3:control".into());
-        let marker = key.trim_end_matches("control.json").to_owned() + "drain-ok.json";
-        objects.insert(marker, br#"{"ok":true}"#.to_vec());
-    }
-    if key.ends_with("/hydrate.json") {
-        mocks.log.lock().unwrap().push("s3:hydrate".into());
+    let hold_hydrate = {
+        let mut objects = mocks.objects.lock().unwrap();
+        objects.insert(key.clone(), body.to_vec());
+        if key.ends_with("/control.json") {
+            mocks.log.lock().unwrap().push("s3:control".into());
+            let marker = key.trim_end_matches("control.json").to_owned() + "drain-ok.json";
+            objects.insert(marker, br#"{"ok":true}"#.to_vec());
+        }
+        let hydrate = key.ends_with("/hydrate.json");
+        if hydrate {
+            mocks.log.lock().unwrap().push("s3:hydrate".into());
+        }
+        if hydrate && !mocks.hold_hydrate {
+            let marker = key.trim_end_matches("hydrate.json").to_owned() + "hydrate-ok.json";
+            objects.insert(marker, br#"{"ok":true}"#.to_vec());
+        }
+        hydrate && mocks.hold_hydrate
+    };
+    if hold_hydrate {
+        mocks.release_hydrate.notified().await;
         let marker = key.trim_end_matches("hydrate.json").to_owned() + "hydrate-ok.json";
-        objects.insert(marker, br#"{"ok":true}"#.to_vec());
+        mocks.objects.lock().unwrap().insert(marker, br#"{"ok":true}"#.to_vec());
     }
     StatusCode::OK
 }
@@ -919,6 +952,182 @@ async fn a_create_error_is_not_retried() {
     assert!(status >= 500, "{status} {body}");
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert_eq!(count(&log_of(&stack.mocks), "runpod:create"), 1, "{:?}", log_of(&stack.mocks));
+}
+
+#[tokio::test]
+async fn a_stop_during_create_is_not_revived_when_the_pod_appears() {
+    let (stack, _node) = stack("hold-create", "monthly_cap_usd = 50\n", false, false, false).await;
+    ready(&stack.url, &stack.dir).await;
+    let url = stack.url.clone();
+    let create = tokio::spawn(async move {
+        call(
+            &url,
+            reqwest::Method::POST,
+            "/v1/rent/sessions",
+            Some(create_body("comfyui-minimax-h3", 1.0, false)),
+            true,
+        )
+        .await
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !log_of(&stack.mocks).iter().any(|line| line == "runpod:create-waiting") {
+        assert!(Instant::now() < deadline, "create did not reach the vendor\n{}", log_of(&stack.mocks).join("\n"));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let session_id = loop {
+        let (status, body) = call(&stack.url, reqwest::Method::GET, "/v1/rent/sessions", None, false).await;
+        assert_eq!(status, 200, "{body}");
+        if let Some(id) = body["sessions"].as_array().and_then(|rows| rows.first()).and_then(|row| row["id"].as_str()) {
+            break id.to_owned();
+        }
+        assert!(Instant::now() < deadline, "the provisioning session was not saved");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    let (status, stopped) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        &format!("/v1/rent/sessions/{session_id}/stop"),
+        Some(json!({})),
+        false,
+    )
+    .await;
+    assert_eq!(status, 200, "{stopped}");
+    assert_eq!(stopped["phase"], "draining", "{stopped}");
+    stack.mocks.release_create.notify_one();
+    let (status, created) = create.await.unwrap();
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["phase"], "stopped", "{created}");
+    assert_eq!(created["drain_ok"], true, "{created}");
+    assert!(created["cost_actual_usd"].as_f64().is_some(), "{created}");
+    assert_eq!(created["id"], session_id);
+    let receipt_key = format!("sessions/{session_id}/receipt.json");
+    let receipt_bytes = stack.mocks.objects.lock().unwrap().get(&receipt_key).cloned().expect("stop receipt");
+    let receipt: Value = serde_json::from_slice(&receipt_bytes).unwrap();
+    assert_eq!(receipt["instance_id"], created["instance_id"], "{receipt}");
+    assert_eq!(receipt["drain_ok"], true, "{receipt}");
+    assert!(receipt["cost_actual_usd"].as_f64().is_some(), "{receipt}");
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !log_of(&stack.mocks).iter().any(|line| line.starts_with("runpod:delete:")) {
+        assert!(Instant::now() < deadline, "the late pod was not deleted\n{}", log_of(&stack.mocks).join("\n"));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (status, again) =
+        call(&stack.url, reqwest::Method::GET, &format!("/v1/rent/sessions/{session_id}"), None, false).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(again["phase"], "stopped", "the create path revived the session: {again}");
+    assert!(stack.mocks.pods.lock().unwrap().is_empty(), "the pod is still billed");
+    let log = log_of(&stack.mocks);
+    let control = log.iter().position(|line| line == "s3:control").expect("drain was requested");
+    let delete = log.iter().position(|line| line.starts_with("runpod:delete:")).expect("pod was deleted");
+    assert!(control < delete, "{log:?}");
+}
+
+#[tokio::test]
+async fn a_failed_delete_of_a_late_pod_stays_open_for_another_stop() {
+    let (stack, _node) = stack("delete-once", "monthly_cap_usd = 50\n", false, false, false).await;
+    ready(&stack.url, &stack.dir).await;
+    let url = stack.url.clone();
+    let create = tokio::spawn(async move {
+        call(
+            &url,
+            reqwest::Method::POST,
+            "/v1/rent/sessions",
+            Some(create_body("comfyui-minimax-h3", 1.0, false)),
+            true,
+        )
+        .await
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !log_of(&stack.mocks).iter().any(|line| line == "runpod:create-waiting") {
+        assert!(Instant::now() < deadline, "create did not reach the vendor");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let (status, listed) = call(&stack.url, reqwest::Method::GET, "/v1/rent/sessions", None, false).await;
+    assert_eq!(status, 200, "{listed}");
+    let session_id = listed["sessions"][0]["id"].as_str().unwrap().to_owned();
+    let (status, stopped) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        &format!("/v1/rent/sessions/{session_id}/stop"),
+        Some(json!({})),
+        false,
+    )
+    .await;
+    assert_eq!(status, 200, "{stopped}");
+    stack.mocks.release_create.notify_one();
+    let (status, created) = create.await.unwrap();
+    assert_eq!(status, 201, "{created}");
+    assert_ne!(created["phase"], "stopped", "{created}");
+    assert!(!created["instance_id"].is_null(), "{created}");
+    let receipt_key = format!("sessions/{session_id}/receipt.json");
+    assert!(!stack.mocks.objects.lock().unwrap().contains_key(&receipt_key), "a failed delete wrote a stop receipt");
+    assert!(
+        log_of(&stack.mocks).iter().any(|line| line.starts_with("runpod:delete-fail:")),
+        "{:?}",
+        log_of(&stack.mocks)
+    );
+    assert!(!stack.mocks.pods.lock().unwrap().is_empty(), "the failed delete removed the pod");
+    let (status, again) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        &format!("/v1/rent/sessions/{session_id}/stop"),
+        Some(json!({"force": true})),
+        false,
+    )
+    .await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(again["phase"], "stopped", "{again}");
+    assert!(again["cost_actual_usd"].as_f64().is_some(), "{again}");
+    assert!(stack.mocks.pods.lock().unwrap().is_empty(), "the retry did not delete the pod");
+    let receipt_bytes = stack.mocks.objects.lock().unwrap().get(&receipt_key).cloned().expect("retry receipt");
+    let receipt: Value = serde_json::from_slice(&receipt_bytes).unwrap();
+    assert_eq!(receipt["instance_id"], again["instance_id"], "{receipt}");
+    assert!(receipt["cost_actual_usd"].as_f64().is_some(), "{receipt}");
+}
+
+#[tokio::test]
+async fn a_stop_during_hydrate_is_not_overwritten() {
+    let (stack, _node) = stack("hold-hydrate", "monthly_cap_usd = 50\n", false, false, false).await;
+    ready(&stack.url, &stack.dir).await;
+    let url = stack.url.clone();
+    let create = tokio::spawn(async move {
+        call(
+            &url,
+            reqwest::Method::POST,
+            "/v1/rent/sessions",
+            Some(create_body("comfyui-minimax-h3", 1.0, false)),
+            true,
+        )
+        .await
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !log_of(&stack.mocks).iter().any(|line| line == "s3:hydrate") {
+        assert!(Instant::now() < deadline, "hydrate did not start\n{}", log_of(&stack.mocks).join("\n"));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let (status, listed) = call(&stack.url, reqwest::Method::GET, "/v1/rent/sessions", None, false).await;
+    assert_eq!(status, 200, "{listed}");
+    let session_id = listed["sessions"][0]["id"].as_str().unwrap().to_owned();
+    let (status, stopped) = call(
+        &stack.url,
+        reqwest::Method::POST,
+        &format!("/v1/rent/sessions/{session_id}/stop"),
+        Some(json!({})),
+        false,
+    )
+    .await;
+    assert_eq!(status, 200, "{stopped}");
+    assert_eq!(stopped["phase"], "stopped", "{stopped}");
+    stack.mocks.release_hydrate.notify_one();
+    let (status, created) = create.await.unwrap();
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["phase"], "stopped", "{created}");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (status, again) =
+        call(&stack.url, reqwest::Method::GET, &format!("/v1/rent/sessions/{session_id}"), None, false).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(again["phase"], "stopped", "hydrate saved over the stop: {again}");
 }
 
 fn rewrite_session(dir: &Path, id: &str, deadline: &str, last_active: Option<&str>) {

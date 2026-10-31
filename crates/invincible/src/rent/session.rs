@@ -48,6 +48,8 @@ impl Phase {
                     | (Self::Ready, Self::Draining | Self::Failed)
                     | (Self::Draining, Self::Ready | Self::Stopped | Self::Failed)
                     | (Self::Failed, Self::Draining)
+                    // A stop that finished before the pod id existed can be reopened once that pod appears.
+                    | (Self::Stopped, Self::Draining)
             )
     }
 }

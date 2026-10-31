@@ -47,3 +47,9 @@ docker build -f sidecar/vllm.Dockerfile -t ghcr.io/wckdboy/invincible-rent-vllm:
 
 `.github/workflows/rent-sidecar.yml` builds the three images. It pushes
 `:edge` from `main`. It does not publish a release.
+
+`:edge` is the preset ref on purpose for now. A node release (`release.yml`) publishes
+binaries, not these images, so a digest written into the preset at tag time would point at
+an image that release did not publish. The bases in the Dockerfiles are already digest-pinned.
+The release that tags `ghcr.io/wckdboy/invincible-rent-<preset>:<version>` should pin that
+digest into the three preset files in the same commit.

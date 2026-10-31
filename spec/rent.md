@@ -26,7 +26,12 @@ When `[rent] enabled` is true, `invincible serve` opens the engine. It does not 
   add a preset. A file that reuses a shipped id is ignored, and a symlink is not followed.
   The schema is wckd-gpu's. A new GHCR package is private. Make it public, or set
   `container_registry_auth_id` to a RunPod registry credential id. The node sends that as
-  `registry` and does not log it.
+  `registry` and does not log it. The preset image ref is `ghcr.io/wckdboy/invincible-rent-*:edge`.
+  `:edge` is acceptable until a release publishes those images: the node release builds binaries,
+  not the GPU images, and the sidecar workflow only pushes `:edge` from main. The bases under
+  those images are already pinned by digest in `sidecar/`. Pinning the preset ref to a digest
+  belongs in the release that tags `ghcr.io/wckdboy/invincible-rent-<preset>:<version>` and
+  rewrites these three files.
 - Sessions live in `$INVINCIBLE_HOME/rent/state/*.json` (mode 0600). A restart loads them and the
   sweeper drains and deletes anything past its deadline, idle, or over the monthly cap.
 - The pod is named `invincible-<node id>-<session>`. The node id is a stable file
@@ -38,7 +43,12 @@ Phases: `provisioning` → `hydrating` → `ready` → `draining` → `stopped`,
 (`quoting`) writes nothing: no session file, no object, no pod.
 
 A stop writes `sessions/<id>/control.json` (`action: drain`), waits for `drain-ok.json`, and only
-then deletes the pod. `force` deletes after that wait even when the marker never arrives. The
+then deletes the pod. `force` deletes after that wait even when the marker never arrives. A stop
+that lands before the pod id exists stays `draining` and remembers whether it was forced. When
+that pod appears, a forced stop deletes it immediately; a plain stop waits for the drain marker
+and, if it never arrives, stays `draining` with the instance id so the sweeper deletes it. A
+failed delete is not recorded as `stopped`. Create re-reads the session before each save, so a
+stop during hydrate is not overwritten by `ready`. The
 sweeper always deletes after the drain attempt: a pod does not outlive the hours it was paid for,
 and an idle ready or hydrating pod (no status read for `idle_minutes`) is stopped the same way.
 A `failed` session that still has a pod is deleted too. On startup and on each sweep, a pod

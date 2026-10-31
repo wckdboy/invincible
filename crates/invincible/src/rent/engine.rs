@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::broker::{self, Cache};
 use super::preset::{Catalog, Preset};
-use super::provider::{Offer, Provider, ProviderError, ProvisionRequest, Query};
+use super::provider::{Instance, Offer, Provider, ProviderError, ProvisionRequest, Query};
 use super::secrets::scrub;
 use super::session::{self, Phase, Session, Store};
 use super::sync::ObjectStore;
@@ -228,11 +228,15 @@ impl Engine {
             ended_at: None,
         };
         session.note(now, "session created");
-        self.sessions.save(&session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        if let Some(stored) = self.persist(&session).await? {
+            return Ok(stored.public());
+        }
         if let Err(err) = self.write_project(&session).await {
             session.error = err.clone();
             let _ = session.go(Phase::Failed, self.now(), err.clone());
-            let _ = self.sessions.save(&session);
+            if let Some(stored) = self.persist(&session).await? {
+                return Ok(stored.public());
+            }
             return Err(RentError::Unavailable(err));
         }
         let mut last = String::from("provision failed");
@@ -252,28 +256,51 @@ impl Engine {
                                 session.data_center = instance.data_center;
                                 session.error = format!("{last} (terminate: {})", self.scrubbed(err));
                                 let _ = session.go(Phase::Failed, self.now(), session.error.clone());
-                                let _ = self.sessions.save(&session);
+                                if let Some(stored) = self.persist(&session).await? {
+                                    return Ok(stored.public());
+                                }
                                 return Err(RentError::Unavailable(session.error.clone()));
                             }
                         }
                         continue;
                     }
-                    session.offer = candidate.clone();
-                    if instance.cost_per_hour > session.offer.usd_per_hr {
-                        session.offer.usd_per_hr = instance.cost_per_hour;
-                        session.cost_estimate_usd = instance.cost_per_hour * session.hours;
+                    // Stop can land while the vendor call is in flight and mark the session
+                    // draining. Saving this in-memory copy would put it back to hydrating.
+                    let created = instance.clone();
+                    let mut current = match self.sessions.get(&session.id) {
+                        Ok(Some(current)) => current,
+                        Ok(None) => {
+                            let _ = self.provider.terminate(&instance.id).await;
+                            return Err(RentError::Unavailable("the session disappeared during create".into()));
+                        }
+                        Err(err) => {
+                            let _ = self.provider.terminate(&instance.id).await;
+                            return Err(RentError::Unavailable(self.scrubbed(err)));
+                        }
+                    };
+                    if matches!(current.phase, Phase::Stopped | Phase::Draining) {
+                        return self.discard_after_stop(&mut current, &instance).await;
                     }
-                    session.instance_id = instance.id.clone();
-                    session.pod_status = instance.status;
-                    session.data_center = instance.data_center;
-                    session.endpoints = instance.endpoints;
-                    session.error.clear();
-                    session
+                    current.offer = candidate.clone();
+                    if instance.cost_per_hour > current.offer.usd_per_hr {
+                        current.offer.usd_per_hr = instance.cost_per_hour;
+                        current.cost_estimate_usd = instance.cost_per_hour * current.hours;
+                    }
+                    current.instance_id = instance.id.clone();
+                    current.pod_status = instance.status;
+                    current.data_center = instance.data_center;
+                    current.endpoints = instance.endpoints;
+                    current.error.clear();
+                    current
                         .go(Phase::Hydrating, self.now(), format!("pod {} created", instance.id))
                         .map_err(RentError::Unavailable)?;
-                    if let Err(err) = self.sessions.save(&session) {
-                        return self.abandon(&session.instance_id, err).await;
+                    match self.persist(&current).await {
+                        Ok(Some(mut stored)) => return self.discard_after_stop(&mut stored, &created).await,
+                        Ok(None) => {}
+                        // The pod exists and the session file did not take it. Delete the pod.
+                        Err(err) => return self.abandon(&created.id, err.to_string()).await,
                     }
+                    session = current;
                     break;
                 }
                 Err(err) => {
@@ -286,7 +313,9 @@ impl Engine {
                                 session.instance_id = pod_id;
                                 session.error = format!("{last} (terminate: {})", self.scrubbed(term));
                                 let _ = session.go(Phase::Failed, self.now(), session.error.clone());
-                                let _ = self.sessions.save(&session);
+                                if let Some(stored) = self.persist(&session).await? {
+                                    return Ok(stored.public());
+                                }
                                 return Err(RentError::Unavailable(session.error.clone()));
                             }
                         }
@@ -297,10 +326,15 @@ impl Engine {
         if session.instance_id.is_empty() {
             session.error = last.clone();
             let _ = session.go(Phase::Failed, self.now(), last.clone());
-            let _ = self.sessions.save(&session);
+            if let Some(stored) = self.persist(&session).await? {
+                return Ok(stored.public());
+            }
             return Err(RentError::Unavailable(last));
         }
         if let Err(err) = self.hydrate(&mut session).await {
+            if let Some(stored) = self.persisted_stop(&session.id).await? {
+                return Ok(stored.public());
+            }
             session.error = match self.provider.terminate(&session.instance_id).await {
                 Ok(()) => {
                     session.instance_id.clear();
@@ -309,10 +343,91 @@ impl Engine {
                 Err(term) => format!("{err} (terminate: {})", self.scrubbed(term)),
             };
             let _ = session.go(Phase::Failed, self.now(), session.error.clone());
-            let _ = self.sessions.save(&session);
+            if let Some(stored) = self.persist(&session).await? {
+                return Ok(stored.public());
+            }
             return Err(RentError::Unavailable(session.error.clone()));
         }
-        self.sessions.save(&session).map_err(|err| RentError::Unavailable(self.scrubbed(err)))?;
+        if let Some(stored) = self.persist(&session).await? {
+            return Ok(stored.public());
+        }
+        Ok(session.public())
+    }
+
+    /// Save [session] unless a stop already moved it to draining or stopped.
+    /// The stored session is returned in that case and nothing is written.
+    async fn persist(&self, session: &Session) -> Result<Option<Session>, RentError> {
+        let _guard = self.session_lock(&session.id).lock_owned().await;
+        if let Some(stored) = self.sessions.get(&session.id).map_err(|e| RentError::Unavailable(self.scrubbed(e)))? {
+            let stopping = matches!(stored.phase, Phase::Stopped | Phase::Draining);
+            let writing_stop = matches!(session.phase, Phase::Stopped | Phase::Draining);
+            if stopping && !writing_stop {
+                return Ok(Some(stored));
+            }
+        }
+        self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        Ok(None)
+    }
+
+    async fn persisted_stop(&self, id: &str) -> Result<Option<Session>, RentError> {
+        let _guard = self.session_lock(id).lock_owned().await;
+        let stored = self.sessions.get(id).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        Ok(stored.filter(|session| matches!(session.phase, Phase::Stopped | Phase::Draining)))
+    }
+
+    /// A stop won while the vendor was still creating. Follow that stop: a forced stop deletes
+    /// the pod now; a plain stop waits for the drain marker and, if it never arrives, stays
+    /// draining so the sweeper can delete it. A failed delete is not recorded as stopped.
+    async fn discard_after_stop(&self, session: &mut Session, instance: &Instance) -> Result<Value, RentError> {
+        let _guard = self.session_lock(&session.id).lock_owned().await;
+        if let Ok(Some(latest)) = self.sessions.get(&session.id) {
+            *session = latest;
+        }
+        session.instance_id = instance.id.clone();
+        session.pod_status = instance.status.clone();
+        session.data_center = instance.data_center.clone();
+        session.endpoints = instance.endpoints.clone();
+        if session.phase != Phase::Draining && session.phase != Phase::Stopped {
+            session.go(Phase::Draining, self.now(), "late pod arrived after stop").map_err(RentError::Unavailable)?;
+        }
+        let force = session.forced;
+        self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+        let drained = if force {
+            false
+        } else {
+            let control = json!({ "action": "drain", "requested_at": self.now().to_rfc3339() });
+            let bytes = serde_json::to_vec(&control).map_err(|e| RentError::Unavailable(e.to_string()))?;
+            match self.objects.put(&control_key(&session.id), &bytes).await {
+                Ok(()) => self.wait_marker(&drain_key(&session.id), self.drain_wait).await.unwrap_or(false),
+                Err(err) => {
+                    tracing::warn!(session = %session.id, "drain before a late pod: {}", self.scrubbed(err));
+                    false
+                }
+            }
+        };
+        if !force && !drained {
+            session.error = "drain did not finish; the pod stays until the sweeper deletes it".into();
+            if session.phase == Phase::Stopped {
+                session.go(Phase::Draining, self.now(), session.error.clone()).map_err(RentError::Unavailable)?;
+            } else {
+                session.note(self.now(), session.error.clone());
+            }
+            self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+            return Ok(session.public());
+        }
+        if let Err(err) = self.provider.terminate(&instance.id).await {
+            session.error = format!("stopped during create (terminate: {})", self.scrubbed(err));
+            if session.phase == Phase::Stopped {
+                session.go(Phase::Draining, self.now(), session.error.clone()).map_err(RentError::Unavailable)?;
+            } else if session.phase != Phase::Draining && session.phase != Phase::Failed {
+                session.go(Phase::Failed, self.now(), session.error.clone()).map_err(RentError::Unavailable)?;
+            } else {
+                session.note(self.now(), session.error.clone());
+            }
+            self.sessions.save(session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+            return Ok(session.public());
+        }
+        self.finish(session, drained, force && !drained).await?;
         Ok(session.public())
     }
 
@@ -411,7 +526,13 @@ impl Engine {
             if session.phase == Phase::Stopped {
                 return Ok(session.public());
             }
-            self.finish(&mut session, true, false).await?;
+            // The vendor call may still return a pod. Stay draining and remember whether
+            // that pod may be deleted without a finished drain.
+            session.forced = force || must_delete;
+            self.sessions.save(&session).map_err(|e| RentError::Unavailable(self.scrubbed(e)))?;
+            if must_delete {
+                self.finish(&mut session, false, true).await?;
+            }
             return Ok(session.public());
         }
         let control = json!({ "action": "drain", "requested_at": self.now().to_rfc3339() });
@@ -863,6 +984,7 @@ mod tests {
         events: Arc<Mutex<Vec<String>>>,
         freeze: bool,
         ghost: bool,
+        fail_deletes: Arc<std::sync::atomic::AtomicU32>,
         pods: Arc<Mutex<Vec<PodRef>>>,
     }
 
@@ -921,8 +1043,14 @@ mod tests {
 
         fn terminate<'a>(&'a self, id: &'a str) -> super::super::provider::ProviderFut<'a, ()> {
             let events = Arc::clone(&self.events);
+            let fail_deletes = Arc::clone(&self.fail_deletes);
             let id = id.to_owned();
             Box::pin(async move {
+                if fail_deletes.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                    fail_deletes.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    events.lock().unwrap().push(format!("terminate-fail:{id}"));
+                    return Err(crate::rent::provider::ProviderError::Vendor("runpod api status 409: conflict".into()));
+                }
                 events.lock().unwrap().push(format!("terminate:{id}"));
                 Ok(())
             })
@@ -985,6 +1113,7 @@ mod tests {
         home: Home,
         node: String,
         pods: Arc<Mutex<Vec<PodRef>>>,
+        fail_deletes: Arc<std::sync::atomic::AtomicU32>,
     }
 
     fn engine(label: &str, freeze: bool, fail_store: bool) -> Opened {
@@ -998,12 +1127,14 @@ mod tests {
         let state = path.join("rent/state");
         let events = Arc::new(Mutex::new(Vec::new()));
         let pods = Arc::new(Mutex::new(Vec::new()));
+        let fail_deletes = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let mut engine = Engine::open(Open {
             provider: Arc::new(Fake {
                 state: state.clone(),
                 events: Arc::clone(&events),
                 freeze,
                 ghost,
+                fail_deletes: Arc::clone(&fail_deletes),
                 pods: Arc::clone(&pods),
             }),
             objects: Arc::new(Mem { events: Arc::clone(&events), fail: fail_store }),
@@ -1020,7 +1151,7 @@ mod tests {
         .unwrap();
         engine.drain_wait = std::time::Duration::from_millis(30);
         engine.drain_poll = std::time::Duration::from_millis(5);
-        Opened { engine: Arc::new(engine), events, home: Home { path, state }, node, pods }
+        Opened { engine: Arc::new(engine), events, home: Home { path, state }, node, pods, fail_deletes }
     }
 
     fn sample(id: &str, phase: crate::rent::session::Phase, instance: &str) -> crate::rent::session::Session {
@@ -1096,7 +1227,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_sweep_terminates_only_this_nodes_untracked_pod() {
-        let Opened { engine, events, home: _home, node, pods } = engine("scope", false, false);
+        let Opened { engine, events, home: _home, node, pods, .. } = engine("scope", false, false);
         pods.lock().unwrap().extend([
             PodRef { id: "pod-orphan".into(), name: format!("invincible-{node}-sess_gone") },
             PodRef { id: "pod-other".into(), name: "invincible-0123456789abcdef-sess_other".into() },
@@ -1110,7 +1241,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_create_in_flight_is_not_reconciled_away() {
-        let Opened { engine, events, home, node, pods } = engine("race", false, false);
+        let Opened { engine, events, home, node, pods, .. } = engine("race", false, false);
         pods.lock().unwrap().push(PodRef { id: "pod-fresh".into(), name: format!("invincible-{node}-sess_fresh") });
         write_session(&home.state, &sample("sess_fresh", crate::rent::session::Phase::Provisioning, ""));
         engine.sweep().await;
@@ -1139,7 +1270,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_id_on_a_stopped_or_failed_session_does_not_keep_the_pod() {
-        let Opened { engine, events, home, node, pods } = engine("empty", false, false);
+        let Opened { engine, events, home, node, pods, .. } = engine("empty", false, false);
         write_session(&home.state, &sample("sess_stopped", crate::rent::session::Phase::Stopped, ""));
         write_session(&home.state, &sample("sess_failed", crate::rent::session::Phase::Failed, ""));
         pods.lock().unwrap().extend([
@@ -1155,7 +1286,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_provisioning_session_past_its_deadline_loses_its_unnamed_pod() {
-        let Opened { engine, events, home, node, pods } = engine("deadline", false, false);
+        let Opened { engine, events, home, node, pods, .. } = engine("deadline", false, false);
         let mut session = sample("sess_late", crate::rent::session::Phase::Provisioning, "");
         session.deadline_at = chrono::Utc::now() - chrono::TimeDelta::minutes(1);
         write_session(&home.state, &session);
@@ -1186,5 +1317,46 @@ mod tests {
             .flatten()
             .any(|entry| std::fs::read_to_string(entry.path()).unwrap_or_default().contains("pod-ghost"));
         assert!(terminated || tracked, "{err}\n{events:?}");
+    }
+
+    fn read_session(state: &std::path::Path, id: &str) -> crate::rent::session::Session {
+        let text = std::fs::read_to_string(state.join(format!("{id}.json"))).unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_plain_stop_leaves_a_late_pod_draining_until_the_marker() {
+        let Opened { engine, events, home, .. } = engine("plain-late", false, false);
+        write_session(&home.state, &sample("sess_plain", crate::rent::session::Phase::Provisioning, ""));
+        let stopped = engine.stop("sess_plain", false, false).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(stopped["phase"], "draining", "{stopped}");
+        let mut current = read_session(&home.state, "sess_plain");
+        let instance = Instance { id: "pod-plain".into(), status: "RUNNING".into(), ..Instance::default() };
+        let out = engine.discard_after_stop(&mut current, &instance).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(out["phase"], "draining", "{out}");
+        assert_eq!(out["instance_id"], "pod-plain");
+        let events = events.lock().unwrap().clone();
+        assert!(!events.iter().any(|line| line.starts_with("terminate:")), "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn a_forced_stop_deletes_a_late_pod_and_a_failed_delete_stays_open() {
+        let Opened { engine, events, home, fail_deletes, .. } = engine("force-late", false, false);
+        write_session(&home.state, &sample("sess_force", crate::rent::session::Phase::Provisioning, ""));
+        let stopped = engine.stop("sess_force", true, false).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(stopped["phase"], "draining", "{stopped}");
+        assert_eq!(stopped["forced"], true, "{stopped}");
+        fail_deletes.store(1, std::sync::atomic::Ordering::SeqCst);
+        let mut current = read_session(&home.state, "sess_force");
+        let instance = Instance { id: "pod-force".into(), status: "RUNNING".into(), ..Instance::default() };
+        let out = engine.discard_after_stop(&mut current, &instance).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_ne!(out["phase"], "stopped", "{out}");
+        assert_eq!(out["instance_id"], "pod-force");
+        let again = engine.stop("sess_force", true, false).await.unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(again["phase"], "stopped", "{again}");
+        assert!(again["cost_actual_usd"].as_f64().is_some(), "{again}");
+        let events = events.lock().unwrap().clone();
+        assert!(events.iter().any(|line| line == "terminate-fail:pod-force"), "{events:?}");
+        assert!(events.iter().any(|line| line == "terminate:pod-force"), "{events:?}");
     }
 }
