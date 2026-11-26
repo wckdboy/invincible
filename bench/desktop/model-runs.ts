@@ -66,6 +66,61 @@ export function meterDollars(text: string, label: string): number | null {
   return said ? Number(said[1]!.replaceAll(",", "")) : null;
 }
 
+/** One run as the runner keeps it: the task's run, what it cost (an upper bound, and the node's meter) and how long it took. */
+export type RunRecord = TaskRun & { dollars: number; meter: number | null; minutes: number };
+
+const median = (xs: readonly number[]): number | null => {
+  if (!xs.length) return null;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+};
+const round = (n: number, places = 4) => Number(n.toFixed(places));
+
+/**
+ * The runs by task, as the desktop suite keeps its model baseline (bench/baseline/desktop-model.json): passes of the
+ * runs, the model calls and actions a run took (median and most), the most calls per action a passing run took, the
+ * tokens, the dollars (the node's meter, and the runner's upper bound) and the minutes. `bar`: the passes it is held to.
+ */
+export function recordOf(report: { at: string; commit: string; model: string; route: string; runs: readonly RunRecord[] }, bar: { passed: number; of: number }) {
+  const tasks = Object.fromEntries(
+    [...new Set(report.runs.map((r) => r.task))].map((task) => {
+      const these = report.runs.filter((r) => r.task === task);
+      const passing = these.filter((r) => r.pass);
+      const loops = these.map((r) => r.loop).filter((l): l is NonNullable<TaskRun["loop"]> => Boolean(l));
+      const sum = (f: (l: NonNullable<TaskRun["loop"]>) => number) => loops.reduce((total, l) => total + f(l), 0);
+      return [
+        task,
+        {
+          passed: passing.length,
+          of: these.length,
+          ...(these.some((r) => !r.pass) ? { failed: these.filter((r) => !r.pass).map((r) => `run ${r.run}: ${r.why.slice(0, 200)}`) } : {}),
+          calls: { median: median(loops.map((l) => l.calls)), most: Math.max(0, ...loops.map((l) => l.calls)) },
+          actions: { median: median(loops.map((l) => l.actions)), most: Math.max(0, ...loops.map((l) => l.actions)) },
+          callsPerAction: passing.length ? round(Math.max(...passing.map((r) => r.loop!.calls / Math.max(1, r.loop!.actions))), 2) : null,
+          tokens: { input: sum((l) => l.usage.input), cached: sum((l) => l.usage.cached ?? 0), output: sum((l) => l.usage.output), unreported: sum((l) => l.unknown) },
+          dollars: { meter: these.every((r) => r.meter !== null) ? round(these.reduce((total, r) => total + r.meter!, 0)) : null, upperBound: round(these.reduce((total, r) => total + r.dollars, 0)) },
+          minutes: { median: round(median(these.map((r) => r.minutes)) ?? 0, 2), most: round(Math.max(0, ...these.map((r) => r.minutes)), 2) },
+        },
+      ];
+    }),
+  );
+  const passed = report.runs.filter((r) => r.pass).length;
+  return {
+    suite: "desktop-model",
+    at: report.at,
+    commit: report.commit,
+    model: report.model,
+    route: report.route,
+    bar,
+    passed,
+    of: report.runs.length,
+    held: passed >= bar.passed,
+    dollars: { meter: report.runs.every((r) => r.meter !== null) ? round(report.runs.reduce((total, r) => total + r.meter!, 0)) : null, upperBound: round(report.runs.reduce((total, r) => total + r.dollars, 0)) },
+    tasks,
+  };
+}
+
 const meter = (): number | null => {
   if (!label) return null;
   const r = Bun.spawnSync(["invincible", "usage", "--days", "2"], { stdout: "pipe", stderr: "pipe" });
@@ -84,7 +139,7 @@ async function main(): Promise<void> {
   await clearLeftovers(b);
   await buildImages(b);
   const { vm } = await BenchVm.make(b, { desktop: true, seed: 1 });
-  const done: (TaskRun & { dollars: number; meter: number | null; minutes: number })[] = [];
+  const done: RunRecord[] = [];
   let spent = 0;
   try {
     await vm.ready(1);
@@ -118,9 +173,11 @@ async function main(): Promise<void> {
     await vm.remove().catch((error) => log(`couldn't remove ${vm.container}: ${(error as Error).message}`));
     await clearLeftovers(b);
   }
-  const report = { at: new Date().toISOString(), model: way.model, route, runs: done, spentUpperBound: Number(spent.toFixed(4)), meterTotal: done.every((r) => r.meter !== null) ? Number(done.reduce((s, r) => s + r.meter!, 0).toFixed(4)) : null };
+  const report = { at: new Date().toISOString(), commit: process.env.INVINCIBLE_BENCH_COMMIT ?? "unknown", model: way.model, route, runs: done, spentUpperBound: Number(spent.toFixed(4)), meterTotal: done.every((r) => r.meter !== null) ? Number(done.reduce((s, r) => s + r.meter!, 0).toFixed(4)) : null };
   mkdirSync(join(OUT_DIR, "desktop"), { recursive: true });
   writeFileSync(join(OUT_DIR, "desktop", "model-runs.json"), `${JSON.stringify(report, null, 2)}\n`);
+  // (The record the suite keeps as its model baseline, by task: C1 step 7's bar, 18 of 20 to start.)
+  writeFileSync(join(OUT_DIR, "desktop", "model-record.json"), `${JSON.stringify(recordOf(report, { passed: Math.ceil((done.length * 18) / 20), of: done.length }), null, 2)}\n`);
   console.log(JSON.stringify(report));
 }
 

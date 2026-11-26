@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { gatewayValues, meterDollars, routeOf } from "./model-runs.ts";
+import { gatewayValues, meterDollars, recordOf, routeOf } from "./model-runs.ts";
 
 /* The real model's runs (model-runs.ts): what is read of a gateway token's file, where each route's calls go, and the node's meter. */
 
@@ -34,4 +34,23 @@ test("the node's meter is read for the token's label alone (as its by-who lines 
   expect(meterDollars(usage, "c1-bench")).toBe(1204.37);
   expect(meterDollars(usage, "c1")).toBeNull();
   expect(meterDollars(usage, "elsewhere")).toBeNull();
+});
+
+test("the runs are kept by task as the suite's model baseline: passes against the bar, calls and actions, tokens, dollars and minutes", () => {
+  const run = (task: "form" | "editor", n: number, pass: boolean, calls: number, actions: number, meter: number | null) => ({
+    task, policy: "model" as const, run: n, pass, why: pass ? "" : "the file holds \"\"", actedMs: 1000, commands: actions + 1, looks: 0,
+    loop: { calls, actions, commands: 1, usage: { input: 1000 * calls, cached: 800 * calls, output: 100 * calls }, unknown: 0, shape: null, ms: 20_000 },
+    dollars: 0.01 * calls, meter: meter, minutes: 0.3 * calls,
+  });
+  const record = recordOf({ at: "2026-11-27T00:00:00.000Z", commit: "abc1234", model: "anthropic/claude-opus-5.5", route: "orcarouter", runs: [run("form", 1, true, 4, 8, 0.03), run("form", 2, true, 6, 8, 0.05), run("editor", 1, false, 9, 3, 0.08)] }, { passed: 3, of: 3 });
+  expect(record).toMatchObject({ suite: "desktop-model", passed: 2, of: 3, held: false, dollars: { meter: 0.16 } });
+  expect(record.tasks.form).toEqual({
+    passed: 2, of: 2,
+    calls: { median: 5, most: 6 }, actions: { median: 8, most: 8 }, callsPerAction: 0.75,
+    tokens: { input: 10_000, cached: 8_000, output: 1_000, unreported: 0 },
+    dollars: { meter: 0.08, upperBound: 0.1 }, minutes: { median: 1.5, most: 1.8 },
+  });
+  expect(record.tasks.editor).toMatchObject({ passed: 0, of: 1, failed: ['run 1: the file holds ""'], callsPerAction: null });
+  // A run the meter couldn't say leaves the meter's sum unsaid, never a smaller one.
+  expect(recordOf({ at: "x", commit: "y", model: "m", route: "r", runs: [run("form", 1, true, 4, 8, null)] }, { passed: 1, of: 1 }).dollars.meter).toBeNull();
 });
