@@ -206,9 +206,11 @@ const campaigns: Campaign[] = [];
   const runner = newNodeIdentity();
   const giver = newNodeIdentity();
   const goal = "Make the gate pass";
-  const statement: ProofStatement = { v: 1, by: runner.id, for: giver.id, handoff: "h_AAAAAAAAAAAAAAAAAAAAAA", nonce: "n".repeat(22), task: "task-abcdefghijkl", run: null, goal: goalDigest(goal), gates: ["true"], status: "done", verified: true, ended: "done", proof: { before: [1], after: [0], review: "pass", sameModel: false }, startedAt: 1, endedAt: 2, said: saidDigest("done", null) };
+  // (Its run's key, a test seed's: a proof that says verified is held to the task and run its giver was told.)
+  const run = didKeyOfEd25519(signingPublicKey(new Uint8Array(32).fill(7)));
+  const statement: ProofStatement = { v: 1, by: runner.id, for: giver.id, handoff: "h_AAAAAAAAAAAAAAAAAAAAAA", nonce: "n".repeat(22), task: "task-abcdefghijkl", run, goal: goalDigest(goal), gates: ["true"], status: "done", verified: true, ended: "done", proof: { before: [1], after: [0], review: "pass", sameModel: false }, startedAt: 1, endedAt: 2, said: saidDigest("done", null) };
   const good = signProof(runner, statement);
-  const expect_ = { by: runner.id, for: giver.id, handoff: statement.handoff, nonce: statement.nonce, goal, gates: ["true"], active: () => true };
+  const expect_ = { by: runner.id, for: giver.id, handoff: statement.handoff, nonce: statement.nonce, goal, gates: ["true"], task: statement.task, run, active: () => true };
   if (proofRefusal(good, expect_) !== null) throw new Error("the genuine proof doesn't check");
   const changeOne = (r: Random, value: unknown): unknown => {
     if (!value || typeof value !== "object") return randomValue(r);
