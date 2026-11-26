@@ -112,6 +112,24 @@ describe("tools the caller runs, through the chat route", () => {
     expect(sent.at(-1)).toEqual({ role: "tool", tool_call_id: "call_1", content: "a.ts: lines 1–1 of 1\n     1\tconst a = 1;" });
   });
 
+  test("a result's picture (a desktop's screen) reaches the model, after the results, as the caller's own", async () => {
+    bodies.length = 0;
+    const screen = { mediaType: "image/png", data: "iVBORw0KGgo=", alt: "the screen after the click" };
+    await events({
+      ...asked,
+      messages: [
+        { role: "user", content: "Send the form." },
+        { role: "assistant", content: "", calls: [{ id: "call_1", name: "read", input: { path: "a.ts" } }], carry },
+        { role: "user", content: "", results: [{ id: "call_1", content: "clicked at 640,450", images: [screen] }] },
+      ],
+    });
+    const sent = bodies[0].messages;
+    expect(sent.at(-2)).toEqual({ role: "tool", tool_call_id: "call_1", content: "clicked at 640,450" });
+    expect(sent.at(-1).role).toBe("user");
+    // (This stand-in model can't see: it reads the picture's words.)
+    expect(JSON.stringify(sent.at(-1).content)).toContain("the screen after the click");
+  });
+
   test("a secret in what a tool came to, or in what it was called with, is refused before any model sees it", async () => {
     const key = `sk-ant-api03-${"FAKE".repeat(8)}`;
     bodies.length = 0;

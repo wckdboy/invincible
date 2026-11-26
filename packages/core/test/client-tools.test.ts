@@ -26,6 +26,14 @@ describe("the caller's own tools in the chat contract", () => {
     expect(ChatMessage.safeParse({ role: "assistant", content: "x", results: [result] }).success).toBe(false);
   });
 
+  test("a result may carry up to two pictures (a computer's screen after its actions), PNG or JPEG, base64, each with words for a model that can't see", () => {
+    const screen = { mediaType: "image/jpeg", data: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA==", alt: "the screen after the click" };
+    expect(ChatMessage.safeParse({ role: "user", content: "", results: [{ ...result, images: [screen] }] }).success).toBe(true);
+    expect(ChatMessage.safeParse({ role: "user", content: "", results: [{ ...result, images: [screen, { ...screen, mediaType: "image/png" }] }] }).success).toBe(true);
+    for (const images of [[screen, screen, screen], [], [{ ...screen, mediaType: "image/svg+xml" }], [{ ...screen, data: "not base64!" }], [{ ...screen, alt: undefined }], [{ ...screen, extra: 1 }]])
+      expect([images, ChatMessage.safeParse({ role: "user", content: "", results: [{ ...result, images }] }).success]).toEqual([images, false]);
+  });
+
   test("a call names a tool as tools are named, with its input an object", () => {
     expect(ChatMessage.safeParse({ role: "assistant", content: "", calls: [{ ...call, name: "Read File" }] }).success).toBe(false);
     expect(ChatMessage.safeParse({ role: "assistant", content: "", calls: [{ ...call, input: "a.ts" }] }).success).toBe(false);

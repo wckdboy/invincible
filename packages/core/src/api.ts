@@ -54,8 +54,19 @@ export const ClientToolName = z.string().regex(/^[a-z][a-z0-9_]{0,40}$/, "a tool
 /** A call the model made to one of the caller's own tools (clientTools): its id, the tool, its input as the model gave it. */
 export const ClientCall = z.strictObject({ id: z.string().min(1).max(128), name: ClientToolName, input: z.record(z.string(), z.unknown()) });
 export type ClientCall = z.infer<typeof ClientCall>;
-/** What one such call came to, as the caller ran it. */
-export const ClientResult = z.strictObject({ id: z.string().min(1).max(128), content: z.string().max(200_000), error: z.boolean().optional() });
+/**
+ * A picture a call's result carries: a computer's screen after its actions (a run's engineer on its VM's desktop). A
+ * model that sees is shown it; one that doesn't reads its words.
+ */
+export const ResultImage = z.strictObject({
+  mediaType: z.enum(["image/png", "image/jpeg"]),
+  /** Base64. A desktop's whole screen as JPEG is a few hundred kilobytes. */
+  data: z.string().min(1).max(4_000_000).regex(/^[A-Za-z0-9+/]+={0,2}$/, "base64"),
+  alt: z.string().min(1).max(400),
+});
+export type ResultImage = z.infer<typeof ResultImage>;
+/** What one such call came to, as the caller ran it: its words, and the pictures it shows (two at most). */
+export const ClientResult = z.strictObject({ id: z.string().min(1).max(128), content: z.string().max(200_000), error: z.boolean().optional(), images: z.array(ResultImage).min(1).max(2).optional() });
 export type ClientResult = z.infer<typeof ClientResult>;
 
 export const ChatMessage = z

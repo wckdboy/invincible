@@ -243,9 +243,13 @@ export function anthropicConversation(input: CompletionInput): Conversation {
       ...m.calls!.map((c) => ({ type: "tool_use" as const, id: c.id, name: c.name, input: c.input })),
     ];
   };
+  // A result's pictures (a desktop's screen) go in its own tool_result, beside its words; one said in words, after them.
   const resultsTurn = (m: ModelMessage): Anthropic.Beta.BetaContentBlockParam[] => [
-    ...(m.results ?? []).filter((r) => !inWords.has(r.id)).map((r) => ({ type: "tool_result" as const, tool_use_id: r.id, content: r.content, ...(r.error ? { is_error: true } : {}) })),
+    ...(m.results ?? [])
+      .filter((r) => !inWords.has(r.id))
+      .map((r) => ({ type: "tool_result" as const, tool_use_id: r.id, content: r.images?.length ? [...words(r.content), ...r.images.map(picture)] : r.content, ...(r.error ? { is_error: true } : {}) })),
     ...words((m.results ?? []).filter((r) => inWords.has(r.id)).map(resultInWords).join("\n")),
+    ...(m.results ?? []).filter((r) => inWords.has(r.id)).flatMap((r) => (r.images ?? []).map(picture)),
     ...(m.images ?? []).map(picture),
     ...words(m.content),
   ];
@@ -413,8 +417,10 @@ export function openAIConversation(input: CompletionInput): Conversation {
         ];
       }
       const results = (m.results ?? []).map((r): OpenAIMessage => ({ role: "tool", tool_call_id: r.id, content: r.error ? `Error: ${r.content}` : r.content }));
-      if (results.length && !m.content && !m.images?.length) return results;
-      return [...results, { role: "user", content: m.images?.length ? (vision ? parts(m.content, m.images) : picturesInWords(m.content, m.images)) : m.content }];
+      // A tool's message takes only words: a result's pictures (a desktop's screen) follow the results, as the caller's own.
+      const images = [...(m.results ?? []).flatMap((r) => r.images ?? []), ...(m.images ?? [])];
+      if (results.length && !m.content && !images.length) return results;
+      return [...results, { role: "user", content: images.length ? (vision ? parts(m.content, images) : picturesInWords(m.content, images)) : m.content }];
     }),
   ];
   // Pictures given with the question go with the last user message, to a model that sees; else in words.

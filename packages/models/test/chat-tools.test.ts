@@ -314,6 +314,21 @@ describe("the caller's own tools (a run's engineer)", () => {
     ]);
   });
 
+  test("a result's pictures follow the results as the caller's own, to a model that sees; to one that doesn't, as their words", async () => {
+    const model = scripted([say("DONE")]);
+    const screen = { mediaType: "image/png" as const, data: "iVBORw0KGgo=", alt: "the screen after the click" };
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Send the form." },
+      { role: "assistant", content: "", calls: [{ id: "call_1", name: "bash", input: { command: "desktop click 640 450" } }] },
+      { role: "user", content: "", results: [{ id: "call_1", content: "clicked at 640,450", images: [screen] }] },
+    ];
+    await collect(chat({ ...brain(["local/m"]), fetch: model.fetch }, { messages, clientTools: SHELL }));
+    const sent = model.bodies[0].messages;
+    expect(sent[3]).toEqual({ role: "tool", tool_call_id: "call_1", content: "clicked at 640,450" });
+    expect(sent[4].role).toBe("user");
+    expect(JSON.stringify(sent[4].content)).toContain("the screen after the click");
+  });
+
   test("another model's carry is never given back", async () => {
     const model = scripted([say("DONE")]);
     const messages: ChatMessage[] = [
@@ -356,6 +371,22 @@ describe("the caller's own tools (a run's engineer)", () => {
     expect(called.calls).toEqual([{ id: "toolu_1", name: "read", input: { path: "a.ts" } }]);
     expect(carriedFor(called.carry, "claude", "claude-opus-5-5")?.blocks).toEqual([{ type: "thinking", thinking: "Let me check.", signature: "sig-abc" }]);
     expect(model.bodies[0].tools.map((t: { name: string }) => t.name)).toEqual(["read", "bash"]);
+  });
+
+  test("a result's pictures go with it: Claude sees them in its call's own result; one given back as words, after its words", async () => {
+    const model = scripted([anthropicStream([{ type: "text", text: "" }], [[{ type: "text_delta", text: "DONE" }]], "end_turn"), anthropicStream([{ type: "text", text: "" }], [[{ type: "text_delta", text: "DONE" }]], "end_turn")]);
+    const screen = { mediaType: "image/jpeg" as const, data: "/9j/4AAQ", alt: "the screen after the click" };
+    const turn = (carry: string | undefined): ChatMessage[] => [
+      { role: "user", content: "Send the form." },
+      { role: "assistant", content: "", calls: [{ id: "toolu_1", name: "left_click", input: { coordinate: [640, 450] } }], ...(carry ? { carry } : {}) },
+      { role: "user", content: "", results: [{ id: "toolu_1", content: "clicked at 640,450", images: [screen] }] },
+    ];
+    const thought = [{ type: "thinking", thinking: "Click Send.", signature: "sig-abc" }];
+    await collect(chat({ ...brain(["claude/claude-opus-5-5"], true), fetch: model.fetch }, { messages: turn(carryOf("claude", "claude-opus-5-5", { blocks: thought })), clientTools: SHELL }));
+    await collect(chat({ ...brain(["claude/claude-opus-5-5"], true), fetch: model.fetch }, { messages: turn(undefined), clientTools: SHELL }));
+    const picture = { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "/9j/4AAQ" } };
+    expect(model.bodies[0].messages[2]).toEqual({ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: [{ type: "text", text: "clicked at 640,450" }, picture] }] });
+    expect(model.bodies[1].messages[2]).toEqual({ role: "user", content: [{ type: "text", text: "(It answered: clicked at 640,450)" }, picture] });
   });
 
   test("Claude is given its own tool turn back as it was; one without its thinking goes as words", async () => {

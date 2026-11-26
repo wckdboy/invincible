@@ -69,8 +69,10 @@ export function openAIResponsesConversation(input: CompletionInput): Conversatio
       ];
     }
     const results = (m.results ?? []).map((r): Item => ({ type: "function_call_output", call_id: r.id, output: r.error ? `Error: ${r.content}` : r.content }));
-    if (results.length && !m.content && !m.images?.length) return results;
-    return [...results, { role: "user", content: m.images?.length ? (vision ? parts(m.content, m.images) : picturesInWords(m.content, m.images)) : m.content }];
+    // A call's output takes only words: a result's pictures (a desktop's screen) follow the outputs, as the caller's own.
+    const images = [...(m.results ?? []).flatMap((r) => r.images ?? []), ...(m.images ?? [])];
+    if (results.length && !m.content && !images.length) return results;
+    return [...results, { role: "user", content: images.length ? (vision ? parts(m.content, images) : picturesInWords(m.content, images)) : m.content }];
   });
   // Pictures given with the question go with the last user message, to a model that sees; else in words.
   const asked = items.findLast((i): i is { role: "user"; content: string | Part[] } => (i as { role?: unknown }).role === "user");
