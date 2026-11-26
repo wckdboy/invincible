@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { type RouteName, SKILL_ID, SKILL_LIMITS, skillAuthor, type SkillDetail, type SkillDoc, SkillDocInput, skillInWords, skillRecordLine, SKILLS_BUDGET_MAX, type SkillsView, type SkillVersionView, type SkillView } from "@galahad/core";
+import { type RouteName, SKILL_ID, SKILL_LIMITS, skillAuthor, type SkillDetail, type SkillDoc, SkillDocInput, skillInWords, skillRecordLine, SKILLS_BUDGET_MAX, type SkillsView, type SkillVersionView, type SkillView } from "@invincible/core";
 
 /*
- * `galahad skills`: his skills at a terminal. Thin: the node keeps them and decides
+ * `invincible skills`: his skills at a terminal. Thin: the node keeps them and decides
  * everything (who may write, what a version's trust is, what may be approved); this
  * shapes input and prints. Approving shows the whole of what you approve, and where it
  * came from, before it asks.
@@ -24,16 +24,16 @@ const dim = (s: string) => (tty ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (tty ? `\x1b[1m${s}\x1b[0m` : s);
 
 export const SKILLS_USAGE = `usage:
-  galahad skills [--all]                 his skills: state, uses and track record (retired ones with --all)
-  galahad skills show <id>               one in full: its words, where it came from, every version, the quests that used it
-  galahad skills approve <id> [-y]       read the version that waits, in full, then approve exactly that one
-  galahad skills lock <id> | unlock <id> locked: he may use it, not change it
-  galahad skills retire <id> | restore <id>   retired: kept, never offered (nothing is deleted)
-  galahad skills rollback <id> [-y]      one step back, to the version before the latest
-  galahad skills write [<id>] --title "…" --when "…" --step "…" [--step "…"]… [--proof "command => what to expect"]… [--pitfall "…"]…
-  galahad skills write [<id>] --file skill.json     yours (owner); with an id, a new version of that skill
-  galahad skills import <github folder>  an Agent Skill (its SKILL.md alone, as text: nothing in it runs), waiting for your approval
-  galahad skills budget [<tokens a day>] the day's budget for distilling skills from passed quests (0: off)`;
+  invincible skills [--all]                 his skills: state, uses and track record (retired ones with --all)
+  invincible skills show <id>               one in full: its words, where it came from, every version, the quests that used it
+  invincible skills approve <id> [-y]       read the version that waits, in full, then approve exactly that one
+  invincible skills lock <id> | unlock <id> locked: he may use it, not change it
+  invincible skills retire <id> | restore <id>   retired: kept, never offered (nothing is deleted)
+  invincible skills rollback <id> [-y]      one step back, to the version before the latest
+  invincible skills write [<id>] --title "…" --when "…" --step "…" [--step "…"]… [--proof "command => what to expect"]… [--pitfall "…"]…
+  invincible skills write [<id>] --file skill.json     yours (owner); with an id, a new version of that skill
+  invincible skills import <github folder>  an Agent Skill (its SKILL.md alone, as text: nothing in it runs), waiting for your approval
+  invincible skills budget [<tokens a day>] the day's budget for distilling skills from passed quests (0: off)`;
 
 const STATE: Record<SkillView["state"], string> = { proposed: "proposed", "in-use": "in use", stale: "stale", retired: "retired" };
 const when = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
@@ -101,7 +101,7 @@ export function docFromFlags(flags: Flags, readFile: (path: string) => string = 
 }
 
 const need = (id: string | undefined): string => {
-  if (!id || !SKILL_ID.test(id)) throw new Error(`a skill's id looks like sk_… (galahad skills lists them)\n${SKILLS_USAGE}`);
+  if (!id || !SKILL_ID.test(id)) throw new Error(`a skill's id looks like sk_… (invincible skills lists them)\n${SKILLS_USAGE}`);
   return id;
 };
 
@@ -111,13 +111,13 @@ export async function skillsCommand(api: Api, sub: string | undefined, rest: str
     case "list": {
       const { skills, budget } = await api.call<SkillsView>("skills");
       const shown = flags.all ? skills : skills.filter((s) => s.state !== "retired");
-      if (!skills.length) console.log("He has no skills yet. He learns one when a quest of his passes its review (galahad do …), and you can write one: galahad skills write --title … --when … --step …");
+      if (!skills.length) console.log("He has no skills yet. He learns one when a quest of his passes its review (invincible do …), and you can write one: invincible skills write --title … --when … --step …");
       for (const s of shown) console.log(skillRow(s));
       const retired = skills.length - shown.length;
-      if (retired) console.log(dim(`${retired} retired (kept, never offered): galahad skills --all`));
+      if (retired) console.log(dim(`${retired} retired (kept, never offered): invincible skills --all`));
       const waiting = skills.filter((s) => s.state !== "retired" && s.pending).length;
-      if (waiting) console.log(`${bold(`${waiting} wait${waiting === 1 ? "s" : ""} for your approval`)} ${dim("· none is given to a model before: galahad skills approve <id> shows it in full first")}`);
-      console.log(dim(`Distilling: ${budget.usedToday} of ${budget.tokensPerDay} tokens used in the last day${budget.tokensPerDay === 0 ? " (off)" : ""} · galahad skills budget <tokens>`));
+      if (waiting) console.log(`${bold(`${waiting} wait${waiting === 1 ? "s" : ""} for your approval`)} ${dim("· none is given to a model before: invincible skills approve <id> shows it in full first")}`);
+      console.log(dim(`Distilling: ${budget.usedToday} of ${budget.tokensPerDay} tokens used in the last day${budget.tokensPerDay === 0 ? " (off)" : ""} · invincible skills budget <tokens>`));
       return;
     }
     case "show": {
@@ -126,17 +126,17 @@ export async function skillsCommand(api: Api, sub: string | undefined, rest: str
       return;
     }
     case "import": {
-      if (!rest[0]) throw new Error(`which folder? galahad skills import https://github.com/<owner>/<repo>/tree/<branch>/<folder>\n${SKILLS_USAGE}`);
+      if (!rest[0]) throw new Error(`which folder? invincible skills import https://github.com/<owner>/<repo>/tree/<branch>/<folder>\n${SKILLS_USAGE}`);
       const { skill, shortened } = await api.call<{ skill: SkillView; shortened: boolean }>("importSkill", { url: rest[0] });
       console.log(`Taken in as text: "${skill.title}" (${skill.id}), from ${skillAuthor(skill.by)}. Only its SKILL.md was read; nothing in its folder runs.`);
       if (shortened) console.log(dim("Its instructions were longer than a skill keeps: they end where it says the rest is."));
-      console.log(`${bold("It waits for your approval")} ${dim(`· no model is given it before: galahad skills approve ${skill.id} shows it in full first`)}`);
+      console.log(`${bold("It waits for your approval")} ${dim(`· no model is given it before: invincible skills approve ${skill.id} shows it in full first`)}`);
       return;
     }
     case "approve": {
       const { skill } = await api.call<{ skill: SkillDetail }>("skill", { id: need(rest[0]) });
       const waiting = skill.pending ? skill.history.find((v) => v.id === skill.pending) : null;
-      if (!waiting || skill.state === "retired") throw new Error(skill.state === "retired" ? "That skill is retired: restore it first (galahad skills restore <id>)." : "Nothing of that skill waits for your approval.");
+      if (!waiting || skill.state === "retired") throw new Error(skill.state === "retired" ? "That skill is retired: restore it first (invincible skills restore <id>)." : "Nothing of that skill waits for your approval.");
       // Approval is of what you read: all of it, and where it came from.
       console.log([`${bold("This version waits for your approval")} ${dim(`· ${skill.id}`)}`, versionLine(waiting), "", ...(waiting.doc ? skillInWords(waiting.doc).split("\n") : ["(this node can't read its words: approve it from a node that can show it to you)"]), ""].join("\n"));
       if (!waiting.doc) return;
@@ -155,7 +155,7 @@ export async function skillsCommand(api: Api, sub: string | undefined, rest: str
     case "retire":
     case "restore": {
       const { skill } = await api.call<{ skill: SkillView }>("retireSkill", { id: need(rest[0]), retired: sub === "retire" });
-      console.log(skill.state === "retired" ? `Retired: "${skill.title}" is kept with every version, and offered to nobody. galahad skills restore ${skill.id} puts it back.` : `Restored: "${skill.title}" is ${stateWords(skill)}.`);
+      console.log(skill.state === "retired" ? `Retired: "${skill.title}" is kept with every version, and offered to nobody. invincible skills restore ${skill.id} puts it back.` : `Restored: "${skill.title}" is ${stateWords(skill)}.`);
       return;
     }
     case "rollback": {

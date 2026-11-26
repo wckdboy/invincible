@@ -1,4 +1,4 @@
-import type { TeamOutcome } from "@galahad/core";
+import type { TeamOutcome } from "@invincible/core";
 import { type Ctx, errorMessage } from "../context.ts";
 import { badge, busy, button, callout, field, type Tone } from "../ui/controls.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";

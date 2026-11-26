@@ -1,5 +1,5 @@
-import type { ArgValue, ConnectorRequestView, ConnectorToolView, ConnectorView, OrderView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { ArgValue, ConnectorRequestView, ConnectorToolView, ConnectorView, OrderView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { chatAppsSection } from "./chat-apps.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { connectorStateOf, KEY_STATE } from "../lib/connector-state.ts";
@@ -766,7 +766,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
         chatApps.el,
         ordersSection,
         availableSection,
-        h("p", { class: "note" }, "A service of your own: describe it in a manifest and run ", h("span", { class: "mono" }, "galahad connector add --manifest file.json"), " on a node."),
+        h("p", { class: "note" }, "A service of your own: describe it in a manifest and run ", h("span", { class: "mono" }, "invincible connector add --manifest file.json"), " on a node."),
       ),
     ),
   );

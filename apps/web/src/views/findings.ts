@@ -1,4 +1,4 @@
-import type { InvestigationView } from "@galahad/core";
+import type { InvestigationView } from "@invincible/core";
 import { isUnavailable } from "../api.ts";
 import type { Ctx, View } from "../context.ts";
 import { absoluteTime, relativeTime } from "../lib/time.ts";
@@ -135,7 +135,7 @@ export const findingsView: View = (root, ctx, { scope, opts }) => {
                   "div",
                   { class: "stack tight" },
                   h("p", {}, "Ask a scientific question from a terminal on a node. The hypothesis and its predictions are recorded before anything runs; the experiment runs in the Lab; an independent reviewer judges the method."),
-                  copyField('galahad investigate "<question>"'),
+                  copyField('invincible investigate "<question>"'),
                 ),
               }),
         ),

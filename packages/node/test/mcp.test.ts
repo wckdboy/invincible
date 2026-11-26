@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { routes, type RouteName } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { routes, type RouteName } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { reconcile } from "../src/heartbeat.ts";
@@ -13,7 +13,7 @@ import { Home } from "../src/home.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * The mind for every arm: a real MCP client (the official SDK) spawns `galahad mcp`
+ * The mind for every arm: a real MCP client (the official SDK) spawns `invincible mcp`
  * over stdio against a real daemon, and the arm's credential is held to least privilege.
  */
 
@@ -33,7 +33,7 @@ const caps: Capabilities = {
   tailscale: null,
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-mcp-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-mcp-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const proxyPort = freePort();
@@ -55,7 +55,7 @@ const text = (result: Awaited<ReturnType<Client["callTool"]>>) =>
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "mcp-node" });
   store.close();
   home.writeConfig({ v: 1, name: "mcp-node", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -65,7 +65,7 @@ beforeAll(async () => {
   armToken = minted.token;
   home.writeArmToken("test-arm", armToken);
 
-  client = new Client({ name: "galahad-test", version: "1.0.0" });
+  client = new Client({ name: "invincible-test", version: "1.0.0" });
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
@@ -104,7 +104,7 @@ describe("arm credentials", () => {
       expect(await refused([name])).toEqual({ status: 400, error: "invalid input", why: ["search and git:… are Galahad's own gateway scopes, not model providers"] });
     }
     // A name this fleet has no provider for.
-    expect(await refused(["no-such-provider"])).toEqual({ status: 400, error: "no model provider no-such-provider on this fleet (galahad providers lists them)", why: undefined });
+    expect(await refused(["no-such-provider"])).toEqual({ status: 400, error: "no model provider no-such-provider on this fleet (invincible providers lists them)", why: undefined });
     // Over MCP too, as an agent would ask.
     const viaTool = await client.callTool({ name: "sandbox_run", arguments: { command: "true", providers: ["git:github:someone:private-repo"] } });
     expect(viaTool.isError).toBe(true);
@@ -153,7 +153,7 @@ describe("arm credentials", () => {
   });
 });
 
-describe("galahad mcp (official MCP client over stdio)", () => {
+describe("invincible mcp (official MCP client over stdio)", () => {
   test("offers the mind's tools and the Oath", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();

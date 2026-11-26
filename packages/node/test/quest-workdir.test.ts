@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatStreamEvent, RouteName, SandboxView } from "@galahad/core";
+import type { ChatStreamEvent, RouteName, SandboxView } from "@invincible/core";
 import { runNodeQuest } from "../src/quest-cli.ts";
 
 /*
@@ -16,7 +16,7 @@ function fakeNode() {
     async call<T>(name: RouteName, input?: any): Promise<T> {
       switch (name) {
         case "createSandbox":
-          return { sandbox: { id: "0000000001", node: "n_ultra", image: "galahad/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, providers: [] } } as T;
+          return { sandbox: { id: "0000000001", node: "n_ultra", image: "invincible/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, providers: [] } } as T;
         case "fleet":
           return { devices: [{ id: "n_ultra", name: "ultra" }] } as T;
         case "execSandbox":
@@ -130,8 +130,8 @@ describe("a quest whose coding tool works in an image of its own", () => {
     };
     const quest = (image?: string) =>
       runNodeQuest(node, { goal: "Fix the parser.", network: "gateway", remember: false, trial: true, plan: "", agent: { name: "claude", minutes: 5, ...(image ? { image } : {}) } }).catch((error: Error) => error.message);
-    expect(await quest("galahad/claude-code:2.1.319")).toContain("stop here");
+    expect(await quest("invincible/claude-code:2.1.319")).toContain("stop here");
     expect(await quest()).toContain("stop here");
-    expect(asked.map((input) => input.image ?? null)).toEqual(["galahad/claude-code:2.1.319", null]);
+    expect(asked.map((input) => input.image ?? null)).toEqual(["invincible/claude-code:2.1.319", null]);
   });
 });

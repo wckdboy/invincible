@@ -1,4 +1,4 @@
-import type { DockerRunner } from "@galahad/sandbox";
+import type { DockerRunner } from "@invincible/sandbox";
 
 /*
  * A stand-in for Docker, for tests on machines without one: it answers the commands
@@ -87,7 +87,7 @@ export function fakeDocker(): FakeDocker {
             const [key, ...value] = w.split("=");
             return c.labels[key!] === value.join("=");
           }));
-          if (rest.includes("--format")) return ok(matching.map((c) => c.labels["dev.galahad.id"] ?? "").join("\n"));
+          if (rest.includes("--format")) return ok(matching.map((c) => c.labels["dev.invincible.id"] ?? "").join("\n"));
           return ok(matching.map((c) => c.name).join("\n"));
         }
         case "inspect": {
@@ -96,7 +96,7 @@ export function fakeDocker(): FakeDocker {
           return ok(JSON.stringify(found.map((c) => ({ Config: { Labels: c.labels, Image: c.image }, State: { Status: c.status }, HostConfig: c.held }))));
         }
         case "exec": {
-          const at = rest.findIndex((a) => a.startsWith("galahad-sbx-"));
+          const at = rest.findIndex((a) => a.startsWith("invincible-sbx-"));
           const container = rest[at]!;
           if (!containers.has(container)) return no(`No such container: ${container}`);
           // After the container: timeout --signal=KILL <n>s <cmd…>

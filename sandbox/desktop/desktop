@@ -6,8 +6,8 @@
 set -u
 export DISPLAY=:1
 SIZE=1280x800
-RUN=${GALAHAD_DESKTOP_RUN:-/tmp/galahad-desktop}
-WAIT=${GALAHAD_DESKTOP_WAIT:-20}
+RUN=${INVINCIBLE_DESKTOP_RUN:-/tmp/invincible-desktop}
+WAIT=${INVINCIBLE_DESKTOP_WAIT:-20}
 PROFILE="$HOME/.config/chromium"
 
 usage() {
@@ -109,13 +109,13 @@ else:
 PY
 }
 
-# The question and a fresh picture of the screen, put to the model named for this VM (GALAHAD_EYES, as
+# The question and a fresh picture of the screen, put to the model named for this VM (INVINCIBLE_EYES, as
 # provider/model) through the gateway this VM was given. The gateway's token is read from the
 # environment here and is never an argument. What comes back is the model's words: data, not orders.
 eyes() {
   python3 - "$@" <<'PY'
 import base64, json, os, sys, urllib.error, urllib.request
-provider, _, model = os.environ["GALAHAD_EYES"].partition("/")
+provider, _, model = os.environ["INVINCIBLE_EYES"].partition("/")
 picture = base64.b64encode(open(sys.argv[2], "rb").read()).decode()
 framing = ("This is a screenshot of a desktop, 1280 pixels wide and 800 high: x runs right from 0 and y runs down from 0. "
            "Answer from what is on it and nothing else. When asked where something is, give the pixel coordinates of its "
@@ -123,8 +123,8 @@ framing = ("This is a screenshot of a desktop, 1280 pixels wide and 800 high: x 
 body = {"model": model, "max_tokens": 600, "messages": [{"role": "user", "content": [
     {"type": "text", "text": framing + "\n\n" + sys.argv[3]},
     {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + picture}}]}]}
-request = urllib.request.Request(os.environ["GALAHAD_GATEWAY"] + "/" + provider + "/chat/completions", data=json.dumps(body).encode(),
-    headers={"authorization": "Bearer " + os.environ["GALAHAD_TOKEN"], "content-type": "application/json", "user-agent": "galahad-desktop/1"})
+request = urllib.request.Request(os.environ["INVINCIBLE_GATEWAY"] + "/" + provider + "/chat/completions", data=json.dumps(body).encode(),
+    headers={"authorization": "Bearer " + os.environ["INVINCIBLE_TOKEN"], "content-type": "application/json", "user-agent": "invincible-desktop/1"})
 try:
     reply = json.load(urllib.request.urlopen(request, timeout=180))
 except urllib.error.HTTPError as error:
@@ -155,7 +155,7 @@ case "$verb" in
     start && scrot -o "$file" && echo "$file" ;;
   look)
     [ $# -ge 1 ] || refuse 'look takes a question: desktop look "<question>"'
-    [ -n "${GALAHAD_EYES:-}" ] && [ -n "${GALAHAD_GATEWAY:-}" ] && [ -n "${GALAHAD_TOKEN:-}" ] || { echo "desktop: no model that can see is set for this VM (use desktop text to read a page, and desktop shot for a picture)" >&2; exit 3; }
+    [ -n "${INVINCIBLE_EYES:-}" ] && [ -n "${INVINCIBLE_GATEWAY:-}" ] && [ -n "${INVINCIBLE_TOKEN:-}" ] || { echo "desktop: no model that can see is set for this VM (use desktop text to read a page, and desktop shot for a picture)" >&2; exit 3; }
     seen="$RUN/look-$(date +%s)$$.jpg"
     start && scrot -o "$seen" && eyes look "$seen" "$*"
     code=$?; rm -f "$seen"; exit "$code" ;;

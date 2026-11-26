@@ -11,7 +11,7 @@ import { EffortLevel } from "./compute.ts";
  */
 
 export const TrialId = z.string().regex(/^tr_[A-Za-z0-9_-]{22}$/);
-/** Trials started together (one `galahad trial run`) share a run id: the Galahad Index is computed per run. */
+/** Trials started together (one `invincible trial run`) share a run id: the Galahad Index is computed per run. */
 export const TrialRunId = z.string().regex(/^r-[a-z0-9]{1,16}$/);
 const Slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/);
 
@@ -98,7 +98,7 @@ export const HarnessOptions = z.object({
 });
 export type HarnessOptions = z.infer<typeof HarnessOptions>;
 
-/** How trials are run when nothing says otherwise: what `galahad trial run` has always done, with a task's gates on. */
+/** How trials are run when nothing says otherwise: what `invincible trial run` has always done, with a task's gates on. */
 export const BASELINE: HarnessOptions = { gates: true, plannerGates: false, effort: 1, skills: false, archive: true, revisions: 2, engram: false, diff: false, escalate: false, remind: false, keepReads: false, tools: false, contract: false, agent: null, planner: true, review: true };
 
 export const VariantName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "a variant's name is lowercase letters, digits and - (max 40)");

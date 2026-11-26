@@ -1,6 +1,6 @@
-import { sseData } from "@galahad/brain";
-import type { ChatMessage, ChatStreamEvent } from "@galahad/core";
-import { randomId, redact, routes } from "@galahad/core";
+import { sseData } from "@invincible/models";
+import type { ChatMessage, ChatStreamEvent } from "@invincible/core";
+import { randomId, redact, routes } from "@invincible/core";
 
 /*
  * Galahad as an ACP agent (the Agent Client Protocol: JSON-RPC 2.0, a message a line, over stdin and stdout), for any
@@ -151,7 +151,7 @@ export function acpAgent(o: AcpAgentOptions) {
           protocolVersion: ACP_VERSION,
           agentCapabilities: { loadSession: false, promptCapabilities: { image: false, audio: false, embeddedContext: true } },
           authMethods: [],
-          agentInfo: { name: "galahad", title: "Galahad" },
+          agentInfo: { name: "invincible", title: "Galahad" },
         });
       case "session/new": {
         const sessionId = `gal-${randomId(12)}`;
@@ -194,7 +194,7 @@ export function askNode(base: string, token: string): AskGalahad {
       });
     } catch (error) {
       if (signal.aborted) throw error;
-      throw new Error(`no Galahad node is running at ${base}; start it with \`galahad serve\``);
+      throw new Error(`no Galahad node is running at ${base}; start it with \`invincible serve\``);
     }
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -205,11 +205,11 @@ export function askNode(base: string, token: string): AskGalahad {
 }
 
 /**
- * `galahad acp`: the protocol on stdin and stdout. Each line is taken as it comes, so a cancel is read while a prompt
+ * `invincible acp`: the protocol on stdin and stdout. Each line is taken as it comes, so a cancel is read while a prompt
  * runs; when the client closes stdin, what is under way is stopped and the process ends.
  */
 export async function runAcpAgent(o: { base: string; token: string }): Promise<void> {
-  const log = (message: string) => process.stderr.write(`galahad acp: ${message}\n`);
+  const log = (message: string) => process.stderr.write(`invincible acp: ${message}\n`);
   const agent = acpAgent({ ask: askNode(o.base, o.token), write: (line) => process.stdout.write(`${line}\n`), log });
   const running = new Set<Promise<void>>();
   const take = (line: string) => {

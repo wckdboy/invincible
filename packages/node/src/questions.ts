@@ -1,4 +1,4 @@
-import { checkAnswer, findSecrets, plainLine, QUESTION_LIMITS, type QuestionAnswer, questionFields, type QuestionField, type QuestionView, randomId } from "@galahad/core";
+import { checkAnswer, findSecrets, plainLine, QUESTION_LIMITS, type QuestionAnswer, questionFields, type QuestionField, type QuestionView, randomId } from "@invincible/core";
 
 /*
  * MCP servers' questions to you, mid-call (PLAN #49; core's questions.ts): the call waits while its question waits in

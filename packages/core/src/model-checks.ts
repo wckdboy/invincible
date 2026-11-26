@@ -1,5 +1,5 @@
 /*
- * What a model was seen to do when it was checked (packages/brain/src/checks.ts): whether it follows the quest
+ * What a model was seen to do when it was checked (packages/models/src/checks.ts): whether it follows the quest
  * loop's command format, reads a screen, and points at the right place on one. Evidence, not a label: the
  * Roundtable's rule (the best suited takes the task) applies to models too. Recorded in the mind (LWW by model,
  * `model.checked`) and read leniently: a newer node that checks more never makes an older one lose what it knows.

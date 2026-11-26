@@ -1,4 +1,4 @@
-import { LIVE_TOPICS, type LiveTopic } from "@galahad/core";
+import { LIVE_TOPICS, type LiveTopic } from "@invincible/core";
 
 /*
  * What changed on this node, for the live stream (core's live.ts). Each topic has a stamp: a short string that changes
@@ -119,7 +119,7 @@ export function mindTopics(kind: string): readonly LiveTopic[] {
 }
 
 /** How many of the mind's events touched each topic: the stamp of what the mind alone holds. */
-export class MindCounts {
+export class LedgerCounts {
   private readonly counts = new Map<LiveTopic, number>();
 
   /** Counts what these events touch (a replay touches everything); whether any topic moved. */

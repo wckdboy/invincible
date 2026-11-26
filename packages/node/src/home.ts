@@ -1,14 +1,14 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { b64u, exportIdentity, fromB64u, importIdentity, newNodeIdentity, newPushKeyPair, type NodeIdentity, type PushKeyPair, pushPublicKey, randomId } from "@galahad/core";
+import { b64u, exportIdentity, fromB64u, importIdentity, newNodeIdentity, newPushKeyPair, type NodeIdentity, type PushKeyPair, pushPublicKey, randomId } from "@invincible/core";
 import { z } from "zod";
 import { loadEnv } from "./env.ts";
 
 /*
- * ~/.galahad/
+ * ~/.invincible/
  *   config.json   node name, fleet id, port, keystore choice
- *   mind.db       this node's replica of the mind (the log + views)
+ *   ledger.db       this node's replica of the mind (the log + views)
  *   local.db      node-local state that never replicates (gateway tokens)
  *   admin.token   local CLI credential (0600)
  *   keys.json     device private keys, only when the OS keychain is unavailable (0600)
@@ -24,16 +24,16 @@ const Config = z.strictObject({
   keystore: z.enum(["os", "file"]),
   /** Address this node advertises to peers (normally its tailnet IP). */
   advertise: z.string().nullable(),
-  /** On a Mac: keep it from sleeping while the node runs (`galahad awake on`; keep-awake.ts). Absent: off. */
+  /** On a Mac: keep it from sleeping while the node runs (`invincible awake on`; keep-awake.ts). Absent: off. */
   keepAwake: z.boolean().optional(),
 });
 export type NodeConfig = z.infer<typeof Config>;
 
-const KEYCHAIN_SERVICE = "dev.galahad.node";
+const KEYCHAIN_SERVICE = "dev.invincible.node";
 
 export class Home {
   readonly configPath: string;
-  readonly mindPath: string;
+  readonly ledgerPath: string;
   readonly localPath: string;
   readonly adminTokenPath: string;
   readonly keyFilePath: string;
@@ -42,14 +42,14 @@ export class Home {
   constructor(readonly dir: string) {
     this.pushKeyPath = join(dir, "push-key.json");
     this.configPath = join(dir, "config.json");
-    this.mindPath = join(dir, "mind.db");
+    this.ledgerPath = join(dir, "ledger.db");
     this.localPath = join(dir, "local.db");
     this.adminTokenPath = join(dir, "admin.token");
     this.keyFilePath = join(dir, "keys.json");
   }
 
   static resolve(dir?: string): Home {
-    return new Home(resolve(dir ?? loadEnv().GALAHAD_HOME ?? join(homedir(), ".galahad")));
+    return new Home(resolve(dir ?? loadEnv().INVINCIBLE_HOME ?? join(homedir(), ".invincible")));
   }
 
   exists(): boolean {
@@ -61,7 +61,7 @@ export class Home {
   }
 
   readConfig(): NodeConfig {
-    if (!this.exists()) throw new Error(`no Galahad node at ${this.dir} — run \`galahad init\` or \`galahad join\``);
+    if (!this.exists()) throw new Error(`no Galahad node at ${this.dir} — run \`invincible init\` or \`invincible join\``);
     return Config.parse(JSON.parse(readFileSync(this.configPath, "utf8")));
   }
 
@@ -146,7 +146,7 @@ export class Home {
 
   readArmToken(label: string): string {
     const path = this.armTokenPath(label);
-    if (!existsSync(path)) throw new Error(`no arm token for "${label}" — run \`galahad mcp install <target> --label ${label}\``);
+    if (!existsSync(path)) throw new Error(`no arm token for "${label}" — run \`invincible mcp install <target> --label ${label}\``);
     return readFileSync(path, "utf8").trim();
   }
 

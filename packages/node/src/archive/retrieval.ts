@@ -1,4 +1,4 @@
-import { type ArchiveContextEntry, type ArchiveHit, randomId } from "@galahad/core";
+import { type ArchiveContextEntry, type ArchiveHit, randomId } from "@invincible/core";
 
 /*
  * Retrieval: what Galahad is given from his archive when a chat, quest or investigation

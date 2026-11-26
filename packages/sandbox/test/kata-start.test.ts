@@ -50,7 +50,7 @@ describe("a microVM that lost its files as it started", () => {
   });
 
   test("any other failure to start fails the sandbox, as it did, and isn't tried again", async () => {
-    const h = host({ code: 125, stderr: "docker: Error response from daemon: pull access denied for galahad/sandbox" });
+    const h = host({ code: 125, stderr: "docker: Error response from daemon: pull access denied for invincible/sandbox" });
     await expect(h.sandboxes.create({ network: "isolated", cpus: 1, memoryGb: 1, ttlMinutes: 30, persistent: false, quest: "q-kata2", isolation: "container" })).rejects.toThrow(/could not start sandbox: docker: Error response from daemon: pull access denied/);
     expect(h.runs()).toBe(1);
     expect(h.paused).toEqual([]);

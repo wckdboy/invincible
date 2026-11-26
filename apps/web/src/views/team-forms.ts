@@ -1,8 +1,8 @@
-import type { SandboxView, SecretView } from "@galahad/core";
-import { knightFromFile, type KnightFile, knightToFile } from "@galahad/core/roundtable";
-import { findSecrets } from "@galahad/core/secret-scan";
-import type { TeamControlInput, TeamKeyGrant, TeamRoom, TeamSnapshot, TeamTask, TeamTaskInput, Teammate } from "@galahad/core/team";
-import { TEAM_LIMITS } from "@galahad/core/team-limits";
+import type { SandboxView, SecretView } from "@invincible/core";
+import { knightFromFile, type KnightFile, knightToFile } from "@invincible/core/roundtable";
+import { findSecrets } from "@invincible/core/secret-scan";
+import type { TeamControlInput, TeamKeyGrant, TeamRoom, TeamSnapshot, TeamTask, TeamTaskInput, Teammate } from "@invincible/core/team";
+import { TEAM_LIMITS } from "@invincible/core/team-limits";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { hasDesktop } from "../lib/desktop.ts";
@@ -196,7 +196,7 @@ export async function editKnight(ctx: Ctx, existing?: Teammate, draft?: KnightFi
   // A job Galahad wrote is his brief to this worker, and is told to it as his. Changing it here makes it yours.
   const author = existing?.instructionsBy && existing.instructionsBy !== "owner" ? (existing.instructionsBy === "galahad" ? "Galahad" : (snapshot?.teammates.find((person) => person.id === existing.instructionsBy)?.name ?? existing.instructionsBy)) : null;
   const form = editor(ctx, existing ? `Edit ${existing.name}` : "New knight", "A knight at your Roundtable, beside Galahad: a name, a lasting job and a workspace of its own.", [
-    // A new knight may start from a knight file of yours (galahad roundtable export, or a knight's page): shown here to check.
+    // A new knight may start from a knight file of yours (invincible roundtable export, or a knight's page): shown here to check.
     !existing && !draft ? h("div", { class: "row" }, button("From a knight file", { size: "sm", variant: "ghost", icon: "folder", onClick: () => takeInKnight(ctx, () => form.close()) })) : null,
     draft ? callout("info", `From a knight file: check it, then create it here.${draft.keys?.length ? ` Where it came from it was given ${draft.keys.join(", ")}; none is given here unless you tick it below.` : ""}`, { title: `${draft.name}, taken in` }) : null,
     appearance.element,
@@ -207,7 +207,7 @@ export async function editKnight(ctx: Ctx, existing?: Teammate, draft?: KnightFi
     h("div", { class: "team-form-grid" }, field("Coding harness", harness, { hint: "Selecting a harness doesn't install it or sign it in: that is yours to do, in the knight's VM. Workspace checks show what's ready." }), field("Model role", role, { hint: roleHint })),
     acpField,
     offered.length || own.length ? h("fieldset", { class: "team-fieldset" }, h("legend", {}, "Models"), modelList, h("label", { class: "row" }, sensitive, h("span", {}, "Sensitive mode: only these models, for everything it does")), h("p", { class: "tiny subtle" }, modelsHint, ". A local model runs on the node that serves it, for a knight on Galahad's own harness: a vendor's coding tool can't use one.")) : null,
-    keyRows.length || keys.length ? h("fieldset", { class: "team-fieldset" }, h("legend", {}, "Keys it may use"), ...keyRows, h("p", { class: "tiny subtle" }, "Its scripts call $GALAHAD_KEYS/<name>/… with $GALAHAD_TOKEN where the key would go: the gateway puts the key in, at its own address alone, and the key never enters its VM. Reads only, unless Writes too. A secret of yours is offered here once it is pinned to its API's https address (galahad secret set <name> --base-url https://…); a model's or a connector's key never is.")) : null,
+    keyRows.length || keys.length ? h("fieldset", { class: "team-fieldset" }, h("legend", {}, "Keys it may use"), ...keyRows, h("p", { class: "tiny subtle" }, "Its scripts call $INVINCIBLE_KEYS/<name>/… with $INVINCIBLE_TOKEN where the key would go: the gateway puts the key in, at its own address alone, and the key never enters its VM. Reads only, unless Writes too. A secret of yours is offered here once it is pinned to its API's https address (invincible secret set <name> --base-url https://…); a model's or a connector's key never is.")) : null,
     field("Daily turn and job budget", dailyTurns, { hint: "Maximum reply turns and jobs per day, not a money limit. Zero holds new work." }),
     h("label", { class: "row" }, enabled, h("span", {}, "Enabled")),
   ], existing ? "Save knight" : "Create knight", async () => {
@@ -273,7 +273,7 @@ export function editNotes(ctx: Ctx, person: Teammate): void {
 export function shipTask(ctx: Ctx, task: TeamTask): void {
   const title = h("input", { class: "input", required: true, maxlength: 120, value: task.title.slice(0, 120) });
   const files = task.changes ? `${task.changes.files} file${task.changes.files === 1 ? "" : "s"}` : "Its changes";
-  editor(ctx, "Ship it as a pull request?", `${files}, on a new galahad/… branch of its repository, as it was verified. Its checks are followed after.`, [field("Pull request title", title)], "Open pull request", async () => {
+  editor(ctx, "Ship it as a pull request?", `${files}, on a new invincible/… branch of its repository, as it was verified. Its checks are followed after.`, [field("Pull request title", title)], "Open pull request", async () => {
     const shipped = await ctx.api.post<{ url: string | null; pr: number | null }>("/api/team/ship", { task: task.id, title: title.value.trim() });
     toast(shipped.pr ? `Pull request #${shipped.pr} opened` : "Pull request opened", { tone: "info", ...(shipped.url ? { action: { label: "Open", run: () => window.open(shipped.url!, "_blank", "noopener") } } : {}) });
   });

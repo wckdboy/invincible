@@ -1,8 +1,8 @@
-import { type ChatStreamEvent, type NodeIdentity, redact, retriedRuns, type RouteName, routes, SELF_ACTION_RESOURCE, spendLabel, type Usage } from "@galahad/core";
-import { chat, commandsRun, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sseData } from "@galahad/brain";
-import type { SyncEngine } from "@galahad/link";
-import type { MindStore, Vault } from "@galahad/mind";
-import type { SandboxHost } from "@galahad/sandbox";
+import { type ChatStreamEvent, type NodeIdentity, redact, retriedRuns, type RouteName, routes, SELF_ACTION_RESOURCE, spendLabel, type Usage } from "@invincible/core";
+import { chat, commandsRun, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sseData } from "@invincible/models";
+import type { SyncEngine } from "@invincible/link";
+import type { LedgerStore, Vault } from "@invincible/ledger";
+import type { SandboxHost } from "@invincible/sandbox";
 import type { ArmTokens } from "./arms.ts";
 import { type Capabilities, isAlwaysOn } from "./capabilities.ts";
 import type { ComputeService } from "./compute/service.ts";
@@ -27,7 +27,7 @@ const QUEST_GOAL_CHARS = 4000;
  */
 
 export interface LoopTaskDeps {
-  store: MindStore;
+  store: LedgerStore;
   vault: Vault;
   identity: NodeIdentity;
   nodeName: string;
@@ -233,7 +233,7 @@ function computeOf(deps: LoopTaskDeps, now: number): HeartbeatSnapshot["compute"
 }
 
 /** Recent activity for the checklist model: what Galahad did, as data. */
-function recentActivity(store: MindStore): string {
+function recentActivity(store: LedgerStore): string {
   const ledger = store.ledger(8).map((e) => `- ${e.body.class} ${e.body.resource} ${e.body.target}: ${e.body.verdict}`);
   const runs = store
     .loopRuns(undefined, 12)

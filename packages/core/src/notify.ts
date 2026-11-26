@@ -27,7 +27,7 @@ export const NOTIFY_KIND_INFO: Record<NotifyKind, { label: string; hint: string;
   approval: { label: "An approval is waiting", hint: "Something he or an agent wants to send or delete, filed for your answer.", on: true },
   finished: { label: "He has finished", hint: "A chat turn nobody was watching, or a quest you started: done, unverified, gave up or failed. News is told quietly, together, to the device you used last.", on: true },
   question: { label: "He has a question", hint: "An answer that ends by asking you, or a key or connector he needs.", on: true },
-  told: { label: "Your rules tell you", hint: "A command a rule of yours matches has run (galahad rule add … --tell): once for each rule and task.", on: true },
+  told: { label: "Your rules tell you", hint: "A command a rule of yours matches has run (invincible rule add … --tell): once for each rule and task.", on: true },
 };
 
 export interface QuietHours {
@@ -725,7 +725,7 @@ const PUSH_SERVICES: { name: string; hosts: string[]; suffixes: string[] }[] = [
   { name: "Mozilla", hosts: ["updates.push.services.mozilla.com"], suffixes: [".push.services.mozilla.com"] },
   { name: "Microsoft", hosts: [], suffixes: [".notify.windows.com"] },
   // UnifiedPush's public server (the ntfy app's), for the Android app on the owner's word (21 Nov): it carries bytes it
-  // can't read, as the others do. A self-hosted one is allowed with GALAHAD_PUSH_HOSTS.
+  // can't read, as the others do. A self-hosted one is allowed with INVINCIBLE_PUSH_HOSTS.
   { name: "ntfy (UnifiedPush)", hosts: ["ntfy.sh"], suffixes: [] },
 ];
 
@@ -759,7 +759,7 @@ export function pushService(endpoint: string, allowed: readonly string[] = []): 
     const pattern = entry.toLowerCase();
     if (pattern === host || (pattern.startsWith("*.") && host.endsWith(pattern.slice(1)) && host.length > pattern.length - 1)) return { ok: true, service: "a push service you allowed", origin: url.origin, href: url.href };
   }
-  return { ok: false, why: `${host} isn't a push service this node knows (Apple, Google, Mozilla, Microsoft, ntfy); allow another with GALAHAD_PUSH_HOSTS on the node` };
+  return { ok: false, why: `${host} isn't a push service this node knows (Apple, Google, Mozilla, Microsoft, ntfy); allow another with INVINCIBLE_PUSH_HOSTS on the node` };
 }
 
 /* ---------- what the app and the terminal read ---------- */

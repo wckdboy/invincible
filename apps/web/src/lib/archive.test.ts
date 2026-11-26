@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ArchiveStatusView } from "@galahad/core";
+import type { ArchiveStatusView } from "@invincible/core";
 import { archiveStep } from "./chats.ts";
 import { deleteName, embeddedShare, embedderLine, emptyFilter, filterSummary, filtering, kindInfo, searchBody } from "./archive.ts";
 
@@ -14,7 +14,7 @@ const status = (over: Partial<ArchiveStatusView> = {}): ArchiveStatusView => ({
   embedder: { model: "ollama/qwen3-embedding:0.6b", state: "ready", error: null, dims: 1024, local: true },
   understanding: { perDay: 200, localOnly: true, usedToday: 3, backlog: 7, lastError: null, lastRun: null },
   integrity: { lastAt: null, ok: null, checked: 0, problems: [] },
-  disk: { blobBytes: 0, blobs: 0, indexBytes: 0, backend: "local", root: "/var/lib/galahad/.galahad/archive" },
+  disk: { blobBytes: 0, blobs: 0, indexBytes: 0, backend: "local", root: "/var/lib/invincible/.invincible/archive" },
   sources: [],
   paused: false,
   ...over,

@@ -1,8 +1,8 @@
-import type { UsageWindow } from "@galahad/core";
+import type { UsageWindow } from "@invincible/core";
 
 /*
  * A provider whose allowance is spent now, in the usage meter's words: the same line the
- * terminal's `galahad usage` says, worked out here (the web app reads only @galahad/core,
+ * terminal's `invincible usage` says, worked out here (the web app reads only @invincible/core,
  * so it keeps its own HH:MM-UTC clock and its own hours-and-minutes span). Pure (no DOM).
  */
 

@@ -1,5 +1,5 @@
-import type { AttachmentRef, ChatStreamEvent, StoredMessage } from "@galahad/core";
-import { type ChatNeeds, type ChatState, chatStateWords, type QueueHold } from "@galahad/core/turns";
+import type { AttachmentRef, ChatStreamEvent, StoredMessage } from "@invincible/core";
+import { type ChatNeeds, type ChatState, chatStateWords, type QueueHold } from "@invincible/core/turns";
 import { archiveStep, stepsOf } from "./chats.ts";
 
 /*

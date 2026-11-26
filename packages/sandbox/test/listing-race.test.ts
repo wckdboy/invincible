@@ -20,7 +20,7 @@ function host(inspectAnswer: { code: number; stderr: string }) {
     if (args[0] === "info") return { code: 0, stdout: "29.0.0", stderr: "" };
     if (args[0] === "ps") return { code: 0, stdout: `${GONE}\n${LIVE}`, stderr: "" };
     // (Docker prints what it found, whatever it didn't.)
-    if (args[0] === "inspect") return { ...inspectAnswer, stdout: JSON.stringify([{ Config: { Labels: labels(LIVE), Image: "galahad/sandbox:1" }, State: { Status: "running" } }]) };
+    if (args[0] === "inspect") return { ...inspectAnswer, stdout: JSON.stringify([{ Config: { Labels: labels(LIVE), Image: "invincible/sandbox:1" }, State: { Status: "running" } }]) };
     return { code: 0, stdout: "", stderr: "" };
   };
   return new SandboxHost({

@@ -1,4 +1,4 @@
-import type { ArchiveEntryView, ArchiveSearchView, ArchiveStatusView, RouteName } from "@galahad/core";
+import type { ArchiveEntryView, ArchiveSearchView, ArchiveStatusView, RouteName } from "@invincible/core";
 
 /*
  * The terminal side of the archive. Thin: every rule lives in the node; this only
@@ -41,7 +41,7 @@ function printStatus(s: ArchiveStatusView): void {
   console.log(`  ${s.entries} entries${kinds ? ` (${kinds})` : ""}${s.deleted ? dim(` · ${s.deleted} deleted by you`) : ""}`);
   const embedder = s.embedder.model
     ? `${s.embedder.model}${s.embedder.local ? " (local)" : s.embedder.local === false ? " (remote)" : ""}${s.embedder.dims ? `, ${s.embedder.dims} dims` : ""}${s.embedder.state === "failing" ? ` · failing: ${s.embedder.error}` : ""}`
-    : "none (searching by words; hire one: galahad roster set embedder ollama/qwen3-embedding:0.6b)";
+    : "none (searching by words; hire one: invincible roster set embedder ollama/qwen3-embedding:0.6b)";
   console.log(`  ${s.chunks} passages, ${s.embedded} embedded, ${s.backlog} waiting · embedder ${embedder}`);
   const u = s.understanding;
   console.log(`  summaries: ${u.usedToday} of ${u.perDay} today${u.localOnly ? " (local model only, until you set a budget)" : ""}, ${u.backlog} waiting${u.lastError ? dim(` · ${u.lastError}`) : ""}`);
@@ -86,7 +86,7 @@ export async function archiveCommand(api: ArchiveApi, sub: string | undefined, r
     case undefined:
     case "status": {
       printStatus(await api.call<ArchiveStatusView>("archiveStatus"));
-      console.log(dim("\n  galahad archive search <words> · show <id> · idea \"<title>\" · reindex · verify · budget <n>"));
+      console.log(dim("\n  invincible archive search <words> · show <id> · idea \"<title>\" · reindex · verify · budget <n>"));
       return;
     }
     case "search": {
@@ -116,7 +116,7 @@ export async function archiveCommand(api: ArchiveApi, sub: string | undefined, r
     }
     case "show": {
       const id = rest[0];
-      if (!id) throw new Error("usage: galahad archive show <id> [file]");
+      if (!id) throw new Error("usage: invincible archive show <id> [file]");
       if (rest[1]) {
         // One file to stdout, as it is (checked against its SHA-256 by the node before it's sent).
         const { bytes } = await api.bytes("archiveFile", { id, path: rest[1] });
@@ -129,7 +129,7 @@ export async function archiveCommand(api: ArchiveApi, sub: string | undefined, r
     }
     case "idea": {
       const title = rest.join(" ").trim();
-      if (!title) throw new Error('usage: galahad archive idea "<title>" [--text "…"] [--tag t] (or the text on stdin)');
+      if (!title) throw new Error('usage: invincible archive idea "<title>" [--text "…"] [--tag t] (or the text on stdin)');
       const text = str(flags, "text") ?? (process.stdin.isTTY ? "" : (await io.readStdin()).trim());
       const tags = (Array.isArray(flags.tag) ? flags.tag : flags.tag ? [flags.tag] : []).filter((t): t is string => typeof t === "string");
       const noted = await api.call<{ id: string; created: boolean; node: string }>("noteIdea", { title, text: text || title, ...(tags.length ? { tags } : {}) });
@@ -140,7 +140,7 @@ export async function archiveCommand(api: ArchiveApi, sub: string | undefined, r
     case "delete": {
       const id = rest[0];
       const reason = str(flags, "reason");
-      if (!id || !reason) throw new Error('usage: galahad archive rm <id> --reason "why" (the archive keeps a tombstone, so it never comes back)');
+      if (!id || !reason) throw new Error('usage: invincible archive rm <id> --reason "why" (the archive keeps a tombstone, so it never comes back)');
       const { entry } = await api.call<{ entry: ArchiveEntryView }>("archiveEntry", { id });
       if (!flags.yes && !io.confirm(`Delete "${entry.title}" (${entry.kind}, ${entry.files.length} file(s)) from the archive for good?`)) {
         console.log("Kept.");
@@ -152,7 +152,7 @@ export async function archiveCommand(api: ArchiveApi, sub: string | undefined, r
     }
     case "reindex": {
       const r = await api.call<{ backlog: number; understanding: number }>("reindexArchive", { embeddings: true, ...(flags.summaries ? { understanding: true } : {}) });
-      console.log(`Embedding ${r.backlog} passage(s) again in the background${flags.summaries ? `, and summarising ${r.understanding} entries within the daily budget` : ""}. \`galahad archive\` shows how far it is.`);
+      console.log(`Embedding ${r.backlog} passage(s) again in the background${flags.summaries ? `, and summarising ${r.understanding} entries within the daily budget` : ""}. \`invincible archive\` shows how far it is.`);
       return;
     }
     case "verify": {
@@ -171,7 +171,7 @@ export async function archiveCommand(api: ArchiveApi, sub: string | undefined, r
         return;
       }
       const n = Number(rest[0]);
-      if (!Number.isInteger(n) || n < 0) throw new Error("usage: galahad archive budget <summaries per day, 0 to stop>");
+      if (!Number.isInteger(n) || n < 0) throw new Error("usage: invincible archive budget <summaries per day, 0 to stop>");
       await api.call("setArchiveBudget", { summariesPerDay: n });
       console.log(n ? `Up to ${n} summaries a day, by the swift role's models in order (a cloud model among them gets the entries' text).` : "No more summaries until you set a budget again.");
       return;

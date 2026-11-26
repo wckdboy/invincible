@@ -1,4 +1,4 @@
-import type { ActionView } from "@galahad/core";
+import type { ActionView } from "@invincible/core";
 import type { Ctx } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";

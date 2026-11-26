@@ -77,7 +77,7 @@ interface Row {
 }
 
 async function bench(target: number): Promise<Row> {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-bench-archive-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-bench-archive-"));
   const store = new ArchiveStore(join(dir, "archive.db"), new LocalDiskBackend(join(dir, "blobs")));
   const r = rng(target);
   const entries = Math.ceil(target / PER_ENTRY);

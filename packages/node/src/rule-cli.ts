@@ -1,8 +1,8 @@
-import type { Rule, RuleView } from "@galahad/core";
+import type { Rule, RuleView } from "@invincible/core";
 import type { Api } from "./loop-cli.ts";
 
 /*
- * `galahad rule`: your tripwires on the commands his work runs, your checks after them, and the rules that tell you one
+ * `invincible rule`: your tripwires on the commands his work runs, your checks after them, and the rules that tell you one
  * has run (core's rules.ts). Thin: the node checks every rule and keeps them in the mind; this shapes what you type and
  * prints what it holds.
  */
@@ -13,12 +13,12 @@ const tty = process.stdout.isTTY;
 const dim = (s: string) => (tty ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (tty ? `\x1b[1m${s}\x1b[0m` : s);
 
-const ADD = 'galahad rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text]';
-const USAGE = `usage: galahad rule ls | rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text] | rule rm <name>`;
+const ADD = 'invincible rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text]';
+const USAGE = `usage: invincible rule ls | rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text] | rule rm <name>`;
 
 /** What they cover, and what they can't see. */
 const COVERS = [
-  "Tripwires are checked before every command of Galahad's quests (galahad do, his loops', a trial's) and of a knight's task on his own runner, and before every gate; checks run after those commands, never after a gate; a rule that tells you does so once for each task, in your Inbox and as a notification (galahad notify kinds told off: the Inbox alone).",
+  "Tripwires are checked before every command of Galahad's quests (invincible do, his loops', a trial's) and of a knight's task on his own runner, and before every gate; checks run after those commands, never after a gate; a rule that tells you does so once for each task, in your Inbox and as a notification (invincible notify kinds told off: the Inbox alone).",
   "A coding tool (OpenCode, Claude Code, Codex, Hermes) runs its own commands in its VM, where they aren't seen: only its gates are checked.",
 ];
 
@@ -65,7 +65,7 @@ export async function ruleCommand(api: Api, sub: string | undefined, rest: strin
     }
     case "rm":
     case "remove": {
-      if (!rest[0]) throw new Error("usage: galahad rule rm <name>");
+      if (!rest[0]) throw new Error("usage: invincible rule rm <name>");
       const { removed } = await api.call<{ removed: string }>("removeRule", { name: rest[0] });
       console.log(`Removed ${removed}: no command is held to it any more.`);
       return;

@@ -23,8 +23,8 @@ describe("a server's question", () => {
     expect(q).toMatchObject({ connector: "tracker", label: "Tracker", message: "Which repository should the issue go in?", askedAt: 1_000, expires: 301_000 });
     expect(q!.fields.map((f) => [f.name, f.kind, f.required])).toEqual([["repo", "text", true], ["urgent", "yes-no", false]]);
     expect(status(() => questions.answer(q!.id, true, { urgent: true }))).toBe(400);
-    questions.answer(q!.id, true, { repo: "amiriteorg/galahad", urgent: true });
-    expect(await call).toEqual({ action: "accept", content: { repo: "amiriteorg/galahad", urgent: true } });
+    questions.answer(q!.id, true, { repo: "amiriteorg/invincible", urgent: true });
+    expect(await call).toEqual({ action: "accept", content: { repo: "amiriteorg/invincible", urgent: true } });
     expect(questions.list()).toEqual([]);
     expect(changed).toEqual([1, 0]);
     expect(status(() => questions.answer(q!.id, false))).toBe(404);

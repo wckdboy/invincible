@@ -1,4 +1,4 @@
-import { artifactTitle, type ChartSpec, compactNumber, isBlockKind, type PlanStep, readArtifact, readChart, readChoices, readStats, readSteps, type Stat } from "@galahad/core/blocks";
+import { artifactTitle, type ChartSpec, compactNumber, isBlockKind, type PlanStep, readArtifact, readChart, readChoices, readStats, readSteps, type Stat } from "@invincible/core/blocks";
 import { copyText } from "./controls.ts";
 import { openSheet } from "./dialog.ts";
 import { h, replace, svg } from "./dom.ts";
@@ -402,7 +402,7 @@ function frameFor(page: string, run: boolean, title: string, tall = false): HTML
   if (!listening) {
     listening = true;
     addEventListener("message", (event) => {
-      if (event.data !== "galahad-frame-ready") return;
+      if (event.data !== "invincible-frame-ready") return;
       const frame = [...document.querySelectorAll<HTMLIFrameElement>("iframe.viz-frame[data-run]")].find((f) => f.contentWindow === event.source);
       const handed = frame && waiting.get(frame);
       if (!frame || handed === undefined) return;

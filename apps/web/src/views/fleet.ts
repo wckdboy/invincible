@@ -1,7 +1,7 @@
-import type { ComputeNodeView, ComputeView, DeviceView, FleetView, PairingView, PeerStatus, QampGrantView } from "@galahad/core";
+import type { ComputeNodeView, ComputeView, DeviceView, FleetView, PairingView, PeerStatus, QampGrantView } from "@invincible/core";
 import { isAbort } from "../api.ts";
 import { capacityBlock, computeBody, slotsTile } from "./fleet-compute.ts";
-import { encodeQr, qrPath } from "@galahad/core/qr";
+import { encodeQr, qrPath } from "@invincible/core/qr";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { grantEnds, shortDid } from "../lib/grants.ts";
 import { makesSandboxes } from "../lib/sandbox.ts";
@@ -254,7 +254,7 @@ export function pairingCard(ctx: Ctx, p: PairingView, onDone?: (outcome: "approv
                 "span",
                 {},
                 "A new machine receives the whole vault, so it's approved from a terminal on an existing node, never from a phone. There, run ",
-                h("code", {}, "galahad pairings"),
+                h("code", {}, "invincible pairings"),
                 ", check this same code, then approve. You can still reject it here.",
               ),
               { title: "Approve machines from a terminal" },
@@ -393,7 +393,7 @@ export function openInvite(ctx: Ctx, initialKind: "client" | "node" = "client"):
     };
     tick();
     inviteScope.interval(tick, 1000);
-    const value = kind === "client" ? (invite.url ?? invite.invite) : `galahad join ${invite.invite}`;
+    const value = kind === "client" ? (invite.url ?? invite.invite) : `invincible join ${invite.invite}`;
     replace(
       body,
       h(
@@ -547,7 +547,7 @@ function agentsSection(ctx: Ctx, scope: Scope): HTMLElement | null {
         "p",
         {},
         grant
-          ? "Its grant ends at once: its key to Galahad is deleted, so the agent's next call is refused, and its bridge stops. To give it again, grant it from a terminal (galahad qamp grant)."
+          ? "Its grant ends at once: its key to Galahad is deleted, so the agent's next call is refused, and its bridge stops. To give it again, grant it from a terminal (invincible qamp grant)."
           : "Its key stops working at once: it can no longer read the mind, run sandboxes or use your models. To bring it back, install it again from a terminal.",
       ),
       confirmLabel: "Revoke",
@@ -610,9 +610,9 @@ function agentsSection(ctx: Ctx, scope: Scope): HTMLElement | null {
     {
       note: [
         "Coding agents with their own key to Galahad. Add one on a node: ",
-        h("span", { class: "mono" }, "galahad mcp install claude"),
+        h("span", { class: "mono" }, "invincible mcp install claude"),
         " (or opencode, codex, hermes); one on another machine of yours, for a while: ",
-        h("span", { class: "mono" }, "galahad qamp grant"),
+        h("span", { class: "mono" }, "invincible qamp grant"),
         ".",
       ],
     },

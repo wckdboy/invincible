@@ -13,7 +13,7 @@ import { basename, join, resolve } from "node:path";
 const script = resolve(import.meta.dir, "../../../scripts/remote-setup.sh");
 // The script installs the Bun it pins (scripts/bun-pin.sh) unless that one is there already: the stand-in says it is.
 const pinned = /^BUN_VERSION=(\S+)$/m.exec(readFileSync(resolve(import.meta.dir, "../../../scripts/bun-pin.sh"), "utf8"))![1]!;
-const root = mkdtempSync(join(tmpdir(), "galahad-deploy-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-deploy-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** A server's home with one release deployed and running, and a commit staged to follow it (with Q-AMP's binary, if given). */
@@ -21,25 +21,25 @@ function server(name: string, tests: "pass" | "fail", qamp?: string) {
   const home = join(root, name);
   const stage = join(root, `${name}-stage`);
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
-  mkdirSync(join(home, ".galahad"), { recursive: true });
-  mkdirSync(join(home, "galahad/releases/aaaaaaaaaaaa"), { recursive: true });
+  mkdirSync(join(home, ".invincible"), { recursive: true });
+  mkdirSync(join(home, "invincible/releases/aaaaaaaaaaaa"), { recursive: true });
   mkdirSync(stage);
-  writeFileSync(join(home, ".galahad/config.json"), '{ "name": "ultra" }');
+  writeFileSync(join(home, ".invincible/config.json"), '{ "name": "ultra" }');
   writeFileSync(join(stage, "package.json"), "{}");
   if (qamp !== undefined) writeFileSync(join(stage, "qamp.bin"), qamp);
-  symlinkSync(join(home, "galahad/releases/aaaaaaaaaaaa"), join(home, "galahad/app"));
+  symlinkSync(join(home, "invincible/releases/aaaaaaaaaaaa"), join(home, "invincible/app"));
   // Bun, as far as the script asks it: its version, an install, the test suite (where it ran, and how it ended).
   writeFileSync(join(home, ".bun/bin/bun"), `#!/bin/sh\ncase "$1" in\n  --version) echo ${pinned} ;;\n  test) pwd > "$HOME/tested-in"; echo "1 ${tests}"; ${tests === "pass" ? "exit 0" : "exit 1"} ;;\nesac\n`);
   chmodSync(join(home, ".bun/bin/bun"), 0o755);
-  const run = Bun.spawnSync(["bash", script, stage, "bbbbbbbbbbbb", "update", "ultra", "-", "-", "7777", "0", "0", "0", "0", "0"], {
-    env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", GALAHAD_USER_PHASE: "1" },
+  const run = Bun.spawnSync(["bash", script, stage, "bbbbbbbbbbbb", "update", "ultra", "-", "-", "7400", "0", "0", "0", "0", "0"], {
+    env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", INVINCIBLE_USER_PHASE: "1" },
     stdout: "pipe",
     stderr: "pipe",
   });
   return {
     code: run.exitCode,
     said: `${run.stdout.toString()}${run.stderr.toString()}`,
-    app: basename(readlinkSync(join(home, "galahad/app"))),
+    app: basename(readlinkSync(join(home, "invincible/app"))),
     testedIn: existsSync(join(home, "tested-in")) ? basename(readFileSync(join(home, "tested-in"), "utf8").trim()) : null,
     home,
   };
@@ -50,7 +50,7 @@ test("Q-AMP's binary shipped with a deploy that isn't the pinned one refuses the
   expect(deploy.code).toBe(1);
   expect(deploy.said).toContain("failed its checksum (it isn't Q-AMP 0.1.0 for this machine): not installed");
   expect(deploy.said).toContain("Q-AMP's binary wasn't installed: not deploying");
-  expect(existsSync(join(deploy.home, ".galahad/bin/qamp"))).toBe(false);
+  expect(existsSync(join(deploy.home, ".invincible/bin/qamp"))).toBe(false);
   expect(deploy.testedIn).toBeNull();
   expect(deploy.app).toBe("aaaaaaaaaaaa");
 });

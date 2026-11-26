@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import { type ArtifactView, b64u, newNodeIdentity, type RouteName, routes } from "@galahad/core";
-import { enrollDevice, foundFleet, MindStore } from "@galahad/mind";
-import type { ExtractLimits, ExtractResult } from "@galahad/sandbox";
+import { type ArtifactView, b64u, newNodeIdentity, type RouteName, routes } from "@invincible/core";
+import { enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
+import type { ExtractLimits, ExtractResult } from "@invincible/sandbox";
 import { ArtifactStore, artifactTarget, contentTypeOf } from "../src/artifacts.ts";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -42,7 +42,7 @@ function collector(files: Record<string, string>) {
 
 const dirs: string[] = [];
 const temp = () => {
-  const d = mkdtempSync(join(tmpdir(), "galahad-art-"));
+  const d = mkdtempSync(join(tmpdir(), "invincible-art-"));
   dirs.push(d);
   return d;
 };
@@ -52,7 +52,7 @@ afterAll(() => {
 
 describe("keeping a sandbox's work", () => {
   const identity = newNodeIdentity();
-  const store = new MindStore(":memory:");
+  const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   const ledger: { resource: string; class: string }[] = [];
   const artifacts = new ArtifactStore({ store, identity, dir: temp(), ledger: (e) => ledger.push(e) });
@@ -135,7 +135,7 @@ describe("artifacts over the API", () => {
 
   beforeAll(async () => {
     const { identity, keystore } = await home.createIdentity("file");
-    const store = new MindStore(home.mindPath);
+    const store = new LedgerStore(home.ledgerPath);
     const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
     store.close();
     home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -240,12 +240,12 @@ describe("artifacts over the API", () => {
 });
 
 /*
- * Fetching an artifact (`galahad artifact <id> --out dir`) writes files named by the mind's
+ * Fetching an artifact (`invincible artifact <id> --out dir`) writes files named by the mind's
  * record, which another node signed. A stolen node key must not turn "fetch them all"
  * into a write anywhere on the machine that fetches.
  */
 describe("where a fetched file lands", () => {
-  const out = join(tmpdir(), "galahad-fetch-out");
+  const out = join(tmpdir(), "invincible-fetch-out");
   const root = resolve(out);
 
   test("inside the directory you chose, folders and all", () => {

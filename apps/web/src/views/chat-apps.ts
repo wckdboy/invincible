@@ -1,4 +1,4 @@
-import type { SlackView, TelegramView } from "@galahad/core";
+import type { SlackView, TelegramView } from "@invincible/core";
 import { type Ctx, errorMessage } from "../context.ts";
 import { relativeTime } from "../lib/time.ts";
 import { busy, button, callout, card, copyField, copyText, listRow, note, secretInput, section, skeletonBlock } from "../ui/controls.ts";
@@ -107,7 +107,7 @@ function telegramCard(ctx: Ctx, telegram: TelegramView, code: LinkCode | null, c
       { label: "Telegram" },
       head,
       note("Through a bot of yours: make one with @BotFather (send it /newbot), and paste the token it gives you. Only your own account is answered, as a device of its own that may chat; nothing on your network is opened."),
-      admin ? form : callout("quiet", "Connecting needs a device with fleet:admin, or a terminal on a node: galahad telegram connect."),
+      admin ? form : callout("quiet", "Connecting needs a device with fleet:admin, or a terminal on a node: invincible telegram connect."),
       status,
     );
   }
@@ -201,7 +201,7 @@ function slackCard(ctx: Ctx, slack: SlackView, manifest: unknown, code: LinkCode
       note("An app of yours answers you in its direct messages. At api.slack.com/apps, make it from the manifest copied here (Create New App → From a manifest) and install it; then paste its app-level token (Basic Information → App-Level Tokens, with connections:write) and its bot token (OAuth & Permissions). Your node opens the connection, so nothing on your network is opened, and only your own account is answered, as a device of its own that may chat."),
       // (Its JSON is long: copied whole, never shown.)
       h("div", { class: "row" }, button("Copy the app's manifest", { size: "sm", icon: "copy", onClick: () => void copyText(JSON.stringify(manifest, null, 2), "Manifest copied") })),
-      admin ? form : callout("quiet", "Connecting needs a device with fleet:admin, or a terminal on a node: galahad slack connect."),
+      admin ? form : callout("quiet", "Connecting needs a device with fleet:admin, or a terminal on a node: invincible slack connect."),
       status,
     );
   }

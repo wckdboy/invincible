@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "../../..");
 const script = join(root, "scripts/install.sh");
-const scratch = mkdtempSync(join(tmpdir(), "galahad-install-"));
+const scratch = mkdtempSync(join(tmpdir(), "invincible-install-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 // The checkout it installs from is one of its own (--plan reads only its commit), so this runs from a tarball too.
@@ -26,7 +26,7 @@ function plan(name: string, args: string[], before?: (home: string) => void) {
   mkdirSync(home, { recursive: true });
   before?.(home);
   const run = Bun.spawnSync(["bash", script, "--plan", ...args], {
-    env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", GALAHAD_SOURCE: source },
+    env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", INVINCIBLE_SOURCE: source },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -37,37 +37,38 @@ test("on a machine new to it, it says it would fetch this commit, install its ow
   const { code, said, home } = plan("fresh", ["--name", "laptop", "--fleet", "camelot"]);
   expect(code).toBe(0);
   expect(said).toContain("--plan: nothing below is done");
-  expect(said).toContain(`would: install the pinned Bun into ${home}/.local/share/galahad/bun`);
+  expect(said).toContain(`would: install the pinned Bun into ${home}/.local/share/invincible/bun`);
   // Never over a Bun of yours.
   expect(said).not.toContain(`${home}/.bun`);
-  expect(said).toContain(`would: write ${home}/.local/bin/galahad`);
-  expect(said).toContain("would: galahad init --name laptop --fleet camelot");
+  expect(said).toContain(`would: write ${home}/.local/bin/invincible`);
+  expect(said).toContain(`would: link ${home}/.local/bin/inv to it`);
+  expect(said).toContain("would: invincible init --name laptop --fleet camelot");
   expect(readdirSync(home)).toEqual([]);
 });
 
 test("it keeps the node running as a service of yours, and publishes it and pairs a phone only then", () => {
   const kept = plan("service", []);
-  if (process.platform === "darwin") expect(kept.said).toContain(`would: write ${kept.home}/Library/LaunchAgents/sh.galahad.node.plist`);
-  else expect(kept.said).toMatch(/would: write .*systemd\/user\/galahad\.service|no service manager for you here/);
+  if (process.platform === "darwin") expect(kept.said).toContain(`would: write ${kept.home}/Library/LaunchAgents/sh.invincible.node.plist`);
+  else expect(kept.said).toMatch(/would: write .*systemd\/user\/invincible\.service|no service manager for you here/);
   const none = plan("no-service", ["--no-service"]);
   expect(none.said).not.toMatch(/LaunchAgents|systemd|publish the app|pair a phone/);
   expect(plan("no-expose", ["--no-expose"]).said).not.toContain("publish the app");
 });
 
 test("with an invite it joins your fleet instead, and a machine that is already a node is kept as it is", () => {
-  expect(plan("join", ["--join", "gi1.fake-invite-for-tests", "--name", "server"]).said).toContain("would: galahad join gi1.fake-invite-for-tests --name server");
+  expect(plan("join", ["--join", "gi1.fake-invite-for-tests", "--name", "server"]).said).toContain("would: invincible join gi1.fake-invite-for-tests --name server");
   const kept = plan("node", [], (home) => {
-    mkdirSync(join(home, ".galahad"));
-    writeFileSync(join(home, ".galahad/config.json"), '{ "name": "keep" }');
+    mkdirSync(join(home, ".invincible"));
+    writeFileSync(join(home, ".invincible/config.json"), '{ "name": "keep" }');
   });
   expect(kept.said).toContain("is already a node");
-  expect(kept.said).not.toMatch(/galahad (init|join)/);
+  expect(kept.said).not.toMatch(/invincible (init|join)/);
 });
 
 test("an option it doesn't know is refused, and --help says what it does", () => {
   expect(plan("unknown", ["--frobnicate"]).code).toBe(2);
   const help = Bun.spawnSync(["bash", script, "--help"], { stdout: "pipe" }).stdout.toString();
-  expect(help).toContain("curl -fsSL https://galahad.sh | bash");
+  expect(help).toContain("curl -fsSL https://invincible.sh | bash");
   expect(help).toContain("--no-expose");
 });
 

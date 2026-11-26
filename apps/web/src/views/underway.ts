@@ -1,4 +1,4 @@
-import type { LookView, UnderwayView } from "@galahad/core";
+import type { LookView, UnderwayView } from "@invincible/core";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { lookWords, nextLookMs, taskWords } from "../lib/underway.ts";

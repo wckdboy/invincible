@@ -28,13 +28,13 @@ import {
   type Usage,
   type UsageLine,
   usdLabel,
-} from "@galahad/core";
-import { grade, pose, type QuestOutcome, SUITES, TRIAL_EVIDENCE, TRIAL_INSTRUCTIONS, type TrialProblem } from "@galahad/brain";
-import { CLAUDE_CODE_IMAGE } from "@galahad/sandbox";
+} from "@invincible/core";
+import { grade, pose, type QuestOutcome, SUITES, TRIAL_EVIDENCE, TRIAL_INSTRUCTIONS, type TrialProblem } from "@invincible/models";
+import { CLAUDE_CODE_IMAGE } from "@invincible/sandbox";
 import { type DoOptions, type NodeClient, runNodeQuest } from "./quest-cli.ts";
 
 /*
- * `galahad trial run`: each problem is posed with fresh random parameters, solved as
+ * `invincible trial run`: each problem is posed with fresh random parameters, solved as
  * an ordinary quest in the Lab (models only, no internet: nothing to look up), graded
  * here against the exact answers, and recorded in the mind. The Galahad Index is the
  * mean score of a run, with a bootstrap interval.
@@ -182,7 +182,7 @@ export function planParallel(census: Pick<ComputeView, "nodes"> | null, asked: n
   const slots = hosts.reduce((sum, n) => sum + n.capacity!.sandboxes, 0);
   const free = hosts.reduce((sum, n) => sum + (n.free ?? 0), 0);
   const where = on ?? (hosts.length === 1 ? hosts[0]!.name : "the fleet");
-  if (slots < effort) throw new Error(`${where} carries ${slots} sandbox${slots === 1 ? "" : "es"} at once: effort ${effort} can't be measured there (galahad compute)`);
+  if (slots < effort) throw new Error(`${where} carries ${slots} sandbox${slots === 1 ? "" : "es"} at once: effort ${effort} can't be measured there (invincible compute)`);
   const most = Math.max(1, Math.floor(slots / effort));
   if (asked === "auto") {
     const now = Math.max(1, Math.min(most, Math.floor(free / effort) || 1, jobs, 8));
@@ -469,7 +469,7 @@ export async function runTrials(node: NodeClient, options: TrialRunOptions): Pro
     if (budget.usd !== undefined) {
       const cost = costOf(spent, prices);
       // A money budget can't be kept blind: a call nobody priced ends the run rather than run on uncounted.
-      if (cost.unpriced.length) return `a money budget needs a price for every model that answers, and there's none for ${cost.unpriced.join(", ")} (galahad price set …)`;
+      if (cost.unpriced.length) return `a money budget needs a price for every model that answers, and there's none for ${cost.unpriced.join(", ")} (invincible price set …)`;
       if (cost.usd >= budget.usd) return `the budget of ${usdLabel(budget.usd)} is spent (${usdLabel(cost.usd)} counted)`;
     }
     return null;
@@ -698,7 +698,7 @@ export async function trialRunFromCli(node: NodeClient, options: Omit<TrialRunOp
     const { run, trials, spent } = result;
     if (trials.length) {
       const said = [describeCost(trials, options.prices), describeDone(trials)].filter(Boolean);
-      console.log(`\n${describeIndex(trials)}${said.length ? `\n${said.join("\n")}` : ""}\n${dim(`run ${run} · galahad trials · galahad trial ${run}`)}`);
+      console.log(`\n${describeIndex(trials)}${said.length ? `\n${said.join("\n")}` : ""}\n${dim(`run ${run} · invincible trials · invincible trial ${run}`)}`);
     }
     if (spent.length) console.log(dim(`spent in all: ${spendLabel(spent, options.prices)}`));
     return result;
@@ -714,6 +714,6 @@ export function chooseProblems(suite: string, names: readonly string[]): TrialPr
   if (!names.length) return [...all];
   const chosen = all.filter((p) => names.includes(p.id) || names.includes(p.domain));
   const unknown = names.filter((n) => !all.some((p) => p.id === n || p.domain === n));
-  if (unknown.length) throw new Error(`no such problem or domain: ${unknown.join(", ")} (galahad trial problems lists them)`);
+  if (unknown.length) throw new Error(`no such problem or domain: ${unknown.join(", ")} (invincible trial problems lists them)`);
   return chosen;
 }

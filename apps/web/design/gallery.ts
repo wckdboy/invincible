@@ -275,7 +275,7 @@ const page = h(
       state("select and text area", h("div", { class: "fields" }, field("Role", h("select", { class: "select" }, h("option", {}, "engineer"), h("option", {}, "planner"))), field("Notes", h("textarea", { class: "textarea", rows: 2 })))),
       state("a key", field("API key", secretInput().wrap, { hint: "Sealed at once; only its last four characters are ever shown." })),
       state("choices", h("div", { class: "stack" }, segment.el.cloneNode(true) as HTMLElement, switchControl("Notifications on this device", true, () => {}, { hint: "Through the browser's push service." }), range.el, tags.el, picker.el)),
-      state("codes", copyField("galahad invite --client"), sasCode("023811")),
+      state("codes", copyField("invincible invite --client"), sasCode("023811")),
     ),
 
     shown(

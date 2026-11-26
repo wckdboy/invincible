@@ -1,7 +1,7 @@
 /*
  * The mandate's north star (docs/MANDATE.md; PLAN #28): human interventions per completed task. Each time you step in on
  * a knight's task is counted on it by how; these say what that comes to. Nothing here depends on anything, so the PWA
- * takes it alone (@galahad/core/interventions).
+ * takes it alone (@invincible/core/interventions).
  */
 
 /**

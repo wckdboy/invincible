@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ConversationSummary, StoredMessage } from "@galahad/core";
+import type { ConversationSummary, StoredMessage } from "@invincible/core";
 import { chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent, projectIdFrom, stepsOf } from "./chats.ts";
 
 const now = new Date(2026, 10, 10, 15, 0).getTime();

@@ -1,6 +1,6 @@
-import { type BrainContext, chat, isEmbeddingModel, resolveProvider } from "@galahad/brain";
-import { freeSlots, type NodeCapacity, SELF_ACTION_QUEST } from "@galahad/core";
-import type { SandboxHost } from "@galahad/sandbox";
+import { type ModelsContext, chat, isEmbeddingModel, resolveProvider } from "@invincible/models";
+import { freeSlots, type NodeCapacity, SELF_ACTION_QUEST } from "@invincible/core";
+import type { SandboxHost } from "@invincible/sandbox";
 import type { Capabilities } from "../capabilities.ts";
 import type { Governor } from "./governor.ts";
 
@@ -48,7 +48,7 @@ const MODEL_CHARS = 600;
  * provider no longer points at this machine (someone repointed "ollama" at a service elsewhere): measuring
  * himself never calls out, and never spends a provider's quota.
  */
-export async function modelSpeed(ctx: BrainContext, caps: Capabilities | null, enter: Governor["enterModel"]): Promise<{ runtime: string; model: string; tps: number }[]> {
+export async function modelSpeed(ctx: ModelsContext, caps: Capabilities | null, enter: Governor["enterModel"]): Promise<{ runtime: string; model: string; tps: number }[]> {
   const out: { runtime: string; model: string; tps: number }[] = [];
   for (const runtime of caps?.localModels ?? []) {
     const model = runtime.models.find((m) => !isEmbeddingModel(m));

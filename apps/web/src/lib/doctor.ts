@@ -1,5 +1,5 @@
-import type { DoctorArea, DoctorCheck, DoctorReport, DoctorState } from "@galahad/core/doctor";
-import { DOCTOR_AREA_TITLES, doctorSorted, doctorTook, doctorVerdict } from "@galahad/core/doctor";
+import type { DoctorArea, DoctorCheck, DoctorReport, DoctorState } from "@invincible/core/doctor";
+import { DOCTOR_AREA_TITLES, doctorSorted, doctorTook, doctorVerdict } from "@invincible/core/doctor";
 
 /*
  * The doctor's report as the Overview draws it (pure: the card only lays it out).

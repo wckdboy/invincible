@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { TrialView, UsageRow } from "@galahad/core";
-import type { UsageLine } from "@galahad/core/spend";
+import type { TrialView, UsageRow } from "@invincible/core";
+import type { UsageLine } from "@invincible/core/spend";
 import { checkLabel, heldLabels, isCheck, priceLabel, priceRows, runCost, spentLine } from "./trial-cost.ts";
 
 /* What trials and model calls cost, as the Trials and Models pages say it. */

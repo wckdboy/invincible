@@ -1,5 +1,5 @@
-import { costOf, type ExecResult, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type TrialAnswer, type TrialRecord, trialScore, tokensLabel, usdLabel } from "@galahad/core";
-import { QUEST_DEFAULTS, testFilesOf } from "@galahad/brain";
+import { costOf, type ExecResult, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type TrialAnswer, type TrialRecord, trialScore, tokensLabel, usdLabel } from "@invincible/core";
+import { QUEST_DEFAULTS, testFilesOf } from "@invincible/models";
 import { inWorkdir, type NodeClient, questId, runNodeQuest } from "./quest-cli.ts";
 import { quote } from "./team-runtime.ts";
 import { harnessOptions, heldToEffort, nothingAnswered, tellPassedOver, type TrialJob, type TrialUnit } from "./trial-cli.ts";
@@ -125,7 +125,7 @@ export function chooseCases(yours: YourCases, names: readonly string[]): YourCas
     const not = yours.left.find((l) => l.task === name || caseId(l.task) === name);
     return [not ? `${name} isn't a case (${not.why})` : `${name}: no case, nor a knight with one`];
   });
-  if (problems.length) throw new Error(`${problems.join("; ")} (galahad trial problems --suite yours lists them)`);
+  if (problems.length) throw new Error(`${problems.join("; ")} (invincible trial problems --suite yours lists them)`);
   return names.length ? yours.cases.filter((c) => names.some((name) => named(c, name))) : [...yours.cases];
 }
 

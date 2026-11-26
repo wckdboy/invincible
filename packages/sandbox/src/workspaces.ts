@@ -4,14 +4,14 @@ import { existsSync } from "node:fs";
  * Disk limits for sandboxes. Each sandbox's /work is its own fixed-size ext4 image
  * (sparse: it takes only what's written), so a runaway knight fills its own
  * workspace, never the host's disk. Mounting needs root, which the node doesn't
- * have; a tiny root helper (sandbox/galahad-workspace, started by systemd per
- * connection) does exactly that, on a socket only the galahad user can open.
+ * have; a tiny root helper (sandbox/invincible-workspace, started by systemd per
+ * connection) does exactly that, on a socket only the invincible user can open.
  *
  * And a budget: a sandbox is created only if every workspace could fill up to its
  * limit and the disk would still keep its reserve free.
  */
 
-export const WORKSPACE_SOCKET = "/run/galahad-workspace.sock";
+export const WORKSPACE_SOCKET = "/run/invincible-workspace.sock";
 export const DEFAULT_DISK_GB = 20;
 /** The most a workspace may be, as the helper itself holds (its MAX_GIB). */
 export const MAX_WORKSPACE_GB = 4096;

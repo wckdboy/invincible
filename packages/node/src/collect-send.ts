@@ -1,4 +1,4 @@
-import { findSecrets, GENERIC_NOTIFICATION, type NotifyPayload, readNotifyPayload } from "@galahad/core";
+import { findSecrets, GENERIC_NOTIFICATION, type NotifyPayload, readNotifyPayload } from "@invincible/core";
 import type { NotifyStore } from "./notify-store.ts";
 import type { PushDelivery, PushOutcome, PushTarget } from "./push-send.ts";
 

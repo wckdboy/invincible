@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { type ChatStreamEvent, parseVariant, type RouteName, TrialRecord, trialProblem, type TrialView, VARIANTS } from "@galahad/core";
-import { ENGINEERING_SUITE, pose, TRIAL_INSTRUCTIONS, type TrialProblem } from "@galahad/brain";
-import { CLAUDE_CODE_IMAGE } from "@galahad/sandbox";
+import { type ChatStreamEvent, parseVariant, type RouteName, TrialRecord, trialProblem, type TrialView, VARIANTS } from "@invincible/core";
+import { ENGINEERING_SUITE, pose, TRIAL_INSTRUCTIONS, type TrialProblem } from "@invincible/models";
+import { CLAUDE_CODE_IMAGE } from "@invincible/sandbox";
 import { AGENT_TRIAL_MINUTES, chooseProblems, harnessOptions, runTrial, runTrials } from "../src/trial-cli.ts";
 
 /*
@@ -27,7 +27,7 @@ function fakeNode(options: { answer?: (goal: string) => string | null; failCreat
       switch (name) {
         case "createSandbox":
           if (options.failCreate) throw new Error("no sandbox host in this fleet");
-          return { sandbox: { id: "0123456789", node: "n_ultra", image: "galahad/lab:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, providers: input.search ? ["search"] : [] } } as T;
+          return { sandbox: { id: "0123456789", node: "n_ultra", image: "invincible/lab:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, providers: input.search ? ["search"] : [] } } as T;
         case "fleet":
           throw new Error("not needed");
         case "execSandbox": {
@@ -152,11 +152,11 @@ describe("a run's harness", () => {
 });
 
 describe("the CLI", () => {
-  test("`galahad trial problems` lists the suite on a machine that isn't a node", () => {
-    const home = mkdtempSync(join(tmpdir(), "galahad-trial-cli-"));
+  test("`invincible trial problems` lists the suite on a machine that isn't a node", () => {
+    const home = mkdtempSync(join(tmpdir(), "invincible-trial-cli-"));
     try {
       const run = Bun.spawnSync([process.execPath, resolve(import.meta.dir, "../src/cli.ts"), "trial", "problems", "--home", join(home, "none")], {
-        env: { ...process.env, GALAHAD_KEYSTORE: "file" },
+        env: { ...process.env, INVINCIBLE_KEYSTORE: "file" },
         stdin: "ignore",
       });
       expect(new TextDecoder().decode(run.stderr)).toBe("");

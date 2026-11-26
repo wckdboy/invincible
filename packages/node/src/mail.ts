@@ -1,5 +1,5 @@
-import type { ArgValue, BuiltRequest, ConnectorManifest } from "@galahad/core";
-import type { ConnectorResult } from "@galahad/brain";
+import type { ArgValue, BuiltRequest, ConnectorManifest } from "@invincible/core";
+import type { ConnectorResult } from "@invincible/models";
 import type { NativeTool } from "./connectors.ts";
 
 /*

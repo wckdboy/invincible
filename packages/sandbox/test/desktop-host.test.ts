@@ -18,13 +18,13 @@ function desk(options: { status?: string; labels?: Record<string, string>; missi
   const runner: DockerRunner = async (args) => {
     if (args[0] === "info") return { code: 0, stdout: "29.0.0", stderr: "" };
     if (args[0] === "ps") return { code: 0, stdout: ID, stderr: "" };
-    if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: "galahad/desktop:1" }, State: { Status: options.status ?? "running" } }]), stderr: "" };
+    if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: "invincible/desktop:1" }, State: { Status: options.status ?? "running" } }]), stderr: "" };
     if (args[0] === "exec") {
       // After the container: timeout --signal=KILL <n>s <cmd…>
       const cmd = args.slice(args.indexOf(containerName(ID)) + 4);
       execs.push(cmd);
       if (options.missing) return { code: 127, stdout: "", stderr: "sh: 1: desktop: not found" };
-      if (options.fail && cmd.includes(options.fail)) return { code: 1, stdout: "", stderr: "desktop: the browser did not start (see /tmp/galahad-desktop/browser.log)" };
+      if (options.fail && cmd.includes(options.fail)) return { code: 1, stdout: "", stderr: "desktop: the browser did not start (see /tmp/invincible-desktop/browser.log)" };
       return { code: 0, stdout: cmd.join(" ").includes("base64 -w0") ? PICTURE : "", stderr: "" };
     }
     return { code: 0, stdout: "", stderr: "" };

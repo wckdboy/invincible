@@ -1,6 +1,6 @@
-import type { ActionView, ConnectorRequestView, FleetView, LoopDraftView, MemoryView, NoticeView, PairingView, QuestionView, ScreenSessionView, SecretRequestView } from "@galahad/core";
-import type { LiveEvent, LiveTopic } from "@galahad/core/live";
-import type { TeamSnapshot } from "@galahad/core/team";
+import type { ActionView, ConnectorRequestView, FleetView, LoopDraftView, MemoryView, NoticeView, PairingView, QuestionView, ScreenSessionView, SecretRequestView } from "@invincible/core";
+import type { LiveEvent, LiveTopic } from "@invincible/core/live";
+import type { TeamSnapshot } from "@invincible/core/team";
 import { type Api, ApiError } from "./api.ts";
 import type { Live } from "./context.ts";
 import { type After, Followers, GAP_MS, type LiveLink, liveLink } from "./lib/live-link.ts";

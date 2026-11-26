@@ -3,9 +3,9 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bodyFingerprint, type Calibration, ceilingThreads, costOf, type Price, REFERENCE_SINGLE, routes, type RouteName, spendTotal, type TrialView, type UsageMeter, type UsageView } from "@galahad/core";
-import { ENGINEERING_SUITE, pose, type QuestEvent } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { bodyFingerprint, type Calibration, ceilingThreads, costOf, type Price, REFERENCE_SINGLE, routes, type RouteName, spendTotal, type TrialView, type UsageMeter, type UsageView } from "@invincible/core";
+import { ENGINEERING_SUITE, pose, type QuestEvent } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import type { Measure } from "../src/compute/service.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -42,7 +42,7 @@ const caps: Capabilities = {
   sandbox: { image: true, networks: true },
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-usage-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-usage-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const docker = fakeDocker();
@@ -95,7 +95,7 @@ const hire = async (model: string) => {
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -168,7 +168,7 @@ describe("the node's own count, and your prices", () => {
       local.close();
     }
     // And none of it is in the log: per-call counts are this node's telemetry, not something replicas decide on.
-    const store = new MindStore(home.mindPath);
+    const store = new LedgerStore(home.ledgerPath);
     try {
       expect(store.eventsSince({}, 100_000).events.some((e) => e.kind.startsWith("usage"))).toBe(false);
     } finally {
@@ -242,7 +242,7 @@ describe("the node's own count, and your prices", () => {
 });
 
 /*
- * `galahad do --budget-usd`: the run's calls are priced as they go, at your prices, and the work stops once they have
+ * `invincible do --budget-usd`: the run's calls are priced as they go, at your prices, and the work stops once they have
  * cost the budget (quest.ts says when and how; here, through a real node, with a price that makes the plan spend it).
  */
 describe("a quest with a budget", () => {
@@ -373,7 +373,7 @@ describe("what a trial spent, in the log", () => {
       expect(spendTotal(trials[0]!.spent!.lines).tokens).toBe(spendTotal(spent).tokens);
       const listed = (await call<{ trials: TrialView[] }>("trials")).trials.find((t) => t.id === trials[0]!.id)!;
       expect(listed.spent).toEqual(trials[0]!.spent!);
-      const store = new MindStore(home.mindPath);
+      const store = new LedgerStore(home.ledgerPath);
       try {
         const events = store.eventsSince({}, 100_000).events;
         const scored = events.find((e) => e.kind === "trial.scored" && (e.body as { id: string }).id === listed.id)!;

@@ -1,4 +1,4 @@
-import type { ConnectorView } from "@galahad/core";
+import type { ConnectorView } from "@invincible/core";
 import { type Ctx, errorMessage } from "../context.ts";
 import { plural } from "../lib/text.ts";
 import { busy, button, callout, copyText, field, secretInput } from "../ui/controls.ts";

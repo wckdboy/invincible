@@ -1,5 +1,5 @@
-import type { ProviderView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { ProviderView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { planLine, roleParts } from "../lib/text.ts";
 import type { PresetView, RoleSpec } from "../types.ts";

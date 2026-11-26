@@ -13,18 +13,18 @@ export type ThemePref = "system" | "light" | "dark";
 export type MotionPref = "system" | "reduce" | "full";
 
 const KEYS = {
-  theme: "galahad:theme",
-  motion: "galahad:motion",
-  sidebar: "galahad:sidebar",
-  role: "galahad:chat-role",
-  enter: "galahad:chat-enter",
-  chat: "galahad:open-chat",
-  roundtable: "galahad:roundtable-view",
-  work: "galahad:work-open",
-  details: "galahad:task-details",
-  panel: "galahad:knight-panel",
-  away: "galahad:away-seen",
-  reach: "galahad:reach-put-away",
+  theme: "invincible:theme",
+  motion: "invincible:motion",
+  sidebar: "invincible:sidebar",
+  role: "invincible:chat-role",
+  enter: "invincible:chat-enter",
+  chat: "invincible:open-chat",
+  roundtable: "invincible:roundtable-view",
+  work: "invincible:work-open",
+  details: "invincible:task-details",
+  panel: "invincible:knight-panel",
+  away: "invincible:away-seen",
+  reach: "invincible:reach-put-away",
 } as const;
 
 type PrefKey = keyof typeof KEYS;
@@ -51,8 +51,8 @@ const root = () => document.documentElement;
 // The app opens on Chat, so the page you were last on is no longer kept; nor the roster's folded sections, which went with
 // the roster sidebar (26 November 2026): what an earlier version wrote goes.
 try {
-  localStorage.removeItem("galahad:last-route");
-  localStorage.removeItem("galahad:roster-folded");
+  localStorage.removeItem("invincible:last-route");
+  localStorage.removeItem("invincible:roster-folded");
 } catch {
   /* storage unavailable: there is nothing to remove */
 }

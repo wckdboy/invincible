@@ -11,7 +11,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
-# Hermes is not a Galahad test dependency. The plugin implements this public ABC;
+# Hermes is not a Invincible test dependency. The plugin implements this public ABC;
 # tests exercise its actual HTTP behavior with an in-process loopback server.
 base = types.ModuleType("agent.memory_provider")
 class MemoryProvider:
@@ -20,14 +20,14 @@ class MemoryProvider:
     def on_session_end(self, *args, **kwargs): pass
 base.MemoryProvider = MemoryProvider
 sys.modules["agent.memory_provider"] = base
-spec = importlib.util.spec_from_file_location("galahad_memory_test", Path(__file__).parent / "galahad" / "__init__.py")
+spec = importlib.util.spec_from_file_location("invincible_memory_test", Path(__file__).parent / "invincible" / "__init__.py")
 plugin = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plugin)
 
 
 class ProviderTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="galahad-memory-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="invincible-memory-test-")
         self.token = Path(self.temp.name) / "arm.token"
         self.token.write_text("arm_" + "F" * 43)
         self.token.chmod(0o600)
@@ -49,11 +49,11 @@ class ProviderTests(unittest.TestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
         self.thread.start()
-        self.env = patch.dict(os.environ, {"GALAHAD_MEMORY_URL": "http://127.0.0.1:" + str(self.server.server_port),
-                                         "GALAHAD_MEMORY_TOKEN_FILE": str(self.token),
+        self.env = patch.dict(os.environ, {"INVINCIBLE_MEMORY_URL": "http://127.0.0.1:" + str(self.server.server_port),
+                                         "INVINCIBLE_MEMORY_TOKEN_FILE": str(self.token),
                                          "http_proxy": "http://127.0.0.1:1", "https_proxy": "http://127.0.0.1:1"})
         self.env.start()
-        self.provider = plugin.GalahadMemoryProvider()
+        self.provider = plugin.InvincibleMemoryProvider()
         self.provider.initialize("primary", agent_context="primary")
 
     def tearDown(self):
@@ -78,18 +78,18 @@ class ProviderTests(unittest.TestCase):
         self.provider.on_memory_write("replace", "user", "private profile")
         self.provider.on_session_end([{"content": "private history"}])
         self.assertEqual(self.calls, [])
-        result = json.loads(self.provider.handle_tool_call("galahad_remember", {"text": "Build requires Python 3", "tags": ["build"]}))
+        result = json.loads(self.provider.handle_tool_call("invincible_remember", {"text": "Build requires Python 3", "tags": ["build"]}))
         self.assertEqual(result, {"id": "new-note", "trust": "untrusted"})
         self.assertEqual(self.calls[0][1], {"text": "Build requires Python 3", "tags": ["hermes", "build"], "untrusted": True})
-        self.provider.handle_tool_call("galahad_remember", {"text": "x", "trust": "owner"})
+        self.provider.handle_tool_call("invincible_remember", {"text": "x", "trust": "owner"})
         self.provider.handle_tool_call("forget", {"id": "other"})
         self.assertEqual(len(self.calls), 1)
 
     def test_nonprimary_contexts_cannot_write_even_with_forged_tool_name(self):
         for context in ("subagent", "cron", "flush"):
             self.provider.initialize("child", agent_context=context)
-            self.assertEqual([t["name"] for t in self.provider.get_tool_schemas()], ["galahad_recall"])
-            self.assertIn("error", json.loads(self.provider.handle_tool_call("galahad_remember", {"text": "no"})))
+            self.assertEqual([t["name"] for t in self.provider.get_tool_schemas()], ["invincible_recall"])
+            self.assertIn("error", json.loads(self.provider.handle_tool_call("invincible_remember", {"text": "no"})))
         self.assertEqual(self.calls, [])
 
     def test_owner_token_insecure_files_and_remote_origins_rejected(self):
@@ -99,8 +99,8 @@ class ProviderTests(unittest.TestCase):
         self.token.chmod(0o644)
         self.assertFalse(self.provider.is_available())
         self.token.chmod(0o600)
-        for url in ("http://example.com", "http://localhost:7777", "http://127.0.0.1:7777/api", "http://user@127.0.0.1:7777", "file:///etc/passwd"):
-            with patch.dict(os.environ, {"GALAHAD_MEMORY_URL": url}):
+        for url in ("http://example.com", "http://localhost:7400", "http://127.0.0.1:7400/api", "http://user@127.0.0.1:7400", "file:///etc/passwd"):
+            with patch.dict(os.environ, {"INVINCIBLE_MEMORY_URL": url}):
                 self.assertFalse(self.provider.is_available())
         self.assertEqual(self.calls, [])
 
@@ -114,10 +114,10 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 3)
 
     def test_invalid_arguments_make_no_request(self):
-        for name, args in (("galahad_recall", {"query": "x", "limit": 9}),
-                           ("galahad_recall", {"query": "x", "limit": True}),
-                           ("galahad_remember", {"text": "x", "tags": [""]}),
-                           ("galahad_remember", {"text": "x" * 20001})):
+        for name, args in (("invincible_recall", {"query": "x", "limit": 9}),
+                           ("invincible_recall", {"query": "x", "limit": True}),
+                           ("invincible_remember", {"text": "x", "tags": [""]}),
+                           ("invincible_remember", {"text": "x" * 20001})):
             self.assertIn("error", json.loads(self.provider.handle_tool_call(name, args)))
         self.assertEqual(self.calls, [])
 

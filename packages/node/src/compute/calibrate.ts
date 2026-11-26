@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { bodyFingerprint, type Calibration, type CalibrationReason, ceilingThreads, type ComputeBody, type ComputeLimit, KERNEL, redact } from "@galahad/core";
+import { bodyFingerprint, type Calibration, type CalibrationReason, ceilingThreads, type ComputeBody, type ComputeLimit, KERNEL, redact } from "@invincible/core";
 import type { BenchOptions, BenchResult } from "./bench.ts";
 
 /*

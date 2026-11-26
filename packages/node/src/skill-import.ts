@@ -1,4 +1,4 @@
-import { readAgentSkill, type SkillDoc } from "@galahad/core";
+import { readAgentSkill, type SkillDoc } from "@invincible/core";
 
 /*
  * Skills from elsewhere (PLAN #34): an Agent Skill's folder on GitHub (its SKILL.md: a name, when to use it, then
@@ -107,7 +107,7 @@ export async function fetchAgentSkill(url: string, o: { fetch?: typeof fetch; ba
   let response: Response;
   try {
     // That address and no other: a redirect is never followed.
-    response = await (o.fetch ?? fetch)(target, { redirect: "manual", headers: { "user-agent": "galahad/0.1 (+https://galahad.sh)" }, signal: AbortSignal.timeout(20_000) });
+    response = await (o.fetch ?? fetch)(target, { redirect: "manual", headers: { "user-agent": "invincible/0.1 (+https://invincible.sh)" }, signal: AbortSignal.timeout(20_000) });
   } catch (error) {
     throw new SkillImportError(502, `GitHub couldn't be reached: ${(error as Error).message}`);
   }

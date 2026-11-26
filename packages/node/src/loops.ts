@@ -12,8 +12,8 @@ import {
   RETIRED_LOOP_TASKS,
   type Schedule,
   ScheduleError,
-} from "@galahad/core";
-import type { MindStore } from "@galahad/mind";
+} from "@invincible/core";
+import type { LedgerStore } from "@invincible/ledger";
 
 /*
  * Loops: work Galahad does on a schedule, or when something happens. A loop lives
@@ -79,7 +79,7 @@ interface StoredWakes {
   cooldownMs: number;
 }
 
-export function loopRecords(store: MindStore): LoopRecord[] {
+export function loopRecords(store: LedgerStore): LoopRecord[] {
   const woken = new Map(store.lwwPrefix<StoredWakes>("loopwake:").map((entry) => [entry.key.slice("loopwake:".length), entry.value!]));
   return store.lwwPrefix<StoredLoop>("loop:").map((entry) => {
     const stored = entry.value!;
@@ -102,7 +102,7 @@ export function loopRecords(store: MindStore): LoopRecord[] {
       // A task this version no longer has says so; any other is taken for a newer version's.
       const kind = (stored.task as { kind?: unknown } | null)?.kind;
       const retired = typeof kind === "string" && Object.hasOwn(RETIRED_LOOP_TASKS, kind) ? RETIRED_LOOP_TASKS[kind]! : null;
-      problems.push(retired ? `its task no longer exists (${retired}), so it never runs. Remove it: galahad loop rm ${stored.name}` : "this node doesn't understand the task (written by a newer version?)");
+      problems.push(retired ? `its task no longer exists (${retired}), so it never runs. Remove it: invincible loop rm ${stored.name}` : "this node doesn't understand the task (written by a newer version?)");
     }
     return {
       name: stored.name,
@@ -123,7 +123,7 @@ export function loopRecords(store: MindStore): LoopRecord[] {
 }
 
 /** Whether every heartbeat loop lets him fix what's safe himself (on unless one says `selfAction: false`). */
-export function selfActionOn(store: MindStore): { on: boolean; heartbeats: string[] } {
+export function selfActionOn(store: LedgerStore): { on: boolean; heartbeats: string[] } {
   const beats = loopRecords(store).filter((l) => l.task?.kind === "heartbeat");
   return { on: beats.every((l) => l.task?.kind !== "heartbeat" || l.task.selfAction !== false), heartbeats: beats.map((l) => l.name) };
 }
@@ -161,7 +161,7 @@ export const WAKE_RETRIES = 3;
 export type RunnableLoop = LoopRecord & { task: LoopTask; schedule: Schedule };
 
 export interface LoopRunnerOptions {
-  store: MindStore;
+  store: LedgerStore;
   identity: NodeIdentity;
   local: Database;
   log: (message: string) => void;

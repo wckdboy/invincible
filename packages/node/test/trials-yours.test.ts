@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { TrialRecord, trialProblem } from "@galahad/core";
+import { TrialRecord, trialProblem } from "@invincible/core";
 import type { TrialJob } from "../src/trial-cli.ts";
 import { trialCommand, UsageError } from "../src/trial-commands.ts";
 import { attemptCase, chooseCases, commandsFor, type GateRun, hardestFirst, judgeGates, rootOf, yourCases } from "../src/trial-yours.ts";
@@ -300,7 +300,7 @@ describe("the yours suite at the command line", () => {
     // Every suite at once needs no node: your own work is pointed to, not read.
     printed = [];
     expect(await trialCommand({ command: "trial", sub: "problems", rest: [], flags: {}, node: () => { throw new Error("no node was needed"); } })).toBe(0);
-    expect(out()).toContain("your node's own: galahad trial problems --suite yours");
+    expect(out()).toContain("your node's own: invincible trial problems --suite yours");
     expect(out()).toContain("cantilever-beam");
   });
 
@@ -325,7 +325,7 @@ describe("the yours suite at the command line", () => {
     await expect(trial(node, "estimate", ["task-nothere-0001"], { suite: "yours" })).rejects.toThrow("task-nothere-0001: no case, nor a knight with one");
     node.team = teamOf([taskOf({ verified: false })]);
     await expect(trial(node, "estimate", [], { suite: "yours" })).rejects.toThrow(UsageError);
-    await expect(trial(node, "estimate", [], { suite: "yours" })).rejects.toThrow("the yours suite has nothing to run yet (galahad trial problems --suite yours says why)");
+    await expect(trial(node, "estimate", [], { suite: "yours" })).rejects.toThrow("the yours suite has nothing to run yet (invincible trial problems --suite yours says why)");
   });
 
   test("its trials are ordinary trials: the report and compare read two runs of it, pairing case by case", async () => {

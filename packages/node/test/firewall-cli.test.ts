@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { MAC_FIREWALL, macFirewallHelper, macFirewallPlist, macFirewallRules, type MacFirewallState } from "@galahad/sandbox";
+import { MAC_FIREWALL, macFirewallHelper, macFirewallPlist, macFirewallRules, type MacFirewallState } from "@invincible/sandbox";
 import { firewallCommand, type FirewallDeps } from "../src/firewall-cli.ts";
 
 /*
- * `galahad firewall` (firewall-cli.ts), with stand-ins for root's places, launchd and the firewall's state: nothing
+ * `invincible firewall` (firewall-cli.ts), with stand-ins for root's places, launchd and the firewall's state: nothing
  * here touches the machine it runs on. What the firewall does to traffic was tried on the Mac mini (docs/MAC.md).
  */
 
@@ -44,14 +44,14 @@ function mac(over: { uid?: number; platform?: string; state?: MacFirewallState[]
   return { deps, printed, ran, placed, made, removed, rooted: () => rooted };
 }
 
-describe("galahad firewall", () => {
+describe("invincible firewall", () => {
   test("status: on, or off with why; its exit code says which", async () => {
     const on = mac();
     expect(await firewallCommand(undefined, on.deps)).toBe(0);
     expect(on.printed[0]).toStartWith("On: a gateway sandbox reaches the gateway alone");
-    const off = mac({ state: [{ on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `galahad firewall install` (it asks for your password once)" }] });
+    const off = mac({ state: [{ on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)" }] });
     expect(await firewallCommand("status", off.deps)).toBe(1);
-    expect(off.printed).toEqual(["Off: this Mac's sandbox firewall isn't installed: run `galahad firewall install` (it asks for your password once)"]);
+    expect(off.printed).toEqual(["Off: this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)"]);
   });
 
   test("rules: what it lets through, as pf is given it", async () => {
@@ -77,16 +77,16 @@ describe("galahad firewall", () => {
       { path: MAC_FIREWALL.plist, text: macFirewallPlist(), mode: 0o644 },
     ]);
     expect(m.ran).toEqual([
-      ["/bin/launchctl", "bootout", "system/sh.galahad.firewall"],
+      ["/bin/launchctl", "bootout", "system/sh.invincible.firewall"],
       ["/bin/launchctl", "bootstrap", "system", MAC_FIREWALL.plist],
     ]);
-    expect(m.printed.at(-1)).toStartWith("Installed and on (sh.galahad.firewall, every 10 s)");
+    expect(m.printed.at(-1)).toStartWith("Installed and on (sh.invincible.firewall, every 10 s)");
   });
 
   test("installed before the node's networks are up: said, and that its node brings them up", async () => {
-    const m = mac({ state: [{ on: false, installed: true, soon: true, why: "the galahad-gw network has no bridge on this Mac yet" }] });
+    const m = mac({ state: [{ on: false, installed: true, soon: true, why: "the invincible-gw network has no bridge on this Mac yet" }] });
     expect(await firewallCommand("install", m.deps)).toBe(0);
-    expect(m.printed.at(-1)).toBe("Installed (sh.galahad.firewall, every 10 s). It is on once the node's networks are up, which its node does as it starts: the galahad-gw network has no bridge on this Mac yet.");
+    expect(m.printed.at(-1)).toBe("Installed (sh.invincible.firewall, every 10 s). It is on once the node's networks are up, which its node does as it starts: the invincible-gw network has no bridge on this Mac yet.");
   });
 
   test("never writes where anyone but root could: a place that isn't root's alone is refused, and nothing is put anywhere", async () => {
@@ -114,16 +114,16 @@ describe("galahad firewall", () => {
     const m = mac();
     expect(await firewallCommand("remove", m.deps)).toBe(0);
     expect(m.ran).toEqual([
-      ["/bin/launchctl", "bootout", "system/sh.galahad.firewall"],
+      ["/bin/launchctl", "bootout", "system/sh.invincible.firewall"],
       ["/sbin/pfctl", "-a", "com.apple/galahad", "-F", "all"],
     ]);
     expect(m.removed).toEqual([MAC_FIREWALL.plist, MAC_FIREWALL.helper, MAC_FIREWALL.status]);
   });
 
-  test("on Linux it is galahad-firewall's to do: said, and install refuses", async () => {
+  test("on Linux it is invincible-firewall's to do: said, and install refuses", async () => {
     const m = mac({ platform: "linux" });
     expect(await firewallCommand("status", m.deps)).toBe(0);
-    expect(m.printed[0]).toContain("galahad-firewall");
+    expect(m.printed[0]).toContain("invincible-firewall");
     expect(await firewallCommand("install", m.deps)).toBe(1);
     expect(m.placed).toEqual([]);
   });
@@ -131,6 +131,6 @@ describe("galahad firewall", () => {
   test("anything else: its usage", async () => {
     const m = mac();
     expect(await firewallCommand("open", m.deps)).toBe(1);
-    expect(m.printed).toEqual(["usage: galahad firewall [status|rules|install|remove]"]);
+    expect(m.printed).toEqual(["usage: invincible firewall [status|rules|install|remove]"]);
   });
 });

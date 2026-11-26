@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LedgerEntry, routes, type RouteName, type SandboxView } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
-import { CLAUDE_CODE_IMAGE, CONTAINER_CANNOT, CONTAINER_UNMADE, KEEPERS, type MacFirewallState, NETWORKS } from "@galahad/sandbox";
+import { type LedgerEntry, routes, type RouteName, type SandboxView } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
+import { CLAUDE_CODE_IMAGE, CONTAINER_CANNOT, CONTAINER_UNMADE, KEEPERS, type MacFirewallState, NETWORKS } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -18,7 +18,7 @@ import { freePort } from "./ports.ts";
  * what a Mac can't give is refused with the reason.
  */
 
-const root = mkdtempSync(join(tmpdir(), "galahad-mac-host-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-mac-host-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const caps: Capabilities = {
@@ -60,7 +60,7 @@ const logged: string[] = [];
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const mind = new MindStore(home.mindPath);
+  const mind = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(mind, identity, { fleetName: "mac-fleet", nodeName: "mini" });
   mind.close();
   home.writeConfig({ v: 1, name: "mini", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -82,16 +82,16 @@ describe("a node on a Mac with Apple's container", () => {
   });
 
   test("makes its networks at its start, the gateway's with --internal, and holds both up", () => {
-    expect(fake.calls).toContainEqual(["network", "create", "--internal", "--subnet", NETWORKS.gateway.subnet, "--label", "dev.galahad=1", NETWORKS.gateway.name]);
-    expect(fake.calls).toContainEqual(["network", "create", "--subnet", NETWORKS.online.subnet, "--label", "dev.galahad=1", NETWORKS.online.name]);
+    expect(fake.calls).toContainEqual(["network", "create", "--internal", "--subnet", NETWORKS.gateway.subnet, "--label", "dev.invincible=1", NETWORKS.gateway.name]);
+    expect(fake.calls).toContainEqual(["network", "create", "--subnet", NETWORKS.online.subnet, "--label", "dev.invincible=1", NETWORKS.online.name]);
     expect([KEEPERS.gateway, KEEPERS.online].map((k) => fake.vms.get(k)?.state)).toEqual(["running", "running"]);
   });
 
   test("makes no sandbox while its firewall is off: the API answers 424 with why, and nothing is made", async () => {
     const before = fake.vms.size;
-    firewall = { on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `galahad firewall install` (it asks for your password once)" };
+    firewall = { on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)" };
     try {
-      await expect(api("createSandbox", { on: "mini", network: "gateway", cpus: 1, memoryGb: 1, quest: "q-no-firewall" })).rejects.toThrow("createSandbox: 424 no sandbox is made on this Mac while its firewall isn't on: this Mac's sandbox firewall isn't installed: run `galahad firewall install`");
+      await expect(api("createSandbox", { on: "mini", network: "gateway", cpus: 1, memoryGb: 1, quest: "q-no-firewall" })).rejects.toThrow("createSandbox: 424 no sandbox is made on this Mac while its firewall isn't on: this Mac's sandbox firewall isn't installed: run `invincible firewall install`");
       expect(fake.vms.size).toBe(before);
     } finally {
       firewall = { on: true };
@@ -114,7 +114,7 @@ describe("a node on a Mac with Apple's container", () => {
     expect(fake.vms.has(sandbox.name)).toBe(false);
     expect(fake.volumes.has(`${sandbox.name}-work`)).toBe(false);
     const { entries } = await api<{ entries: LedgerEntry[] }>("ledger");
-    expect(entries.find((e) => e.resource === "docker.container" && e.class === "create" && e.target === sandbox.name)?.detail).toBe("microVM · gateway · 1 cpu · 1 GB · 20 GB disk · galahad/sandbox:1");
+    expect(entries.find((e) => e.resource === "docker.container" && e.class === "create" && e.target === sandbox.name)?.detail).toBe("microVM · gateway · 1 cpu · 1 GB · 20 GB disk · invincible/sandbox:1");
   });
 
   test("placed without being pinned: its sandbox is made on the Mac; one asked to be isolated finds no host here, and says why", async () => {
@@ -132,7 +132,7 @@ describe("a node on a Mac with Apple's container", () => {
     await api("saveTeammate", { id: "ada", name: "ADA", role: "engineer" });
     const { workspace } = await api<{ workspace: SandboxView }>("provisionTeammate", { id: "ada" });
     expect(workspace).toMatchObject({ isolation: "vm", network: "online", ephemeral: false, cpus: 1, memoryGb: 2 });
-    expect(fake.volumes.get(`${workspace.name}-work`)!.labels["dev.galahad.retained"]).toBe("1");
+    expect(fake.volumes.get(`${workspace.name}-work`)!.labels["dev.invincible.retained"]).toBe("1");
     const grown = await api<{ workspace: SandboxView; paused?: boolean }>("resizeTeammate", { id: "ada", memoryGb: 4 });
     expect(grown).toMatchObject({ paused: true, workspace: { id: workspace.id, memoryGb: 4, status: "running" } });
     expect(fake.vms.get(workspace.name)!.volume).toBe(`${workspace.name}-work`);

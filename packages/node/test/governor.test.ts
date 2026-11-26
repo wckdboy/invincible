@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { NodeCapacity } from "@galahad/core";
+import type { NodeCapacity } from "@invincible/core";
 import os from "node:os";
 import { CapacityError, Governor, KEPT_WORK_MS } from "../src/compute/governor.ts";
 import { liveHost, macFreeShare } from "../src/compute/service.ts";

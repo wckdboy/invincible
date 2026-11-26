@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from "bun:test";
-import type { LoopDraftView, RouteName } from "@galahad/core";
+import type { LoopDraftView, RouteName } from "@invincible/core";
 import { describeTask, loopCommand, parseWake } from "../src/loop-cli.ts";
 
-/* `galahad loop drafts`, `loop add --draft` and `loop dismiss` at a terminal, against what the node would answer. */
+/* `invincible loop drafts`, `loop add --draft` and `loop dismiss` at a terminal, against what the node would answer. */
 
 const draft: LoopDraftView = {
   id: "ld_AAAAAAAAAAAAAAAAAAAAAA",
@@ -10,7 +10,7 @@ const draft: LoopDraftView = {
   schedule: "0 8 * * 1-5",
   tz: "Europe/Copenhagen",
   on: null,
-  task: { kind: "call", connector: "github", tool: "pulls", args: { owner: "amiriteorg", repo: "galahad" } },
+  task: { kind: "call", connector: "github", tool: "pulls", args: { owner: "amiriteorg", repo: "invincible" } },
   wakes: [],
   cooldownMs: null,
   label: "Open pull requests, each weekday",
@@ -54,9 +54,9 @@ async function printed(run: () => Promise<void>): Promise<string[]> {
 test("the drafts are listed with what each would do and why, and how to add or dismiss one", async () => {
   const lines = await printed(() => loopCommand(node().api, "drafts", [], {}));
   expect(lines.join("\n")).toContain("ld_AAAAAAAAAAAAAAAAAAAAAA  pr-check: 0 8 * * 1-5 (Europe/Copenhagen)");
-  expect(lines.join("\n")).toContain("call github.pulls owner=amiriteorg repo=galahad");
+  expect(lines.join("\n")).toContain("call github.pulls owner=amiriteorg repo=invincible");
   expect(lines.join("\n")).toContain("why: You asked to see the open pull requests every weekday at 8.");
-  expect(lines.at(-1)).toContain("galahad loop add --draft <id>");
+  expect(lines.at(-1)).toContain("invincible loop add --draft <id>");
   expect(await printed(() => loopCommand(node([]).api, "drafts", [], {}))).toEqual(["No drafts. Ask Galahad in chat for something on a schedule, and his draft waits here for you."]);
 });
 
@@ -82,11 +82,11 @@ test("what wakes a loop, as you'd say it at a terminal", () => {
   expect(parseWake("gmail from:boss@example.com is:unread")).toEqual({ kind: "mail", connector: "gmail", query: "from:boss@example.com is:unread" });
   expect(parseWake("outlook")).toEqual({ kind: "mail", connector: "outlook" });
   // A GitHub wake with no events named wakes on a failed CI run; a branch narrows that to its own runs.
-  expect(parseWake("github amiriteorg/galahad")).toEqual({ kind: "github", owner: "amiriteorg", repo: "galahad", on: ["ci.failed"] });
-  expect(parseWake("github amiriteorg/galahad ci.failed,pushed main")).toEqual({ kind: "github", owner: "amiriteorg", repo: "galahad", on: ["ci.failed", "pushed"], branch: "main" });
+  expect(parseWake("github amiriteorg/invincible")).toEqual({ kind: "github", owner: "amiriteorg", repo: "invincible", on: ["ci.failed"] });
+  expect(parseWake("github amiriteorg/invincible ci.failed,pushed main")).toEqual({ kind: "github", owner: "amiriteorg", repo: "invincible", on: ["ci.failed", "pushed"], branch: "main" });
   expect(() => parseWake("github amiriteorg")).toThrow(/--wake "github <owner>\/<repo>/);
-  expect(parseWake("github amiriteorg/galahad issue.opened,pr.opened")).toEqual({ kind: "github", owner: "amiriteorg", repo: "galahad", on: ["issue.opened", "pr.opened"] });
-  expect(() => parseWake("github amiriteorg/galahad merged")).toThrow(/ci.failed or pushed or issue.opened or pr.opened, not "merged"/);
+  expect(parseWake("github amiriteorg/invincible issue.opened,pr.opened")).toEqual({ kind: "github", owner: "amiriteorg", repo: "invincible", on: ["issue.opened", "pr.opened"] });
+  expect(() => parseWake("github amiriteorg/invincible merged")).toThrow(/ci.failed or pushed or issue.opened or pr.opened, not "merged"/);
   expect(() => parseWake("slack #general")).toThrow(/--wake webhook/);
   expect(() => parseWake("webhook please")).toThrow(/--wake webhook/);
 });
@@ -102,7 +102,7 @@ test("a loop with something to wake it and no schedule runs only when woken; its
   expect(out).toContain("deploys: only when woken on keep");
   expect(out).toContain("wakes on a webhook (a burst within 15 min wakes it once)");
   expect(out).toContain("POST /hooks/deploys");
-  expect(out).toContain(`Secret, shown this once (galahad loop hook <name> makes a new one): ${"a".repeat(64)}`);
+  expect(out).toContain(`Secret, shown this once (invincible loop hook <name> makes a new one): ${"a".repeat(64)}`);
   expect(out).toContain("X-Hub-Signature-256: sha256=");
   await expect(loopCommand(api, "set", ["deploys"], { cooldown: "soon" })).rejects.toThrow(/--cooldown takes minutes or hours/);
 });

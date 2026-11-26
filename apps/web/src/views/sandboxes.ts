@@ -1,4 +1,4 @@
-import type { FleetView, ProviderView, SandboxView } from "@galahad/core";
+import type { FleetView, ProviderView, SandboxView } from "@invincible/core";
 import { ApiError, isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { diskUse, gatewayUse, IMAGES, isLab, ISOLATION, type IsolationChoice, isolationPlan, makesSandboxes } from "../lib/sandbox.ts";

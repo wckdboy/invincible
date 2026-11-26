@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamTask } from "@galahad/core/team";
+import type { TeamTask } from "@invincible/core/team";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, steppedLine, taskActions, taskBadge, taskEnd } from "./task-card.ts";
 
 const task = (status: TeamTask["status"], more: Partial<TeamTask> = {}): TeamTask => ({ id: "task-abcdefghijkl", room: "dm-ada", assignee: "ada", title: "Fix the importer", goal: "Fix it", dependsOn: [], gates: ["bun test"], status, verified: status === "done", progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, ...more });

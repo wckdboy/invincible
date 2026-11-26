@@ -1,4 +1,4 @@
-import type { DeviceView } from "@galahad/core";
+import type { DeviceView } from "@invincible/core";
 
 /**
  * The active devices a name, an id or the start of an id refers to. A revoked device

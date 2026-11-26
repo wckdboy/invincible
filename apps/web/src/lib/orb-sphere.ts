@@ -1,4 +1,4 @@
-import { blendHex } from "@galahad/core/avatar";
+import { blendHex } from "@invincible/core/avatar";
 import { orbRand, orbSeed, type OrbMood } from "./orb-motion.ts";
 import type { OrbLevel } from "./orb.ts";
 

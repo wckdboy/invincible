@@ -1,5 +1,5 @@
-import { costOf, type Prices, spendTotal, type UsageLine, usdLabel } from "@galahad/core/spend";
-import type { TeamTask, TeamTrailEntry } from "@galahad/core/team";
+import { costOf, type Prices, spendTotal, type UsageLine, usdLabel } from "@invincible/core/spend";
+import type { TeamTask, TeamTrailEntry } from "@invincible/core/team";
 
 /*
  * A task's work, folded (T3 Code's "Worked for 2m 14s ›", its steps grouped: "Read 6 files", "Edited 3 files", "Ran 4

@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -11,14 +11,14 @@ import { fakeDocker } from "./fake-docker.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * `galahad loop add` as it is typed at a terminal, through the CLI's own reading of its flags (cli.ts parseArgs).
+ * `invincible loop add` as it is typed at a terminal, through the CLI's own reading of its flags (cli.ts parseArgs).
  * A loop once (--at, --in) was first tested only from loopCommand, past that reading: the CLI, which reads a flag it
  * wasn't told of as a switch, took `--in 2m` for `--in` alone and refused the loop on Ultra (24 November 2026).
  */
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "loop-cli-test", cores: 2, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: true, vm: { kvm: false, tools: [] }, tools: ["git"], localModels: [], tailscale: null, sandbox: { image: true, networks: true } };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-loop-cli-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-loop-cli-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon | undefined;
@@ -29,14 +29,14 @@ afterAll(async () => {
 });
 
 async function cli(...args: string[]): Promise<{ out: string; err: string; code: number }> {
-  const run = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...args, "--home", home.dir], { env: { ...process.env, GALAHAD_KEYSTORE: "file" }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const run = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), ...args, "--home", home.dir], { env: { ...process.env, INVINCIBLE_KEYSTORE: "file" }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [out, err, code] = await Promise.all([new Response(run.stdout).text(), new Response(run.stderr).text(), run.exited]);
   return { out, err, code };
 }
 
 test("a loop once, typed at a terminal: --at a time in a zone, or --in a while from now", async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });

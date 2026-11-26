@@ -1,5 +1,5 @@
-import type { SandboxView } from "@galahad/core";
-import type { Teammate } from "@galahad/core/team";
+import type { SandboxView } from "@invincible/core";
+import type { Teammate } from "@invincible/core/team";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { hasDesktop } from "../lib/desktop.ts";

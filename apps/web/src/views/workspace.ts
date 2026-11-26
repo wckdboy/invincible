@@ -1,4 +1,4 @@
-import type { TeamChangesView, TeamFilesView, TeamFileView } from "@galahad/core";
+import type { TeamChangesView, TeamFilesView, TeamFileView } from "@invincible/core";
 import { type Ctx, errorMessage } from "../context.ts";
 import { bytesLabel } from "../lib/artifacts.ts";
 import { languageOf } from "../lib/highlight.ts";
@@ -10,7 +10,7 @@ import { codeBlock, renderMarkdown } from "../ui/markdown.ts";
 
 /*
  * A knight's workspace, read (POST /api/team/files, /file and /changes; the Apple apps' Workspace, the terminal's
- * `galahad roundtable files|read|changes`): its folders and files, a file as its code in colour (Markdown drawn, a
+ * `invincible roundtable files|read|changes`): its folders and files, a file as its code in colour (Markdown drawn, a
  * picture shown), and what its latest task changed, each file's part of the diff. In a sheet that moves within itself,
  * with Back; nothing here writes.
  */

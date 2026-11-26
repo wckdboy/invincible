@@ -46,7 +46,7 @@ export function decodeInvite(text: string): Invite {
   return Invite.parse(JSON.parse(fromUtf8(fromB64u(token.slice(4)))));
 }
 
-const pairKey = (secret: Bytes) => deriveKey(secret, "galahad/pair/v1/mac");
+const pairKey = (secret: Bytes) => deriveKey(secret, "invincible/pair/v1/mac");
 
 /**
  * What a joining device calls itself, shown in terminals and the app: no control characters
@@ -90,7 +90,7 @@ export function proofMatches(expected: string, given: string): boolean {
 
 /** Short authentication string shown on both screens, e.g. "482 913". */
 export function sasCode(secret: Bytes, fleet: string, device: string): string {
-  const bytes = deriveKey(secret, `galahad/pair/v1/sas|${fleet}|${device}`, 4);
+  const bytes = deriveKey(secret, `invincible/pair/v1/sas|${fleet}|${device}`, 4);
   const n = (((bytes[0]! << 24) | (bytes[1]! << 16) | (bytes[2]! << 8) | bytes[3]!) >>> 0) % 1_000_000;
   const digits = n.toString().padStart(6, "0");
   return `${digits.slice(0, 3)} ${digits.slice(3)}`;

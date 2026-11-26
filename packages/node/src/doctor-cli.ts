@@ -1,17 +1,17 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
-import { type DoctorCheck, type DoctorReport, doctorExit, doctorLines, doctorSorted, type DoctorStyle, doctorTally, doctorTook, type RouteName } from "@galahad/core";
+import { type DoctorCheck, type DoctorReport, doctorExit, doctorLines, doctorSorted, type DoctorStyle, doctorTally, doctorTook, type RouteName } from "@invincible/core";
 import { realSystem } from "./doctor-facts.ts";
 import type { Home } from "./home.ts";
 
 /*
- * `galahad doctor`: is everything well? One command; the node does the looking, this
+ * `invincible doctor`: is everything well? One command; the node does the looking, this
  * prints. Exit code 0 when all is well, 1 when something needs you, 2 when something
  * is broken; `--json` for machines.
  *
- *   galahad doctor              the whole check (asks each role's model one word, starts and removes a sandbox)
- *   galahad doctor --offline    the same without asking any model or probing any connector's service
- *   galahad doctor --quick      only what costs nothing to look at (what the app's Overview shows)
+ *   invincible doctor              the whole check (asks each role's model one word, starts and removes a sandbox)
+ *   invincible doctor --offline    the same without asking any model or probing any connector's service
+ *   invincible doctor --quick      only what costs nothing to look at (what the app's Overview shows)
  *
  * With no node running there's nobody to ask, so it says so, and looks at what a
  * stopped node leaves on disk: its key file's mode, the mind's database, the disk.
@@ -41,39 +41,39 @@ export function stoppedReport(home: Home, base: string, started = performance.no
       area: "service",
       state: "broken",
       line: `the node isn't running: nothing answers on ${base}`,
-      fix: "Start it: galahad serve (as a service: systemctl start galahad; journalctl -u galahad -n 100 says why it stopped).",
+      fix: "Start it: invincible serve (as a service: systemctl start invincible; journalctl -u invincible -n 100 says why it stopped).",
     },
   ];
   let name = "this machine";
   try {
     const config = home.readConfig();
     name = config.name;
-    checks.push({ id: "node.identity", area: "node", state: config.fleet ? "ok" : "needs-you", line: config.fleet ? `${name} is set up as a node (its config reads well)` : `${name} hasn't joined a fleet`, ...(config.fleet ? {} : { fix: "galahad init founds one; galahad join <invite> joins one." }) });
+    checks.push({ id: "node.identity", area: "node", state: config.fleet ? "ok" : "needs-you", line: config.fleet ? `${name} is set up as a node (its config reads well)` : `${name} hasn't joined a fleet`, ...(config.fleet ? {} : { fix: "invincible init founds one; invincible join <invite> joins one." }) });
     if (config.keystore === "file") {
       const file = realSystem.file(home.keyFilePath)!;
-      if (!file.exists) checks.push({ id: "node.keys", area: "node", state: "broken", line: "its key file (keys.json) is gone, so it can't start", fix: "Restore keys.json from a backup of the node's home, or enrol this machine again (galahad join) and revoke the old entry." });
+      if (!file.exists) checks.push({ id: "node.keys", area: "node", state: "broken", line: "its key file (keys.json) is gone, so it can't start", fix: "Restore keys.json from a backup of the node's home, or enrol this machine again (invincible join) and revoke the old entry." });
       else if (file.mode !== null && file.mode & 0o077) checks.push({ id: "node.keys", area: "node", state: "broken", line: `its key file can be read by other users of this machine (mode ${(file.mode & 0o777).toString(8)})`, fix: "chmod 600 keys.json in the node's home, then consider the keys read: revoke this node and enrol it again." });
       else checks.push({ id: "node.keys", area: "node", state: "ok", line: "its key file is there" });
     }
   } catch (error) {
-    checks.push({ id: "node.identity", area: "node", state: "broken", line: `no usable node at ${home.dir}: ${String((error as Error).message).slice(0, 160)}`, fix: "galahad init founds a fleet here; galahad join <invite> joins one. --home (or GALAHAD_HOME) says where a node lives." });
+    checks.push({ id: "node.identity", area: "node", state: "broken", line: `no usable node at ${home.dir}: ${String((error as Error).message).slice(0, 160)}`, fix: "invincible init founds a fleet here; invincible join <invite> joins one. --home (or INVINCIBLE_HOME) says where a node lives." });
   }
-  if (existsSync(home.mindPath)) {
+  if (existsSync(home.ledgerPath)) {
     try {
-      const db = new Database(home.mindPath, { readonly: true });
+      const db = new Database(home.ledgerPath, { readonly: true });
       try {
         const rows = db.query<{ quick_check: string }, []>("PRAGMA quick_check").all();
         const ok = rows.length === 1 && rows[0]!.quick_check === "ok";
         checks.push(
           ok
             ? { id: "mind.integrity", area: "mind", state: "ok", line: "the mind's database passes SQLite's integrity check" }
-            : { id: "mind.integrity", area: "mind", state: "broken", line: `the mind's database is damaged: ${rows.map((r) => r.quick_check).join("; ").slice(0, 200)}`, fix: "Keep mind.db aside. Restore it from your last backup, or enrol the node again from another one: the log syncs back." },
+            : { id: "mind.integrity", area: "mind", state: "broken", line: `the mind's database is damaged: ${rows.map((r) => r.quick_check).join("; ").slice(0, 200)}`, fix: "Keep ledger.db aside. Restore it from your last backup, or enrol the node again from another one: the log syncs back." },
         );
       } finally {
         db.close();
       }
     } catch (error) {
-      checks.push({ id: "mind.integrity", area: "mind", state: "broken", line: `the mind's database can't be opened: ${String((error as Error).message).slice(0, 160)}`, fix: "Keep mind.db aside. Restore it from your last backup, or enrol the node again from another one." });
+      checks.push({ id: "mind.integrity", area: "mind", state: "broken", line: `the mind's database can't be opened: ${String((error as Error).message).slice(0, 160)}`, fix: "Keep ledger.db aside. Restore it from your last backup, or enrol the node again from another one." });
     }
   }
   const disk = realSystem.disk(home.dir);

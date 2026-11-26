@@ -1,4 +1,4 @@
-import { CLOCK, isConversationId, NOTIFY_OPENS, NOTIFY_PER_DAY, type NotifyLostView, type NotifyOpen, type NotifyPrefs, type NotifyView } from "@galahad/core/notify";
+import { CLOCK, isConversationId, NOTIFY_OPENS, NOTIFY_PER_DAY, type NotifyLostView, type NotifyOpen, type NotifyPrefs, type NotifyView } from "@invincible/core/notify";
 
 /*
  * Notifications on this device, as the page reasons about them (pure: the browser's
@@ -116,7 +116,7 @@ export function pushSync(s: { subscribed: boolean; lost: boolean; browser: boole
  */
 export function readOpenMessage(data: unknown): { route: NotifyOpen; conversation?: string } | null {
   const d = (data && typeof data === "object" ? data : {}) as { type?: unknown; open?: unknown; conversation?: unknown };
-  if (d.type !== "galahad:open" || typeof d.open !== "string" || !(NOTIFY_OPENS as readonly string[]).includes(d.open)) return null;
+  if (d.type !== "invincible:open" || typeof d.open !== "string" || !(NOTIFY_OPENS as readonly string[]).includes(d.open)) return null;
   const conversation = d.open === "chat" && typeof d.conversation === "string" && isConversationId(d.conversation) ? d.conversation : undefined;
   return { route: d.open as NotifyOpen, ...(conversation ? { conversation } : {}) };
 }

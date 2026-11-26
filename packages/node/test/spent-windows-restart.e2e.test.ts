@@ -2,9 +2,9 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { routes, type RouteName, type UsageMeter } from "@galahad/core";
-import { windowsOf } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { routes, type RouteName, type UsageMeter } from "@invincible/core";
+import { windowsOf } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -34,7 +34,7 @@ const caps: Capabilities = {
   sandbox: { image: true, networks: true },
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-spent-windows-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-spent-windows-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const start = (): Promise<Daemon> =>
@@ -55,7 +55,7 @@ afterAll(async () => {
 
 test("a spent plan is still passed over, and still said in the meter, after the node starts again", async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });

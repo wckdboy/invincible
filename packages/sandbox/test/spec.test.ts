@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { SandboxRequest } from "@galahad/core";
+import { SandboxRequest } from "@invincible/core";
 import { chooseIsolation, execArgs, gatewayEnv, KATA_RUNTIME, microVMsAvailable, NETWORKS, networkCreateArgs, runArgs, SandboxError, type SandboxSpec, sandboxScopes, vmResolvConf } from "../src/index.ts";
 
 const base: SandboxSpec = {
   id: "0123456789",
   quest: "q1",
   node: "n_test",
-  image: "galahad/sandbox:1",
+  image: "invincible/sandbox:1",
   network: "gateway",
   cpus: 4,
   memoryGb: 8,
@@ -35,13 +35,13 @@ describe("sandbox hardening", () => {
   });
 
   test("a size-limited workspace is the one host path it sees, mounted at /work", () => {
-    const limited = runArgs({ ...base, workspace: "/var/lib/galahad-workspaces/0123456789", diskGb: 20 });
+    const limited = runArgs({ ...base, workspace: "/var/lib/invincible-workspaces/0123456789", diskGb: 20 });
     const mounts = limited.filter((_, i) => limited[i - 1] === "--mount" || limited[i - 1] === "--volume" || limited[i - 1] === "-v");
-    expect(mounts).toEqual(["type=bind,src=/var/lib/galahad-workspaces/0123456789,dst=/work"]);
-    expect(limited).toContain("dev.galahad.disk=20");
+    expect(mounts).toEqual(["type=bind,src=/var/lib/invincible-workspaces/0123456789,dst=/work"]);
+    expect(limited).toContain("dev.invincible.disk=20");
     // Without one, /work is a Docker volume, and the label says it has no limit.
-    expect(args.filter((_, i) => args[i - 1] === "--mount")).toEqual(["type=volume,src=galahad-sbx-0123456789-work,dst=/work"]);
-    expect(args).toContain("dev.galahad.disk=none");
+    expect(args.filter((_, i) => args[i - 1] === "--mount")).toEqual(["type=volume,src=invincible-sbx-0123456789-work,dst=/work"]);
+    expect(args).toContain("dev.invincible.disk=none");
   });
 
   test("is resource-bounded", () => {
@@ -60,17 +60,17 @@ describe("sandbox hardening", () => {
   });
 
   test("a microVM is the same hardened container on Kata's runtime, with its own kernel", () => {
-    const vm = runArgs({ ...base, isolation: "vm", network: "online", resolvConf: "/var/lib/galahad/.galahad/sandbox-resolv.conf" });
+    const vm = runArgs({ ...base, isolation: "vm", network: "online", resolvConf: "/var/lib/invincible/.invincible/sandbox-resolv.conf" });
     expect(pair(vm, "--runtime")).toBe(KATA_RUNTIME);
     for (const flag of ["--read-only", "--init"]) expect(vm).toContain(flag);
     expect(pair(vm, "--cap-drop")).toBe("ALL");
     expect(pair(vm, "--user")).toBe("1000:1000");
-    expect(vm).toContain("dev.galahad.isolation=vm");
+    expect(vm).toContain("dev.invincible.isolation=vm");
     // Docker's DNS lives on the host side; an online VM gets the host's resolvers, read-only.
-    expect(vm).toContain("type=bind,src=/var/lib/galahad/.galahad/sandbox-resolv.conf,dst=/etc/resolv.conf,readonly");
+    expect(vm).toContain("type=bind,src=/var/lib/invincible/.invincible/sandbox-resolv.conf,dst=/etc/resolv.conf,readonly");
     expect(runArgs({ ...base, isolation: "vm", network: "gateway", resolvConf: "/x" }).join(" ")).not.toContain("resolv.conf");
     expect(args).not.toContain("--runtime");
-    expect(args).toContain("dev.galahad.isolation=container");
+    expect(args).toContain("dev.invincible.isolation=container");
   });
 
   test("online code runs in a microVM where the host has them; you can always choose", () => {
@@ -101,10 +101,10 @@ describe("sandbox hardening", () => {
 
   test("is labelled for ownership, quest, expiry and ephemerality", () => {
     const labels = args.filter((_, i) => args[i - 1] === "--label");
-    expect(labels).toContain("dev.galahad=1");
-    expect(labels).toContain("dev.galahad.quest=q1");
-    expect(labels).toContain("dev.galahad.ephemeral=true");
-    expect(labels).toContain(`dev.galahad.expires=${1_000 + 120 * 60_000}`);
+    expect(labels).toContain("dev.invincible=1");
+    expect(labels).toContain("dev.invincible.quest=q1");
+    expect(labels).toContain("dev.invincible.ephemeral=true");
+    expect(labels).toContain(`dev.invincible.expires=${1_000 + 120 * 60_000}`);
   });
 
   test("the gateway network is internal and sandboxes cannot talk to each other", () => {
@@ -117,12 +117,12 @@ describe("sandbox hardening", () => {
 
   test("tools get a scoped gateway token, never a provider key", () => {
     const env = gatewayEnv("gw_scoped", ["deepseek", "anthropic"]);
-    expect(env.OPENAI_BASE_URL).toBe(`http://${NETWORKS.gateway.gateway}:7779/gw/deepseek`);
-    expect(env.ANTHROPIC_BASE_URL).toBe(`http://${NETWORKS.gateway.gateway}:7779/gw/anthropic`);
+    expect(env.OPENAI_BASE_URL).toBe(`http://${NETWORKS.gateway.gateway}:7402/gw/deepseek`);
+    expect(env.ANTHROPIC_BASE_URL).toBe(`http://${NETWORKS.gateway.gateway}:7402/gw/anthropic`);
     expect(Object.values(env).every((v) => !v.startsWith("sk-"))).toBe(true);
     // A lease with keys of yours on it says where the key gateway is; one without says nothing of it.
-    expect(env.GALAHAD_KEYS).toBeUndefined();
-    expect(gatewayEnv("gw_scoped", ["deepseek"], true).GALAHAD_KEYS).toBe(`http://${NETWORKS.gateway.gateway}:7779/key`);
+    expect(env.INVINCIBLE_KEYS).toBeUndefined();
+    expect(gatewayEnv("gw_scoped", ["deepseek"], true).INVINCIBLE_KEYS).toBe(`http://${NETWORKS.gateway.gateway}:7402/key`);
   });
 
   test("commands run under an in-container deadline", () => {
@@ -131,7 +131,7 @@ describe("sandbox hardening", () => {
       "--interactive",
       "--workdir",
       "/work",
-      "galahad-sbx-0123456789",
+      "invincible-sbx-0123456789",
       "timeout",
       "--signal=KILL",
       "30s",

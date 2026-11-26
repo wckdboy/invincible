@@ -232,4 +232,4 @@ export function redact(text: string, knownValues: (string | null | undefined)[] 
 }
 
 export const SECRET_REDIRECT =
-  "Secrets never go into chat or memory. Add it to the vault instead: the PWA's Vault page, or `galahad key add` in a terminal.";
+  "Secrets never go into chat or memory. Add it to the vault instead: the PWA's Vault page, or `invincible key add` in a terminal.";

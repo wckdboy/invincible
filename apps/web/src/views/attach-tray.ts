@@ -1,5 +1,5 @@
-import type { AttachmentRef, AttachmentType } from "@galahad/core";
-import { ATTACHMENT_LIMITS } from "@galahad/core/attachments";
+import type { AttachmentRef, AttachmentType } from "@invincible/core";
+import { ATTACHMENT_LIMITS } from "@invincible/core/attachments";
 import { type Ctx, errorMessage } from "../context.ts";
 import { bytesLabel } from "../lib/artifacts.ts";
 import { ATTACH_ACCEPT, knownLook, lookOf, prepare, upload } from "../lib/attachments.ts";

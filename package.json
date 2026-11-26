@@ -1,5 +1,5 @@
 {
-  "name": "galahad",
+  "name": "invincible",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,8 @@
     "apps/web"
   ],
   "scripts": {
-    "galahad": "bun packages/node/src/cli.ts",
+    "invincible": "bun packages/node/src/cli.ts",
+    "inv": "bun packages/node/src/cli.ts",
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json && bun test",

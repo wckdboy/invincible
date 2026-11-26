@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { QuestProgressInput } from "@galahad/core";
+import type { QuestProgressInput } from "@invincible/core";
 import { QUEST_SILENT_MS, QuestBoard } from "../src/quests.ts";
 
 const progress = (over: Partial<QuestProgressInput> = {}): QuestProgressInput => ({ quest: "q-1", goal: "write hi", state: "working", plan: "1. Write it.", step: 2, maxSteps: 30, doing: "$ echo hi", revisions: 0, gates: [], ...over });

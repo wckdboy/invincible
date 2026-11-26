@@ -2,8 +2,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ModelCheck, routes, type RouteName } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ModelCheck, routes, type RouteName } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -15,11 +15,11 @@ import { freePort } from "./ports.ts";
  */
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "checks-test", cores: 8, cpu: "test", memoryGb: 32, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
-const root = mkdtempSync(join(tmpdir(), "galahad-checks-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-checks-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
-const card = JSON.parse(readFileSync(new URL("../../brain/assets/check-card/card.json", import.meta.url), "utf8")) as { heading: string; targets: Record<string, { centre: [number, number] }> };
+const card = JSON.parse(readFileSync(new URL("../../models/assets/check-card/card.json", import.meta.url), "utf8")) as { heading: string; targets: Record<string, { centre: [number, number] }> };
 const answer = (text: string) => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
 const model = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (request) => {
   const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
@@ -36,7 +36,7 @@ async function call<T = any>(name: RouteName, input?: unknown, token = home.admi
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });

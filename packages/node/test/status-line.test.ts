@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { type Api, statusLine } from "../src/loop-cli.ts";
 
 /*
- * `galahad status`'s last line says what needs you, as the apps' Inbox counts it: every kind of thing in it, never
+ * `invincible status`'s last line says what needs you, as the apps' Inbox counts it: every kind of thing in it, never
  * "nothing needs you" while one waits.
  */
 
@@ -26,11 +26,11 @@ async function said(answers: Record<string, unknown>): Promise<string> {
 
 const quiet = { loops: { loops: [] }, notices: { notices: [] }, actions: { actions: [] } };
 
-describe("galahad status: what needs you", () => {
+describe("invincible status: what needs you", () => {
   test("a key he asked for needs you: the line never says nothing does", async () => {
     const line = await said({ ...quiet, secretRequests: { requests: [{ name: "stack-overflow", purpose: "its MCP server" }] } });
     expect(line).not.toContain("nothing needs you");
-    expect(line).toContain("1 key asked for (galahad secret list)");
+    expect(line).toContain("1 key asked for (invincible secret list)");
   });
 
   test("each kind that waits is said once, with where to answer it", async () => {
@@ -47,13 +47,13 @@ describe("galahad status: what needs you", () => {
     });
     for (const words of [
       "1 notice",
-      "1 waiting for your answer (galahad action ls)",
-      "2 keys asked for (galahad secret list)",
-      "1 device asking to join (galahad pairings)",
-      "1 fact to keep (galahad about)",
-      "1 loop drafted (galahad loop drafts)",
-      "1 connector asked for (galahad connectors requests)",
-      "1 ask to use a Mac (galahad screen sessions)",
+      "1 waiting for your answer (invincible action ls)",
+      "2 keys asked for (invincible secret list)",
+      "1 device asking to join (invincible pairings)",
+      "1 fact to keep (invincible about)",
+      "1 loop drafted (invincible loop drafts)",
+      "1 connector asked for (invincible connectors requests)",
+      "1 ask to use a Mac (invincible screen sessions)",
     ])
       expect(line).toContain(words);
     expect(line).not.toContain("nothing needs you");
@@ -67,7 +67,7 @@ describe("galahad status: what needs you", () => {
   test("his answers you haven't read are news, not something that needs you", async () => {
     const line = await said({ ...quiet, turns: { turns: [], unread: [{ id: "cv_a", title: "Release", answeredAt: 1 }, { id: "cv_b", title: "Plan", answeredAt: 2 }] } });
     expect(line).toContain("nothing needs you");
-    expect(line).toContain("2 new answers (galahad chats)");
+    expect(line).toContain("2 new answers (invincible chats)");
     expect(await said({ ...quiet, turns: { turns: [] } })).not.toContain("new answer");
   });
 });

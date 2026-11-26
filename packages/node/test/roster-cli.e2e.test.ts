@@ -2,9 +2,9 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { routes } from "@galahad/core";
-import { windowScope, windowsOf } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { routes } from "@invincible/core";
+import { windowScope, windowsOf } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -12,14 +12,14 @@ import { fakeDocker } from "./fake-docker.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * `galahad roster` marks each model a spent window holds back, beside its name: a coding plan's window every model of
+ * `invincible roster` marks each model a spent window holds back, beside its name: a coding plan's window every model of
  * it, any other provider's the one model told to wait (windowScope, since 22 November 2026). Until then the listing
  * matched only a plan's window, so a router's model told to wait looked as ready as any other.
  */
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "roster-cli-test", cores: 2, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: true, vm: { kvm: false, tools: [] }, tools: ["git"], localModels: [], tailscale: null, sandbox: { image: true, networks: true } };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-roster-cli-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-roster-cli-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon | undefined;
@@ -37,7 +37,7 @@ async function admin(name: "setProvider" | "setRoster", input: unknown): Promise
 
 test("a spent window is marked on the models it holds back: a plan's on every model of it, a router's on its one model", async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -51,7 +51,7 @@ test("a spent window is marked on the models it holds back: a plan's on every mo
   const plan = windows.note(windowScope("opencode-go/glm-5.3"), "opencode-go → 429 Go usage limit reached (5-hour, resets in 3h 10m). Upgrade or wait.")!;
   const hhmm = (at: number) => new Date(at).toISOString().slice(11, 16);
 
-  const run = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), "roster", "--home", home.dir], { env: { ...process.env, GALAHAD_KEYSTORE: "file" }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const run = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), "roster", "--home", home.dir], { env: { ...process.env, INVINCIBLE_KEYSTORE: "file" }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [out, err, code] = await Promise.all([new Response(run.stdout).text(), new Response(run.stderr).text(), run.exited]);
   expect(err).toBe("");
   expect(code).toBe(0);

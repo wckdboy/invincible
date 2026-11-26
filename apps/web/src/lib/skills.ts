@@ -1,5 +1,5 @@
-import { findSecrets } from "@galahad/core/secret-scan";
-import { cleanSkillText, SKILL_LIMITS, skillAuthor, type SkillDetail, type SkillDoc, type SkillsView, type SkillVersionView, type SkillView } from "@galahad/core/skills";
+import { findSecrets } from "@invincible/core/secret-scan";
+import { cleanSkillText, SKILL_LIMITS, skillAuthor, type SkillDetail, type SkillDoc, type SkillsView, type SkillVersionView, type SkillView } from "@invincible/core/skills";
 
 /*
  * The Skills page's reasoning, as pure functions (views/skills.ts draws them): how the

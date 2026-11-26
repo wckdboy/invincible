@@ -2,8 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ChatStreamEvent, type ConversationSummary, type RouteName, routes } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ChatStreamEvent, type ConversationSummary, type RouteName, routes } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -30,7 +30,7 @@ const caps: Capabilities = {
   tailscale: null,
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-shutdown-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-shutdown-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 
@@ -69,7 +69,7 @@ afterAll(() => {
 describe("a node stopping", () => {
   test("refuses new requests at once, finishes the chat under way, keeps it, then closes", async () => {
     const { identity, keystore } = await home.createIdentity("file");
-    const store = new MindStore(home.mindPath);
+    const store = new LedgerStore(home.ledgerPath);
     const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "stopper" });
     store.close();
     home.writeConfig({ v: 1, name: "stopper", fleet, port, keystore, advertise: "127.0.0.1" });

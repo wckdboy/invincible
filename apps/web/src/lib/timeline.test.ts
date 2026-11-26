@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamMessage, TeamRoom, TeamTask } from "@galahad/core/team";
+import type { TeamMessage, TeamRoom, TeamTask } from "@invincible/core/team";
 import { againGoal, giveAgain, timeline, timelineTasks } from "./timeline.ts";
 
 const message = (id: string, createdAt: number, speaker = "owner"): TeamMessage => ({ id, room: "dm-ada", speaker, speakerName: speaker, text: id, createdAt, chainId: "c" });

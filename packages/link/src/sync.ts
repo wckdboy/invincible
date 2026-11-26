@@ -1,5 +1,5 @@
-import { compareEvents, type GEvent, type NodeIdentity, type PeerStatus, type SyncPage, type SyncRequest } from "@galahad/core";
-import { type Device, type MindStore, PullState } from "@galahad/mind";
+import { compareEvents, type GEvent, type NodeIdentity, type PeerStatus, type SyncPage, type SyncRequest } from "@invincible/core";
+import { type Device, type LedgerStore, PullState } from "@invincible/ledger";
 import { type FetchLike, signedPost } from "./client.ts";
 
 /*
@@ -9,7 +9,7 @@ import { type FetchLike, signedPost } from "./client.ts";
  * partitions are harmless: the minds converge whenever they can talk.
  *
  * Each request carries our frontier and, to a peer that compares them, the set hash of
- * each device's log (MindStore.deviceDigests), so the peer can also name a device whose
+ * each device's log (LedgerStore.deviceDigests), so the peer can also name a device whose
  * log has a hole below our frontier; we then walk that log a page at a time (PullState).
  */
 
@@ -17,7 +17,7 @@ import { type FetchLike, signedPost } from "./client.ts";
 const MAX_PAGES = 1000;
 
 /** The answering side of /link/sync: one page, and what to repair. */
-export function answerSync(store: MindStore, request: SyncRequest, limit = 500): Omit<SyncPage, "presence"> {
+export function answerSync(store: LedgerStore, request: SyncRequest, limit = 500): Omit<SyncPage, "presence"> {
   return { ...store.eventsSince(request.have, limit, request.sets, request.after), sets: true };
 }
 
@@ -49,7 +49,7 @@ const asLink = (raw: unknown): Link | null => {
  * What isn't a chained event (an unchained one from before chains, or not an event at all) goes to the log's
  * own checks as it came.
  */
-export function answerPush(store: MindStore, events: unknown[]): { added: number; deferred: number } {
+export function answerPush(store: LedgerStore, events: unknown[]): { added: number; deferred: number } {
   const links = events.map(asLink);
   const order = links.map((_, i) => i).filter((i) => links[i] !== null);
   order.sort((x, y) => compareEvents(links[x]!, links[y]!));
@@ -88,7 +88,7 @@ export class SyncEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    private readonly store: MindStore,
+    private readonly store: LedgerStore,
     private readonly identity: NodeIdentity,
     private readonly opts: SyncOptions = {},
   ) {}

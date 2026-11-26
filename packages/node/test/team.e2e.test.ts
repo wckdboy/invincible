@@ -2,14 +2,14 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AttachmentRef, routes, teamArmLabel, type LedgerEntry, type RouteName, type TeamMessage, type TeamSnapshot, type TeamRoomView, type TeamTask } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type AttachmentRef, routes, teamArmLabel, type LedgerEntry, type RouteName, type TeamMessage, type TeamSnapshot, type TeamRoomView, type TeamTask } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { startDaemon, type Daemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import type { Capabilities } from "../src/capabilities.ts";
 import { freePort } from "./ports.ts";
 
-const root = mkdtempSync(join(tmpdir(), "galahad-team-e2e-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-team-e2e-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "team-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
@@ -27,7 +27,7 @@ const request = (name: RouteName, input?: unknown, token = home.adminToken()) =>
 async function api<T = any>(name: RouteName, input?: unknown): Promise<T> { const r = await request(name, input); const body = await r.json(); if (!r.ok) throw new Error(`${r.status}: ${JSON.stringify(body)}`); return body as T; }
 const start = () => startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, shutdownGraceMs: 100 });
 beforeAll(async () => {
-  const { identity, keystore } = await home.createIdentity("file"); const mind = new MindStore(home.mindPath);
+  const { identity, keystore } = await home.createIdentity("file"); const mind = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(mind, identity, { fleetName: "roundtable", nodeName: "keep" }); mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await start();
@@ -245,7 +245,7 @@ test("real API: a knight's workspace is yours alone to look into; one with no VM
   expect(((await none.json()) as { error: string }).error).toContain("this knight has no VM yet");
   expect((await request("teamFile", { id: "ada", path: "/etc/passwd" })).status).toBe(400);
   expect((await request("teamFiles", { id: "ada", path: "/work/../etc" })).status).toBe(400);
-  expect((await request("teamFile", { id: "ada", path: "/work/.galahad-gateway.json" })).status).toBe(403);
+  expect((await request("teamFile", { id: "ada", path: "/work/.invincible-gateway.json" })).status).toBe(403);
   expect((await request("teamChanges", { id: "ada", task: "task-000000000000" })).status).toBe(404);
   // A repository by its path (a project's checkout): under /work only, and a task or a path, never both.
   expect((await request("teamChanges", { id: "ada", path: "/etc" })).status).toBe(400);

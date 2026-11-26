@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ChatStreamEvent, clientIdFromKey, type ConversationSummary, type ConversationView, type QueuedMessage, type RouteName, routes, type Scope, signRequest, type TurnLimits, type TurnView, type UnreadChat, utf8 } from "@galahad/core";
-import { requestPairing, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ChatStreamEvent, clientIdFromKey, type ConversationSummary, type ConversationView, type QueuedMessage, type RouteName, routes, type Scope, signRequest, type TurnLimits, type TurnView, type UnreadChat, utf8 } from "@invincible/core";
+import { requestPairing, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -23,7 +23,7 @@ import { freePort } from "./ports.ts";
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "turns-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-turns-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-turns-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -210,7 +210,7 @@ let phone: { id: string; call: Caller };
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -834,7 +834,7 @@ describe("a side question", () => {
   });
 });
 
-describe("from a terminal (galahad ask, turns, queue)", () => {
+describe("from a terminal (invincible ask, turns, queue)", () => {
   const cli = () => new LocalClient(`http://127.0.0.1:${port}`, home.adminToken());
   /** What the command printed, and a Ctrl-C the test can press. */
   function terminal() {
@@ -879,7 +879,7 @@ describe("from a terminal (galahad ask, turns, queue)", () => {
     expect(await askCommand(cli(), "Do this while I'm away.", { detach: true }, t.io, t.onInterrupt)).toBe(0);
     expect(t.out()).toBe("");
     const [, turn, id] = /(tn_[A-Za-z0-9_-]{22}) in chat (cv_[A-Za-z0-9_-]{22})/.exec(t.err())!;
-    expect(t.err()).toContain(`galahad turn watch ${turn}`);
+    expect(t.err()).toContain(`invincible turn watch ${turn}`);
     await until(async () => (await listed()).turns.some((x) => x.id === turn && x.watchers === 0));
     // From another terminal: what he's on, then watching it to its end.
     const list = terminal();

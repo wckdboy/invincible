@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { archiveId } from "@galahad/core";
+import { archiveId } from "@invincible/core";
 import { LocalDiskBackend, sha256Hex } from "../src/archive/blobs.ts";
 import { asText, chunkCode, chunkEntry, chunkProse, chunkChat, modelFacts, notebookText, transcript } from "../src/archive/chunk.ts";
 import { refuseFile, scrub } from "../src/archive/guard.ts";
@@ -20,7 +20,7 @@ import { conceptVector } from "./archive-fixtures.ts";
 const dirs: string[] = [];
 const stores: ArchiveStore[] = [];
 const temp = () => {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-archive-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-archive-"));
   dirs.push(dir);
   return dir;
 };
@@ -270,7 +270,7 @@ describe("the guard", () => {
   });
 
   test("key material and session files by name, private keys by content", () => {
-    for (const path of ["id_rsa", ".ssh/config", "secrets.json", "x/.env.local", "cookies.sqlite", "admin.token", "keys.json", "a.p12", ".galahad/keys.json"]) expect(refuseFile(path, enc("x"))).not.toBeNull();
+    for (const path of ["id_rsa", ".ssh/config", "secrets.json", "x/.env.local", "cookies.sqlite", "admin.token", "keys.json", "a.p12", ".invincible/keys.json"]) expect(refuseFile(path, enc("x"))).not.toBeNull();
     expect(refuseFile("model.stl", enc("-----BEGIN RSA PRIVATE KEY-----"))).toBe("it holds a private key");
     for (const path of ["model.stl", "id_rsa.pub", "report.md", "keyboard.py"]) expect(refuseFile(path, enc("ok"))).toBeNull();
   });

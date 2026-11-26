@@ -16,8 +16,8 @@ import {
   routes,
   type RouteName,
   type SandboxView,
-} from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+} from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import type { Measure } from "../src/compute/service.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -53,7 +53,7 @@ const caps: Capabilities = {
   sandbox: { image: true, networks: true },
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-compute-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-compute-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const docker = fakeDocker();
@@ -131,7 +131,7 @@ const client = () => new LocalClient(`http://127.0.0.1:${port}`, home.adminToken
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -388,7 +388,7 @@ describe("adapting when the compute changes", () => {
   test("what more compute would buy is said, with the command", async () => {
     await until(async () => (await self()).capacity!.sandboxes === 3);
     const { more } = await census();
-    expect(more.some((line) => line.includes("galahad compute limit ultra --cores 24"))).toBe(true);
+    expect(more.some((line) => line.includes("invincible compute limit ultra --cores 24"))).toBe(true);
     expect(more.some((line) => /Another machine like ultra would carry 6 slots instead of 3/.test(line))).toBe(true);
   });
 });

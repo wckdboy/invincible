@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { type AttachmentRef, type ChatStreamEvent, chatStateWords, pictureType, textOf, plainLine, plainStream, plainText, type ConversationSummary, type ConversationView, holdWords, questInHand, type QuestView, type QueuedMessage, type QueueHold, type TurnLimits, type TurnView } from "@galahad/core";
+import { type AttachmentRef, type ChatStreamEvent, chatStateWords, pictureType, textOf, plainLine, plainStream, plainText, type ConversationSummary, type ConversationView, holdWords, questInHand, type QuestView, type QueuedMessage, type QueueHold, type TurnLimits, type TurnView } from "@invincible/core";
 import type { NodeClient } from "./quest-cli.ts";
 
 /*
  * Turns, queues and quests in hand, from a terminal. A turn started here runs on the
- * node like any other: `galahad ask` only watches it. Ctrl-C stops it, explicitly (the
+ * node like any other: `invincible ask` only watches it. Ctrl-C stops it, explicitly (the
  * terminal's Stop); a terminal that simply goes away stops nothing, and --detach leaves
  * him working on purpose. While he works in a chat, --steer tells him now and --queue
  * keeps the message on the node until he's done.
@@ -110,7 +110,7 @@ export async function printTurn(events: AsyncGenerator<ChatStreamEvent>, io: Io 
       how = "stopped";
       io.err(dim(`\n[${STOPPED[event.reason] ?? "stopped"}]\n`));
     } else if (event.type === "undelivered") {
-      io.err(dim(`[${event.texts.length} of your messages didn't reach him before the turn ended${event.queued ? ": queued, first in line, held until you resume (galahad queue <chat> resume)" : ""}]\n`));
+      io.err(dim(`[${event.texts.length} of your messages didn't reach him before the turn ended${event.queued ? ": queued, first in line, held until you resume (invincible queue <chat> resume)" : ""}]\n`));
     } else if (event.type === "error") {
       how = "error";
       error = event.error;
@@ -152,12 +152,12 @@ async function attachments(node: NodeClient, paths: readonly string[]): Promise<
   return refs;
 }
 
-/** `galahad ask`. Returns the process's exit code: 0 answered, 1 it failed, 130 stopped. */
+/** `invincible ask`. Returns the process's exit code: 0 answered, 1 it failed, 130 stopped. */
 export async function askCommand(node: NodeClient, text: string, o: AskOptions, io: Io = terminal, onInterrupt: (stop: () => void) => () => void = interruptWith): Promise<number> {
   const dim = dimIn(io);
   const modes = [o.steer, o.queue, o.aside].filter(Boolean).length;
   if (modes > 1) throw new Error("give one of --steer, --queue or --aside");
-  if (modes && !o.chat) throw new Error("--steer, --queue and --aside go with --chat <id>: the chat he's working in (galahad turns lists them)");
+  if (modes && !o.chat) throw new Error("--steer, --queue and --aside go with --chat <id>: the chat he's working in (invincible turns lists them)");
   if (o.bring && !o.aside) throw new Error("--bring goes with --aside");
   if (o.attach?.length && modes) throw new Error("--attach goes with a message of yours, not --steer, --queue or --aside");
   // A temporary chat is kept nowhere: a turn of it that nobody watches is stopped by the node, so there's nothing to come back to.
@@ -184,7 +184,7 @@ export async function askCommand(node: NodeClient, text: string, o: AskOptions, 
 
   if (o.queue) {
     const { queue, held, started } = await node.call<{ queue: QueuedMessage[]; held: QueueHold | null; started: TurnView | null }>("queueMessage", { conversation: o.chat, text, ...(o.role ? { role: o.role } : {}) });
-    if (started) io.err(dim(`[nothing was running in that chat, so its turn is now: ${started.id} · galahad turn watch ${started.id}]\n`));
+    if (started) io.err(dim(`[nothing was running in that chat, so its turn is now: ${started.id} · invincible turn watch ${started.id}]\n`));
     else for (const line of queueLines(queue, held)) io.err(`${line}\n`);
     return 0;
   }
@@ -218,7 +218,7 @@ export async function askCommand(node: NodeClient, text: string, o: AskOptions, 
     for await (const event of events) {
       if (event.type === "turn") {
         io.err(`${event.id}${event.conversation ? ` in chat ${event.conversation}` : ""}\n`);
-        io.err(dim(`[he's working, and goes on without this terminal · galahad turn watch ${event.id} · galahad turn stop ${event.id}${event.conversation ? ` · the answer will be in: galahad chat ${event.conversation}` : ""}]\n`));
+        io.err(dim(`[he's working, and goes on without this terminal · invincible turn watch ${event.id} · invincible turn stop ${event.id}${event.conversation ? ` · the answer will be in: invincible chat ${event.conversation}` : ""}]\n`));
         break;
       }
       if (event.type === "error") throw new Error(event.error);
@@ -260,11 +260,11 @@ function interruptWith(stop: () => void): () => void {
 async function turnOf(node: NodeClient, ref: string): Promise<string> {
   if (!ref.startsWith("cv_")) return ref;
   const { conversation } = await node.call<{ conversation: ConversationView }>("conversation", { id: ref });
-  if (!conversation.turn) throw new Error(`he isn't working in ${ref} (galahad chat ${ref} has how its last turn went)`);
+  if (!conversation.turn) throw new Error(`he isn't working in ${ref} (invincible chat ${ref} has how its last turn went)`);
   return conversation.turn.id;
 }
 
-/** `galahad turns` · `galahad turn watch|stop <turn|chat>`. */
+/** `invincible turns` · `invincible turn watch|stop <turn|chat>`. */
 export async function turnsCommand(node: NodeClient, sub: string | undefined, rest: string[], io: Io = terminal): Promise<number> {
   const dim = dimIn(io);
   if (!sub || sub === "ls") {
@@ -272,7 +272,7 @@ export async function turnsCommand(node: NodeClient, sub: string | undefined, re
     const now = Date.now();
     if (!turns.length) io.out("He isn't working on any turn of yours on this node.\n");
     for (const t of turns) io.out(`● ${turnLine(t, now)}\n`);
-    for (const c of conversations.filter((c) => c.queued > 0 && !turns.some((t) => t.conversation === c.id))) io.out(`  ${c.title} (${c.id}): ${chatStateWords(c)} ${dim(`· galahad queue ${c.id}`)}\n`);
+    for (const c of conversations.filter((c) => c.queued > 0 && !turns.some((t) => t.conversation === c.id))) io.out(`  ${c.title} (${c.id}): ${chatStateWords(c)} ${dim(`· invincible queue ${c.id}`)}\n`);
     io.out(dim(`At most ${limits.maxTurns} turns at once on this node, ${limits.maxMinutes} minutes each, ${limits.maxQueued} messages queued behind a chat. A turn nobody watches still spends model tokens; what needs you (an approval, a key) waits for you, and nothing is approved for you.\n`));
     return 0;
   }
@@ -287,12 +287,12 @@ export async function turnsCommand(node: NodeClient, sub: string | undefined, re
     if (how === "error") throw new Error(error ?? "he couldn't answer");
     return how === "stopped" ? 130 : 0;
   }
-  throw new Error("usage: galahad turns | galahad turn watch <turn|chat> | galahad turn stop <turn|chat>");
+  throw new Error("usage: invincible turns | invincible turn watch <turn|chat> | invincible turn stop <turn|chat>");
 }
 
-/** `galahad queue <chat> [add "…" | edit <n> "…" | rm <n|all> | send <n> | resume]`. */
+/** `invincible queue <chat> [add "…" | edit <n> "…" | rm <n|all> | send <n> | resume]`. */
 export async function queueCommand(node: NodeClient, chat: string | undefined, sub: string | undefined, rest: string[], io: Io = terminal): Promise<number> {
-  const usage = 'usage: galahad queue <chat> [add "<message>" | edit <n> "<message>" | rm <n|all> | send <n> | resume]';
+  const usage = 'usage: invincible queue <chat> [add "<message>" | edit <n> "<message>" | rm <n|all> | send <n> | resume]';
   if (!chat) throw new Error(usage);
   const show = (view: { queue: QueuedMessage[]; held: QueueHold | null }): void => {
     for (const line of queueLines(view.queue, view.held)) io.out(`${line}\n`);
@@ -304,7 +304,7 @@ export async function queueCommand(node: NodeClient, chat: string | undefined, s
   const nth = async (n: string | undefined): Promise<number> => {
     const { queue } = await current();
     const item = queue[Number(n) - 1];
-    if (!n || !/^\d+$/.test(n) || !item) throw new Error(`there is no message ${n ?? ""} in that queue (galahad queue ${chat} lists them)`);
+    if (!n || !/^\d+$/.test(n) || !item) throw new Error(`there is no message ${n ?? ""} in that queue (invincible queue ${chat} lists them)`);
     return item.id;
   };
   if (!sub) show(await current());
@@ -313,7 +313,7 @@ export async function queueCommand(node: NodeClient, chat: string | undefined, s
   else if (sub === "rm" && rest[0]) show(await node.call("removeQueued", rest[0] === "all" ? { conversation: chat } : { conversation: chat, id: await nth(rest[0]) }));
   else if (sub === "send" && rest[0]) {
     const sent = await node.call<{ how: "steered" | "started"; turn: TurnView; queue: QueuedMessage[]; held: QueueHold | null }>("sendQueued", { conversation: chat, id: await nth(rest[0]) });
-    io.out(sent.how === "steered" ? "Told him now: it reaches him at his next safe point.\n" : `Started as a turn: ${sent.turn.id} (galahad turn watch ${sent.turn.id}).\n`);
+    io.out(sent.how === "steered" ? "Told him now: it reaches him at his next safe point.\n" : `Started as a turn: ${sent.turn.id} (invincible turn watch ${sent.turn.id}).\n`);
     show(sent);
   } else if (sub === "resume") {
     const resumed = await node.call<{ queue: QueuedMessage[]; held: QueueHold | null; turn: TurnView | null }>("resumeQueue", { conversation: chat });
@@ -323,14 +323,14 @@ export async function queueCommand(node: NodeClient, chat: string | undefined, s
   return 0;
 }
 
-/** `galahad quests [--all]`: the quests in hand on this node, and the ones that just ended. */
+/** `invincible quests [--all]`: the quests in hand on this node, and the ones that just ended. */
 export async function questsCommand(node: NodeClient, all: boolean, io: Io = terminal): Promise<number> {
   const bold = boldIn(io);
   const dim = dimIn(io);
   const { quests } = await node.call<{ quests: QuestView[] }>("quests");
   const inHand = quests.filter((q) => questInHand(q.state));
   const ended = quests.filter((q) => !questInHand(q.state));
-  if (!inHand.length) io.out('No quest in hand on this node. `galahad do "<goal>" --gate "<command>"` starts one.\n');
+  if (!inHand.length) io.out('No quest in hand on this node. `invincible do "<goal>" --gate "<command>"` starts one.\n');
   for (const q of inHand) {
     const [head, ...lines] = questLines(q);
     io.out(`${bold(`◇ ${head}`)}\n${lines.join("\n")}\n\n`);

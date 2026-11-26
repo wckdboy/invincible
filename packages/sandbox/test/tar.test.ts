@@ -68,7 +68,7 @@ const stream = (bytes: Uint8Array, chunk = 333) =>
 
 const dirs: string[] = [];
 const dest = () => {
-  const d = mkdtempSync(join(tmpdir(), "galahad-tar-"));
+  const d = mkdtempSync(join(tmpdir(), "invincible-tar-"));
   dirs.push(d);
   return d;
 };

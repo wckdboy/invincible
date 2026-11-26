@@ -1,4 +1,4 @@
-import { admit, admitGrowth, type ComputeUsage, type ComputeUse, type HostLoad, type NodeCapacity, type QueuedWork, VM_OVERHEAD, type VmOverhead } from "@galahad/core";
+import { admit, admitGrowth, type ComputeUsage, type ComputeUse, type HostLoad, type NodeCapacity, type QueuedWork, VM_OVERHEAD, type VmOverhead } from "@invincible/core";
 
 /*
  * The governor: this node's slots. A sandbox is admitted only when it fits inside

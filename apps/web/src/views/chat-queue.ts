@@ -1,5 +1,5 @@
-import { holdWords, type QueuedMessage, type QueueHold } from "@galahad/core/turns";
-import { findSecrets } from "@galahad/core/secret-scan";
+import { holdWords, type QueuedMessage, type QueueHold } from "@invincible/core/turns";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { plural } from "../lib/text.ts";
 import { stopsIn } from "../lib/turns.ts";
 import { button } from "../ui/controls.ts";

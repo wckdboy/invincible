@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { type ChatStreamEvent, type RouteName, routes, type TeamSnapshot, type TeamTask, type TeamTaskRecord, type Teammate, TrialRecord, trialProblem, type TrialView } from "@galahad/core";
+import { type ChatStreamEvent, type RouteName, routes, type TeamSnapshot, type TeamTask, type TeamTaskRecord, type Teammate, TrialRecord, trialProblem, type TrialView } from "@invincible/core";
 import type { YourCase } from "../src/trial-yours.ts";
 
 /*
@@ -29,7 +29,7 @@ const git = (dir: string, ...args: string[]) => {
 
 /** The invented repository on disk: its first commit (where the task began) and the task's own change as a patch. */
 export function widgets(): { dir: string; base: string; fixed: string; patch: Uint8Array; remove(): void } {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-widgets-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-widgets-"));
   mkdirSync(join(dir, "test"));
   writeFileSync(join(dir, "README.md"), "Widgets: counts what you give it.\n");
   writeFileSync(join(dir, "total.sh"), "#!/bin/sh\n# The sum of a file's numbers, one a line.\nawk '{ s += $1 } END { print s + 1 }' \"$1\"\n");
@@ -183,10 +183,10 @@ export class YoursStandIn {
         routes.createSandbox.input.parse(input);
         if (this.full === true || (typeof this.full === "number" && this.boxes.length >= this.full)) throw new Error("no sandbox host has a free slot");
         const id = String(this.boxes.length + 1).padStart(10, "0");
-        const dir = mkdtempSync(join(tmpdir(), "galahad-yours-box-"));
+        const dir = mkdtempSync(join(tmpdir(), "invincible-yours-box-"));
         mkdirSync(join(dir, "work"));
         this.boxes.push({ id, dir, input, commands: [] });
-        return { sandbox: { id, name: `galahad-${id}`, node: "n_ultra", quest: input.quest, image: "galahad/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, status: "running", ephemeral: true, providers: [] } } as T;
+        return { sandbox: { id, name: `galahad-${id}`, node: "n_ultra", quest: input.quest, image: "invincible/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, status: "running", ephemeral: true, providers: [] } } as T;
       }
       case "checkoutRepository": {
         routes.checkoutRepository.input.parse(input);

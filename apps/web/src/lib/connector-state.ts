@@ -1,4 +1,4 @@
-import type { ConnectorView } from "@galahad/core";
+import type { ConnectorView } from "@invincible/core";
 import type { IconName } from "../ui/icons.ts";
 
 /*

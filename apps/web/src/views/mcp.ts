@@ -1,5 +1,5 @@
-import type { ConnectorToolView, ConnectorView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { ConnectorToolView, ConnectorView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { ApiError } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { asksYou, CONNECTOR_ID, claimWords, type Discovered, discoveredSummary, mcpUrlProblem, stopsAsking, suggestId, TOOL_CLASSES, type ToolClass } from "../lib/connectors.ts";

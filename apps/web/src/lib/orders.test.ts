@@ -21,17 +21,17 @@ const pr = {
   class: "outward",
   connector: "github",
   tool: "pr.create",
-  target: "POST /repos/amiriteorg/galahad/pulls",
-  args: { owner: "amiriteorg", repo: "galahad", head: "feat/orders", base: "main", title: "Standing orders", draft: false },
+  target: "POST /repos/amiriteorg/invincible/pulls",
+  args: { owner: "amiriteorg", repo: "invincible", head: "feat/orders", base: "main", title: "Standing orders", draft: false },
 };
-const remove = { class: "delete", connector: "forge", tool: "bucket.delete", target: "DELETE /buckets/galahad-scratch", args: { name: "galahad-scratch" } };
+const remove = { class: "delete", connector: "forge", tool: "bucket.delete", target: "DELETE /buckets/invincible-scratch", args: { name: "invincible-scratch" } };
 const row = (name: string, mode: ArgRow["mode"], value: string, inPath = false, always = inPath, pinnable = true): ArgRow => ({ name, mode, value, inPath, always, pinnable });
 const issue = {
   class: "outward",
   connector: "tracker",
   tool: "create_issue",
-  target: 'mcp createIssue {"labels":["sandbox"],"repo":"amiriteorg/galahad","title":"Disk quotas"}',
-  args: { labels: ["sandbox"], repo: "amiriteorg/galahad", title: "Disk quotas" },
+  target: 'mcp createIssue {"labels":["sandbox"],"repo":"amiriteorg/invincible","title":"Disk quotas"}',
+  args: { labels: ["sandbox"], repo: "amiriteorg/invincible", title: "Disk quotas" },
 };
 
 describe("standing orders: where a call went", () => {
@@ -45,17 +45,17 @@ describe("standing orders: where a call went", () => {
 
   test("a call's rows: where it went comes first and starts exact, the rest free; a delete pins everything", () => {
     // The node stores arguments sorted, so the path's order has to be read back from the target.
-    const sorted = { ...pr, args: { base: "main", draft: false, head: "feat/orders", owner: "amiriteorg", repo: "galahad", title: "Standing orders" } };
+    const sorted = { ...pr, args: { base: "main", draft: false, head: "feat/orders", owner: "amiriteorg", repo: "invincible", title: "Standing orders" } };
     expect(rowsFromCall(sorted).map((r) => [r.name, r.mode, r.value])).toEqual([
       ["owner", "exact", "amiriteorg"],
-      ["repo", "exact", "galahad"],
+      ["repo", "exact", "invincible"],
       ["base", "any", "main"],
       ["draft", "any", "false"],
       ["head", "any", "feat/orders"],
       ["title", "any", "Standing orders"],
     ]);
     expect(pathArgs("POST /repos/a/b/issues/7/comments", { number: 7, repo: "b", owner: "a" })).toEqual(["owner", "repo", "number"]);
-    expect(rowsFromCall(remove)).toEqual([{ name: "name", mode: "exact", value: "galahad-scratch", inPath: true, always: true, pinnable: true }]);
+    expect(rowsFromCall(remove)).toEqual([{ name: "name", mode: "exact", value: "invincible-scratch", inPath: true, always: true, pinnable: true }]);
   });
 
   test("an MCP call has no path: nothing is read from its target, and lists stay free", () => {
@@ -75,7 +75,7 @@ describe("standing orders: where a call went", () => {
   });
 
   test("what a delete names, for typing it before approving", () => {
-    expect(deleteName(remove)).toBe("galahad-scratch");
+    expect(deleteName(remove)).toBe("invincible-scratch");
     expect(deleteName({ ...remove, target: "DELETE /buckets/my%20bucket" })).toBe("my bucket");
     expect(deleteName({ connector: "tracker", tool: "delete_repo", target: 'mcp delete_repo {"repo":"amiriteorg/old"}', args: { repo: "amiriteorg/old" } })).toBe("amiriteorg/old");
     expect(deleteName(issue)).toBe("tracker.create_issue");
@@ -136,7 +136,7 @@ describe("standing orders: rows into terms", () => {
   });
 
   test("a delete names exactly one thing", () => {
-    expect(rowsToArgs([row("name", "exact", "galahad-scratch", true)], "delete")).toEqual({ args: { name: "galahad-scratch" }, free: [] });
+    expect(rowsToArgs([row("name", "exact", "invincible-scratch", true)], "delete")).toEqual({ args: { name: "invincible-scratch" }, free: [] });
     expect(rowsToArgs([row("name", "pattern", "galahad-*", true)], "delete")).toMatchObject({ problem: expect.stringContaining("can't have a *") });
     expect(rowsToArgs([row("name", "any", "", true)], "delete")).toMatchObject({ problem: expect.stringContaining("exact value") });
     expect(rowsToArgs([row("name", "exact", "a", true), row("force", "any", "")], "delete")).toEqual({ args: { name: "a" }, free: ["force"] });
@@ -177,8 +177,8 @@ describe("standing orders in plain words", () => {
     ).toBe(
       "Only claude-code may use github.pr.create without asking you for owner amiriteorg and head starting with feat/, with any repo, base and title, until Dec 10. Each call still shows up in your inbox.",
     );
-    expect(orderSentence({ connector: "forge", tool: "bucket.delete", args: { name: "galahad-scratch" }, callers: null, until: "Nov 17" })).toBe(
-      "Any of Galahad's agents may use forge.bucket.delete without asking you for name galahad-scratch, until Nov 17. Each call still shows up in your inbox.",
+    expect(orderSentence({ connector: "forge", tool: "bucket.delete", args: { name: "invincible-scratch" }, callers: null, until: "Nov 17" })).toBe(
+      "Any of Galahad's agents may use forge.bucket.delete without asking you for name invincible-scratch, until Nov 17. Each call still shows up in your inbox.",
     );
     expect(orderSentence({ connector: "forge", tool: "post", args: {}, free: ["text"], callers: ["a", "b"], until: "Feb 8" })).toBe(
       "Only a or b may use forge.post without asking you, with any text, until Feb 8. Each call still shows up in your inbox.",
@@ -187,8 +187,8 @@ describe("standing orders in plain words", () => {
   });
 
   test("a label to start from names the tool and where the call went", () => {
-    expect(defaultLabel(pr)).toBe("github.pr.create on amiriteorg/galahad");
-    expect(defaultLabel(remove)).toBe("forge.bucket.delete on galahad-scratch");
+    expect(defaultLabel(pr)).toBe("github.pr.create on amiriteorg/invincible");
+    expect(defaultLabel(remove)).toBe("forge.bucket.delete on invincible-scratch");
     expect(defaultLabel({ connector: "forge", tool: "post", target: "POST /posts", args: { text: "hi" } })).toBe("forge.post");
     expect(defaultLabel({ connector: "x", tool: "y", target: `POST /${"a".repeat(200)}`, args: { p: "a".repeat(200) } })).toHaveLength(128);
   });

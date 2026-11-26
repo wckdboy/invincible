@@ -1,5 +1,5 @@
-# The workshop where Galahad's knights work. Built on each sandbox host by
-# `galahad sandbox build`. Runs unprivileged (uid 1000), read-only at runtime,
+# The workshop where Invincible's knights work. Built on each sandbox host by
+# `invincible sandbox build`. Runs unprivileged (uid 1000), read-only at runtime,
 # with all capabilities dropped; see packages/sandbox/src/spec.ts.
 FROM debian:trixie-slim
 
@@ -32,9 +32,9 @@ RUN case "${TARGETARCH:-amd64}" in amd64) asset=x64 sum="${NODE_SHA256}" ;; arm6
 ENV PATH=/opt/node/bin:$PATH
 ENV NPM_CONFIG_PREFIX=/work/.local
 
-# OpenCode, the coding agent for long quests (galahad do --agent opencode). Pinned, and
+# OpenCode, the coding agent for long quests (invincible do --agent opencode). Pinned, and
 # checked against its SHA-256 for the platform (each GitHub's own digest of the asset); it
-# reaches models only through Galahad's gateway.
+# reaches models only through Invincible's gateway.
 ARG OPENCODE_VERSION=2.2.6
 ARG OPENCODE_SHA256=08bb21d6326ce740d91cce7ebe88a6536933f6e1e30353b91a06b01f25da306c
 ARG OPENCODE_SHA256_ARM64=f2d27600c367e45057d6a16f6a5c2aa8d77b41a9b10d4bc3d849c2f88870e944
@@ -45,10 +45,10 @@ RUN case "${TARGETARCH:-amd64}" in amd64) asset=x64 sum="${OPENCODE_SHA256}" ;; 
  && chmod 0755 /opt/opencode/bin/opencode && rm /tmp/opencode.tgz
 ENV PATH=/opt/opencode/bin:$PATH
 
-# Engram, the notes store a knight's harness may be given (galahad roundtable engram on). Pinned, and
+# Engram, the notes store a knight's harness may be given (invincible roundtable engram on). Pinned, and
 # checked against its SHA-256. A newer one migrates a store when it first opens it, so a bump says what
 # becomes of the stores there are. Its store is on the knight's own disk and its update check is off;
-# nothing here starts it (a harness does, for the length of a run: packages/brain/src/engram.ts).
+# nothing here starts it (a harness does, for the length of a run: packages/models/src/engram.ts).
 ARG ENGRAM_VERSION=3.7.2
 ARG ENGRAM_SHA256=8db9d5db1c1574b8b830aac4ffbe86c024014aed6b9a3f0406ac3361a152cdf0
 ARG ENGRAM_SHA256_ARM64=cdbbcb68d3e842d3e52e27edccef55e6fe98ce3cdbc90cd79894323b029efb50
@@ -63,10 +63,10 @@ ENV ENGRAM_NO_UPDATE_CHECK=1
 
 # A login shell sets PATH afresh (/etc/profile), and a knight's commands run in one: this puts the tools
 # above back on it (tools-path.sh says why; a directory added to the PATH here is added there too).
-COPY tools-path.sh /etc/profile.d/galahad-tools.sh
-RUN chmod 0644 /etc/profile.d/galahad-tools.sh
+COPY tools-path.sh /etc/profile.d/invincible-tools.sh
+RUN chmod 0644 /etc/profile.d/invincible-tools.sh
 
-# Web search through Galahad's own SearXNG, via the gateway (no internet needed).
+# Web search through Invincible's own SearXNG, via the gateway (no internet needed).
 COPY websearch /usr/local/bin/websearch
 RUN chmod 0755 /usr/local/bin/websearch
 

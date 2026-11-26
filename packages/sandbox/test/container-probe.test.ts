@@ -40,10 +40,10 @@ describe("finding Apple's container on a Mac", () => {
     const { runner, asked } = answering();
     expect(await probeContainer(runner)).toEqual({
       container: { version: "1.2.3", running: true },
-      sandbox: { image: true, networks: true, vm: true, engine: "container", cannot: [...CONTAINER_UNMADE], grows: false, images: ["galahad/sandbox:1"] },
+      sandbox: { image: true, networks: true, vm: true, engine: "container", cannot: [...CONTAINER_UNMADE], grows: false, images: ["invincible/sandbox:1"] },
     });
     // Only looked: nothing made, nothing started.
-    expect(asked).toEqual([["system", "version", "--format", "json"], ["image", "inspect", "galahad/sandbox:1"], ["network", "inspect", "galahad-gw"], ["network", "inspect", "galahad-net"]]);
+    expect(asked).toEqual([["system", "version", "--format", "json"], ["image", "inspect", "invincible/sandbox:1"], ["network", "inspect", "invincible-gw"], ["network", "inspect", "invincible-net"]]);
   });
 
   test("its image not built, or its network not made yet: a host that says so (the node makes the network as it starts)", async () => {

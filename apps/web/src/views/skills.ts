@@ -1,4 +1,4 @@
-import { SKILL_LIMITS, SKILLS_BUDGET_MAX, skillAuthor, type SkillDetail, type SkillDoc, skillRecordLine, type SkillsView, type SkillVersionView, type SkillView } from "@galahad/core/skills";
+import { SKILL_LIMITS, SKILLS_BUDGET_MAX, skillAuthor, type SkillDetail, type SkillDoc, skillRecordLine, type SkillsView, type SkillVersionView, type SkillView } from "@invincible/core/skills";
 import { ApiError, isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { budgetLine, docFromForm, formOf, originWords, shownVersion, type SkillForm, skillGroups, stateBadge, trustWords, waitingVersion } from "../lib/skills.ts";

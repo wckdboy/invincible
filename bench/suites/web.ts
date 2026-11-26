@@ -31,12 +31,12 @@ export const suite: Suite = {
   about: "the PWA's places on a laptop and a phone: how far what's on screen moves once it is there (layout shift)",
   headline: ["web.still"],
   async run(ctx) {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-bench-web-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-bench-web-"));
     try {
       const out = join(dir, "shifts.json");
       const measure = Bun.spawn(["bun", join(ROOT, "apps/web/measure/first-load.ts"), "--runs", "0", "--shifts", "--shift-runs", "1", "--json", out], {
         cwd: ROOT,
-        env: { ...process.env, GALAHAD_KEYSTORE: "file" },
+        env: { ...process.env, INVINCIBLE_KEYSTORE: "file" },
         stdout: "ignore",
         stderr: "pipe",
       });

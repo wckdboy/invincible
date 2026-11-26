@@ -1,14 +1,14 @@
-import type { Calibration, ComputeLimit, ComputeNodeView, ComputeView, EffortAsk, NodeCapacity, RouteName } from "@galahad/core";
+import type { Calibration, ComputeLimit, ComputeNodeView, ComputeView, EffortAsk, NodeCapacity, RouteName } from "@invincible/core";
 
 /*
  * The terminal side of compute. Thin: every rule lives in the node (and the pure
  * functions of packages/core/src/compute.ts); this shapes input and prints.
  *
- *   galahad compute                          the census: what each node measured, its ceiling, slots in use and
+ *   invincible compute                          the census: what each node measured, its ceiling, slots in use and
  *                                            waiting, his plan, the day's budget, what more compute would buy
- *   galahad compute calibrate [node]         a node measures itself now
- *   galahad compute limit <node> [--cores n] [--mem gb] [--sandboxes n] [--model-calls n] [--reset]
- *   galahad compute effort [auto|1|2|3] [--budget n]
+ *   invincible compute calibrate [node]         a node measures itself now
+ *   invincible compute limit <node> [--cores n] [--mem gb] [--sandboxes n] [--model-calls n] [--reset]
+ *   invincible compute effort [auto|1|2|3] [--budget n]
  */
 
 export interface ComputeApi {
@@ -60,7 +60,7 @@ const bar = (used: number, of: number): string => (of > 0 && of <= 24 ? `${"█"
 function nodeLines(n: ComputeNodeView, now: number): string[] {
   const lines = [`${bold(n.name)} ${dim(`${n.self ? "this node" : n.online ? "online" : "offline"}${n.due ? ` · due to measure itself (${n.due === "joined" ? "it never has" : "its body, its ceiling or the benchmark changed"})` : ""}`)}`];
   if (!n.body || !n.capacity) return [...lines, dim("  no capability profile yet")];
-  lines.push(`  measured  ${n.calibration ? `${measuredLine(n.calibration, n.capacity)} ${dim(`· ${ago(n.calibration.at, now)}`)}` : dim(`not yet: galahad compute calibrate ${n.name}`)}`);
+  lines.push(`  measured  ${n.calibration ? `${measuredLine(n.calibration, n.capacity)} ${dim(`· ${ago(n.calibration.at, now)}`)}` : dim(`not yet: invincible compute calibrate ${n.name}`)}`);
   lines.push(`  ceiling   ${n.capacity.cores} of ${n.body.cores} threads and ${n.capacity.memoryGb} of ${Math.round(n.body.memoryGb)} GB are his to use ${dim(`· ${limitLine(n.limit)}`)}`);
   const slots = n.capacity.sandboxes;
   const use = n.use;
@@ -113,7 +113,7 @@ export function describeCompute(view: ComputeView, now = Date.now()): string {
   if (view.adapted) {
     lines.push(dim(`His defaults were last re-derived ${ago(view.adapted.at, now)}${view.adapted.changes.length ? `: ${view.adapted.changes.join(" ")}` : "."}`));
   } else lines.push(dim("His defaults aren't on record yet: his next heartbeat records them."));
-  lines.push(dim("galahad compute calibrate [node] · galahad compute limit <node> --cores n --mem gb · galahad compute effort auto|1|2|3 --budget n"));
+  lines.push(dim("invincible compute calibrate [node] · invincible compute limit <node> --cores n --mem gb · invincible compute effort auto|1|2|3 --budget n"));
   return lines.join("\n");
 }
 
@@ -151,7 +151,7 @@ export async function computeCommand(api: ComputeApi, sub: string | undefined, r
     }
     case "limit": {
       const node = rest[0];
-      if (!node) throw new Error("usage: galahad compute limit <node> [--cores n] [--mem gb] [--sandboxes n] [--model-calls n] [--reset]");
+      if (!node) throw new Error("usage: invincible compute limit <node> [--cores n] [--mem gb] [--sandboxes n] [--model-calls n] [--reset]");
       const cores = whole(flags, "cores", 1, 4096);
       const memoryGb = whole(flags, "mem", 1, 65_536);
       const sandboxes = whole(flags, "sandboxes", 0, 256);
@@ -181,7 +181,7 @@ export async function computeCommand(api: ComputeApi, sub: string | undefined, r
           done.policy.effort === "auto" ? "he runs as many attempts at a quest as the free slots and the budget allow, up to 3" : done.policy.effort === 1 ? "one attempt at a quest, unless you name more" : `up to ${done.policy.effort} attempts at a quest when he chooses`
         }.`,
       );
-      console.log(`Budget: ${plural(done.budget.perDay, "extra attempt")} a day (${done.budget.usedToday} used in the last 24 hours). ${dim("A level you name yourself (galahad do --effort 3) stands whatever the budget.")}`);
+      console.log(`Budget: ${plural(done.budget.perDay, "extra attempt")} a day (${done.budget.usedToday} used in the last 24 hours). ${dim("A level you name yourself (invincible do --effort 3) stands whatever the budget.")}`);
       return;
     }
     default:

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RouteName } from "@galahad/core";
+import type { RouteName } from "@invincible/core";
 import {
   CONTAINER_MAJOR,
   CONTAINER_RELEASE,
@@ -15,11 +15,11 @@ import {
   macFirewallInstalled,
   type MacFirewallState,
   parseContainerVersion,
-} from "@galahad/sandbox";
+} from "@invincible/sandbox";
 import { type AsRoot, shellQuote, systemAsRoot } from "./as-root.ts";
 
 /*
- * `galahad sandbox setup`: what a Mac's knights' VMs need, given to it (docs/MAC.md, *Give its knights VMs*), as the
+ * `invincible sandbox setup`: what a Mac's knights' VMs need, given to it (docs/MAC.md, *Give its knights VMs*), as the
  * app's step 3 and This Mac give it, and as you would in Terminal:
  *
  *   container  Apple's container: its signed installer at the release this driver was checked against, fetched from
@@ -31,7 +31,7 @@ import { type AsRoot, shellQuote, systemAsRoot } from "./as-root.ts";
  *   vm         a VM made through the firewall, a command run in it, and the VM removed: the proof
  *
  * What holds already is left as it is, so setting it up again changes nothing that is right. What only root may do
- * (the first two) is asked for once, together (as-root.ts). `galahad sandbox setup status` changes nothing: it says
+ * (the first two) is asked for once, together (as-root.ts). `invincible sandbox setup status` changes nothing: it says
  * what holds and what doesn't. Each step is said as it goes, in words, or (`--json`) as one line of JSON, which the
  * app reads.
  */
@@ -93,7 +93,7 @@ export interface SetupDeps {
 }
 
 /** The node's launchd job, where install.sh and the app put it (the app's NodeAgent). */
-const NODE_LABEL = "sh.galahad.node";
+const NODE_LABEL = "sh.invincible.node";
 const MB = (bytes: number) => Math.round(bytes / 1_000_000);
 
 /**
@@ -105,7 +105,7 @@ export function setupRootScript(work: { pkg: string | null; firewall: boolean },
   const lines = ["set -e"];
   if (work.pkg) {
     lines.push(
-      "d=$(/usr/bin/mktemp -d /private/var/tmp/galahad-container.XXXXXX)",
+      "d=$(/usr/bin/mktemp -d /private/var/tmp/invincible-container.XXXXXX)",
       `trap '/bin/rm -rf "\${d:?}"' EXIT`,
       `/bin/cp ${shellQuote(work.pkg)} "$d/container.pkg"`,
       `[ "$(/usr/bin/shasum -a 256 "$d/container.pkg" | /usr/bin/cut -c1-64)" = ${shellQuote(CONTAINER_RELEASE.sha256)} ] || { echo "The installer isn't the one Apple published for container ${CONTAINER_RELEASE.version}: not installed." >&2; exit 3; }`,
@@ -126,7 +126,7 @@ const lastLine = (output: string, code: number) =>
     ?.replace(/^\d+:\d+: execution error: /, "")
     .slice(0, 300) ?? `it ended with ${code}`;
 
-/** Runs `galahad sandbox setup [status]` (`check`: status, changing nothing): 0 when every step holds; 1 when one doesn't, or failed (each line says why). */
+/** Runs `invincible sandbox setup [status]` (`check`: status, changing nothing): 0 when every step holds; 1 when one doesn't, or failed (each line says why). */
 export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = {}): Promise<number> {
   const check = !!opts.check;
   const states = new Map<SetupStep, SetupState>();
@@ -245,7 +245,7 @@ export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = 
   // The node: it finds container as it starts, so one that started before container did is restarted.
   const node = deps.node();
   if (!node) {
-    say("node", "skipped", "this Mac isn't a node yet: make it one (in the app, or with galahad init or galahad join), then set this up again");
+    say("node", "skipped", "this Mac isn't a node yet: make it one (in the app, or with invincible init or invincible join), then set this up again");
     return rest("not done: this Mac isn't a node yet");
   }
   const hosts = async () => {
@@ -274,7 +274,7 @@ export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = 
       hosting = await hosts().catch(() => false);
     }
     if (!hosting) {
-      say("node", "failed", "it restarted, and doesn't host VMs: its log says why (galahad doctor too)");
+      say("node", "failed", "it restarted, and doesn't host VMs: its log says why (invincible doctor too)");
       return after("node");
     }
     say("node", "done", "it hosts knights' VMs");
@@ -293,7 +293,7 @@ export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = 
       return after("image");
     }
     if (!(await built())) {
-      say("image", "failed", "the build ended, and the image isn't there: galahad sandbox build says why");
+      say("image", "failed", "the build ended, and the image isn't there: invincible sandbox build says why");
       return after("image");
     }
     say("image", "done", "built");
@@ -327,7 +327,7 @@ export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = 
 /** A line as a terminal shows it. */
 export const setupWords = (line: SetupLine): string => `  ${line.state.padEnd(8)} ${SETUP_TITLES[line.step]}: ${line.said}`;
 
-/** This Mac, as `galahad sandbox setup` finds it and changes it. */
+/** This Mac, as `invincible sandbox setup` finds it and changes it. */
 export function systemSetupDeps(over: { node(): SetupNode | null; say(line: SetupLine): void }): SetupDeps {
   const run: SetupDeps["run"] = async (argv, timeoutMs) => {
     const proc = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -372,7 +372,7 @@ export function systemSetupDeps(over: { node(): SetupNode | null; say(line: Setu
       for await (const chunk of createReadStream(path)) hash.update(chunk);
       return hash.digest("hex");
     },
-    tempDir: () => mkdtempSync(join(tmpdir(), "galahad-setup-")),
+    tempDir: () => mkdtempSync(join(tmpdir(), "invincible-setup-")),
     removeDir: (path) => rmSync(path, { recursive: true, force: true }),
     asRoot: systemAsRoot(),
     cli: [process.execPath, process.argv[1]!],

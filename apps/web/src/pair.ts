@@ -1,5 +1,5 @@
-import { fromB64u } from "@galahad/core/bytes";
-import { approvalProof, decodeInvite, type Invite, pairProof, type PairRequestFields, proofMatches, sasCode, statusProof } from "@galahad/core/pairing";
+import { fromB64u } from "@invincible/core/bytes";
+import { approvalProof, decodeInvite, type Invite, pairProof, type PairRequestFields, proofMatches, sasCode, statusProof } from "@invincible/core/pairing";
 import { ApiError, apiFor, nodeReachable, pairPost } from "./api.ts";
 import { errorMessage } from "./context.ts";
 import { type BrowserIdentity, forgetIdentity, runningAsApp, saveIdentity } from "./identity.ts";
@@ -43,7 +43,7 @@ export function renderPairing(root: HTMLElement, identity: BrowserIdentity, invi
   let invite: Invite;
   try {
     invite = decodeInvite(inviteText);
-    if (invite.k !== "client") throw new Error("This invite is for a machine. Run `galahad join …` on that machine instead.");
+    if (invite.k !== "client") throw new Error("This invite is for a machine. Run `invincible join …` on that machine instead.");
   } catch (error) {
     clearHash();
     renderPairFailed(root, errorMessage(error));
@@ -101,7 +101,7 @@ export function renderPairing(root: HTMLElement, identity: BrowserIdentity, invi
         "On your node, approve ",
         h("strong", {}, name),
         " only if it shows this exact code: in Galahad's Inbox on another device, or in the terminal running ",
-        h("span", { class: "mono" }, "galahad invite"),
+        h("span", { class: "mono" }, "invincible invite"),
         ".",
       ),
       h("div", { class: "row", style: "justify-content:center", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", { class: "small muted wait-note" }, note)),
@@ -112,7 +112,7 @@ export function renderPairing(root: HTMLElement, identity: BrowserIdentity, invi
     clearHash();
     join.hidden = true;
     nameInput.disabled = true;
-    replace(status, callout("danger", message, { title: "Pairing stopped", actions: h("span", { class: "small" }, "Ask for a fresh invite with ", h("span", { class: "mono" }, "galahad invite --client"), ".") }));
+    replace(status, callout("danger", message, { title: "Pairing stopped", actions: h("span", { class: "small" }, "Ask for a fresh invite with ", h("span", { class: "mono" }, "invincible invite --client"), ".") }));
   }
 
   async function finish(result: StatusResult): Promise<void> {

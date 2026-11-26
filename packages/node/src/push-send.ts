@@ -1,4 +1,4 @@
-import { b64u, encryptPush, findSecrets, fromB64u, GENERIC_NOTIFICATION, type NotifyPayload, type PushKeyPair, pushService, readNotifyPayload, sha256Bytes, utf8, VAPID_TTL_S, vapidAuthorization, vapidToken } from "@galahad/core";
+import { b64u, encryptPush, findSecrets, fromB64u, GENERIC_NOTIFICATION, type NotifyPayload, type PushKeyPair, pushService, readNotifyPayload, sha256Bytes, utf8, VAPID_TTL_S, vapidAuthorization, vapidToken } from "@invincible/core";
 
 /*
  * Sending one notification to one subscription: outward traffic the owner chose.

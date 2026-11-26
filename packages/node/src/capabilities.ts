@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
-import { preset } from "@galahad/brain";
-import type { Presence } from "@galahad/core";
-import { type ContainerHostCaps, probeContainer, probeSandbox } from "@galahad/sandbox";
+import { preset } from "@invincible/models";
+import type { Presence } from "@invincible/core";
+import { type ContainerHostCaps, probeContainer, probeSandbox } from "@invincible/sandbox";
 
 /*
  * What this body can do. Stable facts go into the node's profile in the mind
@@ -29,7 +29,7 @@ export interface Capabilities {
   sandbox?: { image: boolean; networks: boolean; vm?: boolean; engine?: ContainerHostCaps["engine"]; cannot?: string[]; grows?: false; images?: string[] } | null;
   /** Apple's container, where this Mac has its binary: its version, and whether its service answers. Absent: not found. */
   container?: { version: string | null; running: boolean };
-  /** This node keeps its Mac from sleeping while it runs (`galahad awake on`: keep-awake.ts). Absent: it doesn't. */
+  /** This node keeps its Mac from sleeping while it runs (`invincible awake on`: keep-awake.ts). Absent: it doesn't. */
   awake?: boolean;
   /** This Mac's own screen can be Galahad's (mac-screen.ts: its node runs from the app). Whether macOS allows it now is asked of it. */
   screen?: true;
@@ -131,7 +131,7 @@ export async function servedOrigin(proxyPort: number): Promise<string | null> {
 
 /**
  * A server: Linux and no battery; or a Mac with no battery that its node keeps awake (a Mac mini set to stay on:
- * `galahad awake on`, docs/MAC.md). Other Windows and macOS machines are personal bodies that sleep and travel,
+ * `invincible awake on`, docs/MAC.md). Other Windows and macOS machines are personal bodies that sleep and travel,
  * battery or not (Windows doesn't always report a laptop's battery).
  */
 export const isAlwaysOn = (caps: Partial<Pick<Capabilities, "os" | "hasBattery" | "awake">> | null | undefined): boolean =>

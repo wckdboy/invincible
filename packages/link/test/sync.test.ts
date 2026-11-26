@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, type GEvent, newNodeIdentity, type NodeIdentity, SyncRequest } from "@galahad/core";
-import { type Device, enrollDevice, foundFleet, MindStore } from "@galahad/mind";
+import { b64u, type GEvent, newNodeIdentity, type NodeIdentity, SyncRequest } from "@invincible/core";
+import { type Device, enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
 import { answerPush, answerSync, SyncEngine } from "../src/index.ts";
 
 /*
@@ -11,11 +11,11 @@ import { answerPush, answerSync, SyncEngine } from "../src/index.ts";
 function fleet() {
   const a = newNodeIdentity();
   const b = newNodeIdentity();
-  const storeA = new MindStore(":memory:");
+  const storeA = new LedgerStore(":memory:");
   foundFleet(storeA, a, { fleetName: "link", nodeName: "a" });
   enrollDevice(storeA, a, { device: b.id, name: "b", kind: "node", box: b64u(b.boxPublic) });
   for (let i = 0; i < 120; i++) storeA.emit(a, "ledger.recorded", { class: "create", resource: "sandbox.exec", target: `sb${i}`, verdict: "allow" });
-  const storeB = new MindStore(":memory:");
+  const storeB = new LedgerStore(":memory:");
   storeB.expectFleet(storeA.fleet!);
   return { a, b, storeA, storeB };
 }
@@ -28,7 +28,7 @@ interface Seen {
 }
 
 /** A peer answering /link/sync the way today's server does. */
-function today(store: MindStore, seen: Seen, limit = 25) {
+function today(store: LedgerStore, seen: Seen, limit = 25) {
   return async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(new TextDecoder().decode(init!.body as Uint8Array)) as Record<string, unknown>;
     seen.bodies.push(body);
@@ -39,7 +39,7 @@ function today(store: MindStore, seen: Seen, limit = 25) {
 }
 
 /** A peer from before set hashes: its strict schema knows `have` and `digests` only, and it never says `repair`. */
-function before(store: MindStore, seen: Seen) {
+function before(store: LedgerStore, seen: Seen) {
   return async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(new TextDecoder().decode(init!.body as Uint8Array)) as Record<string, unknown>;
     seen.bodies.push(body);
@@ -140,7 +140,7 @@ describe("the sync engine", () => {
 
     // A node enrolled on a replica this one hasn't heard from yet: its first event is parked, as ever.
     const c = newNodeIdentity();
-    const storeC = new MindStore(":memory:");
+    const storeC = new LedgerStore(":memory:");
     storeC.expectFleet(storeA.fleet!);
     storeC.ingest(storeA.eventsSince({}, 10_000).events);
     enrollDevice(storeC, a, { device: c.id, name: "c", kind: "node", box: b64u(c.boxPublic) });

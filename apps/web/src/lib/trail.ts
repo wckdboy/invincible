@@ -1,4 +1,4 @@
-import type { TeamTrailEntry, TeamWorkStatus } from "@galahad/core/team";
+import type { TeamTrailEntry, TeamWorkStatus } from "@invincible/core/team";
 
 /*
  * A task's trail, read as the node gives it (POST /api/team/trail { task, after }): a page

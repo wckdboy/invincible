@@ -8,7 +8,7 @@ import { keepAwake } from "../src/keep-awake.ts";
 
 /*
  * A Mac set to stay on (a Mac mini serving the fleet): kept from sleeping while its node runs, by caffeinate, tied to
- * the node's process; its battery read from the Mac itself; and `galahad awake` to turn it on and off.
+ * the node's process; its battery read from the Mac itself; and `invincible awake` to turn it on and off.
  */
 
 test("a Mac is kept awake by caffeinate, on mains power, for as long as the node's process lives; let go when asked", () => {
@@ -35,14 +35,14 @@ test("a Mac's battery is its own word, pmset's: a laptop has an internal battery
   expect(macHasBattery(null)).toBe(false);
 });
 
-const root = mkdtempSync(join(tmpdir(), "galahad-awake-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-awake-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-test("galahad awake on and off keep the choice in the node's config; status says it, and that no node is running", async () => {
+test("invincible awake on and off keep the choice in the node's config; status says it, and that no node is running", async () => {
   const home = new Home(join(root, "node"));
   home.writeConfig({ v: 1, name: "mini", fleet: null, port: 1, keystore: "file", advertise: null });
   const cli = async (...args: string[]) => {
-    const proc = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli.ts"), ...args, "--home", home.dir], { stdout: "pipe", stderr: "pipe", env: { ...process.env, GALAHAD_KEYSTORE: "file" } });
+    const proc = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli.ts"), ...args, "--home", home.dir], { stdout: "pipe", stderr: "pipe", env: { ...process.env, INVINCIBLE_KEYSTORE: "file" } });
     const out = await new Response(proc.stdout).text();
     return { out, code: await proc.exited };
   };

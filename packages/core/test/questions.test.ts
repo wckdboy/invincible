@@ -53,7 +53,7 @@ describe("your answer", () => {
   })();
 
   test("what it asked for, each as its kind: a number typed as text is a number, a list chosen once each", () => {
-    expect(checkAnswer(fields, { repo: " amiriteorg/galahad ", region: "eu", count: "4", private: false, labels: ["bug", "bug", "docs"] })).toEqual({ ok: true, content: { repo: "amiriteorg/galahad", region: "eu", count: 4, private: false, labels: ["bug", "docs"] } });
+    expect(checkAnswer(fields, { repo: " amiriteorg/invincible ", region: "eu", count: "4", private: false, labels: ["bug", "bug", "docs"] })).toEqual({ ok: true, content: { repo: "amiriteorg/invincible", region: "eu", count: 4, private: false, labels: ["bug", "docs"] } });
   });
 
   test("what's wrong is said by its field: needed, of another kind, out of bounds, not among its choices, not asked for", () => {

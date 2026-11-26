@@ -28,7 +28,7 @@ function fleet(here: LocalModels, peers: ModelPeer[]) {
   return { fetch, based, sent };
 }
 
-const MINI: ModelPeer = { name: "mini", endpoint: "http://mini.test:7777", models: [{ runtime: "ollama", models: ["mimo-v2.6:9b", "qwen3.8:27b"] }] };
+const MINI: ModelPeer = { name: "mini", endpoint: "http://mini.test:7400", models: [{ runtime: "ollama", models: ["mimo-v2.6:9b", "qwen3.8:27b"] }] };
 
 describe("a model call over the fleet", () => {
   test("a local model only a peer serves is asked of that peer, as it was sent, with the caller's signal", async () => {
@@ -36,7 +36,7 @@ describe("a model call over the fleet", () => {
     const stop = new AbortController();
     const c = call("mimo-v2.6:9b", undefined, { signal: stop.signal });
     expect(await (await f.fetch(c.url, c.init)).text()).toBe("there");
-    expect(f.sent).toEqual([{ endpoint: "http://mini.test:7777", payload: { provider: "ollama", request: { model: "mimo-v2.6:9b", messages: [{ role: "user", content: "hi" }], stream: true } }, signal: stop.signal }]);
+    expect(f.sent).toEqual([{ endpoint: "http://mini.test:7400", payload: { provider: "ollama", request: { model: "mimo-v2.6:9b", messages: [{ role: "user", content: "hi" }], stream: true } }, signal: stop.signal }]);
     expect(f.based).toEqual([]);
   });
 

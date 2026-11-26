@@ -1,4 +1,4 @@
-import type { TeamMessage, TeamRoom, TeamTask, TeamTaskInput } from "@galahad/core/team";
+import type { TeamMessage, TeamRoom, TeamTask, TeamTaskInput } from "@invincible/core/team";
 import { taskEnd } from "./task-card.ts";
 
 /*

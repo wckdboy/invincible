@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { LIVE_TOPICS, type LiveTopic, routes, SCOPES } from "@galahad/core";
-import { LiveChanges, MindCounts, mindTopics, type Stamps, timedStamp } from "../src/live.ts";
+import { LIVE_TOPICS, type LiveTopic, routes, SCOPES } from "@invincible/core";
+import { LiveChanges, LedgerCounts, mindTopics, type Stamps, timedStamp } from "../src/live.ts";
 
 /*
  * What changed on a node, for the live stream (live.ts): each topic's stamp read again soon after a write and four times
@@ -144,7 +144,7 @@ describe("the mind's part", () => {
   });
 
   test("counted by topic; a replay counts as every topic moving", () => {
-    const counts = new MindCounts();
+    const counts = new LedgerCounts();
     expect(counts.take([{ kind: "ledger.recorded" }], false)).toBe(false);
     expect(counts.take([{ kind: "action.requested" }, { kind: "action.decided" }, { kind: "notice.raised" }], false)).toBe(true);
     expect([counts.of("actions"), counts.of("notices"), counts.of("team")]).toEqual([2, 1, 0]);

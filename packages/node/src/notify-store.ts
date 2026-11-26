@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { type DigestTopic, isTimeZone, type NotifyItem, type NotifyPayload, type NotifyPrefs, readNotifyPrefs } from "@galahad/core";
+import { type DigestTopic, isTimeZone, type NotifyItem, type NotifyPayload, type NotifyPrefs, readNotifyPrefs } from "@invincible/core";
 
 /*
  * What this node keeps for notifications, in its own private database (push.db, mode

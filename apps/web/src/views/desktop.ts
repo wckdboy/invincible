@@ -1,4 +1,4 @@
-import type { Teammate } from "@galahad/core/team";
+import type { Teammate } from "@invincible/core/team";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { DESKTOP_KEYS, desktopAddress, type DesktopDo, type DesktopView, saysNoDesktop, screenPoint, shotSource } from "../lib/desktop.ts";

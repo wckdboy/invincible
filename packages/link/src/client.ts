@@ -11,7 +11,7 @@ import {
   signRequest,
   statusProof,
   utf8,
-} from "@galahad/core";
+} from "@invincible/core";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -50,7 +50,7 @@ export async function signedPost<T>(
   return (await response.json()) as T;
 }
 
-export type { SyncPage } from "@galahad/core";
+export type { SyncPage } from "@invincible/core";
 
 // ---- joining a fleet ---------------------------------------------------------
 

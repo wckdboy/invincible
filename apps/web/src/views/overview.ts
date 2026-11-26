@@ -1,4 +1,4 @@
-import type { FleetView, SecretView, UsageMeter } from "@galahad/core";
+import type { FleetView, SecretView, UsageMeter } from "@invincible/core";
 import { isUnavailable } from "../api.ts";
 import type { View } from "../context.ts";
 import { ledgerSignature } from "../lib/activity.ts";

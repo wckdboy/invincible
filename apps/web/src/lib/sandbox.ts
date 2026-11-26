@@ -19,8 +19,8 @@ export function gatewayUse(name: string): { kind: "search" | "models"; label: st
   return { kind: "models", label: name, title: `May use ${name}'s models (your key stays in the vault)` };
 }
 
-/** A Lab sandbox: its image is galahad/lab, whatever the version. */
-export const isLab = (image: string): boolean => /^galahad\/lab(:|$)/.test(image);
+/** A Lab sandbox: its image is invincible/lab, whatever the version. */
+export const isLab = (image: string): boolean => /^invincible\/lab(:|$)/.test(image);
 
 export type Isolation = "container" | "vm";
 export type IsolationChoice = "auto" | Isolation;

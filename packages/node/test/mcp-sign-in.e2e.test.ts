@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import type { ConnectorView, RouteName } from "@galahad/core";
-import { routes } from "@galahad/core";
-import { installedConnector } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import type { ConnectorView, RouteName } from "@invincible/core";
+import { routes } from "@invincible/core";
+import { installedConnector } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -24,7 +24,7 @@ import { freePort } from "./ports.ts";
  */
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "mcp-sign-in-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
-const root = mkdtempSync(join(tmpdir(), "galahad-mcp-sign-in-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-mcp-sign-in-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const callback = `http://127.0.0.1:${port}/oauth/callback`;
@@ -98,7 +98,7 @@ beforeAll(async () => {
   });
   url = `http://127.0.0.1:${upstream.port}/mcp`;
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });

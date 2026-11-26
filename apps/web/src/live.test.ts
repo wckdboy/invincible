@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { LiveTopic } from "@galahad/core/live";
+import type { LiveTopic } from "@invincible/core/live";
 import { type Api, ApiError } from "./api.ts";
 import type { LinkHandlers, LiveLink } from "./lib/live-link.ts";
 import { startLive } from "./live.ts";

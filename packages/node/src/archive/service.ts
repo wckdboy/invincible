@@ -1,7 +1,7 @@
 import { cpus, loadavg } from "node:os";
-import { type ArchiveFilters, type ArchiveSearchView, type ArchiveStatusView, archiveId, type NodeIdentity, sha256B64u, type Trust } from "@galahad/core";
-import { type BrainContext, chat, type Embedding, embed, embedderRef, isEmbeddingModel, listModels, parseRef, resolveProvider, roleModels } from "@galahad/brain";
-import type { MindStore } from "@galahad/mind";
+import { type ArchiveFilters, type ArchiveSearchView, type ArchiveStatusView, archiveId, type NodeIdentity, sha256B64u, type Trust } from "@invincible/core";
+import { type ModelsContext, chat, type Embedding, embed, embedderRef, isEmbeddingModel, listModels, parseRef, resolveProvider, roleModels } from "@invincible/models";
+import type { LedgerStore } from "@invincible/ledger";
 import { reconcile } from "../heartbeat.ts";
 import type { ArchiveAdapter } from "./adapters.ts";
 import { scrub } from "./guard.ts";
@@ -21,9 +21,9 @@ import { lessonEntry, parseUnderstanding, understandingPrompt } from "./understa
 
 export interface ArchiveServiceOptions {
   store: ArchiveStore;
-  brain: BrainContext;
+  brain: ModelsContext;
   /** For notices (the integrity check's findings). */
-  mind: MindStore;
+  mind: LedgerStore;
   identity: NodeIdentity;
   nodeName: string;
   adapters: ArchiveAdapter[];
@@ -324,7 +324,7 @@ export class ArchiveService {
       return;
     }
     if (!reply) {
-      this.understandError = set ? "no swift model answered" : "waiting for a local swift model (or a budget you set: galahad archive budget <n>)";
+      this.understandError = set ? "no swift model answered" : "waiting for a local swift model (or a budget you set: invincible archive budget <n>)";
       this.understandRetryAt = this.now() + 10 * 60 * SECOND;
       return;
     }
@@ -374,7 +374,7 @@ export class ArchiveService {
             key,
             severity: "warn" as const,
             title: `The archive on ${this.o.nodeName} has ${result.problems.length === 1 ? "a damaged or missing file" : `${result.problems.length} damaged or missing files`}`,
-            body: `${result.problems.slice(0, 6).join("\n")}${result.problems.length > 6 ? `\n… ${result.problems.length - 6} more` : ""}\nNothing was deleted. \`galahad archive verify\` checks again.`.slice(0, 2000),
+            body: `${result.problems.slice(0, 6).join("\n")}${result.problems.length > 6 ? `\n… ${result.problems.length - 6} more` : ""}\nNothing was deleted. \`invincible archive verify\` checks again.`.slice(0, 2000),
             node: this.o.identity.id,
           },
         ]
@@ -493,7 +493,7 @@ export class ArchiveService {
   }
 }
 
-function providerIsLocal(brain: BrainContext, ref: string): boolean | null {
+function providerIsLocal(brain: ModelsContext, ref: string): boolean | null {
   try {
     return resolveProvider(brain.store, brain.vault, parseRef(ref).provider)?.local ?? null;
   } catch {
@@ -506,7 +506,7 @@ function providerIsLocal(brain: BrainContext, ref: string): boolean | null {
  * only the role's local models are asked, so nothing in the archive leaves the machine;
  * with one, the role's models in order, as any swift call.
  */
-export async function defaultSummarise(brain: BrainContext, prompt: string, signal: AbortSignal, allowCloud: boolean): Promise<{ text: string; model: string } | null> {
+export async function defaultSummarise(brain: ModelsContext, prompt: string, signal: AbortSignal, allowCloud: boolean): Promise<{ text: string; model: string } | null> {
   let model: string | undefined;
   if (!allowCloud) {
     for (const ref of roleModels(brain.store, "swift")) {

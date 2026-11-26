@@ -1,8 +1,8 @@
-import { type QuestProgressInput, questInHand, type QuestView, redact } from "@galahad/core";
+import { type QuestProgressInput, questInHand, type QuestView, redact } from "@invincible/core";
 
 /*
  * The quests in hand, as this node shows them: whoever runs a quest (a terminal's
- * `galahad do`, a loop here) reports where it stands, and every device sees the plan,
+ * `invincible do`, a loop here) reports where it stands, and every device sees the plan,
  * the step he's on and each gate's last result.
  *
  * A view, not a record: in memory, bounded, and gone with the node (the ledger has every

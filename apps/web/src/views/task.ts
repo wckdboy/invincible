@@ -1,8 +1,8 @@
-import type { TeamChangesView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
-import { moneyPrices, type Price } from "@galahad/core/spend";
-import type { TeamMessage, TeamRoom, TeamRoomView, TeamSnapshot, TeamTask } from "@galahad/core/team";
-import { TEAM_LIMITS } from "@galahad/core/team-limits";
+import type { TeamChangesView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
+import { moneyPrices, type Price } from "@invincible/core/spend";
+import type { TeamMessage, TeamRoom, TeamRoomView, TeamSnapshot, TeamTask } from "@invincible/core/team";
+import { TEAM_LIMITS } from "@invincible/core/team-limits";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";

@@ -368,7 +368,7 @@ export const unsignedOf = (event: GEvent): UnsignedEvent => {
 };
 
 export const eventId = (unsigned: UnsignedEvent): string => sha256B64u(canonical(unsigned));
-const signingInput = (id: string) => domain("galahad-event/v1", id);
+const signingInput = (id: string) => domain("invincible-event/v1", id);
 
 export function signEvent(unsigned: UnsignedEvent, signer: NodeIdentity): GEvent {
   if (unsigned.device !== signer.id) throw new Error("event device must be the signer");

@@ -8,10 +8,10 @@ import { type DeviceId, domain, verifyDeviceSignature } from "./identity.ts";
  * wire; this proves *which enrolled device* is calling, independently of the network.
  */
 export const AUTH = {
-  device: "x-galahad-device",
-  ts: "x-galahad-ts",
-  nonce: "x-galahad-nonce",
-  sig: "x-galahad-sig",
+  device: "x-invincible-device",
+  ts: "x-invincible-ts",
+  nonce: "x-invincible-nonce",
+  sig: "x-invincible-sig",
 } as const;
 
 export const MAX_REQUEST_SKEW_MS = 60_000;
@@ -21,7 +21,7 @@ export const MAX_REQUEST_SKEW_MS = 60_000;
  * are, in an answer of his. Only a hint, outside what is signed, and trusted for nothing else; a node from before it
  * ignores it, and one with none, or a name that isn't a zone, reads your day in your notifications' zone.
  */
-export const ZONE_HEADER = "x-galahad-tz";
+export const ZONE_HEADER = "x-invincible-tz";
 
 export const requestSigningInput = (
   method: string,
@@ -29,7 +29,7 @@ export const requestSigningInput = (
   ts: string,
   nonce: string,
   body: Bytes,
-): Uint8Array<ArrayBuffer> => domain("galahad-req/v1", [method.toUpperCase(), path, ts, nonce, sha256B64u(body)].join("\n"));
+): Uint8Array<ArrayBuffer> => domain("invincible-req/v1", [method.toUpperCase(), path, ts, nonce, sha256B64u(body)].join("\n"));
 
 export type Signer = (message: Uint8Array<ArrayBuffer>) => Bytes | Promise<Bytes>;
 

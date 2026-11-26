@@ -31,7 +31,7 @@ export const ArchiveTag = z
   .regex(/^[\p{L}\p{N}][\p{L}\p{N} ._:/-]*$/u, "letters, digits, spaces and . _ : / -");
 
 /** An entry's id: the hash of where it came from, so archiving the same record again is a no-op. */
-export const archiveId = (source: string, sourceId: string): string => `arc_${sha256B64u(`galahad/archive/v1\u0000${source}\u0000${sourceId}`).slice(0, 22)}`;
+export const archiveId = (source: string, sourceId: string): string => `arc_${sha256B64u(`invincible/archive/v1\u0000${source}\u0000${sourceId}`).slice(0, 22)}`;
 
 /** Filters every search takes: kind, trust, source and time (ms since the epoch, by when the record was made). */
 export const ArchiveFilters = z.strictObject({

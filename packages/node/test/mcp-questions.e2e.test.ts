@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { type QuestionView, type RouteName, routes } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type QuestionView, type RouteName, routes } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -36,7 +36,7 @@ const caps: Capabilities = {
 };
 
 const KEY = "tracker_questions_test_key_0123456789";
-const root = mkdtempSync(join(tmpdir(), "galahad-mcp-questions-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-mcp-questions-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -94,7 +94,7 @@ beforeAll(async () => {
     },
   });
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -119,8 +119,8 @@ describe("a question in the middle of a call", () => {
     expect(q.fields.map((f) => [f.name, f.kind, f.required])).toEqual([["repo", "text", true], ["urgent", "yes-no", false]]);
     // An agent may read that one waits, never answer it.
     expect((await as(armToken, "answerQuestion", { id: q.id, accept: true, content: { repo: "x/y" } })).status).toBe(403);
-    expect((await admin("answerQuestion", { id: q.id, accept: true, content: { repo: "amiriteorg/galahad", urgent: true } })).status).toBe(200);
-    expect((await call).body).toMatchObject({ status: "done", result: { ok: true, body: 'filed "Disk full" in amiriteorg/galahad, urgent' } });
+    expect((await admin("answerQuestion", { id: q.id, accept: true, content: { repo: "amiriteorg/invincible", urgent: true } })).status).toBe(200);
+    expect((await call).body).toMatchObject({ status: "done", result: { ok: true, body: 'filed "Disk full" in amiriteorg/invincible, urgent' } });
     expect((await admin<{ questions: QuestionView[] }>("questions")).body.questions).toEqual([]);
   }, 20_000);
 

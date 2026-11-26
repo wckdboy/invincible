@@ -1,6 +1,6 @@
-import type { ActionView, ConnectorRequestView, FleetView, LoopDraftView, MemoryView, NoticeView, PairingView, QuestionView, ScreenSessionView, SecretRequestView } from "@galahad/core";
-import type { LiveTopic } from "@galahad/core/live";
-import type { TeamSnapshot } from "@galahad/core/team";
+import type { ActionView, ConnectorRequestView, FleetView, LoopDraftView, MemoryView, NoticeView, PairingView, QuestionView, ScreenSessionView, SecretRequestView } from "@invincible/core";
+import type { LiveTopic } from "@invincible/core/live";
+import type { TeamSnapshot } from "@invincible/core/team";
 import type { Api } from "./api.ts";
 import type { BrowserIdentity } from "./identity.ts";
 import type { AnyScope, WhoAmI } from "./types.ts";

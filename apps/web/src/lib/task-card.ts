@@ -1,5 +1,5 @@
-import { interventionWords } from "@galahad/core/interventions";
-import type { TeamTask } from "@galahad/core/team";
+import { interventionWords } from "@invincible/core/interventions";
+import type { TeamTask } from "@invincible/core/team";
 
 /*
  * What a task's card says, in words (pure: no DOM). Where it stands, how it ended and why, what the knight

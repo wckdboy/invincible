@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { endpointsOf, finishMcpSignIn, forgetAccess, type McpPending, OAuthError, type OAuthEndpoints, type OAuthKeep, readKeep, startMcpSignIn, tokenRequest, writeKeep } from "@galahad/brain";
-import type { ConnectorManifest } from "@galahad/core";
-import type { Vault } from "@galahad/mind";
+import { endpointsOf, finishMcpSignIn, forgetAccess, type McpPending, OAuthError, type OAuthEndpoints, type OAuthKeep, readKeep, startMcpSignIn, tokenRequest, writeKeep } from "@invincible/models";
+import type { ConnectorManifest } from "@invincible/core";
+import type { Vault } from "@invincible/ledger";
 
 /*
  * Signing in to a connector as you (brain oauth.ts says what the vault keeps). Google: the authorization code flow

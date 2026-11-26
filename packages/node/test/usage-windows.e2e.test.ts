@@ -2,10 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { routes, type RouteName, type UsageMeter, type UsageWindow } from "@galahad/core";
+import { routes, type RouteName, type UsageMeter, type UsageWindow } from "@invincible/core";
 import { spentWindowLine } from "../src/trial-commands.ts";
-import { windowsOf } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { windowsOf } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -15,7 +15,7 @@ import { freePort } from "./ports.ts";
 /*
  * A plan's allowance spent, in the usage meter: once the node is told of a provider's
  * refusal (a 429 with "resets in …"), GET /api/usage/meter carries the window; once its
- * time has passed, it says nothing of it. And the terminal's `galahad usage` line.
+ * time has passed, it says nothing of it. And the terminal's `invincible usage` line.
  */
 
 const caps: Capabilities = {
@@ -35,7 +35,7 @@ const caps: Capabilities = {
   sandbox: { image: true, networks: true },
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-usage-windows-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-usage-windows-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -54,7 +54,7 @@ async function call<T = any>(name: RouteName, input?: unknown, token = home.admi
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });

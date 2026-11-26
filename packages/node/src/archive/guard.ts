@@ -1,4 +1,4 @@
-import { findSecrets } from "@galahad/core/secret-scan";
+import { findSecrets } from "@invincible/core/secret-scan";
 
 /*
  * What never enters the archive. Everything the archive keeps may one day be embedded

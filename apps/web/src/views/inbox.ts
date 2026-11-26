@@ -1,4 +1,4 @@
-import type { ActionView, LoopDraftView, LoopView, NoticeView, QuestionField, QuestionView, ScreenSessionView } from "@galahad/core";
+import type { ActionView, LoopDraftView, LoopView, NoticeView, QuestionField, QuestionView, ScreenSessionView } from "@invincible/core";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { noticeFrom } from "../lib/notices.ts";
@@ -122,7 +122,7 @@ export function loopDraftCard(ctx: Ctx, draft: LoopDraftView): HTMLElement {
     note(draft.replaces ? `Adding it replaces your loop ${draft.name}. ` : "", `It runs nothing until you add it. Unanswered, it's gone ${relativeTime(draft.expires)}.`),
     mayAdd
       ? formActions(dismiss, add)
-      : callout("quiet", h("span", {}, "This device can't add loops (no brain:write scope). Add it from one that can, or on a node: ", h("code", {}, `galahad loop add --draft ${draft.id}`))),
+      : callout("quiet", h("span", {}, "This device can't add loops (no brain:write scope). Add it from one that can, or on a node: ", h("code", {}, `invincible loop add --draft ${draft.id}`))),
     outcome,
   );
 }
@@ -275,7 +275,7 @@ export function actionCard(ctx: Ctx, action: ActionView): HTMLElement {
     ),
     admin
       ? formActions(decline, similar, edit, approve)
-      : callout("quiet", h("span", {}, "This device can't answer (no fleet:admin scope). Answer from one that can, or on a node: ", h("code", {}, `galahad action approve ${action.id}`))),
+      : callout("quiet", h("span", {}, "This device can't answer (no fleet:admin scope). Answer from one that can, or on a node: ", h("code", {}, `invincible action approve ${action.id}`))),
     outcome,
   );
 }
@@ -306,7 +306,7 @@ export function screenSessionCard(ctx: Ctx, s: ScreenSessionView): HTMLElement {
       { tone: "warn", label: `Galahad is using ${s.nodeName} itself` },
       listRow({ lead: "mark", leadTone: "agent", top: true, title: `Galahad is using ${s.nodeName} itself`, sub: `Until ${clock(s.until!)}, or until you end it.`, meta: [h("span", { title: new Date(s.until!).toLocaleString() }, `ends ${relativeTime(s.until!)}`)] }),
       h("div", { class: "quote small" }, s.why),
-      admin ? formActions(end) : callout("quiet", h("span", {}, "This device can't end it (no fleet:admin scope): ", h("code", {}, `galahad screen end ${s.id}`))),
+      admin ? formActions(end) : callout("quiet", h("span", {}, "This device can't end it (no fleet:admin scope): ", h("code", {}, `invincible screen end ${s.id}`))),
       outcome,
     );
   }
@@ -330,7 +330,7 @@ export function screenSessionCard(ctx: Ctx, s: ScreenSessionView): HTMLElement {
     listRow({ lead: "mark", leadTone: "agent", top: true, title: `Galahad asks to use ${s.nodeName} itself`, sub: `For ${s.minutes} minutes, if you let him.`, meta: [h("span", { title: new Date(s.askedAt).toLocaleString() }, relativeTime(s.askedAt))] }),
     h("div", { class: "quote small" }, s.why),
     note(`Answer by ${clock(s.answerBy)}. No answer means no.`),
-    admin ? formActions(no, yes) : callout("quiet", h("span", {}, "This device can't answer (no fleet:admin scope): ", h("code", {}, `galahad screen approve ${s.id}`))),
+    admin ? formActions(no, yes) : callout("quiet", h("span", {}, "This device can't answer (no fleet:admin scope): ", h("code", {}, `invincible screen approve ${s.id}`))),
     outcome,
   );
 }

@@ -2,9 +2,9 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ChatStreamEvent, clientIdFromKey, type LedgerEntry, type RouteName, routes, type Scope, type ScreenSessionView, signRequest, TEAM_LIMITS, type TeamOverview, type TeamRoomView, type TeamSnapshot, type TurnView, utf8 } from "@galahad/core";
-import { requestPairing, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ChatStreamEvent, clientIdFromKey, type LedgerEntry, type RouteName, routes, type Scope, type ScreenSessionView, signRequest, TEAM_LIMITS, type TeamOverview, type TeamRoomView, type TeamSnapshot, type TurnView, utf8 } from "@invincible/core";
+import { requestPairing, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
 import { ARM_DEFAULT_SCOPES } from "../src/arms.ts";
 import type { Capabilities } from "../src/capabilities.ts";
@@ -20,7 +20,7 @@ import { freePort } from "./ports.ts";
  * Against a real daemon and a stand-in model: his own answers are scripted, a worker's is told by its briefing.
  */
 
-const root = mkdtempSync(join(tmpdir(), "galahad-team-his-own-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-team-his-own-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "team-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
@@ -97,7 +97,7 @@ async function pairDevice(name: string, scopes: Scope[]) {
 }
 
 beforeAll(async () => {
-  const { identity, keystore } = await home.createIdentity("file"); const mind = new MindStore(home.mindPath);
+  const { identity, keystore } = await home.createIdentity("file"); const mind = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(mind, identity, { fleetName: "roundtable", nodeName: "keep" }); mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, shutdownGraceMs: 100, screen: new MacScreen(macHelper, { settleMs: 0, shell: macShell }) });

@@ -1,6 +1,6 @@
 import { copyFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { MindStore, PullState } from "../../packages/mind/src/index.ts";
+import { LedgerStore, PullState } from "../../packages/ledger/src/index.ts";
 import type { Suite, SuiteContext } from "../lib.ts";
 import { buildLog, lateEvent } from "../mind/log.ts";
 
@@ -25,17 +25,17 @@ function measure(ctx: SuiteContext, n: number, full: boolean): void {
   const started = performance.now();
   const log = buildLog(n);
   ctx.speed(`${id}.sign-and-build`, [(performance.now() - started) / n], "ms", "lower", [started, performance.now()], "an event signed, chained and written, with the views built at the end");
-  const opened: MindStore[] = [];
+  const opened: LedgerStore[] = [];
   try {
-    ctx.time(`${id}.open`, () => new MindStore(log.path).close(), { n: 5, warm: 1, note: "opening the replica" });
-    const store = new MindStore(log.path);
+    ctx.time(`${id}.open`, () => new LedgerStore(log.path).close(), { n: 5, warm: 1, note: "opening the replica" });
+    const store = new LedgerStore(log.path);
     opened.push(store);
     const self = { have: store.frontier(), digests: store.deviceDigests() };
     // A peer missing one of the sandbox host's older events (a partial delivery).
     const holePath = join(log.dir, "hole.db");
     store.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     copyFileSync(log.path, holePath);
-    const hole = new MindStore(holePath);
+    const hole = new LedgerStore(holePath);
     hole.db.query("DELETE FROM events WHERE id = ?").run(log.oldB[0]!);
     hole.rebuild();
     const holed = { have: hole.frontier(), digests: hole.deviceDigests() };
@@ -78,7 +78,7 @@ function measure(ctx: SuiteContext, n: number, full: boolean): void {
     ctx.time(`${id}.500-already-held`, () => store.ingest(duplicates), { n: 5, warm: 1, note: "a page of events it holds: skipped before any signature is checked" });
 
     // The holed peer pulls until it's whole: every page, both sides, end to end.
-    const holedStore = new MindStore(holePath);
+    const holedStore = new LedgerStore(holePath);
     opened.push(holedStore);
     const pull = new PullState(holedStore);
     pull.begin();

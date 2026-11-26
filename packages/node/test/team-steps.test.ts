@@ -13,7 +13,7 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 function scratch() {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-steps-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-steps-"));
   dirs.push(dir);
   // (Git as the VM's is: its knight's name, and nothing of this machine's own configuration.)
   const env = { PATH: process.env.PATH!, HOME: dir, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "Ada", GIT_AUTHOR_EMAIL: "ada@roundtable.invalid", GIT_COMMITTER_NAME: "Ada", GIT_COMMITTER_EMAIL: "ada@roundtable.invalid" };
@@ -34,14 +34,14 @@ test("a step is kept as a commit under its own ref, its files as they stood (not
   sh("echo two > a.txt && echo new > b.txt && printf 'out/\\n' > .gitignore && mkdir -p out && echo built > out/x", join(dir, "t1"));
   const [commit, tree, parent] = sh(here(checkpointCommand(join(dir, "t1"), "task-aaaaaaaaaaaa", 1, ""))).split(" ");
   expect(parent).toBe(base);
-  expect(sh("git -C repo rev-parse refs/galahad/checkpoints/task-aaaaaaaaaaaa/1")).toBe(commit!);
+  expect(sh("git -C repo rev-parse refs/invincible/checkpoints/task-aaaaaaaaaaaa/1")).toBe(commit!);
   expect(sh(`git -C repo show ${commit}:a.txt`)).toBe("two");
   expect(sh(`git -C repo show ${commit}:b.txt`)).toBe("new");
   expect(Bun.spawnSync(["git", "-C", join(dir, "repo"), "cat-file", "-e", `${commit}:out/x`]).exitCode).not.toBe(0);
   expect(sh("git status --porcelain", join(dir, "t1"))).toBe(" M a.txt\n?? .gitignore\n?? b.txt");
   // Nothing changed since: the step before's, and no new commit.
   expect(sh(here(checkpointCommand(join(dir, "t1"), "task-aaaaaaaaaaaa", 2, `${tree} ${parent}`)))).toBe("same");
-  expect(Bun.spawnSync(["git", "-C", join(dir, "repo"), "rev-parse", "--verify", "--quiet", "refs/galahad/checkpoints/task-aaaaaaaaaaaa/2"]).exitCode).not.toBe(0);
+  expect(Bun.spawnSync(["git", "-C", join(dir, "repo"), "rev-parse", "--verify", "--quiet", "refs/invincible/checkpoints/task-aaaaaaaaaaaa/2"]).exitCode).not.toBe(0);
   // A commit of the knight's own is a change too: kept, its parent the new HEAD.
   sh("git add a.txt && git commit -qm 'its own'", join(dir, "t1"));
   const [, , after] = sh(here(checkpointCommand(join(dir, "t1"), "task-aaaaaaaaaaaa", 3, `${tree} ${parent}`))).split(" ");

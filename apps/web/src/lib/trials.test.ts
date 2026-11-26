@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { galahadIndex, type InvestigationView, type TrialView } from "@galahad/core";
+import { galahadIndex, type InvestigationView, type TrialView } from "@invincible/core";
 import { byProblem, durationLabel, findingState, groupRuns, markOf, numberLabel, offBy, percent, predictionLines } from "./trials.ts";
 
 const trial = (over: Partial<TrialView> = {}): TrialView => ({

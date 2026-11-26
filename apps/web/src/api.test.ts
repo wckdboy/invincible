@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { routes } from "@galahad/core";
+import { routes } from "@invincible/core";
 import { ApiError, apiFor, READING_POSTS, READS_UNDER_OTHER_SCOPES, setNetworkHandler } from "./api.ts";
 import type { BrowserIdentity } from "./identity.ts";
 

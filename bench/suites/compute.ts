@@ -70,7 +70,7 @@ export const suite: Suite = {
       ctx.log(`effort ${effort}: ${FLEETS.map((n) => `${n} → ${Math.round(by.get(n)!.makespanS)} s`).join(", ")}`);
     }
 
-    // The default: `galahad trial run` with --parallel auto.
+    // The default: `invincible trial run` with --parallel auto.
     const auto = await sim({ seed: ctx.seed, nodes: 8, quests: TRIAL_RUN, effort: 1, parallel: "auto" });
     ctx.quality("compute.auto.e1.n8.makespan", auto.makespanS, "s", "lower", { note: `--parallel auto: ${auto.parallel} trials at once on ${auto.slots} slots` });
     ctx.quality("compute.auto.e1.n8.utilisation", auto.utilisation, "", "higher", { note: "the share of the fleet's slot-time in use" });

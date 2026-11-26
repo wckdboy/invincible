@@ -1,4 +1,4 @@
-import { RECALIBRATE_AFTER_MS, SELF_ACTION_QUEST, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget, selfActionTitle } from "@galahad/core";
+import { RECALIBRATE_AFTER_MS, SELF_ACTION_QUEST, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget, selfActionTitle } from "@invincible/core";
 import { OFFLINE_AFTER_MS } from "./heartbeat.ts";
 
 /*

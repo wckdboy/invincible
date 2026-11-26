@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { randomId, sha256B64u } from "@galahad/core";
+import { randomId, sha256B64u } from "@invincible/core";
 import { ArmTokens } from "../src/arms.ts";
 
 test("legacy external tokens cannot impersonate a newly reserved hivemind knight", () => {

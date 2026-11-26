@@ -692,7 +692,7 @@ describe("where a notification may be sent", () => {
       "https://fcm.googleapis.com:8443/fcm/send/abc",
       "https://user:pass@fcm.googleapis.com/fcm/send/abc",
       "https://127.0.0.1/push",
-      "http://127.0.0.1:7777/api/secrets",
+      "http://127.0.0.1:7400/api/secrets",
       "https://localhost/push",
       "https://100.64.0.1/push",
       "https://ultra.tail1234.ts.net/api/chat",
@@ -747,7 +747,7 @@ describe("settings and what a device hands over", () => {
   });
 
   test("every kind he tells you about is a switch the node takes: your rules' tells too", () => {
-    // Settings and `galahad notify kinds told off` offered it, and the node refused it ("unrecognized key: told").
+    // Settings and `invincible notify kinds told off` offered it, and the node refused it ("unrecognized key: told").
     expect(NotifyPrefsInput.safeParse({ kinds: { told: false } }).success).toBe(true);
     for (const kind of NOTIFY_KINDS) expect(`${kind} ${NotifyPrefsInput.safeParse({ kinds: { [kind]: false } }).success}`).toBe(`${kind} true`);
   });

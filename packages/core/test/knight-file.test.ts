@@ -15,7 +15,7 @@ const GARETH = {
   sensitive: false,
   harness: "acp",
   acp: "goose acp",
-  repository: "https://github.com/amiriteorg/galahad",
+  repository: "https://github.com/amiriteorg/invincible",
   dailyTurns: 40,
   avatar: { v: 2, color: "#3abeff" },
   keys: ["stripe"],
@@ -25,7 +25,7 @@ describe("a knight as a file", () => {
   test("written and read back, it is the same knight: its job whole, its settings as they were", () => {
     const { text, scrubbed } = knightToFile(GARETH);
     expect(scrubbed).toBe(0);
-    expect(text.split("\n").slice(0, 4)).toEqual(["---", `galahad: "${KNIGHT_FILE}"`, 'id: "gareth"', 'name: "Gareth"']);
+    expect(text.split("\n").slice(0, 4)).toEqual(["---", `invincible: "${KNIGHT_FILE}"`, 'id: "gareth"', 'name: "Gareth"']);
     expect(text).toContain('models: ["opencode-go/deepseek-v4-pro","opencode-go/glm-5.3"]');
     expect(text).toContain("---\n\n# Gareth\n\nYou keep Galahad's own repository healthy.");
     const read = knightFromFile(text);
@@ -44,14 +44,14 @@ describe("a knight as a file", () => {
   });
 
   test("written by hand: plain values read as words, what isn't a knight's is left out and said", () => {
-    const read = knightFromFile(['---', `galahad: ${KNIGHT_FILE}`, "id: scout", "name: 'Scout'", "harness: native", "dailyTurns: 12", "colour: red", "---", "# Scout", "", "Looks around."].join("\n"));
+    const read = knightFromFile(['---', `invincible: ${KNIGHT_FILE}`, "id: scout", "name: 'Scout'", "harness: native", "dailyTurns: 12", "colour: red", "---", "# Scout", "", "Looks around."].join("\n"));
     expect(read).toEqual({ ok: true, knight: { id: "scout", name: "Scout", instructions: "Looks around.", harness: "native", dailyTurns: 12 }, ignored: ["colour"] });
   });
 
   test("anything else is said not to be one: no settings, another kind of file, no id or no name", () => {
     expect(knightFromFile("# Just notes")).toEqual({ ok: false, why: expect.stringContaining("doesn't open with a knight's settings") });
     expect(knightFromFile("---\nname: pdf\ndescription: an Agent Skill\n---\nBody")).toEqual({ ok: false, why: expect.stringContaining("isn't a knight file") });
-    expect(knightFromFile(`---\ngalahad: "${KNIGHT_FILE}"\nname: "X"\n---\n`)).toEqual({ ok: false, why: "it names no id" });
-    expect(knightFromFile(`---\ngalahad: "${KNIGHT_FILE}"\nid: "x"\n---\n`)).toEqual({ ok: false, why: "it gives the knight no name" });
+    expect(knightFromFile(`---\ninvincible: "${KNIGHT_FILE}"\nname: "X"\n---\n`)).toEqual({ ok: false, why: "it names no id" });
+    expect(knightFromFile(`---\ninvincible: "${KNIGHT_FILE}"\nid: "x"\n---\n`)).toEqual({ ok: false, why: "it gives the knight no name" });
   });
 });

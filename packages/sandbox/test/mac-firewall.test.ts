@@ -101,7 +101,7 @@ describe("whether it is on", () => {
   });
 
   test("not installed: said, with what to do", async () => {
-    expect(await macFirewall(deps({ status: () => null }))).toEqual({ on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `galahad firewall install` (it asks for your password once)" });
+    expect(await macFirewall(deps({ status: () => null }))).toEqual({ on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)" });
   });
 
   test("a status file anyone but root could have written is never believed", async () => {
@@ -123,9 +123,9 @@ describe("whether it is on", () => {
 
   test("a bridge without its filter yet, or no bridge yet, is off until the helper's next run: soon", async () => {
     const unfiltered = IFCONFIG.replace("inet 172.31.250.1 netmask 0xffffff00 broadcast 172.31.250.255\n\tConfiguration:\n\t\tipfilter disabled flags 0x2", "inet 172.31.250.1 netmask 0xffffff00 broadcast 172.31.250.255\n\tConfiguration:\n\t\tipfilter disabled flags 0x0");
-    expect(await macFirewall(deps({ ifconfig: async () => unfiltered }))).toEqual({ on: false, installed: true, soon: true, why: "pf doesn't see what passes between the VMs on bridge101 (galahad-gw) yet" });
+    expect(await macFirewall(deps({ ifconfig: async () => unfiltered }))).toEqual({ on: false, installed: true, soon: true, why: "pf doesn't see what passes between the VMs on bridge101 (invincible-gw) yet" });
     const noOnline = IFCONFIG.replace("inet 172.31.249.1 ", "inet 172.31.248.1 ");
-    expect(await macFirewall(deps({ ifconfig: async () => noOnline }))).toEqual({ on: false, installed: true, soon: true, why: "the galahad-net network has no bridge on this Mac yet" });
+    expect(await macFirewall(deps({ ifconfig: async () => noOnline }))).toEqual({ on: false, installed: true, soon: true, why: "the invincible-net network has no bridge on this Mac yet" });
   });
 
   test("a gateway's address on anything but a bridge is off, and not soon", async () => {

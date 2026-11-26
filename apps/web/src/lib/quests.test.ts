@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_QUEST_GATES, QuestGates } from "@galahad/core";
+import { MAX_QUEST_GATES, QuestGates } from "@invincible/core";
 import { gateOwner, gateResult, gatesFromText, MAX_GATE_LENGTH, MAX_GATES } from "./quests.ts";
 
 describe("gates typed into the app", () => {
@@ -32,7 +32,7 @@ describe("gates typed into the app", () => {
 describe("a quest in hand, as the app shows it", () => {
   test("its state as a badge: only a reviewed quest is green, and a silent runner is said", async () => {
     const { questBadge, questInHand, questWhere } = await import("./quests.ts");
-    const { QUEST_STATES, questInHand: contractInHand } = await import("@galahad/core");
+    const { QUEST_STATES, questInHand: contractInHand } = await import("@invincible/core");
     // The app's states are the contract's, each with words.
     for (const state of QUEST_STATES) {
       expect(questBadge(state).text.length).toBeGreaterThan(0);

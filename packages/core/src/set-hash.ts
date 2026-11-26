@@ -10,7 +10,7 @@ import { b64u, type Bytes, utf8 } from "./bytes.ts";
  * expansion, whatever the set's size, and the result never depends on the order.
  *
  * Sync uses it to compare what two replicas hold of one device's log without either
- * re-reading that log (see MindStore.deviceDigests). Two different sets reaching the same
+ * re-reading that log (see LedgerStore.deviceDigests). Two different sets reaching the same
  * hash would let a forked device stay hidden, which is why this isn't a plain XOR or sum
  * of hashes: those collide under Gaussian elimination or Wagner's generalized birthday.
  *
@@ -20,7 +20,7 @@ import { b64u, type Bytes, utf8 } from "./bytes.ts";
 
 const LANES = 1024;
 export const SET_HASH_BYTES = LANES * 2;
-const NONCE = utf8("galahad/set1"); // 12 bytes
+const NONCE = utf8("inv/sethash1"); // 12 bytes
 const ZEROS = new Uint8Array(SET_HASH_BYTES);
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 

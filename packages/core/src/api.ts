@@ -623,7 +623,7 @@ export const routes = {
   },
   roster: { method: "GET", path: "/api/roster", scope: "mind:read", input: null },
   /**
-   * Check what a model can do (brain/checks.ts): follow the quest loop's format, read a screen, place a click on
+   * Check what a model can do (models/checks.ts): follow the quest loop's format, read a screen, place a click on
    * one. About eight calls; recorded for every node, which then chooses by it. Yours alone.
    */
   checkModel: { method: "POST", path: "/api/models/check", scope: "brain:write", input: z.strictObject({ model: ModelRef, parts: z.array(z.enum(["format", "reads", "places"])).min(1).max(3).optional() }) },
@@ -882,7 +882,7 @@ export const routes = {
   },
   /**
    * What a sandbox's own calls through its node's gateway have come to (a coding agent's, a script's), by model, as that
-   * node counted them by the sandbox's token: `{ lines: UsageLine[] }`, role "tool". `galahad do` counts them in its
+   * node counted them by the sandbox's token: `{ lines: UsageLine[] }`, role "tool". `invincible do` counts them in its
    * budget. Asked of the node the sandbox is on; an agent, of its own sandboxes only.
    */
   sandboxSpend: {
@@ -1773,7 +1773,7 @@ export interface ConnectorToolDefinition {
   description: string;
   /** Its arguments as a JSON Schema: an MCP server's own, nested lists and objects included; a template's params. */
   input: unknown;
-  /** An MCP tool that differs on its server now from what was installed (galahad connector refresh shows how). */
+  /** An MCP tool that differs on its server now from what was installed (invincible connector refresh shows how). */
   changed: boolean;
 }
 

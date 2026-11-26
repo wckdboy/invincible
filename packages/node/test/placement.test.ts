@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { type Calibration, bodyFingerprint, computeBody, type ComputeNodeView, deriveCapacity, KERNEL, type PeerStatus, REFERENCE_SINGLE } from "@galahad/core";
+import { type Calibration, bodyFingerprint, computeBody, type ComputeNodeView, deriveCapacity, KERNEL, type PeerStatus, REFERENCE_SINGLE } from "@invincible/core";
 import type { Capabilities } from "../src/capabilities.ts";
-import { CLAUDE_CODE_IMAGE, CONTAINER_CANNOT, CONTAINER_IMAGES, CONTAINER_UNMADE, DEFAULT_IMAGE, OWN_IMAGES } from "@galahad/sandbox";
+import { CLAUDE_CODE_IMAGE, CONTAINER_CANNOT, CONTAINER_IMAGES, CONTAINER_UNMADE, DEFAULT_IMAGE, OWN_IMAGES } from "@invincible/sandbox";
 import { type Candidate, Dispatched, fleetCandidates, place, sandboxHost, sandboxRefusals, withDispatched } from "../src/placement.ts";
 
 /*

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
-import type { ExecResult, ScreenAction, ScreenStatus, ScreenView } from "@galahad/core";
+import type { ExecResult, ScreenAction, ScreenStatus, ScreenView } from "@invincible/core";
 
 /*
  * A Mac's own screen, for Galahad (docs/MAC.md, the Mac itself): the app's own binary takes its pictures and moves its

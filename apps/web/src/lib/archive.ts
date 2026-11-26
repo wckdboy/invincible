@@ -1,4 +1,4 @@
-import type { ArchiveStatusView } from "@galahad/core";
+import type { ArchiveStatusView } from "@invincible/core";
 
 /*
  * The Archive page's logic: what each kind is called, the smart selector's summary in
@@ -79,7 +79,7 @@ export function bytesShort(n: number): string {
 
 /** The embedder in words, and the tone of its state. */
 export function embedderLine(s: ArchiveStatusView): { text: string; tone: "ok" | "warn" | "neutral"; hint: string | null } {
-  if (!s.embedder.model) return { text: "None: searching by words", tone: "neutral", hint: "Hire one to search by meaning too: deploy with --embedder, or `galahad roster set embedder ollama/qwen3-embedding:0.6b`." };
+  if (!s.embedder.model) return { text: "None: searching by words", tone: "neutral", hint: "Hire one to search by meaning too: deploy with --embedder, or `invincible roster set embedder ollama/qwen3-embedding:0.6b`." };
   const where = s.embedder.local ? "on this machine" : s.embedder.local === false ? "a remote provider: passages go to it" : "";
   if (s.embedder.state === "failing") return { text: `${s.embedder.model}: not answering`, tone: "warn", hint: s.embedder.error };
   return { text: `${s.embedder.model}${where ? `, ${where}` : ""}`, tone: s.embedder.local === false ? "warn" : "ok", hint: null };

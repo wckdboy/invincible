@@ -169,14 +169,14 @@ describe("request signing", () => {
 
 describe("pairing", () => {
   test("invites round-trip, also from a #pair= URL", () => {
-    const { invite } = newInvite("http://100.64.0.1:7777", b64u(randomBytes(32)), "client");
+    const { invite } = newInvite("http://100.64.0.1:7400", b64u(randomBytes(32)), "client");
     const text = encodeInvite(invite);
     expect(decodeInvite(text)).toEqual(invite);
     expect(decodeInvite(`https://laptop.tail.ts.net/#pair=${text}`)).toEqual(invite);
   });
   test("proof binds the device key; SAS differs per device", () => {
     const fleet = b64u(randomBytes(32));
-    const { invite, secret } = newInvite("http://100.64.0.1:7777", fleet, "node");
+    const { invite, secret } = newInvite("http://100.64.0.1:7400", fleet, "node");
     const a = newNodeIdentity();
     const b = newNodeIdentity();
     const fields = { invite: invite.i, device: a.id, name: "server", kind: "node" as const };

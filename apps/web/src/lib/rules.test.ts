@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_RULE_GLOBS as CONTRACT_GLOBS, RuleInput } from "@galahad/core";
+import { MAX_RULE_GLOBS as CONTRACT_GLOBS, RuleInput } from "@invincible/core";
 import { globsFromText, MAX_CHECK_LENGTH, MAX_GLOB_LENGTH, MAX_RULE_GLOBS, MAX_TEXT_LENGTH, ruleFromForm, ruleParts, ruleWhen } from "./rules.ts";
 
 describe("a tripwire typed into the app", () => {

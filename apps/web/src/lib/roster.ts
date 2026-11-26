@@ -1,5 +1,5 @@
-import { avatarExpression, type AvatarExpression } from "@galahad/core/avatar";
-import type { TeamDelivery, TeamMessage, TeamRoom, TeamSnapshot, TeamTask, Teammate } from "@galahad/core/team";
+import { avatarExpression, type AvatarExpression } from "@invincible/core/avatar";
+import type { TeamDelivery, TeamMessage, TeamRoom, TeamSnapshot, TeamTask, Teammate } from "@invincible/core/team";
 import type { KnightState } from "./knight-state.ts";
 import { taskDependencies, teammateMaker, teamSpeaker } from "./team.ts";
 

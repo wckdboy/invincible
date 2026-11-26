@@ -1,9 +1,9 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { newNodeIdentity } from "@galahad/core";
-import { GatewayTokens } from "@galahad/brain";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+import { newNodeIdentity } from "@invincible/core";
+import { GatewayTokens } from "@invincible/models";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import { handleKeyGateway, keyScope, ungivable } from "../src/key-gateway.ts";
 
 /*
@@ -16,7 +16,7 @@ const KEY = ["FAKE", "stripe", "test", "key"].join("-");
 
 function world(grants: { secret: string; header?: string; write?: boolean }[]) {
   const identity = newNodeIdentity();
-  const store = new MindStore(":memory:");
+  const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   vault.set("stripe", KEY, { origin: "https://api.stripe.test" });
@@ -32,7 +32,7 @@ function world(grants: { secret: string; header?: string; write?: boolean }[]) {
     return answer();
   }) as typeof globalThis.fetch;
   const ledger: LedgerEntryInput[] = [];
-  const call = (path: string, init: RequestInit = {}) => handleKeyGateway(new Request(`http://10.0.0.1:7778${path}`, init), { vault, tokens, fetch, ledger: (entry) => void ledger.push(entry) });
+  const call = (path: string, init: RequestInit = {}) => handleKeyGateway(new Request(`http://10.0.0.1:7401${path}`, init), { vault, tokens, fetch, ledger: (entry) => void ledger.push(entry) });
   return { token, call, reached, ledger, vault, answer: (make: () => Response) => void (answer = make) };
 }
 
@@ -105,7 +105,7 @@ describe("the key gateway", () => {
 
   test("a knight's uses of a key are counted from the ledger, by the VM that made them, over the days asked", () => {
     const identity = newNodeIdentity();
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
     const line = (detail: string, resource = "key.stripe") => store.emit(identity, "ledger.recorded", { class: "read", resource, target: "GET https://api.stripe.test/v1/x", verdict: "allow", detail });
     line("sandbox:0123456789");

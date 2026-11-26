@@ -1,5 +1,5 @@
-import type { MemoryView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { MemoryView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { type Ctx, errorMessage } from "../context.ts";
 import { badge, busy, button, callout, field, formActions } from "../ui/controls.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
@@ -12,7 +12,7 @@ import { toast } from "../ui/toast.ts";
  * proposed, which wait for you here and in the Inbox. He proposes; you keep (in your words, if you like) or drop.
  */
 
-/** core's ABOUT_YOU_TAG, said again here: a value from @galahad/core's index would bring every schema into the app. */
+/** core's ABOUT_YOU_TAG, said again here: a value from @invincible/core's index would bring every schema into the app. */
 const ABOUT_YOU_TAG = "about-you";
 
 /** Bumped when a fact changed here, so the Memory page and the Inbox show it at once. */

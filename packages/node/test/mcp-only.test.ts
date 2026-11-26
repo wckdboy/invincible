@@ -5,7 +5,7 @@ import { createMcpServer } from "../src/mcp.ts";
 import { toolsFor } from "../src/tools.ts";
 
 /*
- * `galahad mcp --tools a,b`: the MCP server offers those tools and no others, whatever its arm's scopes would allow. A
+ * `invincible mcp --tools a,b`: the MCP server offers those tools and no others, whatever its arm's scopes would allow. A
  * grant to an agent on another machine (qamp-grants.ts) runs it so: its arm holds mind:read for `fleet`, and mind:read
  * would also offer your memories (recall, the archive, skills). Q-AMP's bridge serves only the granted tools too; this
  * keeps them out even if that allow-list failed.

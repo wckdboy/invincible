@@ -1,11 +1,11 @@
-# The Lab: where Galahad does mathematics, physics and engineering. Same rules as
+# The Lab: where Invincible does mathematics, physics and engineering. Same rules as
 # the workshop image (../Dockerfile): unprivileged uid 1000, read-only at runtime,
 # no capabilities. Heavy compiled stacks come from Debian (consistent ABIs); the
 # rest from pinned wheels in /opt/lab, a venv that can't replace Debian's numpy.
 FROM debian:trixie-slim
 
 # Slim images drop /usr/share/doc; OpenFOAM's tutorials live there, and they're cases to run, not docs.
-RUN echo 'path-include=/usr/share/doc/openfoam-examples/*' > /etc/dpkg/dpkg.cfg.d/zz-galahad-lab
+RUN echo 'path-include=/usr/share/doc/openfoam-examples/*' > /etc/dpkg/dpkg.cfg.d/zz-invincible-lab
 
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -47,7 +47,7 @@ ENV PATH=/opt/lab/bin:/opt/bun/bin:$PATH \
     MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib XDG_CACHE_HOME=/work/.cache \
     OMPI_MCA_btl_sm_single_copy_mechanism=none OMPI_MCA_rmaps_base_oversubscribe=1 \
     OMPI_MCA_plm=isolated OMPI_MCA_btl_vader_single_copy_mechanism=none PRTE_MCA_rmaps_default_mapping_policy=:oversubscribe \
-    GALAHAD_IMAGE=lab
+    INVINCIBLE_IMAGE=lab
 
 USER 1000:1000
 WORKDIR /work

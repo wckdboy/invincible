@@ -1,6 +1,6 @@
 /*
  * QR codes (ISO/IEC 18004), so an invite can be scanned rather than typed: the
- * terminal prints one for `galahad invite --client`, and the PWA shows one when
+ * terminal prints one for `invincible invite --client`, and the PWA shows one when
  * it pairs a device. Byte mode only (an invite link is ASCII), all four error
  * correction levels, versions 1 to 40, the mask chosen by the standard's
  * penalty rules. No dependencies; the algorithm follows the standard (and the

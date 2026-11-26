@@ -1,7 +1,7 @@
 import { type ChatStreamEvent, type ExecResult, nodeIdentity } from "../../packages/core/src/index.ts";
-import { chat, type ChatTools } from "../../packages/brain/src/chat.ts";
-import { type QuestRole, runQuest } from "../../packages/brain/src/quest.ts";
-import { foundFleet, MindStore, Vault } from "../../packages/mind/src/index.ts";
+import { chat, type ChatTools } from "../../packages/models/src/chat.ts";
+import { type QuestRole, runQuest } from "../../packages/models/src/quest.ts";
+import { foundFleet, LedgerStore, Vault } from "../../packages/ledger/src/index.ts";
 import { intBelow, rng, subSeed, type Suite } from "../lib.ts";
 
 /*
@@ -29,7 +29,7 @@ export const suite: Suite = {
   async run(ctx) {
     const keys = rng(subSeed(ctx.seed, "harness-keys"));
     const identity = nodeIdentity(Uint8Array.from({ length: 32 }, () => intBelow(keys, 256)), Uint8Array.from({ length: 32 }, () => intBelow(keys, 256)));
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     try {
       foundFleet(store, identity, { fleetName: "bench", nodeName: "n" });
       const vault = new Vault(store, identity);

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { type ChatStreamEvent, type ExecResult, newNodeIdentity, noticeItem, type Teammate } from "@galahad/core";
-import type { chat as Chat } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ChatStreamEvent, type ExecResult, newNodeIdentity, noticeItem, type Teammate } from "@invincible/core";
+import type { chat as Chat } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { BACKLOG, BACKLOG_READ, BacklogRunner, issueLines, readProposal } from "../src/backlog.ts";
 import { TeamStore } from "../src/team-store.ts";
 import { TeamService } from "../src/team.ts";
@@ -26,7 +26,7 @@ afterEach(async () => {
 function world(answers: string[] = [], options: { read?: Partial<ExecResult>; busy?: string[]; issues?: string; left?: number | null } = {}) {
   let now = Date.UTC(2026, 10, 19, 18, 0);
   const identity = newNodeIdentity();
-  const mind = new MindStore(":memory:");
+  const mind = new LedgerStore(":memory:");
   foundFleet(mind, identity, { fleetName: "camelot", nodeName: "ultra" });
   const store = new TeamStore(":memory:", () => now);
   store.saveTeammate({ id: "ada", name: "Ada", repository: "https://github.com/you/project" });
@@ -63,7 +63,7 @@ function world(answers: string[] = [], options: { read?: Partial<ExecResult>; bu
   return { store, service, runner, mind, asked, read, notices, trail, budget, clock: { add: (ms: number) => void (now += ms), get: () => now } };
 }
 
-const PROPOSAL = JSON.stringify({ title: "A template of outcomes", goal: "Add `galahad outcome add --from <template>`: the goals of the outcomes you give often, kept to give again.", gates: ["bun run typecheck", "bun test outcomes"], budgetUsd: 2 });
+const PROPOSAL = JSON.stringify({ title: "A template of outcomes", goal: "Add `invincible outcome add --from <template>`: the goals of the outcomes you give often, kept to give again.", gates: ["bun run typecheck", "bun test outcomes"], budgetUsd: 2 });
 
 describe("work for idle knights, from your backlog", () => {
   test("an idle knight with a repository is given the next step of its plan by Galahad himself, within its budget: it starts, its trail says whose yes it was, and nothing waits for you", async () => {
@@ -92,7 +92,7 @@ describe("work for idle knights, from your backlog", () => {
     const task = await w.runner.tick();
     expect(task).toMatchObject({ status: "proposed", budgetUsd: 2 });
     expect(w.notices()).toEqual([expect.objectContaining({ severity: "info", source: "backlog", title: "Work proposed for Ada" })]);
-    expect(w.notices()[0]!.body).toBe(`A template of outcomes\nIt may spend $2, more than is left of your budget, so it waits in your conversation with Ada, and starts when you approve it there (or galahad roundtable approve ${task!.id}).`);
+    expect(w.notices()[0]!.body).toBe(`A template of outcomes\nIt may spend $2, more than is left of your budget, so it waits in your conversation with Ada, and starts when you approve it there (or invincible roundtable approve ${task!.id}).`);
     // The notification in fixed words, never the model's.
     // Counted in the day's digest, never told on its own: a proposal waits for you in its conversation.
     expect(noticeItem({ key: `backlog:${task!.id}`, severity: "info", title: "", source: "backlog", dismissed: false })).toMatchObject({ kind: "told", title: "Galahad: work for a knight", tier: "digest", topic: "backlog" });
@@ -167,7 +167,7 @@ describe("work for idle knights, from your backlog", () => {
     expect(w.runner.idle().map((k) => k.id)).toEqual(["ada"]);
     const second = await w.runner.tick();
     // He is told of the one waiting, and that he may keep it.
-    expect(w.asked[1]!.content).toContain(`waiting for your liege's answer since 2026-11-19: "A template of outcomes" (Add \`galahad outcome add --from <template>\``);
+    expect(w.asked[1]!.content).toContain(`waiting for your liege's answer since 2026-11-19: "A template of outcomes" (Add \`invincible outcome add --from <template>\``);
     expect(w.asked[1]!.content).toContain('or {"keep": "why"} when the one waiting is still its next step');
     expect(second).toMatchObject({ status: "proposed", title: "The board view" });
     expect(w.store.task(first!.id)).toMatchObject({ status: "stopped", error: 'Withdrawn by Galahad: "The board view" comes first now.' });

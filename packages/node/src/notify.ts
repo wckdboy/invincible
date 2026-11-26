@@ -40,9 +40,9 @@ import {
   tagOf,
   testMessage,
   turnItem,
-} from "@galahad/core";
-import type { MindStore } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+} from "@invincible/core";
+import type { LedgerStore } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import type { KeptSummary } from "./chats.ts";
 import type { LostRow, NotifyStore, Subscription, ToldRow } from "./notify-store.ts";
 import { appleEndpoint, type ApplePushEnvironment, appleTarget } from "./apns-send.ts";
@@ -105,7 +105,7 @@ export interface NotifySender {
 }
 
 export interface NotifyOptions {
-  mind: MindStore;
+  mind: LedgerStore;
   nodeName: string;
   db: NotifyStore;
   sender: NotifySender;
@@ -775,7 +775,7 @@ export class NotifyService {
       return key;
     } catch (error) {
       this.keyProblem = redact(String((error as Error).message)).slice(0, 200);
-      throw new NotifyError(500, "this node's notification key can't be used; `galahad doctor` says more");
+      throw new NotifyError(500, "this node's notification key can't be used; `invincible doctor` says more");
     }
   }
 
@@ -783,7 +783,7 @@ export class NotifyService {
     return { device: sub.device, name, service: sub.service, since: sub.createdAt, lastOk: sub.lastOk, lastError: sub.lastError };
   }
 
-  /** Everything the Settings page and `galahad notify` show. Never an endpoint or a key but this node's public one. */
+  /** Everything the Settings page and `invincible notify` show. Never an endpoint or a key but this node's public one. */
   async view(asking: string | null): Promise<NotifyView> {
     const { db } = this.o;
     const now = this.now();

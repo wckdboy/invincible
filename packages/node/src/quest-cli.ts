@@ -30,7 +30,7 @@ import {
   type Usage,
   type UsageLine,
   type ClientCall,
-} from "@galahad/core";
+} from "@invincible/core";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { learnedLines, learnFromQuest, type QuestTrail, questTrail } from "./skills-quest.ts";
 import {
@@ -62,11 +62,11 @@ import {
   standingAfter,
   type Trip,
   timingLine,
-} from "@galahad/brain";
+} from "@invincible/models";
 
 /*
- * `galahad do "<goal>"`: a quest from the terminal. The loop itself is pure
- * (@galahad/brain runQuest); this wires it to the node: models through the
+ * `invincible do "<goal>"`: a quest from the terminal. The loop itself is pure
+ * (@invincible/models runQuest); this wires it to the node: models through the
  * roster (keys never leave the vault), work in a fresh sandbox on the best
  * sandbox host, every command in the ledger, the outcome in the mind.
  */
@@ -157,7 +157,7 @@ export interface DoOptions {
    */
   workdir?: string;
   /**
-   * The engineer is given the sandbox's notes store (Engram: packages/brain/src/engram.ts). A trial's variant
+   * The engineer is given the sandbox's notes store (Engram: packages/models/src/engram.ts). A trial's variant
    * sets it, to measure what the store costs a task: its sandbox is fresh, so the store starts empty. A sandbox
    * whose image has no pinned Engram ends the quest with that as its error; it is never run without and counted as with.
    */
@@ -301,7 +301,7 @@ export function githubRepo(url: string): { owner: string; repo: string } | null 
 /** A branch name from a title: galahad/<words>-<quest>. */
 export function shipBranch(title: string, quest: string): string {
   const words = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/, "");
-  return `galahad/${words || "changes"}-${quest.replace(/^q-/, "")}`;
+  return `invincible/${words || "changes"}-${quest.replace(/^q-/, "")}`;
 }
 
 /** The GitHub connector for an owner: github-<owner> if installed with its key, else github if installed, else null. */
@@ -330,7 +330,7 @@ async function cloneThroughGateway(node: NodeClient, exec: (command: string, tim
   });
   const cloned = await exec(
     [
-      `G="\${GALAHAD_GATEWAY%/gw}"`,
+      `G="\${INVINCIBLE_GATEWAY%/gw}"`,
       `git -c http.extraHeader='Authorization: Bearer ${token}' clone -q --depth 50 "$G/git/${connector}/${repo.owner}/${repo.repo}.git" /work/repo 2>&1 | tail -5`,
       "test -d /work/repo/.git",
       // The clone points back at GitHub, not at the gateway, and keeps no credential.
@@ -378,7 +378,7 @@ function environment(sandbox: SandboxView, host: string): string {
   ].join(" ");
 }
 
-/** One of a quest's events as `galahad do` prints it. */
+/** One of a quest's events as `invincible do` prints it. */
 export function printQuestEvent(event: QuestEvent): void {
   switch (event.type) {
     case "plan":
@@ -621,7 +621,7 @@ async function workIn(
     const through = github ? await cloneThroughGateway(node, exec, github, shop.quest, options.agent.minutes) : null;
     if (through) shop.gitToken = through.hash;
     else {
-      if (options.network !== "online") throw new Error(`cloning ${options.agent.repo} needs --net online (or, for GitHub, a GitHub connector: galahad connector add github)`);
+      if (options.network !== "online") throw new Error(`cloning ${options.agent.repo} needs --net online (or, for GitHub, a GitHub connector: invincible connector add github)`);
       const cloned = await exec(`git clone -q --depth 50 '${options.agent.repo}' /work/repo 2>&1 | tail -5; test -d /work/repo/.git`, 900);
       if (cloned.exitCode !== 0) throw new Error(`couldn't clone ${options.agent.repo}: ${cloned.stdout.trim() || cloned.stderr.trim()}`);
     }
@@ -630,7 +630,7 @@ async function workIn(
   // project (the sandbox is this quest's alone). What the trial itself does in the sandbox is not given it.
   let engram: string | undefined;
   if (options.engram) {
-    if (!engramFound(await exec(ENGRAM_PROBE, 30)).present) throw new Error(`the notes store was asked for, but this sandbox's image has no Engram ${ENGRAM_VERSION}: the workshop image holds it once rebuilt (galahad sandbox build); the Lab's does not`);
+    if (!engramFound(await exec(ENGRAM_PROBE, 30)).present) throw new Error(`the notes store was asked for, but this sandbox's image has no Engram ${ENGRAM_VERSION}: the workshop image holds it once rebuilt (invincible sandbox build); the Lab's does not`);
     engram = options.trial ? "trial" : "quest";
   }
   const store = engram;
@@ -984,7 +984,7 @@ async function agentFor(node: NodeClient, options: DoOptions): Promise<NonNullab
   const pinned = options.pins?.engineer;
   const models = chooseAgentModels(pinned ? [pinned] : (roster.engineer?.models ?? []), providers, pinned ? 1 : 3, driver.kind);
   const api = driver.kind === "anthropic" ? "an Anthropic-API" : "an OpenAI-compatible";
-  if (!models.length) throw new Error(pinned ? `${pinned} can't run ${driver.name}: it needs ${api} provider with a key` : `no engineer model on ${api} provider with a key: galahad roster set engineer <provider/model> …`);
+  if (!models.length) throw new Error(pinned ? `${pinned} can't run ${driver.name}: it needs ${api} provider with a key` : `no engineer model on ${api} provider with a key: invincible roster set engineer <provider/model> …`);
   return { driver, models, minutes: wanted.minutes, workdir: wanted.repo ? "/work/repo" : "/work" };
 }
 
@@ -1018,7 +1018,7 @@ export async function questFromCli(node: NodeClient, options: DoOptions): Promis
       signal: controller.signal,
       started: ({ quest, sandbox, host, attempt }) => {
         console.log(dim(`[${attempt ? `attempt ${attempt}` : "quest"} ${quest} · sandbox ${sandbox.id} on ${host} · network ${sandbox.network}${attempt ? "" : " · Ctrl-C stops after the current step"}]${attempt ? "" : "\n"}`));
-        if (options.keep) console.log(dim(`[the sandbox is kept afterwards: galahad sandbox exec ${sandbox.id} --on ${host} -- …]`));
+        if (options.keep) console.log(dim(`[the sandbox is kept afterwards: invincible sandbox exec ${sandbox.id} --on ${host} -- …]`));
       },
       effort: (event) => {
         if (event.type === "granted") {
@@ -1044,9 +1044,9 @@ export async function questFromCli(node: NodeClient, options: DoOptions): Promis
   if (outcome.timing) console.log(dim(`\nTime: ${timingLine(outcome.timing)}.`));
   if (artifact) {
     const kb = Math.max(1, Math.round(artifact.bytes / 1024));
-    console.log(dim(`\nKept ${artifact.count} file(s), ${kb} KB, from /work/out: galahad artifact ${artifact.id}`));
+    console.log(dim(`\nKept ${artifact.count} file(s), ${kb} KB, from /work/out: invincible artifact ${artifact.id}`));
   }
-  if (shipped?.action) console.log(`\n${bold("◇ Pull request filed for your approval")} ${dim(`· galahad action approve ${shipped.action} · or the Inbox`)}`);
+  if (shipped?.action) console.log(`\n${bold("◇ Pull request filed for your approval")} ${dim(`· invincible action approve ${shipped.action} · or the Inbox`)}`);
   if (shipped?.receipt) console.log(`\n${bold("◇ Shipped under your standing order:")} ${shipped.receipt}`);
   if (shipped?.problem) console.log(dim(`\n${shipped.problem}`));
   // His skills: said only as the node said it (what's in the mind), and why nothing was learned from a passed quest.
@@ -1210,7 +1210,7 @@ export async function investigateFromCli(node: NodeClient, options: InvestigateO
     }
     console.log(indent(result.outcome.summary.trim()));
     if (result.outcome.review) console.log(`\nReviewer:\n${indent(result.outcome.review.trim())}`);
-    if (artifact) console.log(dim(`\nKept ${artifact.count} file(s): galahad artifact ${artifact.id}`));
+    if (artifact) console.log(dim(`\nKept ${artifact.count} file(s): invincible artifact ${artifact.id}`));
     return result;
   } finally {
     process.off("SIGINT", onInterrupt);

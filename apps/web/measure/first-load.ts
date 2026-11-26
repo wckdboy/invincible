@@ -33,7 +33,7 @@
  *                   loads are measured
  *
  * It starts a throwaway node on loopback (a temp home, the file keystore, a stand-in Docker and
- * stand-in models: nothing leaves this machine, and ~/.galahad is never touched), fills it with a
+ * stand-in models: nothing leaves this machine, and ~/.invincible is never touched), fills it with a
  * few knights (one with a desktop in its VM), a room, tasks (running, waiting, verified with kept
  * changes, failed) and trials, a kept chat, a quest in hand and one thing that needs you, pairs a
  * headless Chrome with it through the real pairing page, and then opens pages the way a browser does:
@@ -94,8 +94,8 @@ const CHROME =
 if (!existsSync(CHROME)) throw new Error(`No Chrome found. Set CHROME to a Chrome or Chromium binary.`);
 
 // The node's key goes to a file in the temp home, never to the OS keychain.
-process.env.GALAHAD_KEYSTORE = "file";
-const tmp = mkdtempSync(join(tmpdir(), "galahad-web-measure-"));
+process.env.INVINCIBLE_KEYSTORE = "file";
+const tmp = mkdtempSync(join(tmpdir(), "invincible-web-measure-"));
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 // ---------- the browser, over the DevTools protocol (one connection, a session per target) ----------
@@ -147,7 +147,7 @@ class Chrome {
         "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost",
         // Inside a container that can't make Chrome's sandbox (sovware.io's CI runner), on its word alone: it loads
         // nothing but this machine's own app (the line above).
-        ...(process.env.GALAHAD_CHROME_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
+        ...(process.env.INVINCIBLE_CHROME_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
         `--user-data-dir=${profile}`,
         "--remote-debugging-port=0",
         "about:blank",
@@ -440,7 +440,7 @@ if (GALLERY) {
 try {
   const from = (path: string): Promise<any> => import(join(REPO, path));
   const core = await from("packages/core/src/index.ts");
-  const { foundFleet, MindStore } = await from("packages/mind/src/index.ts");
+  const { foundFleet, LedgerStore } = await from("packages/ledger/src/index.ts");
   const { startDaemon } = await from("packages/node/src/daemon.ts");
   const { Home } = await from("packages/node/src/home.ts");
   const { buildAssets } = await from("packages/node/src/assets.ts");
@@ -456,7 +456,7 @@ try {
   const port = freePort();
   const { identity, keystore } = await home.createIdentity("file");
   if (keystore !== "file") throw new Error(`the node's key went to the ${keystore} keystore, not a file`);
-  const mind = new MindStore(home.mindPath);
+  const mind = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(mind, identity, { fleetName: "measure", nodeName: "keep" });
   mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -936,7 +936,7 @@ try {
       const moved = new Map<string, number>();
       for (let run = 0; run < SHIFT_RUNS; run++) {
         // (A new chat at #/chat, not the kept one a load before left open.)
-        await evaluate(`try { localStorage.removeItem("galahad:open-chat") } catch {}`);
+        await evaluate(`try { localStorage.removeItem("invincible:open-chat") } catch {}`);
         await open(place.hash, false);
         await sleep(SETTLE_MS);
         const seen = await evaluate<{ value: number; moved: string[] }[]>(`window.__measure.shifts`);
@@ -987,7 +987,7 @@ try {
     const views: View[] = [
       { name: "roundtable", hash: "#/team" },
       // The Roundtable as a list (this device's choice).
-      { name: "roundtable-list", hash: "#/team", prefs: { "galahad:roundtable-view": "list" } },
+      { name: "roundtable-list", hash: "#/team", prefs: { "invincible:roundtable-view": "list" } },
       { name: "galahad", hash: `#/chat?c=${conversation}`, wait: ".turn.assistant" },
       // A new chat with him: his orb, large, and what he asks you under it (where the checkout has it).
       { name: "galahad-welcome", hash: "#/chat", steps: [press("Chat options"), press("New chat")], wait: ".chat-hero" },
@@ -1054,7 +1054,7 @@ try {
             continue;
           }
           // A new chat, not the kept one the last round left open (the app comes back to that one).
-          await evaluate(`try { localStorage.removeItem("galahad:open-chat"); ${Object.entries(view.prefs ?? {}).map(([name, value]) => `localStorage.setItem(${JSON.stringify(name)}, ${JSON.stringify(value)});`).join(" ")} } catch {}`);
+          await evaluate(`try { localStorage.removeItem("invincible:open-chat"); ${Object.entries(view.prefs ?? {}).map(([name, value]) => `localStorage.setItem(${JSON.stringify(name)}, ${JSON.stringify(value)});`).join(" ")} } catch {}`);
           try {
             if (view.around) await admin(view.around.route, view.around.before);
             await open(view.hash, false).catch((error) => console.error(`${view.name}: ${(error as Error).message}`));
@@ -1079,7 +1079,7 @@ try {
           }
         }
         for (const sheet of sheets.filter((v) => wanted(v.name))) {
-          await evaluate(`try { localStorage.removeItem("galahad:open-chat") } catch {}`);
+          await evaluate(`try { localStorage.removeItem("invincible:open-chat") } catch {}`);
           try {
             await open(sheet.hash, false);
             await sleep(300);

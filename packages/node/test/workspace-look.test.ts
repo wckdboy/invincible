@@ -2,13 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkPath } from "@galahad/core";
+import { WorkPath } from "@invincible/core";
 import { CHANGES_SCRIPT, changesView, fileView, filesView, LIST_LIMIT, LIST_SCRIPT, LookError, READ_LIMIT, READ_SCRIPT } from "../src/workspace-look.ts";
 
 /* The scripts run here as they run in a knight's VM (Python 3, the path as an argument), on a folder made for each test. */
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const folder = () => { const dir = mkdtempSync(join(tmpdir(), "galahad-look-")); dirs.push(dir); return dir; };
+const folder = () => { const dir = mkdtempSync(join(tmpdir(), "invincible-look-")); dirs.push(dir); return dir; };
 const run = (script: string, ...args: string[]) => {
   const ran = Bun.spawnSync(["python3", "-c", script, ...args], { stdout: "pipe", stderr: "pipe" });
   expect(ran.exitCode).toBe(0);

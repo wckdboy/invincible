@@ -4,7 +4,7 @@ import type { GEvent } from "./events.ts";
 
 /*
  * Node-to-node sync (/link/sync, /link/push): signed by the calling node's key,
- * answered only to enrolled nodes. See MindStore.eventsSince and PullState.
+ * answered only to enrolled nodes. See LedgerStore.eventsSince and PullState.
  */
 
 const DeviceRef = z.string().max(100);

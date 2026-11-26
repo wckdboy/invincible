@@ -1,4 +1,4 @@
-import { type ArgValue, TEAM_GALAHAD, type TeamOutcomeStatus, type TeamTask, type TeamTaskFix, usdLabel } from "@galahad/core";
+import { type ArgValue, TEAM_GALAHAD, type TeamOutcomeStatus, type TeamTask, type TeamTaskFix, usdLabel } from "@invincible/core";
 import type { CiFailure, CiReview, ShippedPull } from "./ci-watch.ts";
 import type { OutcomeRunner } from "./outcomes.ts";
 import { sameRepository } from "./ship.ts";
@@ -14,7 +14,7 @@ import type { TeamService } from "./team.ts";
  * forced); you approve it, the pull request updates, and the watcher follows it again.
  *
  * Who says it goes back: an outcome the work was a step of, within that outcome's budget (your ruling of 18 November
- * 2026: he gives an outcome's knights its tasks); anywhere else you, once (galahad roundtable ci on), since nothing
+ * 2026: he gives an outcome's knights its tasks); anywhere else you, once (invincible roundtable ci on), since nothing
  * else gives a knight work without your word, and then within Galahad's daily giving. Either way once for each commit
  * whose checks failed and each review, at most three times for one pull request (then it's yours); the push always
  * asks. It is said in the work's trail and in the fix's, and a failure's in its notice too.
@@ -58,7 +58,7 @@ function mayGive(deps: CiBackDeps, pull: ShippedPull, work: TeamTask): { why: st
   if (!knight) return { why: `${at}, whose work it was, is no longer seated: it's yours.` };
   if (!knight.repository || !sameRepository(knight.repository, pull.owner, pull.repo)) return { why: `${at} works on another repository now: it's yours.` };
   // Who says it goes back: the outcome it was a step of (within what is left of its budget), or you.
-  if (!work.outcome) return deps.store.ciBack() ? { budgetUsd: work.budgetUsd } : { why: `${at} did this work. To give failing checks back to the knight whose work it was: galahad roundtable ci on` };
+  if (!work.outcome) return deps.store.ciBack() ? { budgetUsd: work.budgetUsd } : { why: `${at} did this work. To give failing checks back to the knight whose work it was: invincible roundtable ci on` };
   const stored = deps.store.outcome(work.outcome);
   const runner = deps.outcomes();
   if (!stored || !runner) return { why: null };
@@ -182,7 +182,7 @@ export async function offerFix(deps: OfferDeps, task: TeamTask): Promise<void> {
     else deps.note(task.id, `Push · onto ${fix.branch}, ${sent.own ? "approved by Galahad himself" : "under your standing order"}: ${sent.result.body}`.slice(0, 500));
   } catch (error) {
     const message = (error as Error).message;
-    deps.note(task.id, `Push · not offered: ${/has no tool "ship\.update"/.test(message) ? `the GitHub connector can't push fixes yet; add it again (galahad connector add ${fix.connector})` : message}`.slice(0, 500));
+    deps.note(task.id, `Push · not offered: ${/has no tool "ship\.update"/.test(message) ? `the GitHub connector can't push fixes yet; add it again (invincible connector add ${fix.connector})` : message}`.slice(0, 500));
     deps.log(`ci: ${task.id}'s fix wasn't offered: ${message}`);
   }
 }

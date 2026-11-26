@@ -1,5 +1,5 @@
 {
-  "name": "@galahad/node",
+  "name": "@invincible/node",
   "version": "0.0.1",
   "license": "Apache-2.0",
   "private": true,
@@ -8,11 +8,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@galahad/brain": "workspace:*",
-    "@galahad/core": "workspace:*",
-    "@galahad/link": "workspace:*",
-    "@galahad/mind": "workspace:*",
-    "@galahad/sandbox": "workspace:*",
+    "@invincible/models": "workspace:*",
+    "@invincible/core": "workspace:*",
+    "@invincible/link": "workspace:*",
+    "@invincible/ledger": "workspace:*",
+    "@invincible/sandbox": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
   }

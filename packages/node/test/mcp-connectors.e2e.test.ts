@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import type { ActionView, ConnectorToolDefinition, ConnectorView, OrderView, RouteName } from "@galahad/core";
-import { routes } from "@galahad/core";
-import { installedConnector, MCP_TOOLS_BUDGET } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import type { ActionView, ConnectorToolDefinition, ConnectorView, OrderView, RouteName } from "@invincible/core";
+import { routes } from "@invincible/core";
+import { installedConnector, MCP_TOOLS_BUDGET } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -38,7 +38,7 @@ const caps: Capabilities = {
 };
 
 const KEY = "tracker_mcp_test_key_0123456789";
-const root = mkdtempSync(join(tmpdir(), "galahad-mcp-connectors-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-mcp-connectors-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -117,7 +117,7 @@ beforeAll(async () => {
   });
   url = `http://127.0.0.1:${upstream.port}/mcp`;
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -185,16 +185,16 @@ describe("an MCP server as a connector", () => {
     const asked = await arm<{ status: string; action: string }>("callConnector", {
       connector: "tracker",
       tool: "create_issue",
-      args: { repo: "amiriteorg/galahad", title: "Disk quotas", labels: ["sandbox", "security"] },
+      args: { repo: "amiriteorg/invincible", title: "Disk quotas", labels: ["sandbox", "security"] },
       why: "Track the quota work",
     });
     expect(asked.body.status).toBe("asked");
     expect(calls.some((c) => c.tool === "createIssue")).toBe(false);
     const waiting = (await admin<{ actions: ActionView[] }>("actions")).body.actions.find((a) => a.id === asked.body.action)!;
-    expect(waiting.target).toMatch(/^mcp createIssue \{"labels":\["sandbox","security"\],"repo":"amiriteorg\/galahad","title":"Disk quotas"\}/);
+    expect(waiting.target).toMatch(/^mcp createIssue \{"labels":\["sandbox","security"\],"repo":"amiriteorg\/invincible","title":"Disk quotas"\}/);
     await admin("decideAction", { id: asked.body.action, approve: true });
     await daemon.connectors.drain();
-    expect(calls.filter((c) => c.tool === "createIssue")).toEqual([{ tool: "createIssue", args: { repo: "amiriteorg/galahad", title: "Disk quotas", labels: ["sandbox", "security"] } }]);
+    expect(calls.filter((c) => c.tool === "createIssue")).toEqual([{ tool: "createIssue", args: { repo: "amiriteorg/invincible", title: "Disk quotas", labels: ["sandbox", "security"] } }]);
     const done = (await admin<{ actions: ActionView[] }>("actions")).body.actions.find((a) => a.id === asked.body.action)!;
     expect(done).toMatchObject({ state: "done" });
     expect(done.receipt).toMatch(/^ok created #7/);

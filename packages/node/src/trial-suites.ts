@@ -1,5 +1,5 @@
-import type { Prices, SandboxNetwork } from "@galahad/core";
-import { AGENTIC_SUITE, agenticProblem, agenticProblems, ENGINEERING_SUITE, LEVELS, reviewDomain, REVIEWER_CASES, USUAL_LEVEL } from "@galahad/brain";
+import type { Prices, SandboxNetwork } from "@invincible/core";
+import { AGENTIC_SUITE, agenticProblem, agenticProblems, ENGINEERING_SUITE, LEVELS, reviewDomain, REVIEWER_CASES, USUAL_LEVEL } from "@invincible/models";
 import type { NodeClient } from "./quest-cli.ts";
 import { agenticUnit } from "./trial-agentic.ts";
 import { reviewerUnit } from "./trial-reviewer.ts";
@@ -25,13 +25,13 @@ export interface SuiteInfo {
   levels?: { min: number; max: number; usual: number };
   /** Whether its problems come hardest first, and a run that names none takes this many of them (`--hardest n`). */
   hardest?: number;
-  /** Every problem, as `galahad trial problems` lists them (`detail`: a line more about one). */
+  /** Every problem, as `invincible trial problems` lists them (`detail`: a line more about one). */
   list(level?: number): { id: string; domain: string; title: string; detail?: string }[];
   /** The problems a run would pose: all of them, or those named (by id or domain). Throws with what's unknown. */
   choose(names: readonly string[], level?: number): Tryable[];
   /** A suite of your own work: its problems are your node's, so it is read through the node before it lists or chooses any. */
   load?(node: NodeClient): Promise<SuiteInfo>;
-  /** What `galahad trial problems` says under the list (yours: what a run would likely cost, and which tasks aren't cases). */
+  /** What `invincible trial problems` says under the list (yours: what a run would likely cost, and which tasks aren't cases). */
   aside?: string;
 }
 
@@ -42,7 +42,7 @@ export const loadSuite = async (suite: SuiteInfo, node: () => NodeClient): Promi
 export function named<T extends { id: string; domain: string }>(all: readonly T[], names: readonly string[], suite: string): T[] {
   if (!names.length) return [...all];
   const unknown = names.filter((n) => !all.some((p) => p.id === n || p.domain === n));
-  if (unknown.length) throw new Error(`no such problem or domain: ${unknown.join(", ")} (galahad trial problems --suite ${suite} lists them)`);
+  if (unknown.length) throw new Error(`no such problem or domain: ${unknown.join(", ")} (invincible trial problems --suite ${suite} lists them)`);
   return all.filter((p) => names.includes(p.id) || names.includes(p.domain));
 }
 
@@ -80,7 +80,7 @@ const agentic: SuiteInfo = {
       else if (ofKind.length) for (const task of ofKind) chosen.push(agenticUnit(task, agenticProblem(task.id, level)!.level));
       else unknown.push(name);
     }
-    if (unknown.length) throw new Error(`no such task, or kind of work: ${unknown.join(", ")} (galahad trial problems --suite agentic lists them; a level is named as slow-rollup-l3)`);
+    if (unknown.length) throw new Error(`no such task, or kind of work: ${unknown.join(", ")} (invincible trial problems --suite agentic lists them; a level is named as slow-rollup-l3)`);
     // Named twice (by name and by kind), a problem is posed once.
     return chosen.filter((p, i) => chosen.findIndex((q) => q.id === p.id) === i);
   },

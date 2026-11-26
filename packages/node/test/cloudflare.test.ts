@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { CATALOG, type ConnectorResult } from "@galahad/brain";
-import { type BuiltRequest, buildCall, ConnectorManifest } from "@galahad/core";
+import { CATALOG, type ConnectorResult } from "@invincible/models";
+import { type BuiltRequest, buildCall, ConnectorManifest } from "@invincible/core";
 import { cloudflareNatives } from "../src/cloudflare.ts";
 
 /*

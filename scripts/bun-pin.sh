@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Bun, pinned to the version the repo is developed and tested with, and checksum-verified: the SHA-256s are the
 # release's own SHASUMS256.txt, which match the digests GitHub records for the assets. Sourced by remote-setup.sh (a
-# server's service user, into $HOME/.bun/bin) and install.sh (anyone's machine, into Galahad's own folder, never over a
+# server's service user, into $HOME/.bun/bin) and install.sh (anyone's machine, into Invincible's own folder, never over a
 # Bun of their own). The binary is put in place by a rename, so a node still running the old one keeps running.
 BUN_VERSION=1.4.4
 

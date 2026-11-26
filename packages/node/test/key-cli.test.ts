@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import type { RouteName } from "@galahad/core";
-import { preset } from "@galahad/brain";
+import type { RouteName } from "@invincible/core";
+import { preset } from "@invincible/models";
 import { keyAddCommand, keyElsewhereLine, planAdvice } from "../src/key-cli.ts";
 
-/* `galahad key add` at a terminal, against what the node would answer. */
+/* `invincible key add` at a terminal, against what the node would answer. */
 
 // (Fakes, in the form of the real things.)
 const OAT = "sk-ant-oat01-FAKE-not-a-token-0000000000000000";
@@ -48,8 +48,8 @@ test("a key his roles name no model of says how to hire one; one they name says 
   // OpenAI's form is told, and pinned to its own address; the roster named here has none of its models.
   const openai = await run("sk-proj-FAKE-key-for-tests-0000000000");
   expect(openai.calls[1]!.input).toEqual({ id: "openai", baseUrl: "https://api.openai.com/v1", kind: "openai", secret: "openai" });
-  expect(openai.lines).toContain("None of his roles has a model of openai's yet: hire one with galahad roster set planner openai/<model>");
-  expect(openai.lines).toContain("galahad provider models openai lists what it serves");
+  expect(openai.lines).toContain("None of his roles has a model of openai's yet: hire one with invincible roster set planner openai/<model>");
+  expect(openai.lines).toContain("invincible provider models openai lists what it serves");
   // A role's defaults on a provider you set up are what it runs on (roster.ts): the node says DeepSeek's model is named.
   const deepseek = await run("sk-FAKE0000000000000000000000000000", { provider: "deepseek" }, ["deepseek/deepseek-v4-pro"]);
   expect(deepseek.lines).not.toContain("None of his roles");
@@ -90,14 +90,14 @@ test("a coding plan is said to be one: what its key is for, where its terms are,
   expect(lines).toContain('"for general-purpose API access or any scenarios outside such tools');
   expect(lines).toContain("https://docs.z.ai/legal-agreement/subscription-terms");
   // First for coding, with what the engineer has now still behind it.
-  expect(lines).toContain("galahad roster set engineer zai-coding/glm-5.3 anthropic/claude-opus-5-5");
+  expect(lines).toContain("invincible roster set engineer zai-coding/glm-5.3 anthropic/claude-opus-5-5");
   // The key itself is never printed.
   expect(lines).not.toContain(PLAN_KEY);
 });
 
 test("a plan for interactive use only says so, and how to use it: never put first for coding, since nothing of his may run on it", () => {
   const lines = planAdvice("kimi-coding", preset("kimi-coding")!.plan!, ["opencode-go/glm-5.3"]).join("\n");
-  expect(lines).toContain("Kimi Code is a coding plan for interactive use only, by its terms: it is lent to a tool you run yourself (galahad run --providers kimi-coding -- <tool>)");
+  expect(lines).toContain("Kimi Code is a coding plan for interactive use only, by its terms: it is lent to a tool you run yourself (invincible run --providers kimi-coding -- <tool>)");
   expect(lines).not.toContain("roster set engineer");
   // OpenCode Go's terms allow a coding agent's own calls: it codes on it himself.
   expect(planAdvice("opencode-go", preset("opencode-go")!.plan!, []).join("\n")).toContain("Galahad and the other knights code on it themselves, as Galahad");
@@ -132,7 +132,7 @@ test("your own address for a provider is what the key is pinned to", async () =>
 test("a provider pointed elsewhere since its key was added says where the key was for, and the line that adds it where the provider is now", () => {
   const ams = "https://token-plan-ams.xiaomimimo.com/v1";
   expect(keyElsewhereLine({ id: "mimo-token", baseUrl: ams, keyElsewhere: "https://token-plan-sgp.xiaomimimo.com" })).toBe(
-    `mimo-token's key was added for https://token-plan-sgp.xiaomimimo.com, and a key goes only where it was added for: add it again for this address with \`galahad key add --provider mimo-token --base-url ${ams}\`.`,
+    `mimo-token's key was added for https://token-plan-sgp.xiaomimimo.com, and a key goes only where it was added for: add it again for this address with \`invincible key add --provider mimo-token --base-url ${ams}\`.`,
   );
   expect(keyElsewhereLine({ id: "mimo-token", baseUrl: ams })).toBeNull();
 });

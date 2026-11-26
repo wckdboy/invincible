@@ -14,8 +14,8 @@ import {
   sasCode,
   type Scope,
   statusProof,
-} from "@galahad/core";
-import { enrollDevice, type MindStore } from "@galahad/mind";
+} from "@invincible/core";
+import { enrollDevice, type LedgerStore } from "@invincible/ledger";
 
 interface PendingRequest {
   device: string;
@@ -56,7 +56,7 @@ export class PairingHost {
   private readonly invites = new Map<string, InviteRecord>();
 
   constructor(
-    private readonly store: MindStore,
+    private readonly store: LedgerStore,
     private readonly identity: NodeIdentity,
     private readonly endpoint: string,
     private readonly now: () => number = Date.now,

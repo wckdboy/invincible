@@ -1,7 +1,7 @@
-import type { Scope } from "@galahad/core";
+import type { Scope } from "@invincible/core";
 
 /*
- * Response shapes the PWA codes against that are not (yet) in @galahad/core's
+ * Response shapes the PWA codes against that are not (yet) in @invincible/core's
  * contract: the ledger and sandboxes are being built alongside this UI. Views
  * using them degrade gracefully when the node answers 404 or 424.
  */

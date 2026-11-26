@@ -1,4 +1,4 @@
-import type { TeamSnapshot } from "@galahad/core/team";
+import type { TeamSnapshot } from "@invincible/core/team";
 import type { Ctx } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { GALAHAD, seating } from "../lib/arrange.ts";

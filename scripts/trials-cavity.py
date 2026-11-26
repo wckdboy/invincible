@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The lid-driven cavity trial's reference values, computed in the Lab.
 
-    docker run --rm -v "$PWD/scripts:/s:ro" galahad/lab:1 python3 /s/trials-cavity.py
+    docker run --rm -v "$PWD/scripts:/s:ro" invincible/lab:1 python3 /s/trials-cavity.py
 
 Steady Navier–Stokes at Re = 100 with Taylor–Hood (P2/P1) elements on crossed
 meshes of increasing size, Newton with Reynolds continuation and a direct solver;

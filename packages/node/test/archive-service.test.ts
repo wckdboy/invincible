@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { archiveId, newNodeIdentity, type NodeIdentity, registrationDigest, type Preregistration, SENSITIVE_WORK, TRIAL_ARCHIVE_KIND } from "@galahad/core";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
+import { archiveId, newNodeIdentity, type NodeIdentity, registrationDigest, type Preregistration, SENSITIVE_WORK, TRIAL_ARCHIVE_KIND } from "@invincible/core";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, trialsAdapter } from "../src/archive/adapters.ts";
 import { LocalDiskBackend, sha256Hex } from "../src/archive/blobs.ts";
 import { fence } from "../src/archive/retrieval.ts";
@@ -30,7 +30,7 @@ afterEach(async () => {
 interface World {
   dir: string;
   identity: NodeIdentity;
-  mind: MindStore;
+  mind: LedgerStore;
   vault: Vault;
   chats: ChatStore;
   artifacts: ArtifactStore;
@@ -39,9 +39,9 @@ interface World {
 }
 
 function world(): World {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-archive-svc-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-archive-svc-"));
   const identity = newNodeIdentity();
-  const mind = new MindStore(join(dir, "mind.db"));
+  const mind = new LedgerStore(join(dir, "ledger.db"));
   foundFleet(mind, identity, { fleetName: "camelot", nodeName: "ultra" });
   const vault = new Vault(mind, identity);
   const clock = { now: Date.parse("2026-11-11T10:00:00Z") };

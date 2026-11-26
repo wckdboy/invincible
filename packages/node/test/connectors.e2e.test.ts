@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ActionView, APPROVAL_TTL_MS, b64u, type ConnectorView, decodeHlc, HlcClock, type LoopRunView, type LoopView, newNodeIdentity, type NoticeView, type OrderView, type RouteName, routes, MCP_LIBRARY } from "@galahad/core";
-import { enrollDevice, foundFleet, MindStore, Vault } from "@galahad/mind";
+import { type ActionView, APPROVAL_TTL_MS, b64u, type ConnectorView, decodeHlc, HlcClock, type LoopRunView, type LoopView, newNodeIdentity, type NoticeView, type OrderView, type RouteName, routes, MCP_LIBRARY } from "@invincible/core";
+import { enrollDevice, foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { ConnectorService } from "../src/connectors.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -44,7 +44,7 @@ async function until<T>(check: () => Promise<T | null | undefined | false> | T |
 }
 
 const KEY = "forge_e2e_key_0123456789abcdef";
-const root = mkdtempSync(join(tmpdir(), "galahad-connectors-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-connectors-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -100,7 +100,7 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${upstream.port}`;
 
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -223,9 +223,9 @@ describe("connectors", () => {
   });
 
   test("creating is Galahad's to do: an agent's create runs at once", async () => {
-    const created = await arm<{ status: string }>("callConnector", { connector: "forge", tool: "bucket.create", args: { name: "galahad-cache" } });
+    const created = await arm<{ status: string }>("callConnector", { connector: "forge", tool: "bucket.create", args: { name: "invincible-cache" } });
     expect(created.body.status).toBe("done");
-    expect(hits.at(-1)).toMatchObject({ method: "POST", path: "/buckets", body: JSON.stringify({ name: "galahad-cache" }) });
+    expect(hits.at(-1)).toMatchObject({ method: "POST", path: "/buckets", body: JSON.stringify({ name: "invincible-cache" }) });
   });
 
   test("outward: an agent's call waits for you, and is sent exactly once after you approve", async () => {
@@ -253,7 +253,7 @@ describe("connectors", () => {
   });
 
   test("delete: declined means never sent", async () => {
-    const asked = await arm<{ status: string; action: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "galahad-cache" } });
+    const asked = await arm<{ status: string; action: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "invincible-cache" } });
     expect(asked.body.status).toBe("asked");
     await admin("decideAction", { id: asked.body.action, approve: false, note: "keep it" });
     await daemon.connectors.drain();
@@ -381,25 +381,25 @@ describe("standing orders", () => {
   });
 
   test("approve and sign in one go: the waiting action is approved and sent, the order covers the next one", async () => {
-    const asked = await arm<{ status: string; action: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "galahad-tmp" } });
+    const asked = await arm<{ status: string; action: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "invincible-tmp" } });
     expect(asked.body.status).toBe("asked");
     const signed = await admin<{ order: OrderView; action: ActionView }>("setOrder", {
       connector: "forge",
       tool: "bucket.delete",
-      args: { name: "galahad-tmp" },
-      label: "Recreate galahad-tmp",
+      args: { name: "invincible-tmp" },
+      label: "Recreate invincible-tmp",
       approve: asked.body.action,
     });
     expect(signed.status).toBe(200);
     expect(signed.body.action.state).toBe("approved");
     await daemon.connectors.drain();
-    const deletes = () => hits.filter((h) => h.method === "DELETE" && h.path === "/buckets/galahad-tmp");
+    const deletes = () => hits.filter((h) => h.method === "DELETE" && h.path === "/buckets/invincible-tmp");
     await until(() => deletes().length === 1);
-    const again = await arm<{ status: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "galahad-tmp" } });
+    const again = await arm<{ status: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "invincible-tmp" } });
     expect(again.body.status).toBe("done");
     expect(deletes()).toHaveLength(2);
     // A different bucket isn't covered.
-    expect((await arm<{ status: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "galahad-prod" } })).body.status).toBe("asked");
+    expect((await arm<{ status: string }>("callConnector", { connector: "forge", tool: "bucket.delete", args: { name: "invincible-prod" } })).body.status).toBe("asked");
     await admin("revokeOrder", { id: signed.body.order.id });
   });
 });
@@ -407,7 +407,7 @@ describe("standing orders", () => {
 describe("the outbox survives a crash without sending twice", () => {
   test("a send that was in flight when the node died is reported, never retried", async () => {
     const identity = newNodeIdentity();
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     foundFleet(store, identity, { fleetName: "camelot", nodeName: "solo" });
     const vault = new Vault(store, identity);
     vault.set("forge", KEY, { provider: "forge", origin });
@@ -441,15 +441,15 @@ describe("an approval has a send deadline", () => {
     const clocks = { f: Date.UTC(2026, 10, 2, 9), g: Date.UTC(2026, 10, 2, 9) };
     const f = newNodeIdentity();
     const g = newNodeIdentity();
-    const storeF = new MindStore(":memory:", new HlcClock(() => clocks.f));
+    const storeF = new LedgerStore(":memory:", new HlcClock(() => clocks.f));
     foundFleet(storeF, f, { fleetName: "camelot", nodeName: "filer" });
     enrollDevice(storeF, f, { device: g.id, name: "answerer", kind: "node", box: b64u(g.boxPublic) });
     const vault = new Vault(storeF, f);
     vault.set("forge", KEY, { provider: "forge", origin });
     storeF.emit(f, "connector.set", { id: "forge", manifest: manifest() });
-    const storeG = new MindStore(":memory:", new HlcClock(() => clocks.g));
+    const storeG = new LedgerStore(":memory:", new HlcClock(() => clocks.g));
     storeG.expectFleet(storeF.fleet!);
-    const sync = (from: MindStore, to: MindStore) => to.ingest(from.eventsSince(to.frontier(), 100_000).events);
+    const sync = (from: LedgerStore, to: LedgerStore) => to.ingest(from.eventsSince(to.frontier(), 100_000).events);
     sync(storeF, storeG);
     let sent = 0;
     const fetch = (async () => {
@@ -457,7 +457,7 @@ describe("an approval has a send deadline", () => {
       return Response.json({ created: true }, { status: 201 });
     }) as unknown as typeof globalThis.fetch;
     const ledgered: { verdict: string; reason?: string; detail?: string }[] = [];
-    const service = (store: MindStore, identity: typeof f, now: () => number) =>
+    const service = (store: LedgerStore, identity: typeof f, now: () => number) =>
       new ConnectorService({ store, vault: new Vault(store, identity), identity, local: new Database(":memory:"), ledger: (e) => ledgered.push(e), log: () => {}, fetch, now });
     const filer = service(storeF, f, () => clocks.f);
     const answerer = service(storeG, g, () => clocks.g);
@@ -601,7 +601,7 @@ describe("loops over the API", () => {
   });
 
   test("a VM's eyes on a coding plan its tools may use aren't a model he lacks; on one for a tool you run yourself, the heartbeat says why", async () => {
-    // Two plans with their keys in the vault (fakes, made here), as `galahad key add` leaves them.
+    // Two plans with their keys in the vault (fakes, made here), as `invincible key add` leaves them.
     for (const id of ["opencode-go", "kimi-coding"]) {
       expect((await admin("setSecret", { name: id, value: `FAKE-${id}-${"0".repeat(24)}`, provider: id })).status).toBe(200);
       expect((await admin("setProvider", { id, secret: id })).status).toBe(200);

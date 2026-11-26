@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, GENERIC_NOTIFICATION, notifyDay, type NotifyPayload, type QuestView, tagOf, turnItem } from "@galahad/core";
-import type { MindStore } from "@galahad/mind";
+import { b64u, GENERIC_NOTIFICATION, notifyDay, type NotifyPayload, type QuestView, tagOf, turnItem } from "@invincible/core";
+import type { LedgerStore } from "@invincible/ledger";
 import { COLLECT_SERVICE, CollectSender, collectTarget } from "../src/collect-send.ts";
 import { type NotifyOptions, NotifyService, type NotifySources } from "../src/notify.ts";
 import { NotifyStore } from "../src/notify-store.ts";
@@ -41,7 +41,7 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
     quests: { list: () => quests, onChange: (fn) => (listeners.push(fn), () => {}) },
     ...over.sources,
   };
-  const mind = { activeDevice: (id: string) => devices.find((d) => d.id === id) ?? null, devices: () => devices } as unknown as MindStore;
+  const mind = { activeDevice: (id: string) => devices.find((d) => d.id === id) ?? null, devices: () => devices } as unknown as LedgerStore;
   const ledger: unknown[] = [];
   const options: NotifyOptions = { mind, nodeName: "ultra", db, sender, allowed: [], sources, ledger: (entry) => void ledger.push(entry), log: () => {}, now: () => now, tickMs: over.tickMs ?? false };
   const service = new NotifyService(options);

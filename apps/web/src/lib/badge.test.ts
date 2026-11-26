@@ -22,7 +22,7 @@ test("what the worker stored, and what a page tells it, are read strictly", () =
   }
   expect(readBadgeMessage(badgeMessage(4))).toBe(4);
   expect(readBadgeMessage(badgeMessage(-3))).toBe(0);
-  for (const strange of [null, { type: "galahad:badge" }, { type: "galahad:badge", count: "4" }, { type: "galahad:open", count: 4 }, { type: "galahad:badge", count: 1e6 }]) {
+  for (const strange of [null, { type: "invincible:badge" }, { type: "invincible:badge", count: "4" }, { type: "invincible:open", count: 4 }, { type: "invincible:badge", count: 1e6 }]) {
     expect(readBadgeMessage(strange)).toBeNull();
   }
 });

@@ -10,7 +10,7 @@
  * Only http(s) links ever become links; anything else stays text.
  */
 
-import { isBlockKind } from "@galahad/core/blocks";
+import { isBlockKind } from "@invincible/core/blocks";
 
 export type Inline =
   | { t: "text"; v: string }

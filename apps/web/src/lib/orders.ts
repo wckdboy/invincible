@@ -48,7 +48,7 @@ export const pathPlaceholders = (path: string): string[] => [...path.matchAll(/\
 
 /**
  * Which of a call's arguments went into its path, in the path's order, read back
- * from the action's target ("POST /repos/amiriteorg/galahad/pulls"): those whose
+ * from the action's target ("POST /repos/wckdboy/invincible/pulls"): those whose
  * value is one of its segments. A coincidence only ever makes the default stricter.
  */
 export function pathArgs(target: string, args: Record<string, unknown>): string[] {
@@ -278,7 +278,7 @@ export function deleteName(call: { connector: string; tool: string; target: stri
   }
 }
 
-/** A label to start from: the tool, and where the call went ("github.pr.create on amiriteorg/galahad"). */
+/** A label to start from: the tool, and where the call went ("github.pr.create on wckdboy/invincible"). */
 export function defaultLabel(call: { connector: string; tool: string; target: string; args: Record<string, unknown> }): string {
   const where = pathArgs(call.target, call.args).map((name) => argText(call.args[name]));
   const label = `${call.connector}.${call.tool}${where.length ? ` on ${where.join("/")}` : ""}`;

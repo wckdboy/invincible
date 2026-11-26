@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { GRADE, MARK, REPO, RESULT_FILE, type Solution, treeOutput, unpackPayload } from "@galahad/brain";
+import { GRADE, MARK, REPO, RESULT_FILE, type Solution, treeOutput, unpackPayload } from "@invincible/models";
 
 /*
  * Stand-in sandboxes for agentic trials: each is a set of files in memory, and answers
@@ -70,7 +70,7 @@ export class StandInSandboxes {
 
   /** Really run `bun <args>` with the files under `root` laid out in a temporary directory. */
   private async bun(box: Box, root: string, cwd: string, args: string[]): Promise<Answer> {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-standin-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-standin-"));
     try {
       for (const [path, text] of Object.entries(this.under(box, root))) {
         mkdirSync(dirname(join(dir, path)), { recursive: true });

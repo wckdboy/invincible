@@ -1,4 +1,4 @@
-import type { ProjectView } from "@galahad/core";
+import type { ProjectView } from "@invincible/core";
 import type { Ctx } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";

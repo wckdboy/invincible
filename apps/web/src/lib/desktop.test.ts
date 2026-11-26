@@ -57,14 +57,14 @@ describe("an address for the knight's browser", () => {
 
 describe("whether a VM has a desktop", () => {
   test("its image says so", () => {
-    expect(hasDesktop({ image: "galahad/desktop:1" })).toBe(true);
-    expect(hasDesktop({ image: "galahad/workshop:1" })).toBe(false);
+    expect(hasDesktop({ image: "invincible/desktop:1" })).toBe(true);
+    expect(hasDesktop({ image: "invincible/workshop:1" })).toBe(false);
     expect(hasDesktop(null)).toBe(false);
     expect(hasDesktop(undefined)).toBe(false);
   });
 
   test("the node's refusal that a VM has none is told apart from every other", () => {
-    expect(saysNoDesktop({ status: 424, message: "this teammate's VM has no desktop: have it made again with one (galahad knights provision <id> --remake --desktop)" })).toBe(true);
+    expect(saysNoDesktop({ status: 424, message: "this teammate's VM has no desktop: have it made again with one (invincible knights provision <id> --remake --desktop)" })).toBe(true);
     expect(saysNoDesktop({ status: 424, message: "the desktop could not do that: exit 1" })).toBe(false);
     expect(saysNoDesktop({ status: 409, message: "the teammate's VM is exited" })).toBe(false);
     expect(saysNoDesktop({ status: 500, message: "has no desktop" })).toBe(false);

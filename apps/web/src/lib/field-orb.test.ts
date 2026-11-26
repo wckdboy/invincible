@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { KNIGHT_TINTS, knightColors } from "@galahad/core/avatar";
+import { KNIGHT_TINTS, knightColors } from "@invincible/core/avatar";
 import { AURUM, fieldPoints, project } from "./field.ts";
 import {
   FIELD_EASE, FIELD_EMBERS, FIELD_MOTION, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldSettled, fieldStep, fieldStill, fieldTone,

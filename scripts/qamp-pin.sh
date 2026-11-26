@@ -2,7 +2,7 @@
 # Q-AMP (wckdboy/qamp on sovware.io), pinned to its release and checksum-verified: the SHA-256s are the release's own
 # SHA256SUMS. The forge is sign-in only, so nothing here downloads it: install_qamp takes the file you fetched and checks
 # it against the pin for this machine. Sourced by remote-setup.sh, which puts it where the node looks for it, in the
-# service user's Galahad home (<home>/bin/qamp; GALAHAD_QAMP_BIN names another). The binary is put in place by a rename,
+# service user's Invincible home (<home>/bin/qamp; INVINCIBLE_QAMP_BIN names another). The binary is put in place by a rename,
 # so a bridge still running the old one keeps running.
 QAMP_VERSION=0.1.0
 # qamp-0.1.0-x86_64-unknown-linux-gnu (built in rust:1.100-bookworm, glibc 2.36)

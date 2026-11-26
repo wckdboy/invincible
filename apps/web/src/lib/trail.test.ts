@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamTrailEntry } from "@galahad/core/team";
+import type { TeamTrailEntry } from "@invincible/core/team";
 import { emptyTrail, takeTrail, trailNext, trailTail, type TrailPage } from "./trail.ts";
 
 const line = (n: number, text = `line ${n}`): TeamTrailEntry => ({ n, at: 1000 + n, text });

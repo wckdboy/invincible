@@ -1,4 +1,4 @@
-import { LIVE_BEAT_MS, type LiveEvent, type LiveTopic } from "@galahad/core/live";
+import { LIVE_BEAT_MS, type LiveEvent, type LiveTopic } from "@invincible/core/live";
 
 /*
  * The node's live stream, kept open while the app is shown (core's live.ts): it says which of what the app shows

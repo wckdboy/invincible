@@ -1,4 +1,4 @@
-import type { LookView, UnderwayTask } from "@galahad/core";
+import type { LookView, UnderwayTask } from "@invincible/core";
 
 /*
  * What is under way in a chat, in words (views/underway.ts draws it above the message box): each task he gave a knight

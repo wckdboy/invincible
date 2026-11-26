@@ -1,10 +1,10 @@
 import { b64u, compareEvents, type GEvent, HlcClock, MAX_CLOCK_DRIFT_MS, NonceCache, nodeIdentity, type NodeIdentity, PushRequest, signEvent, SyncRequest, verifyRequestSignature } from "../../packages/core/src/index.ts";
 import { answerPush, answerSync, type FetchLike, signedPost, SyncEngine } from "../../packages/link/src/index.ts";
-import { enrollDevice, foundFleet, MindStore, revokeDevice, Vault } from "../../packages/mind/src/index.ts";
+import { enrollDevice, foundFleet, LedgerStore, revokeDevice, Vault } from "../../packages/ledger/src/index.ts";
 import { intBelow, rng, shuffle, subSeed } from "../lib.ts";
 
 /*
- * A fleet in one process: N replicas, each a real MindStore with its own keys and
+ * A fleet in one process: N replicas, each a real LedgerStore with its own keys and
  * its own (skewed) clock, exchanging real signed events through the real sync
  * engine (SyncEngine, PullState, answerSync, signed requests checked at the door
  * with the real verifier and nonce cache) over a transport that is a function
@@ -114,7 +114,7 @@ export interface FleetSimResult {
 interface SimNode {
   name: string;
   identity: NodeIdentity;
-  store: MindStore;
+  store: LedgerStore;
   vault: Vault;
   engine: SyncEngine;
   endpoint: string;
@@ -223,7 +223,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
       const at = new URL(url);
       const to = byEndpoint.get(at.origin);
       const headers = new Headers(init?.headers);
-      const from = byDevice.get(headers.get("x-galahad-device") ?? "");
+      const from = byDevice.get(headers.get("x-invincible-device") ?? "");
       const body = init?.body as Uint8Array;
       if (!to || !reachable(from, to)) throw new Error("unreachable");
       stats.requests++;
@@ -263,7 +263,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
         const p = inFlight.splice(next, 1)[0]!;
         now = Math.max(now, p.at);
         // The link may have gone since it was sent.
-        const from = byDevice.get(p.headers.get("x-galahad-device") ?? "");
+        const from = byDevice.get(p.headers.get("x-invincible-device") ?? "");
         if (reachable(from, p.to)) deliver(p.to, "/link/push", p.headers, p.body);
       }
       now = Math.max(now, to);
@@ -276,7 +276,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
       const identity = nodeIdentity(bytes32(keys), bytes32(keys));
       const offsetMs = index === 0 ? 0 : Math.round((keys() * 2 - 1) * HEALTHY_SKEW_MS);
       const node = { name, identity, endpoint: `http://${name}.sim`, offsetMs, nonces: new NonceCache(), offline: false, replays: 0, loop: `poll-${name}`, slot: EPOCH } as SimNode;
-      node.store = new MindStore(":memory:", new HlcClock(() => timeOf(node)));
+      node.store = new LedgerStore(":memory:", new HlcClock(() => timeOf(node)));
       node.vault = new Vault(node.store, identity);
       node.engine = new SyncEngine(node.store, identity, { fetch: transport });
       // Count full replays where they happen.
@@ -639,7 +639,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
     if (!converged) problems.push("replicas differ at the end");
     // A replica that receives everything in order, in one go, must be the same mind; and so must each after a rebuild.
     const digest = reference.store.digest();
-    const fresh = new MindStore(":memory:", new HlcClock(() => now));
+    const fresh = new LedgerStore(":memory:", new HlcClock(() => now));
     try {
       fresh.expectFleet(fleet);
       const all = reference.store.db

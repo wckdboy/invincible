@@ -1,4 +1,4 @@
-import type { ArchiveLessons, Trust } from "@galahad/core";
+import type { ArchiveLessons, Trust } from "@invincible/core";
 import { z } from "zod";
 import type { IncomingEntry } from "./store.ts";
 import { lowerTrust } from "./store.ts";

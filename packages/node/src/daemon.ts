@@ -2,15 +2,15 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, decodeHlc, type NodeIdentity, screenSessionView } from "@galahad/core";
-import { type BrainContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, pinLegacyKeys, refusedKeysOf, windowsOf } from "@galahad/brain";
+import { canonical, decodeHlc, type NodeIdentity, screenSessionView } from "@invincible/core";
+import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, pinLegacyKeys, refusedKeysOf, windowsOf } from "@invincible/models";
 import { UsageStore } from "./usage.ts";
 import { cloudflareNatives } from "./cloudflare.ts";
 import { gmailNatives, outlookNatives } from "./mail.ts";
-import { PairingHost, SyncEngine } from "@galahad/link";
-import { adoptChains, MindStore, Vault } from "@galahad/mind";
-import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@galahad/sandbox";
-import type { ArgValue, HostLoad } from "@galahad/core";
+import { PairingHost, SyncEngine } from "@invincible/link";
+import { adoptChains, LedgerStore, Vault } from "@invincible/ledger";
+import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
+import type { ArgValue, HostLoad } from "@invincible/core";
 import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
 import { Governor } from "./compute/governor.ts";
@@ -66,7 +66,7 @@ export interface Daemon {
   port: number;
   endpoint: string;
   identity: NodeIdentity;
-  store: MindStore;
+  store: LedgerStore;
   sync: SyncEngine;
   loops: LoopRunner;
   connectors: ConnectorService;
@@ -109,7 +109,7 @@ export interface DaemonOptions {
   telegramBase?: string;
   /** Where Slack's Web API is (tests: a stand-in). */
   slackBase?: string;
-  /** Let the fleet's founding node create its default loop, the heartbeat (default true; GALAHAD_HEARTBEAT=off disables). */
+  /** Let the fleet's founding node create its default loop, the heartbeat (default true; INVINCIBLE_HEARTBEAT=off disables). */
   defaultHeartbeat?: boolean;
   /** Outbound fetch for connectors (tests). */
   fetch?: typeof fetch;
@@ -138,7 +138,7 @@ export interface DaemonOptions {
   hostLoad?: () => Omit<HostLoad, "oursRecently"> | null;
   /** The longest a sandbox waits for a slot (default 30 minutes). */
   slotWaitMs?: number;
-  /** The node's limits on chat turns (default: 4 at once, 30 minutes each, 20 queued a chat; GALAHAD_TURNS_MAX and GALAHAD_TURN_MINUTES set the first two). */
+  /** The node's limits on chat turns (default: 4 at once, 30 minutes each, 20 queued a chat; INVINCIBLE_TURNS_MAX and INVINCIBLE_TURN_MINUTES set the first two). */
   turnLimits?: Partial<HubLimits>;
   /** How long requests and turns under way get to finish when the node stops (default 10 s; tests pass less). */
   shutdownGraceMs?: number;
@@ -152,9 +152,9 @@ export interface DaemonOptions {
    * origin), how often he looks (false: only when the test says), his clock, and how a pause before a retry passes.
    */
   push?: { allow?: string[]; tickMs?: number | false; now?: () => number; sleep?: (ms: number) => Promise<void>; apple?: { development?: string; production?: string } };
-  /** How Q-AMP's binary is run for grants (tests: a stand-in). Default: <home>/bin/qamp, or GALAHAD_QAMP_BIN. */
+  /** How Q-AMP's binary is run for grants (tests: a stand-in). Default: <home>/bin/qamp, or INVINCIBLE_QAMP_BIN. */
   qamp?: QampRunner;
-  /** The UDP ports grants' bridges listen on (tests: others; default 7781–7789), and how often expiry is looked for. */
+  /** The UDP ports grants' bridges listen on (tests: others; default 7410–7419), and how often expiry is looked for. */
   qampPorts?: { first: number; last: number };
   qampSweepMs?: number;
 }
@@ -163,7 +163,7 @@ export interface DaemonOptions {
  * The fleet's founder gives Galahad a heartbeat once: every 30 minutes on an
  * always-on node. Never again after that, so a heartbeat you removed stays removed.
  */
-function ensureHeartbeat(store: MindStore, identity: NodeIdentity, caps: Capabilities): void {
+function ensureHeartbeat(store: LedgerStore, identity: NodeIdentity, caps: Capabilities): void {
   if (store.genesis?.device !== identity.id || store.lww("loop:heartbeat")) return;
   const server = isAlwaysOn(caps)
     ? undefined
@@ -185,7 +185,7 @@ const MAX_REQUEST_BODY = 8 * 1024 * 1024;
 const SHUTDOWN_GRACE_MS = 10_000;
 
 /** Publish this node's endpoint + capabilities, only when they changed (idempotent). */
-function publishProfile(store: MindStore, identity: NodeIdentity, endpoint: string, caps: Capabilities): void {
+function publishProfile(store: LedgerStore, identity: NodeIdentity, endpoint: string, caps: Capabilities): void {
   const body = { endpoint, caps: caps as unknown as Record<string, unknown> };
   const current = store.device(identity.id)?.profile;
   if (current && canonical(current) === canonical(body)) return;
@@ -229,7 +229,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const config = home.readConfig();
   if (!config.fleet) throw new Error("this node has not joined a fleet");
   const identity = await home.loadIdentity(config.keystore);
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   store.expectFleet(config.fleet);
   if (!store.activeDevice(identity.id)) throw new Error("this node is not an active member of its fleet (revoked?)");
   const vault = new Vault(store, identity);
@@ -251,9 +251,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   refusedKeys.kept = (refusal) => usage.keepRefusedKey(refusal);
   refusedKeys.forgot = (provider) => usage.forgetRefusedKey(provider);
   /** His own upkeep's calls (the heartbeat's words, his skills, the archive), counted as his. */
-  const upkeepSpent: NonNullable<BrainContext["spent"]> = (call) => usage.note("galahad", call.role, call.ref, call.usage);
+  const upkeepSpent: NonNullable<ModelsContext["spent"]> = (call) => usage.note("galahad", call.role, call.ref, call.usage);
 
-  const port = env.GALAHAD_PORT ?? config.port;
+  const port = env.INVINCIBLE_PORT ?? config.port;
   // A Mac set to stay on is kept from sleeping while the node runs, and says so in its capabilities (isAlwaysOn).
   const awake = config.keepAwake ? keepAwake() : null;
   if (config.keepAwake && !awake) log("keep-awake is on, but only a Mac with caffeinate can be kept awake: this machine isn't");
@@ -269,7 +269,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const screen = opts.screen !== undefined ? opts.screen : screenBinary ? new MacScreen(spawnHelper(screenBinary)) : null;
   const withScreen = (c: Capabilities): Capabilities => (screen ? { ...c, screen: true } : c);
   let caps = withScreen(opts.capabilities ?? withAwake(await probeCapabilities()));
-  const advertise = env.GALAHAD_ADVERTISE ?? config.advertise ?? caps.tailscale?.ip ?? "127.0.0.1";
+  const advertise = env.INVINCIBLE_ADVERTISE ?? config.advertise ?? caps.tailscale?.ip ?? "127.0.0.1";
   const endpoint = `http://${advertise}:${port}`;
 
   const sync = new SyncEngine(store, identity, { intervalMs: opts.syncIntervalMs, log });
@@ -315,8 +315,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   };
 
   // Grants to agents on your other machines, over Q-AMP (qamp-grants.ts): each its arm, its chain and its bridge, which
-  // serves `galahad mcp --arm qamp.<id> --tools …` on this node's own address. Its binary is the node's own copy.
-  const qampBin = env.GALAHAD_QAMP_BIN ?? join(home.dir, "bin", "qamp");
+  // serves `invincible mcp --arm qamp.<id> --tools …` on this node's own address. Its binary is the node's own copy.
+  const qampBin = env.INVINCIBLE_QAMP_BIN ?? join(home.dir, "bin", "qamp");
   const cliPath = resolve(dirname(fileURLToPath(import.meta.url)), "cli.ts");
   const qamp = new QampGrants({
     db: local,
@@ -369,7 +369,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       // unlimited Docker volumes, and the heartbeat says so. Never beside a stand-in for Docker: the
       // helper is root on its host, and would make real images there for containers that don't exist.
       // (On a Mac the host makes container's own volumes, each of a fixed size, and needs no helper.)
-      ...(opts.docker || apple ? {} : { workspaces: new WorkspaceHelper(env.GALAHAD_WORKSPACE_SOCKET) }),
+      ...(opts.docker || apple ? {} : { workspaces: new WorkspaceHelper(env.INVINCIBLE_WORKSPACE_SOCKET) }),
       imageContext: sandboxContext,
       // Online sandboxes run in KVM microVMs where Kata is installed (scripts/remote-setup.sh).
       microVMs,
@@ -436,15 +436,15 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     chats,
     log,
     limits: {
-      ...(env.GALAHAD_TURNS_MAX ? { maxTurns: env.GALAHAD_TURNS_MAX } : {}),
-      ...(env.GALAHAD_TURN_MINUTES ? { maxMinutes: env.GALAHAD_TURN_MINUTES } : {}),
+      ...(env.INVINCIBLE_TURNS_MAX ? { maxTurns: env.INVINCIBLE_TURNS_MAX } : {}),
+      ...(env.INVINCIBLE_TURN_MINUTES ? { maxMinutes: env.INVINCIBLE_TURN_MINUTES } : {}),
       ...opts.turnLimits,
     },
   });
   // His own looks: set as he answers in a chat of yours, each a turn of his there when it comes (looks.ts).
   const looks = new LookRunner({ chats, turns, log });
   // ---- The archive: node-local, its own database and blob store in the home, never the mind's log.
-  const archiveStore = new ArchiveStore(join(home.dir, "archive.db"), new LocalDiskBackend(env.GALAHAD_ARCHIVE_DIR ?? join(home.dir, "archive")));
+  const archiveStore = new ArchiveStore(join(home.dir, "archive.db"), new LocalDiskBackend(env.INVINCIBLE_ARCHIVE_DIR ?? join(home.dir, "archive")));
   const archive = new ArchiveService({
     store: archiveStore,
     brain: { store, vault, ...(opts.fetch ? { fetch: opts.fetch } : {}), spent: upkeepSpent },
@@ -464,10 +464,10 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       skillsAdapter(store),
     ],
   });
-  if (env.GALAHAD_ARCHIVE !== "off" && opts.archiveIntervalMs !== false) archive.start();
+  if (env.INVINCIBLE_ARCHIVE !== "off" && opts.archiveIntervalMs !== false) archive.start();
   // The node backs itself up once a day (backups.ts), where the doctor looks for its backups.
-  const backups = new BackupRunner({ home: home.dir, dir: backupDirFor(home.dir, env.GALAHAD_BACKUP_DIR), log });
-  if (env.GALAHAD_BACKUPS !== "off" && opts.backups !== false) backups.start();
+  const backups = new BackupRunner({ home: home.dir, dir: backupDirFor(home.dir, env.INVINCIBLE_BACKUP_DIR), log });
+  if (env.INVINCIBLE_BACKUPS !== "off" && opts.backups !== false) backups.start();
 
   // MCP servers' questions mid-call (questions.ts): each waits in your Inbox for you, and its call with it.
   const questions = new Questions({ log });
@@ -550,8 +550,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const webPush = new PushSender({
     // One key for this node's lifetime; a failure to read it is tried again at the next use.
     key: () => (pushKey ??= home.pushKey(config.keystore).catch((error) => ((pushKey = null), Promise.reject(error)))),
-    contact: env.GALAHAD_PUSH_CONTACT ?? DEFAULT_PUSH_CONTACT,
-    allowed: [...(env.GALAHAD_PUSH_HOSTS?.split(",") ?? []), ...(opts.push?.allow ?? [])],
+    contact: env.INVINCIBLE_PUSH_CONTACT ?? DEFAULT_PUSH_CONTACT,
+    allowed: [...(env.INVINCIBLE_PUSH_HOSTS?.split(",") ?? []), ...(opts.push?.allow ?? [])],
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     ...(opts.push?.now ? { now: opts.push.now } : {}),
     ...(opts.push?.sleep ? { sleep: opts.push.sleep } : {}),
@@ -574,7 +574,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       send: (target, payload, delivery, signal) => (collectTarget(target.endpoint) ? collected : appleTarget(target.endpoint) ? applePush : webPush).send(target, payload, delivery, signal),
       close: () => applePush.close(),
     },
-    allowed: [...(env.GALAHAD_PUSH_HOSTS?.split(",") ?? []), ...(opts.push?.allow ?? [])],
+    allowed: [...(env.INVINCIBLE_PUSH_HOSTS?.split(",") ?? []), ...(opts.push?.allow ?? [])],
     sources: {
       notices: () => store.lwwPrefix<{ key: string; severity: string; title: string; source: string; dismissed?: boolean }>("notice:").flatMap((e) => (e.value ? [{ key: e.value.key, severity: e.value.severity, title: e.value.title, source: e.value.source, dismissed: !!e.value.dismissed }] : [])),
       actions: () => connectors.actions(),
@@ -603,7 +603,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
 
   // Bundled once: the app this node serves, and what the doctor checks is there.
   const assets = await buildAssets();
-  const proxyPort = opts.proxyPort ?? env.GALAHAD_PROXY_PORT ?? port + 1;
+  const proxyPort = opts.proxyPort ?? env.INVINCIBLE_PROXY_PORT ?? port + 1;
   const doctorDeps: DoctorDeps = {
     store,
     vault,
@@ -617,14 +617,14 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     governor,
     compute,
     archive,
-    archiveOff: env.GALAHAD_ARCHIVE === "off",
+    archiveOff: env.INVINCIBLE_ARCHIVE === "off",
     assets,
     port,
     proxyPort,
     startedAt,
     trouble,
     system: opts.system ?? (opts.capabilities ? noSystem : realSystem),
-    ...(env.GALAHAD_BACKUP_DIR ? { backupDir: env.GALAHAD_BACKUP_DIR } : {}),
+    ...(env.INVINCIBLE_BACKUP_DIR ? { backupDir: env.INVINCIBLE_BACKUP_DIR } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     notify: () => notify.doctorFacts(),
     knights: () => team.store.teammates(),
@@ -745,7 +745,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   void qamp.resume(opts.qampSweepMs).catch((error: Error) => log(`qamp: ${error.message}`));
 
   // Loops and the outbox start once the API they call is listening.
-  if ((opts.defaultHeartbeat ?? true) && process.env.GALAHAD_HEARTBEAT !== "off") {
+  if ((opts.defaultHeartbeat ?? true) && process.env.INVINCIBLE_HEARTBEAT !== "off") {
     try {
       ensureHeartbeat(store, identity, caps);
     } catch (error) {

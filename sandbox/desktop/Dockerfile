@@ -1,8 +1,8 @@
 # The knights' desktop: the workshop image (../Dockerfile) with a display, a window manager, a browser
 # and the tools that operate them, for a knight whose work needs a screen (Computer Use). Built on a
-# sandbox host by `galahad sandbox build --desktop`, after the workshop image it is made from. Same rules:
+# sandbox host by `invincible sandbox build --desktop`, after the workshop image it is made from. Same rules:
 # unprivileged uid 1000, read-only at runtime, no capabilities. Nothing listens outside the VM.
-FROM galahad/sandbox:1
+FROM invincible/sandbox:1
 
 USER root
 RUN apt-get update \

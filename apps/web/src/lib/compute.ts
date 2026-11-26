@@ -1,4 +1,4 @@
-import type { Calibration, ComputeLimit, ComputeNodeView, ComputeView, EffortWork } from "@galahad/core";
+import type { Calibration, ComputeLimit, ComputeNodeView, ComputeView, EffortWork } from "@invincible/core";
 
 /*
  * Compute, in words, for the Fleet page: what a node measured, its ceiling and whose

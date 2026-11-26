@@ -1,4 +1,4 @@
-import type { ChatTools, ToolCall, ToolImage } from "@galahad/brain";
+import type { ChatTools, ToolCall, ToolImage } from "@invincible/models";
 import {
   describeWake,
   ABOUT_YOU_TAG,
@@ -48,7 +48,7 @@ import {
   type TeamMessage, type TeamOutcome, type TeamTask,
   type TeamOverview,
   type Teammate,
-} from "@galahad/core";
+} from "@invincible/core";
 import { z } from "zod";
 import { describeOrder, describeTask } from "./loop-cli.ts";
 
@@ -591,7 +591,7 @@ export const TOOLS: GalahadTool[] = [
     annotations: { readOnlyHint: true },
     async run(api, { id, path }) {
       const { bytes, type } = await api.bytes("artifactFile", { id, path });
-      if (!type.startsWith("text/")) return `${path}: ${type || "binary"}, ${bytes.length} bytes (not text; fetch it with \`galahad artifact ${id} ${path} > file\`).`;
+      if (!type.startsWith("text/")) return `${path}: ${type || "binary"}, ${bytes.length} bytes (not text; fetch it with \`invincible artifact ${id} ${path} > file\`).`;
       const text = new TextDecoder().decode(bytes.subarray(0, 100 * 1024));
       return bytes.length > 100 * 1024 ? `${text}\n… (${bytes.length - 100 * 1024} more bytes)` : text;
     },
@@ -658,7 +658,7 @@ export const TOOLS: GalahadTool[] = [
     async run(api, input) {
       const { draft } = await api.call<{ draft: LoopDraftView }>("draftLoop", input);
       const wakes = draft.wakes.length ? ` It wakes on ${draft.wakes.map(describeWake).join(" or ")}.` : "";
-      return `Drafted, not added: loop ${draft.name}, ${draft.schedule}${draft.tz !== "UTC" ? ` (${draft.tz})` : ""}, ${describeTask(draft.task)}.${wakes}${draft.replaces ? ` Adding it replaces his loop named ${draft.name}.` : ""} It waits in his Inbox to add or dismiss (gone in a week), or from a terminal: galahad loop add --draft ${draft.id}`;
+      return `Drafted, not added: loop ${draft.name}, ${draft.schedule}${draft.tz !== "UTC" ? ` (${draft.tz})` : ""}, ${describeTask(draft.task)}.${wakes}${draft.replaces ? ` Adding it replaces his loop named ${draft.name}.` : ""} It waits in his Inbox to add or dismiss (gone in a week), or from a terminal: invincible loop add --draft ${draft.id}`;
     },
   }),
 
@@ -777,7 +777,7 @@ export const TOOLS: GalahadTool[] = [
     own: true,
     async run(api, { fact }) {
       await api.call<{ id: string; trust: string }>("remember", { text: fact, tags: [ABOUT_YOU_TAG] });
-      return "Proposed. It goes with your answers once your liege keeps it (in the app: Memory, About you; or galahad about).";
+      return "Proposed. It goes with your answers once your liege keeps it (in the app: Memory, About you; or invincible about).";
     },
   }),
 
@@ -1105,7 +1105,7 @@ export const TOOLS: GalahadTool[] = [
   tool({
     name: "skill_write",
     title: "Write up a skill",
-    description: `Write up how a kind of work is done as a skill, when the user asks for it ("write up how you did that"): a title, when to use it, the steps as plain words, what proves it worked (commands and what to expect of each), and pitfalls. It is saved as a proposal: it waits for the user's approval (the Skills page, or galahad skills approve) and is used by nobody until then. With id, a new version of a skill you wrote yourself, never one the user wrote or locked. Say it is saved only when this tool says so. Words only: no secrets, and nothing that runs, installs or fetches by itself.`,
+    description: `Write up how a kind of work is done as a skill, when the user asks for it ("write up how you did that"): a title, when to use it, the steps as plain words, what proves it worked (commands and what to expect of each), and pitfalls. It is saved as a proposal: it waits for the user's approval (the Skills page, or invincible skills approve) and is used by nobody until then. With id, a new version of a skill you wrote yourself, never one the user wrote or locked. Say it is saved only when this tool says so. Words only: no secrets, and nothing that runs, installs or fetches by itself.`,
     input: {
       id: z.string().regex(SKILL_ID).describe("Revise this skill of your own (leave out for a new one)").optional(),
       title: z.string().min(1).max(SKILL_LIMITS.title).describe("What kind of work this is, in a few words"),
@@ -1125,7 +1125,7 @@ export const TOOLS: GalahadTool[] = [
       const { skill } = await api.call<{ skill: SkillView; version: string }>("writeSkill", { ...(id ? { id } : {}), doc: { title, when, steps, ...(proof?.length ? { proof } : {}), ...(pitfalls?.length ? { pitfalls } : {}) } });
       // The node answered with the skill as the mind holds it: only then is it said to be saved.
       return skill.pending
-        ? `Saved in the mind as ${skill.id}${id ? `, a new version (${skill.versions})` : ""}: it waits for the user's approval and is used by nobody until then. They read it in full on the Skills page, or with \`galahad skills approve ${skill.id}\`.`
+        ? `Saved in the mind as ${skill.id}${id ? `, a new version (${skill.versions})` : ""}: it waits for the user's approval and is used by nobody until then. They read it in full on the Skills page, or with \`invincible skills approve ${skill.id}\`.`
         : `Saved in the mind as ${skill.id}: ${skillStateWords(skill)}.`;
     },
   }),

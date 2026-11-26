@@ -1,5 +1,5 @@
-import { clockUtc, refusalWords, refusesKey, regionalBaseUrls, spanWords } from "@galahad/brain";
-import { type DoctorArea, type DoctorCheck, type DoctorReport, type DoctorState, doctorSorted, doctorTally, redact } from "@galahad/core";
+import { clockUtc, refusalWords, refusesKey, regionalBaseUrls, spanWords } from "@invincible/models";
+import { type DoctorArea, type DoctorCheck, type DoctorReport, type DoctorState, doctorSorted, doctorTally, redact } from "@invincible/core";
 
 /*
  * The doctor: is everything well on this node? One look at the whole installation,
@@ -93,7 +93,7 @@ export interface DoctorFacts {
       microVMs: boolean;
       /** The firewall unit that keeps sandboxes to the one gateway port (null: can't be asked here). */
       firewall: "active" | "inactive" | "missing" | null;
-      /** A Mac's sandbox firewall (pf, from a helper of root's: galahad firewall), as the node reads it; absent on Linux. */
+      /** A Mac's sandbox firewall (pf, from a helper of root's: invincible firewall), as the node reads it; absent on Linux. */
       macFirewall?: { on: boolean; installed: boolean; soon: boolean; why: string | null; release?: "current" | "other" | "none" };
       /** A sandbox started, ran one command and was removed: each kind tried. "busy": no slot was free. null: not tried. */
       start: { kind: "container" | "vm"; ok: boolean; ms: number; error: string | null }[] | "busy" | null;
@@ -193,13 +193,13 @@ export { refusalWords };
 
 /** Why a model didn't answer, and what that calls for. */
 function probeAdvice(error: string): string {
-  if (/content.?filter|refus|declin/i.test(error)) return "The provider's filter ended the reply. Filters aren't steady: run the doctor again, and if it keeps happening put another model first (galahad roster set).";
+  if (/content.?filter|refus|declin/i.test(error)) return "The provider's filter ended the reply. Filters aren't steady: run the doctor again, and if it keeps happening put another model first (invincible roster set).";
   // (A refused key by the rule the node remembers one by: brain's refusesKey. A 403 of what was asked isn't the key's.)
-  if (refusesKey(error) || /unauthor|invalid.*key/i.test(error)) return "The provider refused the key. Replace it: galahad key add (or the app's Vault).";
-  if (/\b403\b|forbidden/i.test(error)) return "The provider refused what was asked, not its key (a model its plan doesn't include, a region it doesn't serve, a moderation flag): read its words, or put another model first (galahad roster set).";
-  if (/\b429\b|rate.?limit|quota|credit|billing/i.test(error)) return "The provider is limiting or out of credit. Check the account, or put another model first (galahad roster set).";
-  if (/time|abort/i.test(error)) return "No answer in time. Check the provider's status and this node's network, or put another model first (galahad roster set).";
-  return "Check the provider's status and its base URL (galahad provider list), or put another model first (galahad roster set).";
+  if (refusesKey(error) || /unauthor|invalid.*key/i.test(error)) return "The provider refused the key. Replace it: invincible key add (or the app's Vault).";
+  if (/\b403\b|forbidden/i.test(error)) return "The provider refused what was asked, not its key (a model its plan doesn't include, a region it doesn't serve, a moderation flag): read its words, or put another model first (invincible roster set).";
+  if (/\b429\b|rate.?limit|quota|credit|billing/i.test(error)) return "The provider is limiting or out of credit. Check the account, or put another model first (invincible roster set).";
+  if (/time|abort/i.test(error)) return "No answer in time. Check the provider's status and this node's network, or put another model first (invincible roster set).";
+  return "Check the provider's status and its base URL (invincible provider list), or put another model first (invincible roster set).";
 }
 
 export function diagnose(f: DoctorFacts): Diagnosis[] {
@@ -220,11 +220,11 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
   /* ---------- this node: its identity and where its keys are ---------- */
 
-  if (!f.self.active) add("node", "node.identity", "broken", `${self} isn't an active member of its fleet (revoked?)`, "Join again with a fresh invite from another node: galahad invite there, galahad join here.");
+  if (!f.self.active) add("node", "node.identity", "broken", `${self} isn't an active member of its fleet (revoked?)`, "Join again with a fresh invite from another node: invincible invite there, invincible join here.");
   else add("node", "node.identity", "ok", `${self} is ${f.self.role === "full" ? "a full node" : `a ${f.self.role ?? "limited"} node`} of fleet ${f.self.fleetName}`);
 
   if (f.keys.keystore === "os") add("node", "node.keys", "ok", "its device keys are in the operating system's keychain");
-  else if (f.keys.keyFile && !f.keys.keyFile.exists) add("node", "node.keys", "broken", "its key file (keys.json) is gone, so it can't start again", "Restore keys.json from a backup of the node's home, or enrol this machine again (galahad join) and revoke the old entry.");
+  else if (f.keys.keyFile && !f.keys.keyFile.exists) add("node", "node.keys", "broken", "its key file (keys.json) is gone, so it can't start again", "Restore keys.json from a backup of the node's home, or enrol this machine again (invincible join) and revoke the old entry.");
   else if (openToOthers(f.keys.keyFile)) add("node", "node.keys", "broken", `its key file can be read by other users of this machine (mode ${octal(f.keys.keyFile!.mode!)})`, "chmod 600 keys.json in the node's home, then consider the keys read: revoke this node and enrol it again.");
   else if (openToOthers(f.keys.pushKeyFile ?? null)) add("node", "node.keys", "broken", `its notification key can be read by other users of this machine (push-key.json, mode ${octal(f.keys.pushKeyFile!.mode!)})`, "Stop the node, delete push-key.json and start it again: it makes a new key, and each device subscribes to it the next time its app opens. Whoever read the old one could have sent notifications as this node.");
   else if (!f.keys.keyFile || f.keys.keyFile.mode === null) add("node", "node.keys", "ok", "its device keys are in a key file (keys.json); this system has no file modes to check");
@@ -239,7 +239,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
   if (f.mind.integrity === null) add("mind", "mind.integrity", "skipped", "the database's integrity wasn't scanned (a full check does)");
   else if (f.mind.integrity === "ok") add("mind", "mind.integrity", "ok", `the mind's database passes SQLite's integrity check (${plural(f.mind.events, "event")})`);
-  else add("mind", "mind.integrity", "broken", `the mind's database is damaged: ${f.mind.integrity.slice(0, 200)}`, "Stop the node and keep mind.db aside. Restore it from your last backup, or enrol the node again from another one: the log syncs back.");
+  else add("mind", "mind.integrity", "broken", `the mind's database is damaged: ${f.mind.integrity.slice(0, 200)}`, "Stop the node and keep ledger.db aside. Restore it from your last backup, or enrol the node again from another one: the log syncs back.");
 
   if (f.mind.forks.length) {
     add(
@@ -247,7 +247,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
       "mind.chain",
       "broken",
       `${f.mind.forks.map((d) => d.name).join(", ")} signed two different histories: its key may be in someone else's hands`,
-      "Revoke it (galahad revoke), then rotate the keys it could read.",
+      "Revoke it (invincible revoke), then rotate the keys it could read.",
     );
   } else add("mind", "mind.chain", "ok", f.mind.head ? `its own hash chain ends at ${f.mind.head.slice(0, 10)}, and no device has signed two histories` : "no device has signed two histories");
 
@@ -283,10 +283,10 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   for (const peer of f.mind.peers) {
     const id = `mind.sync.${peer.name}`;
     if (peer.online) add("mind", id, "ok", `in sync with ${peer.name}`);
-    else if (peer.error && /\b40[13]\b/.test(peer.error)) add("mind", id, "needs-you", `${peer.name} refuses this node's requests (${redact(peer.error).slice(0, 120)})`, "A clock out of step, or one of them was revoked: check both clocks, then galahad status on each.");
+    else if (peer.error && /\b40[13]\b/.test(peer.error)) add("mind", id, "needs-you", `${peer.name} refuses this node's requests (${redact(peer.error).slice(0, 120)})`, "A clock out of step, or one of them was revoked: check both clocks, then invincible status on each.");
     else if (!peer.alwaysOn) add("mind", id, "ok", `${peer.name} is asleep or away (a personal machine: it syncs when it's back)`);
     else if (f.now - (peer.lastSeen ?? f.self.startedAt) < OFFLINE_AFTER_MS) add("mind", id, "ok", `${peer.name} hasn't answered in the last minutes`);
-    else add("mind", id, "needs-you", `${peer.name} is offline${peer.lastSeen ? `: last reached ${span(f.now - peer.lastSeen)} ago` : ""}`, `Check that machine and its Tailscale; work placed there waits. On it: systemctl status galahad.`);
+    else add("mind", id, "needs-you", `${peer.name} is offline${peer.lastSeen ? `: last reached ${span(f.now - peer.lastSeen)} ago` : ""}`, `Check that machine and its Tailscale; work placed there waits. On it: systemctl status invincible.`);
   }
 
   if (f.mind.backup) {
@@ -295,9 +295,9 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if ((!b.exists || b.newestAt === null) && f.now - f.self.startedAt < FIRST_BACKUP_MS) {
       add("mind", "mind.backup", "ok", `no backup of the mind yet: the node keeps its first ten minutes after it starts, in ${b.dir}`);
     } else if (!b.exists || b.newestAt === null) {
-      add("mind", "mind.backup", "needs-you", `no backup of the mind in ${b.dir}`, "The node keeps its own each day, the first a few minutes after it starts (backups.ts), unless GALAHAD_BACKUPS=off: its log says if one couldn't be kept. Set GALAHAD_BACKUP_DIR to keep them elsewhere. A second full node is a living copy too.");
+      add("mind", "mind.backup", "needs-you", `no backup of the mind in ${b.dir}`, "The node keeps its own each day, the first a few minutes after it starts (backups.ts), unless INVINCIBLE_BACKUPS=off: its log says if one couldn't be kept. Set INVINCIBLE_BACKUP_DIR to keep them elsewhere. A second full node is a living copy too.");
     } else if (f.now - b.newestAt > BACKUP_OLD_MS) {
-      add("mind", "mind.backup", "needs-you", `the newest backup of the mind is ${span(f.now - b.newestAt)} old (${b.dir})`, "The node keeps one itself each day: its log says why one wasn't kept (backups: …), unless GALAHAD_BACKUPS=off.", {
+      add("mind", "mind.backup", "needs-you", `the newest backup of the mind is ${span(f.now - b.newestAt)} old (${b.dir})`, "The node keeps one itself each day: its log says why one wasn't kept (backups: …), unless INVINCIBLE_BACKUPS=off.", {
         finding: { severity: "info", title: `The mind's backups on ${self} have stopped`, body: `The newest file in ${b.dir} is more than a week old. The node's log says why its daily one wasn't kept.` },
       });
     } else add("mind", "mind.backup", "ok", `backed up ${span(f.now - b.newestAt)} ago (${plural(b.files, "file")} in ${b.dir})`);
@@ -305,10 +305,10 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
   /* ---------- the vault ---------- */
 
-  if (!f.vault.unlocked) add("vault", "vault.open", "broken", `${self} can't open the vault, so it can use no key`, "It holds no grant for the current vault key. Re-grant it from another full node, or rotate the vault (galahad vault rotate).");
+  if (!f.vault.unlocked) add("vault", "vault.open", "broken", `${self} can't open the vault, so it can use no key`, "It holds no grant for the current vault key. Re-grant it from another full node, or rotate the vault (invincible vault rotate).");
   else add("vault", "vault.open", "ok", `open: ${plural(f.vault.secrets, "key")} sealed in it, usable here`);
   if (f.vault.requests.length) {
-    add("vault", "vault.requests", "needs-you", `Galahad is waiting for ${plural(f.vault.requests.length, "key")}: ${f.vault.requests.slice(0, 6).join(", ")}`, "Fill them in the app's Vault, or galahad secret set <name> (a hidden prompt). He learns only that they're there.");
+    add("vault", "vault.requests", "needs-you", `Galahad is waiting for ${plural(f.vault.requests.length, "key")}: ${f.vault.requests.slice(0, 6).join(", ")}`, "Fill them in the app's Vault, or invincible secret set <name> (a hidden prompt). He learns only that they're there.");
   }
 
   /* ---------- models: each role on the roster ---------- */
@@ -317,10 +317,10 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   const none = f.providers?.setUp === 0;
   if (none) {
     const named = f.providers!.byDefault;
-    add("models", "models.none", "broken", "no provider is set up here yet, so no model can answer", `Add a key: galahad key add. A key for ${named.slice(0, -1).join(", ")} or ${named.at(-1)} is enough, since his roles' defaults name their models; for another provider, hire one of its models too (galahad roster set <role> <provider/model>).`);
+    add("models", "models.none", "broken", "no provider is set up here yet, so no model can answer", `Add a key: invincible key add. A key for ${named.slice(0, -1).join(", ")} or ${named.at(-1)} is enough, since his roles' defaults name their models; for another provider, hire one of its models too (invincible roster set <role> <provider/model>).`);
   }
   // A provider whose allowance is spent until it resets: its models are passed over on every role until then (a coding
-  // plan's every model; any other provider's, the one model told to wait: brain/windows.ts windowScope). The window
+  // plan's every model; any other provider's, the one model told to wait: models/windows.ts windowScope). The window
   // ends by itself, so there is nothing to do; said once in the models area, never as a role's finding or an Inbox notice.
   for (const window of f.spent ?? []) {
     add(
@@ -334,7 +334,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   // (A refusal from before the key was last set was left out of the facts: the key has been replaced since.)
   for (const refusal of f.refused ?? []) {
     const regional = regionalBaseUrls(refusal.provider);
-    const fix = `Replace the key: galahad key add --provider ${refusal.provider}.${regional ? " The key must be for the address its plan's page shows (--base-url): a key for another region is refused here." : ""}`;
+    const fix = `Replace the key: invincible key add --provider ${refusal.provider}.${regional ? " The key must be for the address its plan's page shows (--base-url): a key for another region is refused here." : ""}`;
     add("models", `models.key.${refusal.provider}`, "needs-you", `${refusal.provider} refused its key at ${clockUtc(refusal.at)} UTC: ${refusal.said}`, fix, {
       finding: { severity: "warn", title: `${refusal.provider} refused its key`, body: `${refusal.provider} refused its key at ${clockUtc(refusal.at)} UTC: ${refusal.said}. ${fix}` },
     });
@@ -346,7 +346,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if (!role.models.length) continue; // nobody hired for it: a choice, not a problem
     const id = `role.${role.role}`;
     const models = role.models.map((m) => (m.problem === null && refusedKey.has(m.ref.slice(0, m.ref.indexOf("/"))) ? { ...m, problem: "its provider refused its key", refused: true } : { ...m, refused: false }));
-    // A coding plan's models do his coding, and the knights' coding tools use them (brain/providers.ts); they
+    // A coding plan's models do his coding, and the knights' coding tools use them (models/providers.ts); they
     // answer nothing else, and are asked no word. What is judged for everything else a role does is the rest.
     const plans = models.filter((m) => m.plan);
     const own = models.filter((m) => !m.plan);
@@ -359,8 +359,8 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
         "needs-you",
         `${unlent.map((m) => `${m.ref} (${m.problem})`).join("; ")}: on ${role.role}${TOOL_ROLES.has(role.role) ? "" : " for coding"}, which can't use ${unlent.length === 1 ? "it" : "them"}`,
         unlent.every((m) => m.problem === VM_TOOLS_CANT)
-          ? `Hire a model a VM's tools may use: galahad roster set ${role.role} <provider/model>.`
-          : `Add the plan's key: galahad key add --provider ${unlent[0]!.ref.slice(0, unlent[0]!.ref.indexOf("/"))}.`,
+          ? `Hire a model a VM's tools may use: invincible roster set ${role.role} <provider/model>.`
+          : `Add the plan's key: invincible key add --provider ${unlent[0]!.ref.slice(0, unlent[0]!.ref.indexOf("/"))}.`,
       );
     }
     const tools = lent.length ? `; his coding and the knights' tools use ${lent.map((m) => m.ref).join(", ")}` : "";
@@ -381,7 +381,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     }
     if (role.unset && !usable.length) {
       const named = [...new Set(role.models.map((m) => m.ref.slice(0, m.ref.indexOf("/"))))];
-      add("models", id, CORE_ROLES.has(role.role) ? "broken" : "needs-you", `no model can play ${role.role}: its defaults name ${named.slice(0, -1).join(", ")}${named.length > 1 ? " and " : ""}${named.at(-1)}, none of them set up here`, `Add a key for one of them (galahad key add), or hire a model you have a key for: galahad roster set ${role.role} <provider/model>.`);
+      add("models", id, CORE_ROLES.has(role.role) ? "broken" : "needs-you", `no model can play ${role.role}: its defaults name ${named.slice(0, -1).join(", ")}${named.length > 1 ? " and " : ""}${named.at(-1)}, none of them set up here`, `Add a key for one of them (invincible key add), or hire a model you have a key for: invincible roster set ${role.role} <provider/model>.`);
       continue;
     }
     if (!usable.length || !first) {
@@ -389,10 +389,10 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
       const unplayable = own.length ? own : CODING_ROLES.has(role.role) || role.custom ? plans : [];
       // What to do: nothing, for a window that ends by itself; the key, for one refused; else a key or another model.
       const fix = unplayable.length && unplayable.every((m) => m.spent)
-        ? `It comes back by itself when its allowance resets (said above). To have ${role.role} played before then: galahad roster set ${role.role} <provider/model>.`
+        ? `It comes back by itself when its allowance resets (said above). To have ${role.role} played before then: invincible roster set ${role.role} <provider/model>.`
         : unplayable.length && unplayable.every((m) => m.refused)
-          ? `Replace its key (said above), or hire a model that works here: galahad roster set ${role.role} <provider/model>.`
-          : "Add a key (galahad key add) or hire a model that works here (galahad roster set " + role.role + " <provider/model>).";
+          ? `Replace its key (said above), or hire a model that works here: invincible roster set ${role.role} <provider/model>.`
+          : "Add a key (invincible key add) or hire a model that works here (invincible roster set " + role.role + " <provider/model>).";
       add(
         "models",
         id,
@@ -410,8 +410,8 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
         `${id}.first`,
         "needs-you",
         `${role.role}'s first model, ${first.ref}, is skipped on every answer (${first.problem}); ${usable[0]!.ref} answers instead`,
-        `Give it what it lacks (galahad key add, galahad provider add), or put a model that works first: galahad roster set ${role.role} ${usable.map((m) => m.ref).join(" ")}.`,
-        { finding: { severity: "info", title: `${role.role}'s first model is skipped on every answer`, body: `${first.ref}: ${first.problem}. ${usable[0]!.ref} answers instead. Give it what it lacks (galahad key add), or put a model that works first (galahad roster set ${role.role} …).` } },
+        `Give it what it lacks (invincible key add, invincible provider add), or put a model that works first: invincible roster set ${role.role} ${usable.map((m) => m.ref).join(" ")}.`,
+        { finding: { severity: "info", title: `${role.role}'s first model is skipped on every answer`, body: `${first.ref}: ${first.problem}. ${usable[0]!.ref} answers instead. Give it what it lacks (invincible key add), or put a model that works first (invincible roster set ${role.role} …).` } },
       );
     }
     const probe = role.probe;
@@ -427,7 +427,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
       add("models", id, others.length || !CORE_ROLES.has(role.role) ? "needs-you" : "broken", `${role.role}: ${probe.ref} didn't answer: ${error}${others.length ? ` (${others[0]!.ref} is next in line)` : ""}`, probeAdvice(error), { ms: probe.ms });
     }
   }
-  if (!f.roles.some((r) => r.models.length)) add("models", "role.none", "broken", "no model is hired for any role", "Add a key and a provider: galahad key add.");
+  if (!f.roles.some((r) => r.models.length)) add("models", "role.none", "broken", "no model is hired for any role", "Add a key and a provider: invincible key add.");
 
   /* ---------- the archive and its embedder ---------- */
 
@@ -437,18 +437,18 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if (e.state === "none") add("archive", "archive.embedder", "ok", "no embedder is hired, so the archive is searched by words alone");
     else if (e.state === "failing" || e.probe?.ok === false) {
       const why = redact((e.probe?.ok === false ? e.probe.error : e.error) ?? "it doesn't answer").replace(/\s+/g, " ").slice(0, 160);
-      add("archive", "archive.embedder", "needs-you", `the embedder ${e.model} isn't working: ${why}. Search is by words alone until it is`, e.local ? "On this machine: systemctl status galahad-ollama (a deploy with --embedder installs it), then galahad archive." : "Check its provider and key (galahad provider list), then galahad archive.", {
-        finding: { severity: "warn", title: `The archive's embedder isn't working on ${self}`, body: `${e.model} doesn't answer, so the archive is searched by words alone and nothing new gets a vector. ${e.local ? "On that machine: systemctl status galahad-ollama." : "Check its provider and key (galahad provider list)."}` },
+      add("archive", "archive.embedder", "needs-you", `the embedder ${e.model} isn't working: ${why}. Search is by words alone until it is`, e.local ? "On this machine: systemctl status invincible-ollama (a deploy with --embedder installs it), then invincible archive." : "Check its provider and key (invincible provider list), then invincible archive.", {
+        finding: { severity: "warn", title: `The archive's embedder isn't working on ${self}`, body: `${e.model} doesn't answer, so the archive is searched by words alone and nothing new gets a vector. ${e.local ? "On that machine: systemctl status invincible-ollama." : "Check its provider and key (invincible provider list)."}` },
       });
     } else add("archive", "archive.embedder", "ok", `the embedder ${e.model} ${e.probe ? "answers" : "is working"}${e.local ? " on this machine (nothing leaves it)" : " (a remote provider: passages go to it)"}`, undefined, e.probe ? { ms: e.probe.ms } : {});
 
-    if (a.off) add("archive", "archive.index", "needs-you", `the archive's background work is off: it keeps ${plural(a.entries, "entry", "entries")} and takes in nothing new`, "Remove GALAHAD_ARCHIVE=off from the node's environment and restart it.");
-    else if (a.sourceErrors.length) add("archive", "archive.index", "needs-you", `the archive couldn't read ${a.sourceErrors.map((s) => `${s.name} (${redact(s.error).slice(0, 80)})`).join("; ")}`, "See galahad archive for each source; it tries again by itself.");
+    if (a.off) add("archive", "archive.index", "needs-you", `the archive's background work is off: it keeps ${plural(a.entries, "entry", "entries")} and takes in nothing new`, "Remove INVINCIBLE_ARCHIVE=off from the node's environment and restart it.");
+    else if (a.sourceErrors.length) add("archive", "archive.index", "needs-you", `the archive couldn't read ${a.sourceErrors.map((s) => `${s.name} (${redact(s.error).slice(0, 80)})`).join("; ")}`, "See invincible archive for each source; it tries again by itself.");
     else add("archive", "archive.index", "ok", `${plural(a.entries, "entry", "entries")} in ${plural(a.chunks, "passage")}${a.backlog ? `, ${a.backlog.toLocaleString("en")} waiting for a vector (he embeds in the background)` : ""}`);
 
-    if (a.integrity.ok === false) add("archive", "archive.integrity", "broken", `${plural(a.integrity.problems, "archived file")} damaged or missing`, "galahad archive verify names them. Restore those files from a backup of the node's home: nothing is mended by deleting.");
+    if (a.integrity.ok === false) add("archive", "archive.integrity", "broken", `${plural(a.integrity.problems, "archived file")} damaged or missing`, "invincible archive verify names them. Restore those files from a backup of the node's home: nothing is mended by deleting.");
     else if (a.integrity.lastAt === null) add("archive", "archive.integrity", "ok", "its files haven't been re-hashed yet (it happens once a day)");
-    else if (f.now - a.integrity.lastAt > INTEGRITY_OLD_MS) add("archive", "archive.integrity", "needs-you", `its files were last re-hashed ${span(f.now - a.integrity.lastAt)} ago (it should be daily)`, "Run galahad archive verify. If it stays old, the archive's background work isn't running: see the node's log.");
+    else if (f.now - a.integrity.lastAt > INTEGRITY_OLD_MS) add("archive", "archive.integrity", "needs-you", `its files were last re-hashed ${span(f.now - a.integrity.lastAt)} ago (it should be daily)`, "Run invincible archive verify. If it stays old, the archive's background work isn't running: see the node's log.");
     else add("archive", "archive.integrity", "ok", `every archived file matched its hash ${span(f.now - a.integrity.lastAt)} ago`);
   }
 
@@ -459,18 +459,18 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     const hosts = f.sandbox.others;
     // (A Mac with Apple's container that isn't running is told how to start it: it hosts through nothing else.)
     const container = f.sandbox.container;
-    const here = container && !container.running ? `run galahad sandbox setup here: it starts Apple's container${container.version ? ` (${container.version} is installed)` : ""} and restarts the node` : "install Docker on this one and restart the node";
-    if (!hosts.length) add("sandbox", "sandbox.host", "needs-you", "no node in the fleet hosts sandboxes, so quests and trials can't run", `Enrol a machine with Docker (galahad join there), or ${here}.`);
+    const here = container && !container.running ? `run invincible sandbox setup here: it starts Apple's container${container.version ? ` (${container.version} is installed)` : ""} and restarts the node` : "install Docker on this one and restart the node";
+    if (!hosts.length) add("sandbox", "sandbox.host", "needs-you", "no node in the fleet hosts sandboxes, so quests and trials can't run", `Enrol a machine with Docker (invincible join there), or ${here}.`);
     else add("sandbox", "sandbox.host", "ok", `${self} hosts no sandboxes (no Docker here); they run on ${hosts.map((h) => h.name).join(", ")}`);
   } else {
     const mac = host.engine === "container";
-    if (!host.docker) add("sandbox", "sandbox.docker", "broken", mac ? "Apple's container isn't answering on this Mac" : "Docker isn't answering on this machine", mac ? "galahad sandbox setup starts its service (container system start, at a 1.x release) and restarts the node, saying what fails." : "systemctl status docker, and check that the node's user is in the docker group.");
+    if (!host.docker) add("sandbox", "sandbox.docker", "broken", mac ? "Apple's container isn't answering on this Mac" : "Docker isn't answering on this machine", mac ? "invincible sandbox setup starts its service (container system start, at a 1.x release) and restarts the node, saying what fails." : "systemctl status docker, and check that the node's user is in the docker group.");
     else add("sandbox", "sandbox.docker", "ok", mac ? "Apple's container answers: every sandbox here is a VM of its own" : "Docker answers");
-    if (mac && host.docker && f.sandbox.container?.kernel === false) add("sandbox", "sandbox.kernel", "needs-you", "Apple's container has no kernel for its VMs yet, so none starts here", "galahad sandbox setup fetches Apple's recommended one (container checks its digest).");
+    if (mac && host.docker && f.sandbox.container?.kernel === false) add("sandbox", "sandbox.kernel", "needs-you", "Apple's container has no kernel for its VMs yet, so none starts here", "invincible sandbox setup fetches Apple's recommended one (container checks its digest).");
     if (host.docker) {
-      if (!host.image) add("sandbox", "sandbox.image", "needs-you", "the sandbox image is missing (another tool's cleanup may have pruned it)", "galahad sandbox build. He also rebuilds it himself when a sandbox is next needed, which makes that quest wait.");
+      if (!host.image) add("sandbox", "sandbox.image", "needs-you", "the sandbox image is missing (another tool's cleanup may have pruned it)", "invincible sandbox build. He also rebuilds it himself when a sandbox is next needed, which makes that quest wait.");
       else add("sandbox", "sandbox.image", "ok", "the sandbox image is built and kept in use");
-      if (!host.networks) add("sandbox", "sandbox.networks", "needs-you", "a sandbox network is missing", "Restart the node: it creates them at its start (systemctl restart galahad).");
+      if (!host.networks) add("sandbox", "sandbox.networks", "needs-you", "a sandbox network is missing", "Restart the node: it creates them at its start (systemctl restart invincible).");
       else add("sandbox", "sandbox.networks", "ok", mac ? "both sandbox networks are there, each held up by a VM of the node's own" : "both sandbox networks are there");
 
       if (host.start === null) add("sandbox", "sandbox.start", "skipped", f.quick ? "no sandbox was started (a full check starts one and removes it)" : "no sandbox was started: the image is missing");
@@ -479,7 +479,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
         for (const run of host.start) {
           const what = run.kind === "vm" ? "a microVM sandbox" : "a sandbox";
           if (run.ok) add("sandbox", `sandbox.start.${run.kind}`, "ok", `${what} started, ran a command and was removed`, undefined, { ms: run.ms });
-          else add("sandbox", `sandbox.start.${run.kind}`, "broken", `${what} didn't start: ${redact(run.error ?? "no reason given").replace(/\s+/g, " ").slice(0, 200)}`, mac ? "container system logs says why container couldn't start it; galahad sandbox run -- true shows the same failure." : run.kind === "vm" ? "Kata Containers isn't working: a deploy with --sudo reinstalls it; until then online sandboxes can't be microVMs." : "See docker ps -a and the node's log; galahad sandbox run -- true shows the same failure.", { ms: run.ms });
+          else add("sandbox", `sandbox.start.${run.kind}`, "broken", `${what} didn't start: ${redact(run.error ?? "no reason given").replace(/\s+/g, " ").slice(0, 200)}`, mac ? "container system logs says why container couldn't start it; invincible sandbox run -- true shows the same failure." : run.kind === "vm" ? "Kata Containers isn't working: a deploy with --sudo reinstalls it; until then online sandboxes can't be microVMs." : "See docker ps -a and the node's log; invincible sandbox run -- true shows the same failure.", { ms: run.ms });
         }
       }
     }
@@ -489,25 +489,25 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     else add("sandbox", "sandbox.disk", "ok", "each sandbox's workspace is its own fixed-size disk");
     if (host.firewall === "active") add("sandbox", "sandbox.firewall", "ok", "the firewall unit is active: sandboxes reach one port on this host and nothing else");
     else if (host.firewall === "inactive") {
-      add("sandbox", "sandbox.firewall", "broken", "the firewall unit (galahad-firewall) isn't active, so sandboxes may reach more of this host than the gateway", "sudo systemctl restart galahad-firewall, then systemctl status galahad-firewall.", {
-        finding: { severity: "warn", title: `The sandbox firewall isn't active on ${self}`, body: "galahad-firewall keeps sandboxes to the one gateway port. On that machine: sudo systemctl restart galahad-firewall." },
+      add("sandbox", "sandbox.firewall", "broken", "the firewall unit (invincible-firewall) isn't active, so sandboxes may reach more of this host than the gateway", "sudo systemctl restart invincible-firewall, then systemctl status invincible-firewall.", {
+        finding: { severity: "warn", title: `The sandbox firewall isn't active on ${self}`, body: "invincible-firewall keeps sandboxes to the one gateway port. On that machine: sudo systemctl restart invincible-firewall." },
       });
     } else if (host.firewall === "missing") {
-      add("sandbox", "sandbox.firewall", "needs-you", "there's no galahad-firewall unit here: what a sandbox can reach on this host depends on its other firewall", "Deploy with --sudo to install it: only the gateway port on the sandbox bridge, whatever UFW does.", {
-        finding: { severity: "info", title: `${self} has no sandbox firewall unit`, body: "What a sandbox can reach on that host depends on its other firewall. A deploy with --sudo installs galahad-firewall." },
+      add("sandbox", "sandbox.firewall", "needs-you", "there's no invincible-firewall unit here: what a sandbox can reach on this host depends on its other firewall", "Deploy with --sudo to install it: only the gateway port on the sandbox bridge, whatever UFW does.", {
+        finding: { severity: "info", title: `${self} has no sandbox firewall unit`, body: "What a sandbox can reach on that host depends on its other firewall. A deploy with --sudo installs invincible-firewall." },
       });
     }
     const wall = host.macFirewall;
     // (On, but installed by another release: its rules are that release's, until this one's are put in their place.)
-    if (wall?.on && wall.release === "other") add("sandbox", "sandbox.firewall", "needs-you", "this Mac's sandbox firewall is on, with another release's rules", "galahad sandbox setup puts this release's in place (it asks for your password once).");
+    if (wall?.on && wall.release === "other") add("sandbox", "sandbox.firewall", "needs-you", "this Mac's sandbox firewall is on, with another release's rules", "invincible sandbox setup puts this release's in place (it asks for your password once).");
     else if (wall?.on) add("sandbox", "sandbox.firewall", "ok", "this Mac's sandbox firewall is on: a gateway sandbox reaches the gateway alone, an online one the internet, never this Mac or your networks; no sandbox reaches another");
     else if (wall && !wall.installed) {
-      add("sandbox", "sandbox.firewall", "needs-you", "this Mac has no sandbox firewall, so it makes no sandboxes: its knights work on your other nodes", "galahad sandbox setup, or This Mac in the app (it asks for your password once).", {
-        finding: { severity: "info", title: `${self} has no sandbox firewall`, body: "A Mac makes no sandboxes until its firewall is installed. On that Mac: galahad sandbox setup." },
+      add("sandbox", "sandbox.firewall", "needs-you", "this Mac has no sandbox firewall, so it makes no sandboxes: its knights work on your other nodes", "invincible sandbox setup, or This Mac in the app (it asks for your password once).", {
+        finding: { severity: "info", title: `${self} has no sandbox firewall`, body: "A Mac makes no sandboxes until its firewall is installed. On that Mac: invincible sandbox setup." },
       });
     } else if (wall) {
-      add("sandbox", "sandbox.firewall", wall.soon ? "needs-you" : "broken", `this Mac's sandbox firewall isn't on, so it makes no sandboxes: ${wall.why ?? "no reason given"}`, wall.soon ? "Its helper puts it right within seconds of the networks coming up: galahad firewall status." : "galahad firewall status says why; galahad firewall install puts it back.", {
-        finding: { severity: "warn", title: `The sandbox firewall is off on ${self}`, body: `It makes no sandboxes until it is: ${wall.why ?? "no reason given"}. On that Mac: galahad firewall status.` },
+      add("sandbox", "sandbox.firewall", wall.soon ? "needs-you" : "broken", `this Mac's sandbox firewall isn't on, so it makes no sandboxes: ${wall.why ?? "no reason given"}`, wall.soon ? "Its helper puts it right within seconds of the networks coming up: invincible firewall status." : "invincible firewall status says why; invincible firewall install puts it back.", {
+        finding: { severity: "warn", title: `The sandbox firewall is off on ${self}`, body: `It makes no sandboxes until it is: ${wall.why ?? "no reason given"}. On that Mac: invincible firewall status.` },
       });
     }
   }
@@ -516,26 +516,26 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
   if (f.compute) {
     const c = f.compute;
-    if (c.lastAt === null) add("compute", "compute.calibration", c.canMeasure ? "needs-you" : "ok", c.canMeasure ? `${self} hasn't measured itself, so he counts one sandbox slot here` : `${self} doesn't measure itself here`, "galahad compute calibrate (a few seconds, at low priority).");
-    else if (c.due === "changed") add("compute", "compute.calibration", "needs-you", `its measurement is stale: this machine, its ceiling or the benchmark changed since it measured itself ${span(f.now - c.lastAt)} ago`, "galahad compute calibrate. He does it himself after the next heartbeat unless self-action is off.");
-    else if (f.now - c.lastAt > CALIBRATION_OLD_MS) add("compute", "compute.calibration", "needs-you", `it last measured itself ${span(f.now - c.lastAt)} ago`, "galahad compute calibrate, so placement and slots follow the machine as it is now.");
+    if (c.lastAt === null) add("compute", "compute.calibration", c.canMeasure ? "needs-you" : "ok", c.canMeasure ? `${self} hasn't measured itself, so he counts one sandbox slot here` : `${self} doesn't measure itself here`, "invincible compute calibrate (a few seconds, at low priority).");
+    else if (c.due === "changed") add("compute", "compute.calibration", "needs-you", `its measurement is stale: this machine, its ceiling or the benchmark changed since it measured itself ${span(f.now - c.lastAt)} ago`, "invincible compute calibrate. He does it himself after the next heartbeat unless self-action is off.");
+    else if (f.now - c.lastAt > CALIBRATION_OLD_MS) add("compute", "compute.calibration", "needs-you", `it last measured itself ${span(f.now - c.lastAt)} ago`, "invincible compute calibrate, so placement and slots follow the machine as it is now.");
     else add("compute", "compute.calibration", "ok", `measured itself ${span(f.now - c.lastAt)} ago`);
     if (c.slots !== null) add("compute", "compute.slots", "ok", `${c.inUse} of ${plural(c.slots, "sandbox slot")} in use${c.waiting ? `, ${c.waiting} waiting for one` : ""}`);
   }
 
   /* ---------- loops ---------- */
 
-  if (!f.loops.some((l) => l.name === "heartbeat")) add("loops", "loops.heartbeat", "needs-you", "there's no heartbeat loop, so nobody looks around between your visits", "galahad loop add heartbeat --every 30m --heartbeat.");
+  if (!f.loops.some((l) => l.name === "heartbeat")) add("loops", "loops.heartbeat", "needs-you", "there's no heartbeat loop, so nobody looks around between your visits", "invincible loop add heartbeat --every 30m --heartbeat.");
   for (const loop of f.loops) {
     const id = `loop.${loop.name}`;
     const last = loop.lastAt ? `last ran ${span(f.now - loop.lastAt)} ago (${loop.recent[0] ?? "?"})` : "hasn't run yet";
     const next = loop.next ? (loop.next > f.now ? `, next in ${span(loop.next - f.now)}` : ", due now") : "";
-    if (loop.runner === null) add("loops", id, "broken", `${loop.name} has no runner: the node it ran on was revoked`, `Move it: galahad loop set ${loop.name} --on <node>.`);
-    else if (loop.problem) add("loops", id, "needs-you", `${loop.name} can't be read here: ${loop.problem}`, `Set it again (galahad loop set ${loop.name} …), or update this node if a newer one wrote it.`);
+    if (loop.runner === null) add("loops", id, "broken", `${loop.name} has no runner: the node it ran on was revoked`, `Move it: invincible loop set ${loop.name} --on <node>.`);
+    else if (loop.problem) add("loops", id, "needs-you", `${loop.name} can't be read here: ${loop.problem}`, `Set it again (invincible loop set ${loop.name} …), or update this node if a newer one wrote it.`);
     else if (!loop.enabled) add("loops", id, "ok", `${loop.name} is paused (${last})`);
-    else if (loop.recent.length >= 3 && loop.recent.slice(0, 3).every((s) => s === "failed")) add("loops", id, "broken", `${loop.name} keeps failing: its last three runs failed`, `galahad loop runs ${loop.name} says why.`);
-    else if (loop.recent[0] === "failed" || loop.recent[0] === "interrupted") add("loops", id, "needs-you", `${loop.name}'s last run ${loop.recent[0] === "failed" ? "failed" : "was interrupted"} (${span(f.now - (loop.lastAt ?? f.now))} ago)`, `galahad loop runs ${loop.name} says why; galahad loop run ${loop.name} tries again.`);
-    else if (!loop.runnerOnline) add("loops", id, "needs-you", `${loop.name} runs on ${loop.runner}, which is offline (${last})`, `Bring ${loop.runner} back, or move it: galahad loop set ${loop.name} --on <node>.`);
+    else if (loop.recent.length >= 3 && loop.recent.slice(0, 3).every((s) => s === "failed")) add("loops", id, "broken", `${loop.name} keeps failing: its last three runs failed`, `invincible loop runs ${loop.name} says why.`);
+    else if (loop.recent[0] === "failed" || loop.recent[0] === "interrupted") add("loops", id, "needs-you", `${loop.name}'s last run ${loop.recent[0] === "failed" ? "failed" : "was interrupted"} (${span(f.now - (loop.lastAt ?? f.now))} ago)`, `invincible loop runs ${loop.name} says why; invincible loop run ${loop.name} tries again.`);
+    else if (!loop.runnerOnline) add("loops", id, "needs-you", `${loop.name} runs on ${loop.runner}, which is offline (${last})`, `Bring ${loop.runner} back, or move it: invincible loop set ${loop.name} --on <node>.`);
     else add("loops", id, "ok", `${loop.name} on ${loop.runner}: ${last}${next}`);
   }
 
@@ -544,9 +544,9 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   if (!f.connectors.length) add("connectors", "connectors.none", "ok", "none installed");
   for (const c of f.connectors) {
     const id = `connector.${c.id}`;
-    if (c.problem) add("connectors", id, "broken", `${c.label} doesn't validate: ${c.problem.slice(0, 200)}`, `Install it again: galahad connector add ${c.id} (or fix its manifest).`);
-    else if (c.key === "missing") add("connectors", id, "needs-you", `${c.label} is waiting for its key`, `galahad secret set <name> --connector ${c.id}, or the app's Vault.`);
-    else if (c.key === "wrong-origin") add("connectors", id, "needs-you", `${c.label}'s key is pinned to another address, so it's never sent`, `Set it again for this connector: galahad secret set <name> --connector ${c.id}.`);
+    if (c.problem) add("connectors", id, "broken", `${c.label} doesn't validate: ${c.problem.slice(0, 200)}`, `Install it again: invincible connector add ${c.id} (or fix its manifest).`);
+    else if (c.key === "missing") add("connectors", id, "needs-you", `${c.label} is waiting for its key`, `invincible secret set <name> --connector ${c.id}, or the app's Vault.`);
+    else if (c.key === "wrong-origin") add("connectors", id, "needs-you", `${c.label}'s key is pinned to another address, so it's never sent`, `Set it again for this connector: invincible secret set <name> --connector ${c.id}.`);
     else if (c.reach && !c.reach.ok) add("connectors", id, "needs-you", `${c.label} can't be reached${c.host ? ` at ${c.host}` : ""}: ${redact(c.reach.error ?? "no answer").slice(0, 120)}`, "Check the address and this node's network; his calls to it fail until it answers.", { ms: c.reach.ms });
     else if (c.reach) add("connectors", id, "ok", `${c.label} answers${c.host ? ` at ${c.host}` : ""}${c.key === "ready" ? ", and its key is in the vault" : ""}`, undefined, { ms: c.reach.ms });
     else add("connectors", id, "ok", `${c.label} is installed${c.key === "ready" ? " with its key" : ""} (not probed${f.offline ? ": offline" : ""})`);
@@ -562,8 +562,8 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   if (f.app.published === undefined) add("app", "app.published", "ok", `whether it's published on your tailnet can't be told here; on this machine it's at ${f.app.local}`);
   else if (f.app.published) add("app", "app.published", "ok", `published at ${f.app.published}`);
   else if (f.self.alwaysOn) {
-    add("app", "app.published", "needs-you", "Tailscale isn't publishing the app, so your phone and browser can't open it", "galahad expose (it runs tailscale serve for this node's app port); tailscale serve status shows what's published.", {
-      finding: { severity: "warn", title: `Tailscale isn't publishing the app on ${self}`, body: "Your devices can't open it until it is. On that machine: galahad expose, then tailscale serve status." },
+    add("app", "app.published", "needs-you", "Tailscale isn't publishing the app, so your phone and browser can't open it", "invincible expose (it runs tailscale serve for this node's app port); tailscale serve status shows what's published.", {
+      finding: { severity: "warn", title: `Tailscale isn't publishing the app on ${self}`, body: "Your devices can't open it until it is. On that machine: invincible expose, then tailscale serve status." },
     });
   } else add("app", "app.published", "ok", `not published on your tailnet (a personal machine); on this machine it's at ${f.app.local}`);
 
@@ -579,15 +579,15 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
       // waits for an answer only you give (unanswered, an approval lapses in a day). In your Inbox, so every app shows
       // it; never pushed (notify.ts): a notification can't say it can't reach you.
       const why = lost ? `: ${lost === 1 ? "a device's were dropped by its push service" : `${plural(lost, "device")}' were dropped by their push services`}` : `, and ${plural(asks, "thing")} ${asks === 1 ? "waits" : "wait"} for your answer`;
-      add("notify", "notify.devices", "needs-you", `no device has notifications on, so he can't reach you when the app is closed${why}`, "Turn them on from a device you carry: iPhone or iPad, More → Notifications; the web app, Settings → Notifications; Android, More → Notifications. galahad notify test sends one.", {
+      add("notify", "notify.devices", "needs-you", `no device has notifications on, so he can't reach you when the app is closed${why}`, "Turn them on from a device you carry: iPhone or iPad, More → Notifications; the web app, Settings → Notifications; Android, More → Notifications. invincible notify test sends one.", {
         as: "notify.reach",
         finding: { severity: "warn", title: "Galahad can't reach you when the app is closed", body: "No device of yours has notifications on, so what needs you waits here until you look. iPhone or iPad: More → Notifications. Web app: Settings → Notifications. Android: More → Notifications." },
       });
     } else if (!n.devices) add("notify", "notify.devices", "ok", "no device has notifications turned on, so he can't reach you when the app is closed (Settings turns them on)");
     else if (n.failing.length) {
       const names = n.failing.map((d) => d.device);
-      add("notify", "notify.devices", "needs-you", `notifications aren't reaching ${n.failing.map((d) => `${d.device} (${d.error.slice(0, 80)})`).join("; ")}`, "On that device: Settings, turn notifications off and on again. galahad notify test sends one now.", {
-        finding: { severity: "warn", title: `Notifications aren't reaching ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]}`, body: "The last ones didn't arrive. On that device, turn notifications off and on again; galahad notify test sends one." },
+      add("notify", "notify.devices", "needs-you", `notifications aren't reaching ${n.failing.map((d) => `${d.device} (${d.error.slice(0, 80)})`).join("; ")}`, "On that device: Settings, turn notifications off and on again. invincible notify test sends one now.", {
+        finding: { severity: "warn", title: `Notifications aren't reaching ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]}`, body: "The last ones didn't arrive. On that device, turn notifications off and on again; invincible notify test sends one." },
       });
     } else add("notify", "notify.devices", "ok", `${plural(n.devices, "device")} can be reached with a notification`);
   }
@@ -597,8 +597,8 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   if (f.disk) {
     const share = f.disk.totalGb ? f.disk.freeGb / f.disk.totalGb : 1;
     const words = `${Math.floor(f.disk.freeGb).toLocaleString("en")} GB free of ${Math.round(f.disk.totalGb).toLocaleString("en")} GB where the node keeps its home`;
-    if (share < 0.03 || f.disk.freeGb < 1) add("disk", "disk.home", "broken", `almost no disk left: ${words}`, "Free space now: docker system df, old backups, the archive's root (galahad archive). The mind can't write when it's full.");
-    else if (share < 0.1 || f.disk.freeGb < 5) add("disk", "disk.home", "needs-you", `low on disk: ${words}`, "Free space soon: docker system df, old backups, the archive's root (galahad archive).");
+    if (share < 0.03 || f.disk.freeGb < 1) add("disk", "disk.home", "broken", `almost no disk left: ${words}`, "Free space now: docker system df, old backups, the archive's root (invincible archive). The mind can't write when it's full.");
+    else if (share < 0.1 || f.disk.freeGb < 5) add("disk", "disk.home", "needs-you", `low on disk: ${words}`, "Free space soon: docker system df, old backups, the archive's root (invincible archive).");
     else add("disk", "disk.home", "ok", words);
   }
 
@@ -606,13 +606,13 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
   const up = `up ${span(f.now - f.self.startedAt)}`;
   if (f.service.restarts !== null && f.service.restarts > 0) {
-    add("service", "service.unit", "needs-you", `${up}; systemd has restarted it ${plural(f.service.restarts, "time")} since it was last started by hand`, "journalctl -u galahad -n 200 shows what ended it each time.", {
-      finding: { severity: "info", title: `${self}'s service has been restarting`, body: "systemd restarted it after it ended by itself. On that machine: journalctl -u galahad -n 200 shows why." },
+    add("service", "service.unit", "needs-you", `${up}; systemd has restarted it ${plural(f.service.restarts, "time")} since it was last started by hand`, "journalctl -u invincible -n 200 shows what ended it each time.", {
+      finding: { severity: "info", title: `${self}'s service has been restarting`, body: "systemd restarted it after it ended by itself. On that machine: journalctl -u invincible -n 200 shows why." },
     });
   } else add("service", "service.unit", "ok", f.service.restarts === null ? `${up} (not run by systemd here, or it can't be asked)` : `${up}, and systemd hasn't had to restart it`);
   {
     const recent = f.service.warnings.filter((w) => f.now - w.at <= WARNINGS_RECENT_MS);
-    if (recent.length) add("service", "service.log", "needs-you", `${plural(recent.length, "line")} of trouble in its log in the last hour, the latest: ${recent[0]!.text.slice(0, 200)}`, "The node's log has the rest (journalctl -u galahad -n 200, or the terminal it runs in).");
+    if (recent.length) add("service", "service.log", "needs-you", `${plural(recent.length, "line")} of trouble in its log in the last hour, the latest: ${recent[0]!.text.slice(0, 200)}`, "The node's log has the rest (journalctl -u invincible -n 200, or the terminal it runs in).");
     else add("service", "service.log", "ok", f.service.warnings.length ? `nothing in its log in the last hour (${plural(f.service.warnings.length, "line")} of trouble since it started)` : "nothing in its log reads like trouble");
   }
 
@@ -622,10 +622,10 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if (k.sensitive) {
       const usable = k.sensitive.filter((m) => m.problem === null);
       if (usable.length) add("models", `knight.${k.id}.sensitive`, "ok", `${k.name} is in sensitive mode, on ${usable.map((m) => m.ref).join(", ")}${usable.length < k.sensitive.length ? ` (${plural(k.sensitive.length - usable.length, "model")} of its own can't be used here)` : ""}`);
-      else add("models", `knight.${k.id}.sensitive`, "broken", `${k.name} is in sensitive mode, and none of its models can be used here (${k.sensitive.map((m) => `${m.ref}: ${m.problem}`).join("; ").slice(0, 300)}): its work can't run, and never goes to another model`, `Add the key its models need (galahad key add --provider <id>), or choose models of its own that can run (galahad roundtable sensitive ${k.id} on <provider/model…>).`, { finding: { severity: "warn", title: `${k.name} can't work in sensitive mode`, body: "None of the models it is held to can be used on this node." } });
+      else add("models", `knight.${k.id}.sensitive`, "broken", `${k.name} is in sensitive mode, and none of its models can be used here (${k.sensitive.map((m) => `${m.ref}: ${m.problem}`).join("; ").slice(0, 300)}): its work can't run, and never goes to another model`, `Add the key its models need (invincible key add --provider <id>), or choose models of its own that can run (invincible roundtable sensitive ${k.id} on <provider/model…>).`, { finding: { severity: "warn", title: `${k.name} can't work in sensitive mode`, body: "None of the models it is held to can be used on this node." } });
     }
     for (const key of k.keys) {
-      if (key.problem) add("vault", `knight.${k.id}.key.${key.secret}`, "needs-you", `${k.name} was given the key ${key.secret}, which can go nowhere now: ${key.problem}`, `Pin it again (galahad secret set ${key.secret} --base-url https://…), or take it back (galahad roundtable keys ${k.id} rm ${key.secret}).`);
+      if (key.problem) add("vault", `knight.${k.id}.key.${key.secret}`, "needs-you", `${k.name} was given the key ${key.secret}, which can go nowhere now: ${key.problem}`, `Pin it again (invincible secret set ${key.secret} --base-url https://…), or take it back (invincible roundtable keys ${k.id} rm ${key.secret}).`);
       else add("vault", `knight.${k.id}.key.${key.secret}`, "ok", `${k.name} may use the key ${key.secret} without seeing it`);
     }
   }

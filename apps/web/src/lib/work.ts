@@ -1,6 +1,6 @@
-import type { ProjectView } from "@galahad/core";
-import { costOf, type Prices, type UsageLine } from "@galahad/core/spend";
-import type { TeamSnapshot, TeamTask, Teammate } from "@galahad/core/team";
+import type { ProjectView } from "@invincible/core";
+import { costOf, type Prices, type UsageLine } from "@invincible/core/spend";
+import type { TeamSnapshot, TeamTask, Teammate } from "@invincible/core/team";
 import { type KnightState, STATES, type StateLook } from "./knight-state.ts";
 import { type Ask, knightOfCaller } from "./roster.ts";
 import { relativeTime } from "./time.ts";

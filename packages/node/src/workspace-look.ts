@@ -1,4 +1,4 @@
-import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf } from "@galahad/core";
+import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf } from "@invincible/core";
 
 /*
  * Looking into a knight's workspace (its VM's /work, or Galahad's computer's) from your devices: a folder's entries, one
@@ -15,7 +15,7 @@ export const DIFF_LIMIT = 600_000;
 /** A folder's first entries, in order. */
 export const LIST_LIMIT = 2_000;
 /** Kept from view, whatever is asked: the file that holds the VM's gateway token. */
-export const KEPT_FROM_VIEW = ["/work/.galahad-gateway.json"] as const;
+export const KEPT_FROM_VIEW = ["/work/.invincible-gateway.json"] as const;
 
 /** `python3 -c LIST <path>`: a folder's entries, folders and files each with its size and when it changed. */
 export const LIST_SCRIPT = `import json,os,stat,sys

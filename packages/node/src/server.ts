@@ -117,7 +117,7 @@ import {
   type LiveBye,
   type LiveEvent,
   type LiveTopic,
-} from "@galahad/core";
+} from "@invincible/core";
 import {
   AGENTS,
   acpDriver,
@@ -164,10 +164,10 @@ import {
   tripOf,
   countable,
   nowLine,
-} from "@galahad/brain";
-import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@galahad/link";
-import { type Device, enrollDevice, isFullNode, type MindStore, revokeDevice, type SecretInfo, type Vault } from "@galahad/mind";
-import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, TEAM_LEASE_MINUTES } from "@galahad/sandbox";
+} from "@invincible/models";
+import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
+import { type Device, enrollDevice, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
+import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
 import type { GovernedSandboxHost } from "./compute/governed-host.ts";
 import type { Governor } from "./compute/governor.ts";
 import type { ComputeService } from "./compute/service.ts";
@@ -225,14 +225,14 @@ import { galahadRevision } from "./revision.ts";
 import { localModelsOf, type ModelPeer, serves, viaFleet } from "./local-models.ts";
 import { githubRepo, shipBranch } from "./quest-cli.ts";
 import type { Terminals } from "./terminals.ts";
-import { LiveChanges, MindCounts, timedStamp } from "./live.ts";
+import { LiveChanges, LedgerCounts, timedStamp } from "./live.ts";
 import { QampGrantError, QampGrants } from "./qamp-grants.ts";
 
 /**
  * loopback  127.0.0.1:<port>         local processes only: CLI (admin token), model gateway
  * proxied   127.0.0.1:<port + 1>     target of `tailscale serve` (HTTPS PWA): remote traffic, treated like tailnet
  * tailnet   <tailnet ip>:<port>      node-to-node link
- * sandbox   <gateway bridge>:7779    reachable only from sandboxes: the model gateway and nothing else
+ * sandbox   <gateway bridge>:7402    reachable only from sandboxes: the model gateway and nothing else
  */
 export type Listener = "loopback" | "proxied" | "tailnet" | "sandbox";
 
@@ -242,7 +242,7 @@ export interface AppContext {
   artifacts: ArtifactStore;
   nodeName: string;
   port: number;
-  store: MindStore;
+  store: LedgerStore;
   vault: Vault;
   pairing: PairingHost;
   sync: SyncEngine;
@@ -626,7 +626,7 @@ export function createApp(ctx: AppContext) {
       return named;
     }
     const macs = ctx.store.devices().filter((d) => d.kind === "node" && d.role === "full" && lends(d));
-    if (!macs.length) throw new HttpError(424, "no Mac in this fleet lends Galahad its screen: a Mac whose node runs from the Galahad app does, once you allow it there (galahad screen allow)");
+    if (!macs.length) throw new HttpError(424, "no Mac in this fleet lends Galahad its screen: a Mac whose node runs from the Galahad app does, once you allow it there (invincible screen allow)");
     if (macs.length > 1) throw new HttpError(400, `name the Mac (on): ${macs.map((m) => m.name).join(", ")}`);
     return macs[0]!;
   }
@@ -1133,8 +1133,8 @@ export function createApp(ctx: AppContext) {
     } catch {
       throw refused;
     }
-    if (!hookSigned(secret, body, req.headers.get("x-hub-signature-256") ?? req.headers.get("x-galahad-signature"))) throw refused;
-    const event = hookEvent(body, { delivery: req.headers.get("x-github-delivery") ?? req.headers.get("x-galahad-delivery"), github: req.headers.get("x-github-event") }, Date.now());
+    if (!hookSigned(secret, body, req.headers.get("x-hub-signature-256") ?? req.headers.get("x-invincible-signature"))) throw refused;
+    const event = hookEvent(body, { delivery: req.headers.get("x-github-delivery") ?? req.headers.get("x-invincible-delivery"), github: req.headers.get("x-github-event") }, Date.now());
     return json({ ok: true, woken: ctx.loops.wake(name, [event]) > 0 }, 202);
   }
 
@@ -1730,7 +1730,7 @@ export function createApp(ctx: AppContext) {
    * What changed, for your devices' live streams (core's live.ts; the stamps: live.ts). Each topic's stamp is read from
    * what its route answers from, the mind's by the events it took; nothing is read while nobody listens.
    */
-  const mindCounts = new MindCounts();
+  const mindCounts = new LedgerCounts();
   const liveChanges = new LiveChanges(
     {
       // A device joined, left or changed, or a node went on- or offline (its load and round trip: the pages that show them).
@@ -1754,13 +1754,13 @@ export function createApp(ctx: AppContext) {
     },
     { log: ctx.log },
   );
-  const stopMind = ctx.store.onApplied((events, rebuilt) => {
+  const stopLedger = ctx.store.onApplied((events, rebuilt) => {
     if (mindCounts.take(events, rebuilt)) liveChanges.poke();
   });
   ctx.shutdown?.addEventListener(
     "abort",
     () => {
-      stopMind();
+      stopLedger();
       liveChanges.close();
     },
     { once: true },
@@ -2026,7 +2026,7 @@ export function createApp(ctx: AppContext) {
   async function lookInWorkspace(id: string, script: string, args: string[], signal: AbortSignal, timeoutSec = 30): Promise<string> {
     const seat = seatOf(id);
     if (!seat.workspace) throw new HttpError(424, noVm(id));
-    const ran = await inProcess(teammatePrincipal(seat.id), signal).call<import("@galahad/core").ExecResult>("execSandbox", { on: seat.workspace.node, id: seat.workspace.id, cmd: ["python3", "-c", script, ...args], timeoutSec });
+    const ran = await inProcess(teammatePrincipal(seat.id), signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: seat.workspace.node, id: seat.workspace.id, cmd: ["python3", "-c", script, ...args], timeoutSec });
     if (ran.exitCode !== 0) throw new HttpError(502, `the workspace couldn't be read: ${redact(ran.stderr || ran.stdout).trim().slice(0, 300) || `it ended with ${ran.exitCode}`}`);
     return ran.stdout;
   }
@@ -2038,7 +2038,7 @@ export function createApp(ctx: AppContext) {
       throw error;
     }
   };
-  const noVm = (id: string) => (id === TEAM_GALAHAD ? "Galahad has no computer yet: Computer in his chat makes one, or galahad roundtable provision galahad" : `this knight has no VM yet: galahad roundtable provision ${id} makes one`);
+  const noVm = (id: string) => (id === TEAM_GALAHAD ? "Galahad has no computer yet: Computer in his chat makes one, or invincible roundtable provision galahad" : `this knight has no VM yet: invincible roundtable provision ${id} makes one`);
   const vmProvisioning = new Map<string, Promise<SandboxView>>();
   /** The providers each knight's VM token covers now: those with a key when its current task began (prepareTeam). */
   const leased = new Map<string, readonly string[]>();
@@ -2106,7 +2106,7 @@ export function createApp(ctx: AppContext) {
     const current = seatOf(member.id);
     if (!current.enabled) throw new HttpError(409, "knight paused");
     if (!current.workspace) throw new HttpError(424, "this knight has no VM yet");
-    return inProcess(teammatePrincipal(member.id), signal).call<import("@galahad/core").ExecResult>("execSandbox", { on: current.workspace.node, id: current.workspace.id, cmd: ["bash", "-lc", command], timeoutSec: timeout });
+    return inProcess(teammatePrincipal(member.id), signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: current.workspace.node, id: current.workspace.id, cmd: ["bash", "-lc", command], timeoutSec: timeout });
   }
   /** The providers with a key now: what a knight's task lease covers when the task starts, and a VM made (again) with. */
   const keyedProviders = (): string[] => providerViews(ctx.store, ctx.vault).filter((v) => v.hasKey).map((v) => v.id).slice(0, 16);
@@ -2126,7 +2126,7 @@ export function createApp(ctx: AppContext) {
     await inProcess(teamOwner, signal).call("prepareTeamWorkspace", { on: workspace.node, id: workspace.id, quest: armQuest(teammateLabel(member.id)), ...(member.repository ? { repository: member.repository } : {}), providers, ...(models ? { models: [...models] } : {}), ...(keys.length ? { keys } : {}) });
     if (member.repository) {
       // No key in command text or git config. The leased token is read inside the VM; the remote is reset to its public URL.
-      const script = `import json,os,subprocess,sys\nd=json.load(open('/work/.galahad-gateway.json'))\np='/work/repo'\nif os.path.exists(p):\n sys.exit(0 if os.path.isdir(p+'/.git') else 1)\nr=subprocess.run(['git','-c','http.extraHeader=Authorization: Bearer '+d['GALAHAD_TOKEN'],'clone','--quiet',d['GALAHAD_REPO_URL'],p],capture_output=True)\nif r.returncode: print('Repository clone failed through the read-only gateway'); sys.exit(r.returncode)\nsubprocess.run(['git','-C',p,'remote','set-url','origin',sys.argv[1]],check=True)`;
+      const script = `import json,os,subprocess,sys\nd=json.load(open('/work/.invincible-gateway.json'))\np='/work/repo'\nif os.path.exists(p):\n sys.exit(0 if os.path.isdir(p+'/.git') else 1)\nr=subprocess.run(['git','-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'clone','--quiet',d['INVINCIBLE_REPO_URL'],p],capture_output=True)\nif r.returncode: print('Repository clone failed through the read-only gateway'); sys.exit(r.returncode)\nsubprocess.run(['git','-C',p,'remote','set-url','origin',sys.argv[1]],check=True)`;
       const encoded = Buffer.from(script).toString("base64");
       const cloned = await execTeam(member, `python3 -c "import base64; exec(base64.b64decode('${encoded}'))" '${member.repository}'`, 900, signal);
       if (cloned.exitCode !== 0) throw new HttpError(424, "could not clone the knight's repository through its GitHub connector");
@@ -2248,7 +2248,7 @@ export function createApp(ctx: AppContext) {
   async function stopTeamWorker(member: Teammate): Promise<void> {
     const bound = teamMember(member.id).workspace;
     if (!bound) return;
-    const result = await inProcess(teammatePrincipal(member.id), new AbortController().signal).call<import("@galahad/core").ExecResult>("execSandbox", { on: bound.node, id: bound.id, cmd: ["bash", "-lc", agentCleanupCommand()], timeoutSec: 15 });
+    const result = await inProcess(teammatePrincipal(member.id), new AbortController().signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: bound.node, id: bound.id, cmd: ["bash", "-lc", agentCleanupCommand()], timeoutSec: 15 });
     if (result.exitCode !== 0) throw new HttpError(424, "the knight's previous run could not be safely stopped; inspect its VM before resuming");
   }
   /* Whether a worker has a VM is asked of its host, never assumed: one made just before a crash may never have been
@@ -2495,7 +2495,7 @@ export function createApp(ctx: AppContext) {
     teamDesktop: async (input, p, req) => {
       ownerOnly(p);
       const bound = seatOf(input.id).workspace;
-      if (!bound) throw new HttpError(424, input.id === TEAM_GALAHAD ? noVm(input.id) : `this knight has no VM yet: galahad roundtable provision ${input.id} --desktop makes one with a desktop`);
+      if (!bound) throw new HttpError(424, input.id === TEAM_GALAHAD ? noVm(input.id) : `this knight has no VM yet: invincible roundtable provision ${input.id} --desktop makes one with a desktop`);
       const done = await inProcess(p, req.signal).call("teamDesktopOn", { on: bound.node, id: bound.id, quest: armQuest(teammateLabel(input.id)), action: input.action });
       // A click or a key of yours on its desktop while it works is taking it over (#28): once a task.
       if (input.action.do !== "look") steppedIn({ teammate: input.id }, "takeover", "took over its desktop");
@@ -2651,7 +2651,7 @@ export function createApp(ctx: AppContext) {
       try {
         shipment = ShipManifest.parse(JSON.parse(new TextDecoder().decode(ctx.artifacts.read(artifact, "ship/manifest.json").bytes)));
       } catch {
-        throw new HttpError(404, `${artifact} isn't kept on this node, or holds no shipment: ship it from where it is kept (galahad ship ${artifact})`);
+        throw new HttpError(404, `${artifact} isn't kept on this node, or holds no shipment: ship it from where it is kept (invincible ship ${artifact})`);
       }
       const where = githubRepo(shipment.remote);
       if (!where) throw new HttpError(422, `the work was done on ${shipment.remote}, which isn't a github.com repository`);
@@ -2674,7 +2674,7 @@ export function createApp(ctx: AppContext) {
         connectorErrors(() => ctx.connectors.decide(filed.action, true, p.kind === "client" ? p.device : null));
         await ctx.connectors.drain();
         const action = ctx.connectors.actions(10_000).find((a) => a.id === filed.action);
-        if (action?.state !== "done") throw new HttpError(502, `not shipped: ${action?.receipt ?? "it hasn't been sent yet (galahad action ls)"}`);
+        if (action?.state !== "done") throw new HttpError(502, `not shipped: ${action?.receipt ?? "it hasn't been sent yet (invincible action ls)"}`);
         receipt = action.receipt ?? "";
       }
       const url = /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.exec(receipt)?.[0] ?? null;
@@ -2740,7 +2740,7 @@ export function createApp(ctx: AppContext) {
       const done = await useComputer();
       const ran = (async () => {
         const eyes = eyesFor(TEAM_GALAHAD);
-        return execTeam(seat, withGateway(`cd /work && ${eyes ? `export GALAHAD_EYES=${quote(eyes)} && ` : ""}${input.command}`), Math.min(input.timeoutSec ?? 120, TEAM_COMMAND_SECONDS), req.signal);
+        return execTeam(seat, withGateway(`cd /work && ${eyes ? `export INVINCIBLE_EYES=${quote(eyes)} && ` : ""}${input.command}`), Math.min(input.timeoutSec ?? 120, TEAM_COMMAND_SECONDS), req.signal);
       })().finally(done);
       return longRunning(ran);
     },
@@ -2841,7 +2841,7 @@ export function createApp(ctx: AppContext) {
       // Read through your connector for its owner when you added one, else through github's.
       const own = `github-${repo.owner.toLowerCase()}`;
       const connector = installedConnector(ctx.store, own) ? own : "github";
-      if (!installedConnector(ctx.store, connector)) throw new HttpError(424, "add the GitHub connector before a repository can be read (galahad connector add github)");
+      if (!installedConnector(ctx.store, connector)) throw new HttpError(424, "add the GitHub connector before a repository can be read (invincible connector add github)");
       return longRunning(onNode(p, input.on, routes.checkoutRepository.path, input, () => ctx.sandbox!.checkoutRepository(input.id, { connector, ...repo }, input.commit, input.path), { sandbox: input.id }));
     },
     whoami: (_input, p) => ({
@@ -2875,7 +2875,7 @@ export function createApp(ctx: AppContext) {
       // Yours alone: an agent (Galahad among them) proposes, and only you keep what goes with every answer.
       if (p.kind === "arm" || p.kind === "node") throw new HttpError(403, "only you keep a fact about you: he proposes, you keep");
       const fact = [...ctx.store.memoriesTagged(ABOUT_YOU_TAG, 200, false), ...ctx.store.memoriesTagged(ABOUT_YOU_TAG, 200, true)].find((m) => m.id === input.id);
-      if (!fact) throw new HttpError(404, "no such fact about you (galahad about lists them)");
+      if (!fact) throw new HttpError(404, "no such fact about you (invincible about lists them)");
       const text = input.text ?? fact.text;
       guardAgainstSecrets(text);
       const event = ctx.store.remember(ctx.identity, text, { tags: [ABOUT_YOU_TAG], prov: { trust: "owner", ...(p.kind === "client" ? { via: p.device } : {}) } });
@@ -3393,7 +3393,7 @@ export function createApp(ctx: AppContext) {
       // add one, so machines are approved from a terminal on an existing node.
       const pending = ctx.pairing.pending().find((r) => r.invite === input.invite && r.device === input.device);
       if (pending?.kind === "node" && p.kind === "client") {
-        throw new HttpError(403, "approve new machines from a terminal on an existing node (`galahad pairings`)");
+        throw new HttpError(403, "approve new machines from a terminal on an existing node (`invincible pairings`)");
       }
       ctx.pairing.approve(input.invite, input.device);
       return { ok: true };
@@ -3451,7 +3451,7 @@ export function createApp(ctx: AppContext) {
       const { on, attempt, ...request } = input;
       // Model providers only, and only ones this fleet has: the gateway's own scopes were refused by the contract.
       const unknown = ((request.providers ?? []) as string[]).filter((id) => !providerRecord(ctx.store, id));
-      if (unknown.length) throw new HttpError(400, `no model provider ${unknown.join(", ")} on this fleet (galahad providers lists them)`);
+      if (unknown.length) throw new HttpError(400, `no model provider ${unknown.join(", ")} on this fleet (invincible providers lists them)`);
       // An arm's sandboxes all belong to its own quest and are always ephemeral.
       const scoped = p.kind === "arm" ? { ...request, quest: armQuest(p.label!), persistent: false } : request;
       // Creating may pull an image: long-running.
@@ -3662,7 +3662,7 @@ export function createApp(ctx: AppContext) {
     },
     grantArm: (input) => {
       // A grant's arm holds what its tools' routes need and nothing else: another tool is another grant.
-      if (QampGrants.isGrantArm(input.label)) throw new HttpError(400, "a Q-AMP grant's arm holds what its tools need and nothing else: grant again (galahad qamp grant) for other tools");
+      if (QampGrants.isGrantArm(input.label)) throw new HttpError(400, "a Q-AMP grant's arm holds what its tools need and nothing else: grant again (invincible qamp grant) for other tools");
       try {
         return { arm: ctx.arms.grant(input.label, input.add ?? [], input.remove ?? []) };
       } catch (error) {
@@ -3925,7 +3925,7 @@ export function createApp(ctx: AppContext) {
     loopHook: (input) => {
       const loop = loopRecords(ctx.store).find((l) => l.name === input.name);
       if (!loop) throw new HttpError(404, `no loop "${input.name}"`);
-      if (!loop.wakes.some((w) => w.kind === "webhook")) throw new HttpError(409, `loop ${input.name} has no webhook (galahad loop set ${input.name} --wake webhook)`);
+      if (!loop.wakes.some((w) => w.kind === "webhook")) throw new HttpError(409, `loop ${input.name} has no webhook (invincible loop set ${input.name} --wake webhook)`);
       return { path: `/hooks/${loop.name}`, node: ctx.store.device(loop.on)?.name ?? loop.on, secret: mintHookSecret(loop.name) };
     },
     removeLoop: (input) => {
@@ -3979,7 +3979,7 @@ export function createApp(ctx: AppContext) {
     selfAction: () => selfActionView(),
     setSelfAction: (input) => {
       const beats = loopRecords(ctx.store).filter((l) => l.task?.kind === "heartbeat");
-      if (!beats.length) throw new HttpError(409, "there's no heartbeat loop, and self-action runs after it (galahad loop add heartbeat --every 30m --heartbeat)");
+      if (!beats.length) throw new HttpError(409, "there's no heartbeat loop, and self-action runs after it (invincible loop add heartbeat --every 30m --heartbeat)");
       for (const loop of beats) {
         if (loop.task?.kind !== "heartbeat") continue;
         const { selfAction: _was, ...rest } = loop.task;
@@ -4061,7 +4061,7 @@ export function createApp(ctx: AppContext) {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you are told what happened while you were away");
       const store = ctx.team?.store;
       const knights = new Map((store?.teammates() ?? []).map((t) => [t.id, t.name]));
-      // What waits for your answer now, as `galahad status` counts it (notices are said by what they are, not counted).
+      // What waits for your answer now, as `invincible status` counts it (notices are said by what they are, not counted).
       const waiting =
         ctx.connectors.actions().filter((a) => a.state === "waiting").length +
         ctx.vault.requests().length +
@@ -4129,14 +4129,14 @@ export function createApp(ctx: AppContext) {
       // `loop.<name>` is the name the node gives its own loops' quests (his own work: skills.ts): never an agent's.
       if (input.label.startsWith("loop.")) throw new HttpError(400, "names beginning loop. are his own loops'; choose another");
       // `qamp.<id>` is a grant's (qamp-grants.ts), holding what its tools need alone: only a grant makes one.
-      if (QampGrants.isGrantArm(input.label)) throw new HttpError(400, "names beginning qamp. are grants to agents on other machines (galahad qamp grant); choose another");
+      if (QampGrants.isGrantArm(input.label)) throw new HttpError(400, "names beginning qamp. are grants to agents on other machines (invincible qamp grant); choose another");
       try {
         return ctx.arms.mint(input.label, input.scopes);
       } catch (error) {
         throw new HttpError(400, (error as Error).message);
       }
     },
-    // A grant's arm ends with its grant: its bridge is stopped too, as galahad qamp revoke would, wherever arms are listed.
+    // A grant's arm ends with its grant: its bridge is stopped too, as invincible qamp revoke would, wherever arms are listed.
     revokeArm: async (input) => {
       const grant = ctx.qamp.grantOfArm(input.label);
       if (grant) return { revoked: await ctx.qamp.revoke(grant) };
@@ -4154,7 +4154,7 @@ export function createApp(ctx: AppContext) {
       ownerOfQamp(p);
       return qampErrors(async () => {
         if ("all" in input) return { revoked: await ctx.qamp.revokeAll() };
-        if (!(await ctx.qamp.revoke(input.id))) throw new HttpError(404, `no grant ${input.id} on this node (galahad qamp grants lists them)`);
+        if (!(await ctx.qamp.revoke(input.id))) throw new HttpError(404, `no grant ${input.id} on this node (invincible qamp grants lists them)`);
         return { revoked: 1 };
       });
     },
@@ -4162,7 +4162,7 @@ export function createApp(ctx: AppContext) {
       longRunning(
         onNode(p, input.on, routes.buildSandboxImage.path, input.lab ? { lab: true } : input.desktop ? { desktop: true } : {}, async () => {
           const result = input.lab
-            ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/lab`, undefined, "galahad/lab:1")
+            ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/lab`, undefined, "invincible/lab:1")
             : input.desktop
               ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/desktop`, undefined, DESKTOP_IMAGE)
               : await ctx.sandbox!.build(ctx.sandboxContext!);
@@ -4301,7 +4301,7 @@ export function createApp(ctx: AppContext) {
     pushUnsubscribe: (input, p) => {
       ownerOfNotify(p);
       const target = notifyTarget(input.device, p);
-      if (!target) throw new HttpError(400, "name the device: galahad notify off <device>");
+      if (!target) throw new HttpError(400, "name the device: invincible notify off <device>");
       return { removed: ctx.notify.unsubscribe(target) };
     },
     notifyTest: (input, p) => {

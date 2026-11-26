@@ -1,7 +1,7 @@
 // The trial suite's problems for N seeds, with their exact answers, as JSON:
 // the input to scripts/trials-crosscheck.py, which re-solves each one by an
 // independent method in the Lab.   bun scripts/trials-cases.ts 25 > cases.json
-import { ENGINEERING_SUITE, pose } from "../packages/brain/src/index.ts";
+import { ENGINEERING_SUITE, pose } from "../packages/models/src/index.ts";
 
 const seeds = Number(process.argv[2] ?? 20);
 const cases = ENGINEERING_SUITE.flatMap((problem) =>

@@ -1,10 +1,10 @@
-import { QAMP_TOOLS, QAMP_TTL, QampGrantInput, type QampGrantMade, type QampGrantView } from "@galahad/core";
+import { QAMP_TOOLS, QAMP_TTL, QampGrantInput, type QampGrantMade, type QampGrantView } from "@invincible/core";
 import type { Api } from "./loop-cli.ts";
 
 /*
- * `galahad qamp`: Galahad's tools for an agent on another of your machines, over Q-AMP (qamp-grants.ts). Thin: the node
+ * `invincible qamp`: Galahad's tools for an agent on another of your machines, over Q-AMP (qamp-grants.ts). Thin: the node
  * makes, keeps and ends each grant; this shapes what you type and prints what the agent's machine runs, as
- * `galahad mcp install` prints a client's config.
+ * `invincible mcp install` prints a client's config.
  */
 
 type Flags = Record<string, string | boolean | (string | boolean)[] | undefined>;
@@ -13,8 +13,8 @@ const tty = process.stdout.isTTY;
 const dim = (s: string) => (tty ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (tty ? `\x1b[1m${s}\x1b[0m` : s);
 
-const GRANT = `galahad qamp grant <did:key:z6Mk…> [--tools ${QAMP_TOOLS.join(",")}] [--ttl 1h]`;
-const USAGE = `usage: ${GRANT} | galahad qamp grants | galahad qamp revoke <id>|--all`;
+const GRANT = `invincible qamp grant <did:key:z6Mk…> [--tools ${QAMP_TOOLS.join(",")}] [--ttl 1h]`;
+const USAGE = `usage: ${GRANT} | invincible qamp grants | invincible qamp revoke <id>|--all`;
 
 /** `--ttl 90m`, `1h`, `24h`, `1d`, `45s`, or plain seconds: in seconds. Anything else: null. */
 export function ttlSeconds(text: string): number | null {
@@ -56,8 +56,8 @@ export async function qampCommand(api: Api, sub: string | undefined, rest: strin
       console.log(`  grant   ${grant.id} · its arm ${grant.label} holds ${grant.scopes.join(", ")}`);
       console.log(`  bridge  ${grant.url} · that key alone may connect\n`);
       console.log(`On the agent's machine, with qamp ${dim("0.1.0")} and the key you named (the file qamp keygen wrote):\n\n  ${command.join(" ")}\n`);
-      console.log(`As an MCP server (Claude Code, OpenCode, Codex…), the same command:\n\n${JSON.stringify({ mcpServers: { galahad: { command: "qamp", args: command.slice(1) } } }, null, 2)}\n`);
-      console.log(dim(`The chain (qdt1.…) is useless without the agent's private key; keep it out of chats all the same. The grant ends by itself; galahad qamp revoke ${grant.id} ends it now.`));
+      console.log(`As an MCP server (Claude Code, OpenCode, Codex…), the same command:\n\n${JSON.stringify({ mcpServers: { invincible: { command: "qamp", args: command.slice(1) } } }, null, 2)}\n`);
+      console.log(dim(`The chain (qdt1.…) is useless without the agent's private key; keep it out of chats all the same. The grant ends by itself; invincible qamp revoke ${grant.id} ends it now.`));
       if (/@(127\.|\[::1\])/.test(grant.url)) console.log(dim("This node listens on loopback only (it advertises no tailnet address): only an agent on this machine can reach it."));
       return;
     }
@@ -84,7 +84,7 @@ export async function qampCommand(api: Api, sub: string | undefined, rest: strin
         return;
       }
       const id = rest[0];
-      if (!id || rest.length > 1) throw new Error("usage: galahad qamp revoke <id>|--all   (galahad qamp grants lists them)");
+      if (!id || rest.length > 1) throw new Error("usage: invincible qamp revoke <id>|--all   (invincible qamp grants lists them)");
       await api.call("qampRevoke", { id });
       console.log(`Ended ${id}: its arm is deleted (the agent's next call is refused) and its bridge stopped.`);
       return;

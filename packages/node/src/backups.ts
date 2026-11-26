@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
  * A copy is SQLite's own (VACUUM INTO, from a connection that only reads), owner-only, named `<db>-nightly-<day>.db`.
  * Seven days are kept, and a Sunday's for four weeks; nothing else in the folder is ever touched (a copy you made by
  * hand stays yours). The archive's files, the uploads and the node's own keys are not copied: the first two are kept
- * whole on disk already, and a key belongs in one place. GALAHAD_BACKUPS=off turns it off.
+ * whole on disk already, and a key belongs in one place. INVINCIBLE_BACKUPS=off turns it off.
  */
 
 /** The databases a node keeps in its home. */

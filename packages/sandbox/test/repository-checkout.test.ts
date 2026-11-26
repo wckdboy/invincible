@@ -42,7 +42,7 @@ function trialHost(opts: { labels?: Record<string, string>; status?: string; fet
     runner: async (args) => {
       commands.push(args);
       if (args[0] === "ps") return { code: 0, stdout: ID, stderr: "" };
-      if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: "galahad/sandbox:1" }, State: { Status: opts.status ?? "running" } }]), stderr: "" };
+      if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: "invincible/sandbox:1" }, State: { Status: opts.status ?? "running" } }]), stderr: "" };
       if (args[0] === "exec" && args.includes("python3") && args.at(-1) !== BASE) {
         events.push("write");
         return opts.failWrite ? { code: 1, stdout: "", stderr: "no space left" } : { code: 0, stdout: "", stderr: "" };
@@ -64,16 +64,16 @@ describe("a repository checked out in a trial's sandbox", () => {
     // One lease, for the one repository: short, and good for a fetch's few requests.
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["git:github:example:widgets"], ttlMinutes: 15, maxRequests: 100 }]);
     expect(f.events).toEqual(["mint", "write", "fetch", "revoke:test-only-checkout-hash-1"]);
-    // Written inside the sandbox as the knights' lease is: JSON in /work/.galahad-gateway.json, never a shell's configuration.
+    // Written inside the sandbox as the knights' lease is: JSON in /work/.invincible-gateway.json, never a shell's configuration.
     const write = f.commands.find((args) => args[0] === "exec" && args.at(-1) !== BASE)!;
     expect(write.slice(0, 5)).toEqual(["exec", "--interactive", "--workdir", "/work", containerName(ID)]);
     const env = JSON.parse(Buffer.from(write.at(-1)!, "base64").toString());
-    expect(env).toEqual({ GALAHAD_GATEWAY: "http://172.31.250.1:7779/gw", GALAHAD_TOKEN: lease(1), GALAHAD_REPO_URL: "http://172.31.250.1:7779/git/github/example/widgets.git" });
+    expect(env).toEqual({ INVINCIBLE_GATEWAY: "http://172.31.250.1:7402/gw", INVINCIBLE_TOKEN: lease(1), INVINCIBLE_REPO_URL: "http://172.31.250.1:7402/git/github/example/widgets.git" });
     // The fetch names the place and the commit, and reads the lease itself: the token is in no command of it.
     const fetch = f.commands.find((args) => args[0] === "exec" && args.at(-1) === BASE)!;
     expect(fetch.slice(-2)).toEqual([ROOT, BASE]);
     expect(fetch.join(" ")).not.toContain(lease(1));
-    expect(fetch.join(" ")).toContain("/work/.galahad-gateway.json");
+    expect(fetch.join(" ")).toContain("/work/.invincible-gateway.json");
     // The ledger says what was read, where; never the lease or its hash.
     expect(f.ledger).toEqual([expect.objectContaining({ class: "read", resource: "sandbox.checkout", target: containerName(ID), quest: "g-mwk1abc", verdict: "allow" })]);
     expect(f.ledger[0]!.detail).toContain("example/widgets");
@@ -127,7 +127,7 @@ describe("the checkout, really run", () => {
   const tools = have(["python3", "--version"]) && have(["git", "--version"]);
 
   function upstream() {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-checkout-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-checkout-"));
     const src = join(dir, "widgets");
     mkdirSync(src);
     const git = (...a: string[]) => Bun.spawnSync(["git", "-C", src, "-c", "user.email=t@example.invalid", "-c", "user.name=t", ...a]).stdout.toString().trim();
@@ -138,9 +138,9 @@ describe("the checkout, really run", () => {
       git("commit", "-qm", `commit ${n}`);
     }
     const leasePath = join(dir, "lease.json");
-    writeFileSync(leasePath, JSON.stringify({ GALAHAD_TOKEN: "test-only-token", GALAHAD_REPO_URL: `file://${src}` }));
-    // (In a sandbox the lease is /work/.galahad-gateway.json: here it is a file of the test's own.)
-    const script = CHECKOUT_SCRIPT.replace("'/work/.galahad-gateway.json'", JSON.stringify(leasePath));
+    writeFileSync(leasePath, JSON.stringify({ INVINCIBLE_TOKEN: "test-only-token", INVINCIBLE_REPO_URL: `file://${src}` }));
+    // (In a sandbox the lease is /work/.invincible-gateway.json: here it is a file of the test's own.)
+    const script = CHECKOUT_SCRIPT.replace("'/work/.invincible-gateway.json'", JSON.stringify(leasePath));
     const run = (root: string, commit: string) => Bun.spawnSync(["python3", "-c", script, root, commit]);
     return { dir, src, leasePath, run, base: git("rev-parse", "HEAD~1"), later: git("rev-parse", "HEAD") };
   }

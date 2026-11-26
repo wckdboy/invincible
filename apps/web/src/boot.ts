@@ -5,11 +5,11 @@
  */
 try {
   const root = document.documentElement;
-  const theme = localStorage.getItem("galahad:theme");
+  const theme = localStorage.getItem("invincible:theme");
   if (theme === "light" || theme === "dark") root.dataset.theme = theme;
-  const motion = localStorage.getItem("galahad:motion");
+  const motion = localStorage.getItem("invincible:motion");
   if (motion === "reduce" || motion === "full") root.dataset.motion = motion;
-  if (localStorage.getItem("galahad:sidebar") === "collapsed") root.dataset.sidebar = "collapsed";
+  if (localStorage.getItem("invincible:sidebar") === "collapsed") root.dataset.sidebar = "collapsed";
 } catch {
   /* storage blocked: system defaults apply */
 }

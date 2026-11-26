@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ScreenAction } from "@galahad/core";
+import type { ScreenAction } from "@invincible/core";
 import { type HelperRun, inputRefused, MacScreen, ScreenError, screenArgs, screenDid, screenHelper } from "../src/mac-screen.ts";
 
 /*
@@ -24,7 +24,7 @@ describe("the helper", () => {
     expect(screenArgs({ do: "scroll", direction: "down" })).toEqual(["scroll", "down", "3"]);
     expect(screenArgs({ do: "type", text: "héllo; rm -rf ~" })).toEqual(["type", Buffer.from("héllo; rm -rf ~", "utf8").toString("base64")]);
     expect(screenArgs({ do: "key", keys: ["super+space", "Return"] })).toEqual(["key", "super+space", "Return"]);
-    expect(screenArgs({ do: "open", address: "https://galahad.sh" })).toEqual(["open", "https://galahad.sh"]);
+    expect(screenArgs({ do: "open", address: "https://invincible.sh" })).toEqual(["open", "https://invincible.sh"]);
     expect(screenArgs({ do: "app", name: "Safari" })).toEqual(["open", "Safari"]);
   });
 

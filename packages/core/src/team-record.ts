@@ -2,7 +2,7 @@ import { costOf, type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel 
 
 /*
  * What a knight's task came to, in words: the same from the same record at a terminal and in the
- * app. No dependencies (no zod): the PWA imports this directly (@galahad/core/team-record).
+ * app. No dependencies (no zod): the PWA imports this directly (@invincible/core/team-record).
  */
 
 /** A task's record as this reads it (a TeamTaskRecord has all of this). */

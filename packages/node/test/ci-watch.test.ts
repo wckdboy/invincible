@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { type ActionView, newNodeIdentity } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ActionView, newNodeIdentity } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { CI_NO_CHECKS_MS, CI_WATCH_FOR_MS, CiWatch, type CiWatchOptions, ciVerdict, type ShippedPull, shippedPulls } from "../src/ci-watch.ts";
 
 /* After you ship: the node that shipped follows the pull request's checks, and a failure waits in your Inbox. */
@@ -32,9 +32,9 @@ describe("which pull requests are followed", () => {
     id: "a_ship1",
     connector: "github",
     tool: "ship",
-    args: { owner: "amiriteorg", repo: "galahad", branch: "galahad/units", artifact: "art_x", title: "Units" },
+    args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/units", artifact: "art_x", title: "Units" },
     class: "outward",
-    target: "POST /repos/amiriteorg/galahad/pulls (ship)",
+    target: "POST /repos/amiriteorg/invincible/pulls (ship)",
     by: "galahad",
     why: null,
     node: "n_here",
@@ -44,7 +44,7 @@ describe("which pull requests are followed", () => {
     sendBy: null,
     decidedVia: null,
     order: null,
-    receipt: "pull request #12: https://github.com/amiriteorg/galahad/pull/12 (3 files on galahad/units into main, commit 4f7a1c2e9b8d)",
+    receipt: "pull request #12: https://github.com/amiriteorg/invincible/pull/12 (3 files on invincible/units into main, commit 4f7a1c2e9b8d)",
     note: null,
     self: false,
     ...over,
@@ -52,17 +52,17 @@ describe("which pull requests are followed", () => {
   const at = () => 1_000;
 
   test("each ship this node sent that went through, with its repository, branch and pull request", () => {
-    expect(shippedPulls([ship()], "n_here", at)).toEqual([{ action: "a_ship1", connector: "github", owner: "amiriteorg", repo: "galahad", branch: "galahad/units", artifact: "art_x", pr: 12, at: 1_000 }]);
+    expect(shippedPulls([ship()], "n_here", at)).toEqual([{ action: "a_ship1", connector: "github", owner: "amiriteorg", repo: "invincible", branch: "invincible/units", artifact: "art_x", pr: 12, at: 1_000 }]);
     // Through an owner's own GitHub connector too: followed through that one.
     expect(shippedPulls([ship({ connector: "github-amiriteorg" })], "n_here", at)).toEqual([expect.objectContaining({ connector: "github-amiriteorg" })]);
   });
 
   test("a fix pushed onto a shipped branch is the same pull request, followed from the push", () => {
     const when: Record<string, number> = { a_ship1: 1_000, a_fix1: 9_000 };
-    const fix = ship({ id: "a_fix1", tool: "ship.update", args: { owner: "amiriteorg", repo: "galahad", branch: "galahad/units", artifact: "art_fix", title: "Fix" }, receipt: "1 file pushed onto galahad/units, commit 9f2c1d0e4b7a: pull request #12 updated" });
-    expect(shippedPulls([fix, ship()], "n_here", (id) => when[id] ?? null)).toEqual([{ action: "a_ship1", connector: "github", owner: "amiriteorg", repo: "galahad", branch: "galahad/units", artifact: "art_x", pr: 12, at: 9_000 }]);
+    const fix = ship({ id: "a_fix1", tool: "ship.update", args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/units", artifact: "art_fix", title: "Fix" }, receipt: "1 file pushed onto invincible/units, commit 9f2c1d0e4b7a: pull request #12 updated" });
+    expect(shippedPulls([fix, ship()], "n_here", (id) => when[id] ?? null)).toEqual([{ action: "a_ship1", connector: "github", owner: "amiriteorg", repo: "invincible", branch: "invincible/units", artifact: "art_x", pr: 12, at: 9_000 }]);
     // Another branch is another pull request.
-    expect(shippedPulls([ship(), ship({ id: "a_ship2", args: { owner: "amiriteorg", repo: "galahad", branch: "galahad/other", artifact: "art_y", title: "Other" } })], "n_here", at)).toHaveLength(2);
+    expect(shippedPulls([ship(), ship({ id: "a_ship2", args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/other", artifact: "art_y", title: "Other" } })], "n_here", at)).toHaveLength(2);
   });
 
   test("not another node's, not one that failed or waits for you, not any other call", () => {
@@ -75,7 +75,7 @@ describe("which pull requests are followed", () => {
 describe("following the checks", () => {
   function harness(shipped: ShippedPull[], back?: CiWatchOptions["back"], reviews?: CiWatchOptions["reviews"]) {
     const identity = newNodeIdentity();
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     foundFleet(store, identity, { fleetName: "camelot", nodeName: "here" });
     let now = 10 * 60_000;
     let checks: unknown = { total_count: 0, check_runs: [] };
@@ -104,7 +104,7 @@ describe("following the checks", () => {
     const notices = () => store.lwwPrefix<{ title: string; body: string; severity: string; source: string } | null>("notice:ci:").map((entry) => entry.value).filter(Boolean);
     return { store, watch, calls, through, logs, notices, github, set: (next: unknown) => (checks = next), annotate: (id: number, list: unknown) => (annotations[id] = list), at: (ms: number) => (now = ms) };
   }
-  const pull: ShippedPull = { action: "a_ship1", connector: "github", owner: "amiriteorg", repo: "galahad", branch: "galahad/units", artifact: "art_x", pr: 12, at: 5 * 60_000 };
+  const pull: ShippedPull = { action: "a_ship1", connector: "github", owner: "amiriteorg", repo: "invincible", branch: "invincible/units", artifact: "art_x", pr: 12, at: 5 * 60_000 };
   const failed = (id: number, name: string, sha: string) => ({ ...run(id, name, "completed", "failure"), head_sha: sha });
 
   test("what became of a failure is said in its notice, after the count and before what CI reported; the commit and what failed are what decides it", async () => {
@@ -161,14 +161,14 @@ describe("following the checks", () => {
     wanted = true;
     await h.watch.tick();
     await h.watch.tick();
-    expect(h.calls.filter((c) => c.startsWith("pull.reviews"))).toEqual([`pull.reviews {"owner":"amiriteorg","repo":"galahad","number":12,"per_page":100}`]);
+    expect(h.calls.filter((c) => c.startsWith("pull.reviews"))).toEqual([`pull.reviews {"owner":"amiriteorg","repo":"invincible","number":12,"per_page":100}`]);
     const old = harness([pull], undefined, { wanted: () => true, asked: () => {} });
     old.github.refuse = "pull.reviews";
     await old.watch.tick();
     old.at(10 * 60_000 + 15 * 60_000);
     await old.watch.tick();
     expect(old.calls.filter((c) => c.startsWith("pull.reviews"))).toHaveLength(1);
-    expect(old.logs.filter((line) => line.includes("can't read reviews yet"))).toEqual(["ci: github can't read reviews yet; add it again to have reviews followed (galahad connector add github)"]);
+    expect(old.logs.filter((line) => line.includes("can't read reviews yet"))).toEqual(["ci: github can't read reviews yet; add it again to have reviews followed (invincible connector add github)"]);
   });
 
   test("a failure is told however its giving back goes: without the commit nothing is asked, and a giving back that breaks is logged", async () => {
@@ -184,7 +184,7 @@ describe("following the checks", () => {
     broken.set({ total_count: 1, check_runs: [failed(7, "test", "b".repeat(40))] });
     await broken.watch.tick();
     expect(broken.notices()[0]!.body).toBe("1 of 1 checks failed: test.");
-    expect(broken.logs).toContain("ci: amiriteorg/galahad galahad/units: not given back (the team store is closed)");
+    expect(broken.logs).toContain("ci: amiriteorg/invincible invincible/units: not given back (the team store is closed)");
   });
 
   test("a failure waits in the Inbox, naming the pull request, each failing check, and what it reported against the code", async () => {
@@ -192,12 +192,12 @@ describe("following the checks", () => {
     h.set({ total_count: 2, check_runs: [run(7, "test", "in_progress"), run(8, "lint", "completed", "success")] });
     await h.watch.tick();
     expect(h.notices()).toEqual([]);
-    expect(h.calls).toEqual([`checks {"owner":"amiriteorg","repo":"galahad","ref":"galahad/units","per_page":100}`]);
+    expect(h.calls).toEqual([`checks {"owner":"amiriteorg","repo":"invincible","ref":"invincible/units","per_page":100}`]);
     h.set({ total_count: 2, check_runs: [run(7, "test", "completed", "failure"), run(8, "lint", "completed", "success")] });
     h.annotate(7, [{ path: "src/importer.ts", start_line: 14, annotation_level: "failure", message: "Expected 3, received 2\n  at importer.test.ts:9" }]);
     await h.watch.tick();
     expect(h.notices()).toEqual([
-      expect.objectContaining({ title: "CI failed on amiriteorg/galahad#12", severity: "warn", source: "ci", body: "1 of 2 checks failed: test.\nsrc/importer.ts:14 Expected 3, received 2" }),
+      expect.objectContaining({ title: "CI failed on amiriteorg/invincible#12", severity: "warn", source: "ci", body: "1 of 2 checks failed: test.\nsrc/importer.ts:14 Expected 3, received 2" }),
     ]);
     // Said once: the same failure seen again writes nothing more.
     const events = h.store.lwwPrefix("notice:ci:")[0]!.hlc;
@@ -235,7 +235,7 @@ describe("following the checks", () => {
   test("a GitHub connector installed before it could read checks is said once, not every few minutes", async () => {
     const logs: string[] = [];
     const identity = newNodeIdentity();
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     foundFleet(store, identity, { fleetName: "camelot", nodeName: "here" });
     let asked = 0;
     const watch = new CiWatch({
@@ -268,7 +268,7 @@ describe("following the checks", () => {
 
   test("a pull request that conflicts with its base is noticed once per base commit, each pull request of its own", async () => {
     const asked: { action: string; base: string }[] = [];
-    const other: ShippedPull = { ...pull, action: "a_ship2", branch: "galahad/other", artifact: "art_y", pr: 13 };
+    const other: ShippedPull = { ...pull, action: "a_ship2", branch: "invincible/other", artifact: "art_y", pr: 13 };
     const h = harness([pull, other], (shippedPull, failure) => {
       asked.push({ action: shippedPull.action, base: failure.conflict! });
       return { said: "Given back to @kay.", fixing: true };
@@ -307,10 +307,10 @@ describe("following the checks", () => {
     await h.watch.tick();
     expect(conflicts).toEqual([]);
     // Reviews were still read on the same look: a connector that can't read a pull request isn't marked against reviews.
-    expect(h.calls.filter((c) => c.startsWith("pull.reviews"))).toEqual([`pull.reviews {"owner":"amiriteorg","repo":"galahad","number":12,"per_page":100}`]);
+    expect(h.calls.filter((c) => c.startsWith("pull.reviews"))).toEqual([`pull.reviews {"owner":"amiriteorg","repo":"invincible","number":12,"per_page":100}`]);
     expect(reviewsAsked).toEqual([7]);
-    expect(h.calls.filter((c) => c.startsWith("pull "))).toEqual([`pull {"owner":"amiriteorg","repo":"galahad","number":12}`]);
-    expect(h.logs.filter((line) => line.includes("can't read"))).toEqual(["ci: github can't read a pull request yet; add it again to have conflicts followed (galahad connector add github)"]);
+    expect(h.calls.filter((c) => c.startsWith("pull "))).toEqual([`pull {"owner":"amiriteorg","repo":"invincible","number":12}`]);
+    expect(h.logs.filter((line) => line.includes("can't read"))).toEqual(["ci: github can't read a pull request yet; add it again to have conflicts followed (invincible connector add github)"]);
     // A later look doesn't try the pull read again.
     h.at(10 * 60_000 + 15 * 60_000);
     await h.watch.tick();

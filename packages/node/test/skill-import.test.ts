@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { AGENT_SKILL_STEP, HlcClock, newNodeIdentity } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { AGENT_SKILL_STEP, HlcClock, newNodeIdentity } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { fetchAgentSkill, RAW_GITHUB, skillAddress, SkillImportError } from "../src/skill-import.ts";
 import { SkillError, SkillsService } from "../src/skills.ts";
 
@@ -89,7 +89,7 @@ describe("taking one in", () => {
 
   test("the skill it makes is untrusted, by where it came from, and waits: no model is given it before you approve it, then as a note with its instructions", async () => {
     const identity = newNodeIdentity();
-    const store = new MindStore(":memory:", new HlcClock(() => Date.UTC(2026, 10, 20, 3)));
+    const store = new LedgerStore(":memory:", new HlcClock(() => Date.UTC(2026, 10, 20, 3)));
     foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
     const skills = new SkillsService({ store, identity, log: () => {}, ledger: () => {}, role: () => null, ask: async () => ({ text: "NONE", model: "x" }), now: () => Date.UTC(2026, 10, 20, 3) });
     const found = await fetchAgentSkill("https://github.com/anthropics/skills/tree/main/skills/pdf", { fetch: stand(() => new Response(SKILL_MD)).fetch });

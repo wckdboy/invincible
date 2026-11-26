@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, newNodeIdentity } from "@galahad/core";
-import { enrollDevice, foundFleet, MindStore } from "@galahad/mind";
+import { b64u, newNodeIdentity } from "@invincible/core";
+import { enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
 import { assess, type HeartbeatSnapshot, loopNotice, OFFLINE_AFTER_MS, readChecklistReply, reconcile } from "../src/heartbeat.ts";
 
 const NOW = Date.parse("2026-11-09T12:00:00Z");
@@ -160,7 +160,7 @@ describe("notices follow the findings", () => {
   function setup() {
     const a = newNodeIdentity();
     const b = newNodeIdentity();
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     foundFleet(store, a, { fleetName: "camelot", nodeName: "ultra" });
     enrollDevice(store, a, { device: b.id, name: "laptop", kind: "node", box: b64u(b.boxPublic) });
     return { a, b, store };

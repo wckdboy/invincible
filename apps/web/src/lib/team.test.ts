@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamTask, Teammate } from "@galahad/core/team";
-import { TeamHarness } from "@galahad/core/team";
+import type { TeamTask, Teammate } from "@invincible/core/team";
+import { TeamHarness } from "@invincible/core/team";
 import { engramLine, HANDLE_PATTERN, HARNESS, harnessNote, KNIGHT_MODELS_MAX, knightModelChoices, knightModelLabel, knightModelsLine, knightRoleLine, knightWorksOn, knightRoles, landingHash, removalPlan, takenHandles, taskDependencies, teamHash, teamLocation, teamSpeaker, teammateId, teammateMaker, teammateState, toggleKnightModel } from "./team.ts";
 
 describe("the role a knight works on", () => {
@@ -111,7 +111,7 @@ describe("team navigation and identity", () => {
     expect(teamSpeaker({ speaker: "galahad", speakerName: "Galahad" }, [])).toBe("Galahad");
     // What the node notes in a conversation itself is the Roundtable's.
     expect(teamSpeaker({ speaker: "system", speakerName: "system" }, [])).toBe("The Roundtable");
-    expect(teamSpeaker({ speaker: "galahad", speakerName: "" }, [{ ...person, id: "galahad-2", name: "Not him" }])).toBe("Galahad");
+    expect(teamSpeaker({ speaker: "galahad", speakerName: "" }, [{ ...person, id: "invincible-2", name: "Not him" }])).toBe("Galahad");
     expect(teammateMaker(person, [])).toBeNull();
     expect(teammateMaker({ ...person, createdBy: "owner" }, [])).toBeNull();
     expect(teammateMaker({ ...person, createdBy: "galahad" }, [])).toBe("Galahad");

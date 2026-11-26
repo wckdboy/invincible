@@ -2,8 +2,8 @@ import type { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { QAMP_ARM_PREFIX, QAMP_PORTS, QAMP_TOOLS, QampDid, type QampGrantMade, type QampGrantView, type QampTool, qampArm, type Scope } from "@galahad/core";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+import { QAMP_ARM_PREFIX, QAMP_PORTS, QAMP_TOOLS, QampDid, type QampGrantMade, type QampGrantView, type QampTool, qampArm, type Scope } from "@invincible/core";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import { ARM_FORBIDDEN_SCOPES, type ArmTokens } from "./arms.ts";
 import type { Home } from "./home.ts";
 import { type GalahadTool, TOOLS, toolScopes } from "./tools.ts";
@@ -21,7 +21,7 @@ import { type GalahadTool, TOOLS, toolScopes } from "./tools.ts";
  *      does. It is useless without the agent's private key. The bridge key is made once, here, and is never the
  *      node's own key, which stays in the daemon.
  *   3. a bridge, `qamp serve --mcp-stdio`, on this node's tailnet address (never 0.0.0.0) and a port of its own. It
- *      lets the agent's key alone connect, and serves the granted tools alone, from `galahad mcp --tools`, which offers
+ *      lets the agent's key alone connect, and serves the granted tools alone, from `invincible mcp --tools`, which offers
  *      them alone too.
  *
  * When the grant ends (its time is up, or you revoke it) its arm is deleted first, so the agent's very next call is
@@ -219,10 +219,10 @@ export interface QampGrantsOptions {
   home: Home;
   /** The address bridges listen on and agents dial: this node's tailnet address (what it advertises). */
   address: () => string;
-  /** This node's loopback port: where each bridge's `galahad mcp` reaches it. */
+  /** This node's loopback port: where each bridge's `invincible mcp` reaches it. */
   port: number;
   runner: QampRunner;
-  /** The MCP server a bridge serves: `galahad mcp --arm <label> --tools a,b --home <home>`, as a command. */
+  /** The MCP server a bridge serves: `invincible mcp --arm <label> --tools a,b --home <home>`, as a command. */
   mcpCommand: (label: string, tools: readonly string[]) => string[];
   ledger: (entry: LedgerEntryInput) => void;
   log: (message: string) => void;
@@ -342,7 +342,7 @@ export class QampGrants {
     for (let port = this.ports.first; port <= this.ports.last; port++) {
       if (!taken.has(port) && (await this.portFree(address, port))) return port;
     }
-    throw new QampGrantError(409, `every Q-AMP port of this node is in use (${this.ports.first}–${this.ports.last}, one a grant): revoke a grant first (galahad qamp grants)`);
+    throw new QampGrantError(409, `every Q-AMP port of this node is in use (${this.ports.first}–${this.ports.last}, one a grant): revoke a grant first (invincible qamp grants)`);
   }
 
   /**
@@ -360,7 +360,7 @@ export class QampGrants {
       const lacking = scopes.filter((s) => !by.scopes.includes(s));
       if (lacking.length) throw new QampGrantError(403, `this device doesn't hold ${lacking.join(", ")}, which those tools need`);
       const address = this.opts.address();
-      if (unspecified(address)) throw new QampGrantError(424, "this node has no address to give a bridge but every interface's, and a bridge never listens on those: set its tailnet address (GALAHAD_ADVERTISE)");
+      if (unspecified(address)) throw new QampGrantError(424, "this node has no address to give a bridge but every interface's, and a bridge never listens on those: set its tailnet address (INVINCIBLE_ADVERTISE)");
       const bridge = await this.bridgeKey();
       const port = await this.freePort(address);
       let id = randomBytes(5).toString("hex");
@@ -423,7 +423,7 @@ export class QampGrants {
       "--", ...this.opts.mcpCommand(label, tools),
     ];
     // What its MCP server needs to reach this node, and nothing else of the daemon's environment.
-    const env: Record<string, string> = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? this.opts.home.dir, GALAHAD_HOME: this.opts.home.dir, GALAHAD_PORT: String(this.opts.port) };
+    const env: Record<string, string> = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? this.opts.home.dir, INVINCIBLE_HOME: this.opts.home.dir, INVINCIBLE_PORT: String(this.opts.port) };
     if (process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR;
     let proc: QampProcess;
     try {

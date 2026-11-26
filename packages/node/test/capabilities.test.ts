@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { preset } from "@galahad/brain";
-import { CONTAINER_IMAGES, CONTAINER_UNMADE } from "@galahad/sandbox";
+import { preset } from "@invincible/models";
+import { CONTAINER_IMAGES, CONTAINER_UNMADE } from "@invincible/sandbox";
 import { type Capabilities, isAlwaysOn, RUNTIME_PROBES, sandboxHostOf, servedOriginFrom } from "../src/capabilities.ts";
 import { refreshCapabilities } from "../src/daemon.ts";
 
@@ -85,20 +85,20 @@ describe("where the PWA is published on the tailnet", () => {
   // What `tailscale serve status --json` says on a server that keeps 443 for something else.
   const ULTRA = JSON.stringify({
     TCP: { "8443": { HTTPS: true } },
-    Web: { "ultra.example.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:7778" } } } },
+    Web: { "ultra.example.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:7401" } } } },
   });
 
   test("the port tailscale serves this node's proxy on, not the 443 another service may hold", () => {
-    expect(servedOriginFrom(ULTRA, 7778)).toBe("https://ultra.example.ts.net:8443");
+    expect(servedOriginFrom(ULTRA, 7401)).toBe("https://ultra.example.ts.net:8443");
   });
 
   test("443 is left out of the origin; another port's handler, or none, isn't this node's", () => {
-    const laptop = JSON.stringify({ Web: { "laptop.example.ts.net:443": { Handlers: { "/": { Proxy: "http://localhost:7778/" } } } } });
-    expect(servedOriginFrom(laptop, 7778)).toBe("https://laptop.example.ts.net");
+    const laptop = JSON.stringify({ Web: { "laptop.example.ts.net:443": { Handlers: { "/": { Proxy: "http://localhost:7401/" } } } } });
+    expect(servedOriginFrom(laptop, 7401)).toBe("https://laptop.example.ts.net");
     expect(servedOriginFrom(ULTRA, 9999)).toBeNull();
-    expect(servedOriginFrom(JSON.stringify({ Web: { "x.example.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:77781" } } } } }), 7778)).toBeNull();
-    expect(servedOriginFrom("{}", 7778)).toBeNull();
-    expect(servedOriginFrom("not json", 7778)).toBeNull();
+    expect(servedOriginFrom(JSON.stringify({ Web: { "x.example.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:77781" } } } } }), 7401)).toBeNull();
+    expect(servedOriginFrom("{}", 7401)).toBeNull();
+    expect(servedOriginFrom("not json", 7401)).toBeNull();
   });
 });
 

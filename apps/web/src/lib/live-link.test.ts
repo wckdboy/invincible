@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { LiveEvent, LiveTopic } from "@galahad/core/live";
+import type { LiveEvent, LiveTopic } from "@invincible/core/live";
 import { type FirstRead, Followers, GAP_MS, HELLO_WAIT_MS, type LinkHandlers, liveLink, RETRY_FIRST_MS, RETRY_MAX_MS, SILENT_MS, STEADY_MS } from "./live-link.ts";
 
 /*

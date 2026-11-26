@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import http2 from "node:http2";
-import { fromB64u, type NotifyPayload, utf8 } from "@galahad/core";
+import { fromB64u, type NotifyPayload, utf8 } from "@invincible/core";
 import { APPLE_TOKEN_MS, appleEndpoint, type ApplePushKey, ApplePushSender, appleTarget, readApplePushKey, storedApplePushKey, applePayload } from "../src/apns-send.ts";
 
 /*
@@ -76,7 +76,7 @@ describe("a notification to the iPhone app", () => {
     expect(await signedByKey(jwt)).toBe(true);
     expect(request!.body).toEqual({
       aps: { alert: { title: PAYLOAD.title, body: PAYLOAD.body }, sound: "default", "interruption-level": "active", "thread-id": "approval" },
-      galahad: { v: 1, kind: "approval", open: "inbox", tag: "approval-1" },
+      invincible: { v: 1, kind: "approval", open: "inbox", tag: "approval-1" },
     });
     apple.close();
   });
@@ -97,7 +97,7 @@ describe("a notification to the iPhone app", () => {
     const action = "a_1234567890123456789012";
     expect(JSON.parse(applePayload({ ...PAYLOAD, action, approvable: true }))).toEqual({
       aps: { alert: { title: PAYLOAD.title, body: PAYLOAD.body }, sound: "default", "interruption-level": "active", "thread-id": "approval", category: "approval" },
-      galahad: { v: 1, kind: "approval", open: "inbox", tag: "approval-1", action },
+      invincible: { v: 1, kind: "approval", open: "inbox", tag: "approval-1", action },
     });
     expect(JSON.parse(applePayload({ ...PAYLOAD, action, approvable: false })).aps.category).toBe("approval-decline");
     expect(JSON.parse(applePayload(PAYLOAD)).aps.category).toBeUndefined();
@@ -174,7 +174,7 @@ describe("a notification to the iPhone app", () => {
 
   test("with no key on the node, or a subscription that isn't an iPhone's, nothing is sent", async () => {
     const { sender: apple } = sender({ key: null });
-    expect((await apple.send({ endpoint: appleEndpoint("production", TOKEN), p256dh: "", auth: "" }, PAYLOAD, DELIVERY)).error).toContain("galahad notify apple-key");
+    expect((await apple.send({ endpoint: appleEndpoint("production", TOKEN), p256dh: "", auth: "" }, PAYLOAD, DELIVERY)).error).toContain("invincible notify apple-key");
     expect(await apple.send({ endpoint: "https://web.push.apple.com/x", p256dh: "", auth: "" }, PAYLOAD, DELIVERY)).toMatchObject({ ok: false, gone: true });
     expect(seen).toHaveLength(0);
     apple.close();

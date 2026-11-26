@@ -1,4 +1,4 @@
-import { type ProjectGitView, redact } from "@galahad/core";
+import { type ProjectGitView, redact } from "@invincible/core";
 import { LookError } from "./workspace-look.ts";
 
 /*

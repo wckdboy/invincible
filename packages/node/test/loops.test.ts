@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { b64u, newNodeIdentity, type NodeIdentity } from "@galahad/core";
-import { enrollDevice, foundFleet, MindStore } from "@galahad/mind";
+import { b64u, newNodeIdentity, type NodeIdentity } from "@invincible/core";
+import { enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
 import { checkSchedule, LoopError, loopRecords, LoopRunner, type RunContext, type RunnableLoop, type RunResult, selfActionOn } from "../src/loops.ts";
 
 /*
@@ -15,7 +15,7 @@ const MIN = 60_000;
 function world() {
   const a = newNodeIdentity();
   const b = newNodeIdentity();
-  const store = new MindStore(":memory:");
+  const store = new LedgerStore(":memory:");
   foundFleet(store, a, { fleetName: "camelot", nodeName: "ultra" });
   enrollDevice(store, a, { device: b.id, name: "laptop", kind: "node", box: b64u(b.boxPublic) });
   let now = T0;
@@ -373,7 +373,7 @@ describe("a loop whose task this version no longer has", () => {
     expect(loop).toMatchObject({ name: "look-over", scheduleText: "every 30m", enabled: true, task: null, label: "His review" });
     expect(loop!.schedule).not.toBeNull();
     expect(loop!.problem).toContain("its task no longer exists");
-    expect(loop!.problem).toContain("galahad loop rm look-over");
+    expect(loop!.problem).toContain("invincible loop rm look-over");
     // A task nobody has ever known is still taken for a newer version's.
     w.store.emit(w.a, "loop.set", { name: "odd", schedule: "every 30m", tz: "UTC", on: w.a.id, enabled: true, task: { kind: "teleport" } });
     expect(loopRecords(w.store).find((l) => l.name === "odd")!.problem).toBe("this node doesn't understand the task (written by a newer version?)");

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AttachmentRef, ATTACHMENT_LIMITS, ChatMessage, pictureType, textOf } from "@galahad/core";
+import { type AttachmentRef, ATTACHMENT_LIMITS, ChatMessage, pictureType, textOf } from "@invincible/core";
 import { UPLOAD_IDLE_MS, UploadError, Uploads, withAttachments } from "../src/uploads.ts";
 
 /*
@@ -16,7 +16,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 function store(opts: { now?: () => number; maxBytes?: number } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-uploads-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-uploads-"));
   dirs.push(dir);
   return { dir: join(dir, "uploads"), uploads: new Uploads(join(dir, "uploads"), opts) };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Calibration, ComputeNodeView, NodeCapacity } from "@galahad/core";
+import type { Calibration, ComputeNodeView, NodeCapacity } from "@invincible/core";
 import { attemptLine, budgetText, ceilingChange, ceilingOwner, ceilingText, effortText, fleetSlots, limitRanges, measuredFacts, modelCallsText, slotsText, strengthText } from "./compute.ts";
 
 /* Compute in words, as the Fleet page says it. */

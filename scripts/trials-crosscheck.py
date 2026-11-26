@@ -2,9 +2,9 @@
 """Check the trial suite's exact answers by independent methods, in the Lab.
 
     bun scripts/trials-cases.ts 25 > cases.json
-    docker run --rm -i -v "$PWD/scripts:/s:ro" galahad/lab:1 python3 /s/trials-crosscheck.py < cases.json
+    docker run --rm -i -v "$PWD/scripts:/s:ro" invincible/lab:1 python3 /s/trials-crosscheck.py < cases.json
 
-Each problem is re-solved a different way from packages/brain/src/trial-suite.ts:
+Each problem is re-solved a different way from packages/models/src/trial-suite.ts:
 beam finite elements, generalized eigenproblems, ODE integration, a PDE solve by
 the method of lines, double Fourier series, Lambert W, and a CAD kernel. The lid-driven
 cavity is checked separately (it needs a CFD study, not a formula). Exit 1 if any

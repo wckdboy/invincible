@@ -59,18 +59,18 @@ describe("a sandbox on a Mac", () => {
   test("is made as its own VM: its volume of a fixed size first, the networks once, then the VM, and the ledger says so", async () => {
     const m = macHost();
     const made = await m.host.create(ASK);
-    const volume = `galahad-sbx-${made.id}-work`;
-    expect(commands(m.fake.calls, "volume").find((c) => c[1] === "create")).toEqual(["volume", "create", "-s", "20G", "--label", "dev.galahad=1", "--label", `dev.galahad.id=${made.id}`, volume]);
+    const volume = `invincible-sbx-${made.id}-work`;
+    expect(commands(m.fake.calls, "volume").find((c) => c[1] === "create")).toEqual(["volume", "create", "-s", "20G", "--label", "dev.invincible=1", "--label", `dev.invincible.id=${made.id}`, volume]);
     expect(commands(m.fake.calls, "network").filter((c) => c[1] === "create")).toEqual([
-      ["network", "create", "--internal", "--subnet", NETWORKS.gateway.subnet, "--label", "dev.galahad=1", NETWORKS.gateway.name],
-      ["network", "create", "--subnet", NETWORKS.online.subnet, "--label", "dev.galahad=1", NETWORKS.online.name],
+      ["network", "create", "--internal", "--subnet", NETWORKS.gateway.subnet, "--label", "dev.invincible=1", NETWORKS.gateway.name],
+      ["network", "create", "--subnet", NETWORKS.online.subnet, "--label", "dev.invincible=1", NETWORKS.online.name],
     ]);
-    const vm = m.fake.vms.get(`galahad-sbx-${made.id}`)!;
+    const vm = m.fake.vms.get(`invincible-sbx-${made.id}`)!;
     expect(vm.volume).toBe(volume);
     expect(vm.args).toContain("--read-only");
     expect(vm.networks).toEqual([NETWORKS.gateway.name]);
-    expect(made).toMatchObject({ node: "n_mac", network: "gateway", isolation: "vm", status: "running", cpus: 2, memoryGb: 4, image: "galahad/sandbox:1", ephemeral: true, quest: "q-mac", disk: { limitGb: 20 } });
-    expect(m.ledger).toContainEqual(expect.objectContaining({ class: "create", resource: "docker.container", target: `galahad-sbx-${made.id}`, verdict: "allow", quest: "q-mac", detail: "microVM · gateway · 2 cpu · 4 GB · 20 GB disk · galahad/sandbox:1" }));
+    expect(made).toMatchObject({ node: "n_mac", network: "gateway", isolation: "vm", status: "running", cpus: 2, memoryGb: 4, image: "invincible/sandbox:1", ephemeral: true, quest: "q-mac", disk: { limitGb: 20 } });
+    expect(m.ledger).toContainEqual(expect.objectContaining({ class: "create", resource: "docker.container", target: `invincible-sbx-${made.id}`, verdict: "allow", quest: "q-mac", detail: "microVM · gateway · 2 cpu · 4 GB · 20 GB disk · invincible/sandbox:1" }));
     // A second sandbox finds the networks there.
     await m.host.create(ASK);
     expect(commands(m.fake.calls, "network").filter((c) => c[1] === "create")).toHaveLength(2);
@@ -79,7 +79,7 @@ describe("a sandbox on a Mac", () => {
   test("online joins Galahad's own NAT network and the gateway's, egress first, as on Docker", async () => {
     const m = macHost();
     const made = await m.host.create({ ...ASK, network: "online" });
-    expect(m.fake.vms.get(`galahad-sbx-${made.id}`)!.networks).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
+    expect(m.fake.vms.get(`invincible-sbx-${made.id}`)!.networks).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
   });
 
   test("an isolated sandbox is refused with the reason, and nothing is made", async () => {
@@ -105,7 +105,7 @@ describe("a sandbox on a Mac", () => {
     const m = macHost();
     const made = await m.host.create({ ...ASK, isolation: "container" });
     expect(made.isolation).toBe("vm");
-    expect(m.fake.vms.get(`galahad-sbx-${made.id}`)!.labels[`${LABEL}.isolation`]).toBe("vm");
+    expect(m.fake.vms.get(`invincible-sbx-${made.id}`)!.labels[`${LABEL}.isolation`]).toBe("vm");
     expect(m.host.isolationFor("gateway", "container")).toBe("vm");
     expect(m.host.isolationFor("online", undefined)).toBe("vm");
     expect(m.host.kinds).toEqual(["vm"]);
@@ -119,17 +119,17 @@ describe("a sandbox on a Mac", () => {
     m.fake.onExec = () => ({ code: 0, stdout: "hello\n" });
     const ran = await m.host.exec(made.id, ["echo", "hello"], 30);
     expect(ran).toMatchObject({ exitCode: 0, stdout: "hello\n" });
-    expect(m.fake.execs.at(-1)).toEqual({ name: `galahad-sbx-${made.id}`, user: "1000:1000", cmd: ["echo", "hello"] });
-    expect(m.ledger.at(-1)).toMatchObject({ class: "modify", resource: "sandbox.exec", target: `galahad-sbx-${made.id}`, detail: "echo hello → exit 0" });
+    expect(m.fake.execs.at(-1)).toEqual({ name: `invincible-sbx-${made.id}`, user: "1000:1000", cmd: ["echo", "hello"] });
+    expect(m.ledger.at(-1)).toMatchObject({ class: "modify", resource: "sandbox.exec", target: `invincible-sbx-${made.id}`, detail: "echo hello → exit 0" });
   });
 
   test("its model access is a scoped lease in its environment, revoked when it is removed", async () => {
     const m = macHost();
     const made = await m.host.create({ ...ASK, providers: ["deepseek"] });
     expect(m.minted).toEqual([{ label: `sandbox:${made.id}`, providers: ["deepseek"], ttlMinutes: 30, maxRequests: 100_000 }]);
-    const args = m.fake.vms.get(`galahad-sbx-${made.id}`)!.args;
-    expect(args).toContain("GALAHAD_TOKEN=test-only-token-1");
-    expect(args).toContain(`OPENAI_BASE_URL=http://${NETWORKS.gateway.gateway}:7779/gw/deepseek`);
+    const args = m.fake.vms.get(`invincible-sbx-${made.id}`)!.args;
+    expect(args).toContain("INVINCIBLE_TOKEN=test-only-token-1");
+    expect(args).toContain(`OPENAI_BASE_URL=http://${NETWORKS.gateway.gateway}:7402/gw/deepseek`);
     await m.host.destroy(made.id, { quest: "q-mac" });
     expect(m.revoked).toEqual(["test-only-hash-1"]);
   });
@@ -138,10 +138,10 @@ describe("a sandbox on a Mac", () => {
     const m = macHost();
     const made = await m.host.create(ASK);
     // Another node's sandbox on the same Mac, and container's own builder: neither is this node's.
-    await m.fake.runner(["run", "--detach", "--name", "galahad-sbx-ffffffffff", "--cpus", "1", "--memory", "1024M", "--label", "dev.galahad=1", "--label", "dev.galahad.id=ffffffffff", "--label", "dev.galahad.node=n_other", "galahad/sandbox:1", "sleep", "infinity"], 1000);
+    await m.fake.runner(["run", "--detach", "--name", "invincible-sbx-ffffffffff", "--cpus", "1", "--memory", "1024M", "--label", "dev.invincible=1", "--label", "dev.invincible.id=ffffffffff", "--label", "dev.invincible.node=n_other", "invincible/sandbox:1", "sleep", "infinity"], 1000);
     await m.fake.runner(["run", "--detach", "--name", "buildkit", "--cpus", "2", "--memory", "2048M", "builder", "sleep", "infinity"], 1000);
     expect((await m.host.list()).map((s) => s.id)).toEqual([made.id]);
-    m.fake.vms.get(`galahad-sbx-${made.id}`)!.state = "stopped";
+    m.fake.vms.get(`invincible-sbx-${made.id}`)!.state = "stopped";
     expect((await m.host.get(made.id))?.status).toBe("exited");
     // A list that fails is never read as "none".
     m.fake.service = false;
@@ -153,11 +153,11 @@ describe("a sandbox on a Mac", () => {
     const made = await m.host.create(ASK);
     const asked = await m.host.destroy(made.id, { quest: "another-quest" });
     expect(asked.verdict).toBe("ask");
-    expect(m.fake.vms.has(`galahad-sbx-${made.id}`)).toBe(true);
+    expect(m.fake.vms.has(`invincible-sbx-${made.id}`)).toBe(true);
     const removed = await m.host.destroy(made.id, { quest: "q-mac" });
     expect(removed.verdict).toBe("allow");
     const order = m.fake.calls.filter((c) => (c[0] === "delete" || (c[0] === "volume" && c[1] === "delete")));
-    expect(order).toEqual([["delete", "--force", `galahad-sbx-${made.id}`], ["volume", "delete", `galahad-sbx-${made.id}-work`]]);
+    expect(order).toEqual([["delete", "--force", `invincible-sbx-${made.id}`], ["volume", "delete", `invincible-sbx-${made.id}-work`]]);
     // (The networks' keepers stay: they are no sandboxes.)
     expect([...m.fake.vms.keys()]).toEqual([KEEPERS.gateway, KEEPERS.online]);
     expect(m.fake.volumes.size).toBe(0);
@@ -167,7 +167,7 @@ describe("a sandbox on a Mac", () => {
   test("one that won't start leaves nothing behind: its VM, its volume and its lease go, and the error says why", async () => {
     const m = macHost();
     // (Its own start fails; the networks' keepers and the one-off that hands its volume on have gone through.)
-    m.fake.failRun = (args) => (args[args.indexOf("--name") + 1]?.startsWith("galahad-sbx-") ? "Error: failed to boot the VM (test-only-token-1)" : null);
+    m.fake.failRun = (args) => (args[args.indexOf("--name") + 1]?.startsWith("invincible-sbx-") ? "Error: failed to boot the VM (test-only-token-1)" : null);
     await expect(m.host.create({ ...ASK, providers: ["deepseek"] })).rejects.toThrow(/could not start sandbox: Error: failed to boot the VM/);
     expect([...m.fake.vms.keys()]).toEqual([KEEPERS.gateway, KEEPERS.online]);
     expect(m.fake.volumes.size).toBe(0);
@@ -193,9 +193,9 @@ describe("a sandbox on a Mac", () => {
 
   test("its images are built for Apple silicon, the builder's VM stopped after, and no keeper holds them (nothing prunes them on a Mac)", async () => {
     const m = macHost();
-    const built = await m.host.build("/opt/galahad/sandbox");
+    const built = await m.host.build("/opt/invincible/sandbox");
     expect(built.ok).toBe(true);
-    expect(commands(m.fake.calls, "build")).toEqual([["build", "--pull", "--platform", "linux/arm64", "--tag", "galahad/sandbox:1", "/opt/galahad/sandbox"]]);
+    expect(commands(m.fake.calls, "build")).toEqual([["build", "--pull", "--platform", "linux/arm64", "--tag", "invincible/sandbox:1", "/opt/invincible/sandbox"]]);
     // (Its builder is a VM of 2 GB that a build leaves running: seen on the Mac mini.)
     expect(commands(m.fake.calls, "builder")).toEqual([["builder", "stop"]]);
     expect(m.fake.calls.findIndex((c) => c[0] === "builder")).toBeGreaterThan(m.fake.calls.findIndex((c) => c[0] === "build"));
@@ -215,13 +215,13 @@ describe("a sandbox on a Mac", () => {
     const m = macHost({ now: () => now });
     const made = await m.host.create(ASK);
     // A knight's workspace whose VM was lost, and an ordinary one: both from long ago.
-    await m.fake.runner(["volume", "create", "-s", "20G", "--label", "dev.galahad=1", "--label", "dev.galahad.id=aaaaaaaaaa", "--label", "dev.galahad.retained=1", "galahad-sbx-aaaaaaaaaa-work"], 1000);
-    await m.fake.runner(["volume", "create", "-s", "20G", "--label", "dev.galahad=1", "--label", "dev.galahad.id=bbbbbbbbbb", "galahad-sbx-bbbbbbbbbb-work"], 1000);
+    await m.fake.runner(["volume", "create", "-s", "20G", "--label", "dev.invincible=1", "--label", "dev.invincible.id=aaaaaaaaaa", "--label", "dev.invincible.retained=1", "invincible-sbx-aaaaaaaaaa-work"], 1000);
+    await m.fake.runner(["volume", "create", "-s", "20G", "--label", "dev.invincible=1", "--label", "dev.invincible.id=bbbbbbbbbb", "invincible-sbx-bbbbbbbbbb-work"], 1000);
     now = Date.parse("2026-11-17T00:00:00Z") + 31 * 60_000;
     const reaped = await m.host.reap();
-    expect(reaped).toContain(`galahad-sbx-${made.id}`);
+    expect(reaped).toContain(`invincible-sbx-${made.id}`);
     expect(reaped).toContain("workspace bbbbbbbbbb");
-    expect([...m.fake.volumes.keys()]).toEqual(["galahad-sbx-aaaaaaaaaa-work"]);
+    expect([...m.fake.volumes.keys()]).toEqual(["invincible-sbx-aaaaaaaaaa-work"]);
   });
 });
 
@@ -229,9 +229,9 @@ describe("its workspaces: container's volumes", () => {
   test("a volume of a fixed size, labelled as its sandbox's; a knight's is kept, and only its owner's removal takes it", async () => {
     const fake = fakeContainer();
     const volumes = new ContainerVolumes(fake.runner, () => ({ totalBytes: 100 * GIB, freeBytes: 60 * GIB }));
-    expect(await volumes.create("0123456789", 20)).toBe("galahad-sbx-0123456789-work");
-    expect(await volumes.create("abcdefabcd", 30, { retain: true })).toBe("galahad-sbx-abcdefabcd-work");
-    expect(fake.volumes.get("galahad-sbx-abcdefabcd-work")!.labels["dev.galahad.retained"]).toBe("1");
+    expect(await volumes.create("0123456789", 20)).toBe("invincible-sbx-0123456789-work");
+    expect(await volumes.create("abcdefabcd", 30, { retain: true })).toBe("invincible-sbx-abcdefabcd-work");
+    expect(fake.volumes.get("invincible-sbx-abcdefabcd-work")!.labels["dev.invincible.retained"]).toBe("1");
     const stats = await volumes.stats();
     expect(stats).toMatchObject({ totalBytes: 100 * GIB, freeBytes: 60 * GIB });
     expect(stats.images.map((i) => [i.id, i.sizeBytes, i.retained])).toEqual([["0123456789", 20 * GIB, false], ["abcdefabcd", 30 * GIB, true]]);
@@ -250,8 +250,8 @@ describe("its workspaces: container's volumes", () => {
     const fake = fakeContainer();
     const volumes = new ContainerVolumes(fake.runner, () => ({ totalBytes: 100 * GIB, freeBytes: 60 * GIB }));
     await volumes.create("0123456789", 20);
-    expect(fake.oneOffs).toEqual([["run", "--rm", "--user", "0:0", "--entrypoint", "chown", "--kernel-arg", "ipv6.disable=1", "--network", NETWORKS.gateway.name, "--no-dns", "--mount", "type=volume,source=galahad-sbx-0123456789-work,target=/work", "galahad/sandbox:1", "1000:1000", "/work"]]);
-    expect(fake.volumes.get("galahad-sbx-0123456789-work")!.owner).toBe("1000:1000");
+    expect(fake.oneOffs).toEqual([["run", "--rm", "--user", "0:0", "--entrypoint", "chown", "--kernel-arg", "ipv6.disable=1", "--network", NETWORKS.gateway.name, "--no-dns", "--mount", "type=volume,source=invincible-sbx-0123456789-work,target=/work", "invincible/sandbox:1", "1000:1000", "/work"]]);
+    expect(fake.volumes.get("invincible-sbx-0123456789-work")!.owner).toBe("1000:1000");
   });
 
   test("a volume that can't be handed on isn't kept: it is removed, and the workspace fails saying why", async () => {
@@ -266,7 +266,7 @@ describe("its workspaces: container's volumes", () => {
 describe("the networks on a Mac", () => {
   const keeperArgs = (kind: "gateway" | "online") => [
     "run", "-d", "--name", KEEPERS[kind], "--label", `${LABEL}.keeper=${kind}`, "--cpus", "1", "--memory", "256M", "--kernel-arg", "ipv6.disable=1",
-    "--network", NETWORKS[kind].name, "--no-dns", "--read-only", "--cap-drop", "ALL", "--user", "1000:1000", "galahad/sandbox:1", "sleep", "infinity",
+    "--network", NETWORKS[kind].name, "--no-dns", "--read-only", "--cap-drop", "ALL", "--user", "1000:1000", "invincible/sandbox:1", "sleep", "infinity",
   ];
   /** The helper restarts and keeper runs, in the order they happened. */
   const timeline = (calls: string[][]) => calls.flatMap((c) => (c[0] === "launchctl" ? [`restart ${c.at(-1)!.split(".").at(-1)}`] : c[0] === "run" && c.includes("-d") ? [`keep ${c[c.indexOf("--network") + 1]}`] : []));
@@ -304,7 +304,7 @@ describe("the networks on a Mac", () => {
     m.restarts.length = 0;
     await m.host.ensureNetworks();
     expect(m.fake.vms.get(KEEPERS.gateway)!.state).toBe("running");
-    expect(m.fake.vms.get(`galahad-sbx-${made.id}`)!.state).toBe("running");
+    expect(m.fake.vms.get(`invincible-sbx-${made.id}`)!.state).toBe("running");
     expect(m.restarts).toEqual([]);
   });
 
@@ -329,8 +329,8 @@ describe("the networks on a Mac", () => {
     await m.host.ensureNetworks();
     const refused = await m.host.create(ASK).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(SandboxError);
-    expect((refused as SandboxError).message).toMatch(/holds the galahad-net network up on this Mac \(galahad-online-keeper\) won't make: Error: vmnet refused the attachment/);
-    expect([...m.fake.vms.keys()].filter((k) => k.startsWith("galahad-sbx-"))).toEqual([]);
+    expect((refused as SandboxError).message).toMatch(/holds the invincible-net network up on this Mac \(invincible-online-keeper\) won't make: Error: vmnet refused the attachment/);
+    expect([...m.fake.vms.keys()].filter((k) => k.startsWith("invincible-sbx-"))).toEqual([]);
     expect(m.fake.volumes.size).toBe(0);
     // Once it starts, sandboxes are made again.
     m.fake.failRun = undefined;
@@ -357,27 +357,27 @@ describe("the networks on a Mac", () => {
 describe("the firewall on a Mac", () => {
   test("no sandbox is made while it isn't on: refused saying why and what to do, before its workspace is made", async () => {
     const m = macHost();
-    m.firewall.state = { on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `galahad firewall install` (it asks for your password once)" };
+    m.firewall.state = { on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)" };
     const refused = await m.host.create(ASK).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(SandboxError);
     expect((refused as SandboxError).status).toBe(424);
-    expect((refused as SandboxError).message).toBe("no sandbox is made on this Mac while its firewall isn't on: this Mac's sandbox firewall isn't installed: run `galahad firewall install` (it asks for your password once)");
-    expect([...m.fake.vms.keys()].filter((k) => k.startsWith("galahad-sbx-"))).toEqual([]);
+    expect((refused as SandboxError).message).toBe("no sandbox is made on this Mac while its firewall isn't on: this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)");
+    expect([...m.fake.vms.keys()].filter((k) => k.startsWith("invincible-sbx-"))).toEqual([]);
     expect(m.fake.volumes.size).toBe(0);
     expect(m.minted).toEqual([]);
   });
 
   test("a bridge just brought up is waited for: one its helper's next run puts right is asked about again", async () => {
     let asks = 0;
-    const m = macHost({ firewall: async () => (++asks < 3 ? { on: false, installed: true, soon: true, why: "pf doesn't see what passes between the VMs on bridge101 (galahad-gw) yet" } : { on: true }) });
+    const m = macHost({ firewall: async () => (++asks < 3 ? { on: false, installed: true, soon: true, why: "pf doesn't see what passes between the VMs on bridge101 (invincible-gw) yet" } : { on: true }) });
     await m.host.create(ASK);
     expect(asks).toBe(3);
   });
 
   test("but not for ever: after two of its helper's runs, refused", async () => {
     const m = macHost();
-    m.firewall.state = { on: false, installed: true, soon: true, why: "the galahad-gw network has no bridge on this Mac yet" };
-    await expect(m.host.create(ASK)).rejects.toThrow(/firewall isn't on: the galahad-gw network has no bridge on this Mac yet/);
+    m.firewall.state = { on: false, installed: true, soon: true, why: "the invincible-gw network has no bridge on this Mac yet" };
+    await expect(m.host.create(ASK)).rejects.toThrow(/firewall isn't on: the invincible-gw network has no bridge on this Mac yet/);
     expect(m.firewall.asked).toBe(21);
   });
 

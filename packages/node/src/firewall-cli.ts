@@ -1,9 +1,9 @@
 import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { MAC_FIREWALL, macFirewall, macFirewallHelper, macFirewallPlist, macFirewallRules, type MacFirewallState } from "@galahad/sandbox";
+import { MAC_FIREWALL, macFirewall, macFirewallHelper, macFirewallPlist, macFirewallRules, type MacFirewallState } from "@invincible/sandbox";
 
 /*
- * `galahad firewall`: the Mac's sandbox firewall (packages/sandbox/src/mac-firewall.ts), as galahad-firewall is
+ * `invincible firewall`: the Mac's sandbox firewall (packages/sandbox/src/mac-firewall.ts), as invincible-firewall is
  * Ultra's. `status` says whether it is on, and why not; `rules`, what it lets through; `install` puts its helper and
  * launchd job in root's places and starts them; `remove` takes them away. Those two are root's to do: run as anyone
  * else, they ask sudo for your password and run again as root. Nothing is written where anyone but root could write.
@@ -65,9 +65,9 @@ export const systemFirewallDeps = (): FirewallDeps => ({
   print: (line) => console.log(line),
 });
 
-const USAGE = "usage: galahad firewall [status|rules|install|remove]";
+const USAGE = "usage: invincible firewall [status|rules|install|remove]";
 
-/** Runs `galahad firewall <sub>`: its exit code (0 on, or done; 1 off, or refused). */
+/** Runs `invincible firewall <sub>`: its exit code (0 on, or done; 1 off, or refused). */
 export async function firewallCommand(sub: string | undefined, deps: FirewallDeps): Promise<number> {
   const { print } = deps;
   if (sub === "rules") {
@@ -79,7 +79,7 @@ export async function firewallCommand(sub: string | undefined, deps: FirewallDep
     return 1;
   }
   if (deps.platform !== "darwin") {
-    print("The Mac's sandbox firewall is a Mac's: on Linux, galahad-firewall holds sandboxes to the gateway (a deploy with --sudo installs it).");
+    print("The Mac's sandbox firewall is a Mac's: on Linux, invincible-firewall holds sandboxes to the gateway (a deploy with --sudo installs it).");
     return sub && sub !== "status" ? 1 : 0;
   }
   if (!sub || sub === "status") return status(deps);
@@ -126,7 +126,7 @@ async function install(deps: FirewallDeps): Promise<number> {
     await deps.sleep(500);
     state = await deps.state();
   }
-  if (state.on) deps.print(`Installed and on (${MAC_FIREWALL.label}, every ${MAC_FIREWALL.every} s): sandboxes on this Mac reach what galahad firewall rules shows, and nothing else.`);
+  if (state.on) deps.print(`Installed and on (${MAC_FIREWALL.label}, every ${MAC_FIREWALL.every} s): sandboxes on this Mac reach what invincible firewall rules shows, and nothing else.`);
   else if (state.soon) deps.print(`Installed (${MAC_FIREWALL.label}, every ${MAC_FIREWALL.every} s). It is on once the node's networks are up, which its node does as it starts: ${state.why}.`);
   else deps.print(`Installed, but it isn't on: ${state.why}.`);
   return state.on || state.soon ? 0 : 1;

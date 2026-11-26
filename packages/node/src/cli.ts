@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamEvent, decodeInvite, encodeQr, type FleetView, type InvestigationView, qrToTerminal, type RouteName, routes, type SandboxView, type ScreenSessionView, type ScreenStatus, type ScreenView, type TeamOutcome, type SlackView, SLACK_APP_MANIFEST, type TelegramView, type TrialView, type QuestionView, plainLine, type LiveEvent } from "@galahad/core";
-import { onPlan, planOf, sseData } from "@galahad/brain";
-import { requestPairing, signedPost, type SyncPage, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamEvent, decodeInvite, encodeQr, type FleetView, type InvestigationView, qrToTerminal, type RouteName, routes, type SandboxView, type ScreenSessionView, type ScreenStatus, type ScreenView, type TeamOutcome, type SlackView, SLACK_APP_MANIFEST, type TelegramView, type TrialView, type QuestionView, plainLine, type LiveEvent } from "@invincible/core";
+import { onPlan, planOf, sseData } from "@invincible/models";
+import { requestPairing, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { artifactTarget } from "./artifacts.ts";
 import { servedOrigin, tailscaleInfo } from "./capabilities.ts";
 import { startDaemon } from "./daemon.ts";
@@ -25,9 +25,9 @@ import { qampCommand } from "./qamp-cli.ts";
 import { computeCommand, parseEffort } from "./compute-cli.ts";
 import { checkGates, githubConnector, githubRepo, investigateFromCli, questFromCli, shipBranch } from "./quest-cli.ts";
 import { askCommand, questsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
-import { ABOUT_YOU_TAG, chatStateWords, checkFacts, type MemoryView, type ModelCheck, THINKING_EFFORTS } from "@galahad/core";
+import { ABOUT_YOU_TAG, chatStateWords, checkFacts, type MemoryView, type ModelCheck, THINKING_EFFORTS } from "@invincible/core";
 import { ShipManifest } from "./ship.ts";
-import type { ConversationSummary, ConversationView, ProjectGitView, ProjectView, ProviderView, TeamChangesView } from "@galahad/core";
+import type { ConversationSummary, ConversationView, ProjectGitView, ProjectView, ProviderView, TeamChangesView } from "@invincible/core";
 import { runWithToken } from "./run-tool.ts";
 import { streamedError } from "./server.ts";
 import { priceCommand, trialCommand, usageCommand, UsageError } from "./trial-commands.ts";
@@ -40,9 +40,9 @@ import { terminalCommand, ttyScreen } from "./terminal-cli.ts";
 
 const VERSION = "0.1.0";
 
-const HELP = `galahad — one mind, many bodies
+const HELP = `invincible (or inv) — one mind, many bodies
 
-Start here (galahad.sh's installer founds the fleet and keeps the node running where it can; otherwise: serve)
+Start here (invincible.sh's installer founds the fleet and keeps the node running where it can; otherwise: serve)
   key add                           a provider's key, typed into a hidden prompt: Anthropic's, OpenAI's, OpenRouter's,
                                     DeepSeek's … his roles answer on it at once
   ask "Good morning, Galahad."      a word with him
@@ -73,8 +73,8 @@ of its own; "roundtable" and "team" are the same command)
                                     [--sensitive] [--models provider/model,…]: sensitive mode for this task alone,
                                     on the models named, or with none named its knight's own
   roundtable keys <id> [add <secret> [--header x-api-key] [--write] | rm <secret>]
-                                    keys of yours it may use but never see: its scripts call $GALAHAD_KEYS/<secret>/…
-                                    and the gateway puts the key in, at the key's pinned address alone (galahad secret
+                                    keys of yours it may use but never see: its scripts call $INVINCIBLE_KEYS/<secret>/…
+                                    and the gateway puts the key in, at the key's pinned address alone (invincible secret
                                     set <secret> --base-url https://api.example.com); reads only unless --write
   roundtable export <id> [--out file.md]
                                     a knight as a file you carry: its job and how it works, never its memory or a key
@@ -124,7 +124,7 @@ of its own; "roundtable" and "team" are the same command)
   roundtable backlog [on|off]        work for idle knights: one with a repository and nothing to do is given the next
                                     step of its repository's plan, a task a day at most, on Galahad's own yes within its
                                     budget ($3 at most); one that may spend more than is left of your budget (galahad
-                                    usage budget) waits for you (galahad roundtable approve <task>); on until you turn it off
+                                    usage budget) waits for you (invincible roundtable approve <task>); on until you turn it off
   roundtable avatar <id> [--color #rrggbb | --reset]
                                     a knight is an orb: choose its colour, or let it go back to the one its
                                     handle gives it; with neither, its orb's colours are printed
@@ -135,8 +135,8 @@ of its own; "roundtable" and "team" are the same command)
                                     only with --destroy-workspace, which destroys that VM and everything in /work
 
 Set up
-  init [--name laptop] [--fleet camelot] [--port 7777]     found a fleet on this machine
-  join <invite> [--name server] [--port 7777]              join a fleet with an invite
+  init [--name laptop] [--fleet camelot] [--port 7400]     found a fleet on this machine
+  join <invite> [--name server] [--port 7400]              join a fleet with an invite
   serve                                                    run this node (daemon)
   expose [--https 443]                                     publish the PWA over HTTPS on your tailnet (tailscale serve)
   invite [--client] [--origin https://host.ts.net:8443] [--no-qr] [--no-wait]
@@ -256,7 +256,7 @@ Work
                                   reviewer on the evidence alone (auto: what the free slots and the budget allow)
      … --fenced                    the engineer sends one shell command a reply, as before 21 November 2026, in place
                                   of its own tools (bash, read, edit, write, several calls a turn)
-     … --budget-usd 2              money its model calls may spend at your prices (galahad price), every
+     … --budget-usd 2              money its model calls may spend at your prices (invincible price), every
                                   attempt's together: past four fifths the work is told to wrap up, and once
                                   it is spent the work stops
      … --gate "<command>" [--gate …] [--no-planner-gates]
@@ -271,7 +271,7 @@ Work
                                   GitHub repositories, private ones too, through the read-only git gateway)
      … --repo https://github.com/o/r --ship [--title …] [--base main] [--draft]
                                   once the reviewer passes it, ask you to open a pull request (Inbox)
-  ship <artifact> --title "…" [--body …] [--base main] [--branch galahad/…] [--draft] [--ask] [-y]
+  ship <artifact> --title "…" [--body …] [--base main] [--branch invincible/…] [--draft] [--ask] [-y]
                                   open a pull request from a quest's kept changes (the node commits them on
                                   a new branch with the connector's key; the sandbox never holds it)
   place [--docker] [--vm] [--gpu] [--mem 16] [--tools git,opencode] [--long] [--untrusted] [--interactive]
@@ -429,17 +429,17 @@ Maintenance
                                   Exit code 0: all is well; 1: something needs you; 2: something is broken
   rebuild                         re-materialize the mind from its log and verify the digest
 
-Options: --home <dir> (or GALAHAD_HOME); init and join also take --keystore os|file and --advertise <tailnet ip>
-Environment: GALAHAD_PORT, GALAHAD_KEYSTORE=os|file, GALAHAD_ADVERTISE=<tailnet ip>, GALAHAD_ARCHIVE_DIR=<absolute path>, GALAHAD_ARCHIVE=off,
-  GALAHAD_BACKUP_DIR=<absolute path> (where the node keeps its daily backups, and the doctor looks), GALAHAD_BACKUPS=off,
-  GALAHAD_PUSH_CONTACT=mailto:…|https://… (who operates this node, as push services are told; default names nobody),
-  GALAHAD_PUSH_HOSTS=host,*.host (push services to allow beyond Apple, Google, Mozilla, Microsoft and ntfy.sh)`;
+Options: --home <dir> (or INVINCIBLE_HOME); init and join also take --keystore os|file and --advertise <tailnet ip>
+Environment: INVINCIBLE_PORT, INVINCIBLE_KEYSTORE=os|file, INVINCIBLE_ADVERTISE=<tailnet ip>, INVINCIBLE_ARCHIVE_DIR=<absolute path>, INVINCIBLE_ARCHIVE=off,
+  INVINCIBLE_BACKUP_DIR=<absolute path> (where the node keeps its daily backups, and the doctor looks), INVINCIBLE_BACKUPS=off,
+  INVINCIBLE_PUSH_CONTACT=mailto:…|https://… (who operates this node, as push services are told; default names nobody),
+  INVINCIBLE_PUSH_HOSTS=host,*.host (push services to allow beyond Apple, Google, Mozilla, Microsoft and ntfy.sh)`;
 
 const dim = (s: string) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (process.stdout.isTTY ? `\x1b[1m${s}\x1b[0m` : s);
 
 function fail(message: string): never {
-  console.error(`galahad: ${message}`);
+  console.error(`invincible: ${message}`);
   process.exit(1);
 }
 
@@ -452,7 +452,7 @@ class Admin {
 
   constructor(home: Home) {
     const config = home.readConfig();
-    this.base = `http://127.0.0.1:${loadEnv().GALAHAD_PORT ?? config.port}`;
+    this.base = `http://127.0.0.1:${loadEnv().INVINCIBLE_PORT ?? config.port}`;
     this.token = home.adminToken();
   }
 
@@ -468,7 +468,7 @@ class Admin {
       });
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new CliError(`no daemon on ${this.base} — start it with \`galahad serve\``);
+      throw new CliError(`no daemon on ${this.base} — start it with \`invincible serve\``);
     }
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string; issues?: unknown };
@@ -755,12 +755,12 @@ async function main(): Promise<void> {
     case "init": {
       if (home.exists()) fail(`a node already exists at ${home.dir}`);
       const nodeName = str("name") ?? (await import("node:os")).hostname().toLowerCase();
-      const keystorePref = (str("keystore") ?? loadEnv().GALAHAD_KEYSTORE ?? "os") as "os" | "file";
+      const keystorePref = (str("keystore") ?? loadEnv().INVINCIBLE_KEYSTORE ?? "os") as "os" | "file";
       const { identity, keystore } = await home.createIdentity(keystorePref);
-      const store = new MindStore(home.mindPath);
+      const store = new LedgerStore(home.ledgerPath);
       const fleet = foundFleet(store, identity, { fleetName: str("fleet") ?? "camelot", nodeName });
       store.close();
-      home.writeConfig({ v: 1, name: nodeName, fleet, port: Number(str("port") ?? 7777), keystore, advertise: str("advertise") ?? null });
+      home.writeConfig({ v: 1, name: nodeName, fleet, port: Number(str("port") ?? 7400), keystore, advertise: str("advertise") ?? null });
       home.adminToken();
       console.log(`${bold("A new fleet is founded.")}
   fleet   ${fleet}
@@ -769,23 +769,23 @@ async function main(): Promise<void> {
   home    ${home.dir}
 
 Next:
-  galahad serve                 start this node
-  galahad expose                serve the PWA at https://<this-machine>.<tailnet>.ts.net
-  galahad invite --client       pair your phone or browser (scan the QR code with it)
-  galahad invite                add another machine (then run \`galahad join <invite>\` there)
-  galahad key add               paste an API key`);
+  invincible serve                 start this node
+  invincible expose                serve the PWA at https://<this-machine>.<tailnet>.ts.net
+  invincible invite --client       pair your phone or browser (scan the QR code with it)
+  invincible invite                add another machine (then run \`invincible join <invite>\` there)
+  invincible key add               paste an API key`);
       return;
     }
 
     case "join": {
-      if (!sub) fail("usage: galahad join <invite>");
+      if (!sub) fail("usage: invincible join <invite>");
       if (home.exists()) fail(`a node already exists at ${home.dir}`);
       const invite = decodeInvite(sub);
       if (invite.k !== "node") fail("that invite is for a client; open it in a browser instead");
       const nodeName = str("name") ?? (await import("node:os")).hostname().toLowerCase();
-      const port = Number(str("port") ?? loadEnv().GALAHAD_PORT ?? 7777);
-      const keystorePref = (str("keystore") ?? loadEnv().GALAHAD_KEYSTORE ?? "os") as "os" | "file";
-      const advertise = str("advertise") ?? loadEnv().GALAHAD_ADVERTISE ?? (await tailscaleInfo())?.ip ?? "127.0.0.1";
+      const port = Number(str("port") ?? loadEnv().INVINCIBLE_PORT ?? 7400);
+      const keystorePref = (str("keystore") ?? loadEnv().INVINCIBLE_KEYSTORE ?? "os") as "os" | "file";
+      const advertise = str("advertise") ?? loadEnv().INVINCIBLE_ADVERTISE ?? (await tailscaleInfo())?.ip ?? "127.0.0.1";
       const { identity, keystore } = await home.createIdentity(keystorePref);
       const join = await requestPairing(sub, {
         device: identity.id,
@@ -796,7 +796,7 @@ Next:
       });
       console.log(`\n  Confirmation code:  ${bold(join.sas)}\n\n  Approve on the inviting node if it shows the same code. Waiting…`);
       const { fleet } = await waitForApproval(join);
-      const store = new MindStore(home.mindPath);
+      const store = new LedgerStore(home.ledgerPath);
       store.expectFleet(fleet);
       for (let page = 0; page < 1000; page++) {
         const result = await signedPost<SyncPage>(identity, invite.e, "/link/sync", { have: store.frontier() });
@@ -808,7 +808,7 @@ Next:
       store.close();
       home.writeConfig({ v: 1, name: nodeName, fleet, port, keystore, advertise: str("advertise") ?? null });
       home.adminToken();
-      console.log(`\n${bold(`Joined fleet ${fleetName}.`)} The vault and the mind are now shared. Start this node with \`galahad serve\`.`);
+      console.log(`\n${bold(`Joined fleet ${fleetName}.`)} The vault and the mind are now shared. Start this node with \`invincible serve\`.`);
       return;
     }
 
@@ -829,7 +829,7 @@ Next:
       const ts = await tailscaleInfo();
       if (!ts) fail("tailscale is not running");
       const env = loadEnv();
-      const proxyPort = env.GALAHAD_PROXY_PORT ?? (env.GALAHAD_PORT ?? config.port) + 1;
+      const proxyPort = env.INVINCIBLE_PROXY_PORT ?? (env.INVINCIBLE_PORT ?? config.port) + 1;
       const https = str("https") ?? "443";
       const proc = Bun.spawn(["tailscale", "serve", "--bg", `--https=${https}`, `http://127.0.0.1:${proxyPort}`], {
         stdout: "inherit",
@@ -845,11 +845,11 @@ Next:
       const kind = flags.client ? "client" : "node";
       let origin = str("origin");
       // A phone opens the PWA where `tailscale serve` publishes it, which may not be 443 (on a server that
-      // keeps 443 for something else, it's whatever `galahad expose --https` chose): ask Tailscale.
+      // keeps 443 for something else, it's whatever `invincible expose --https` chose): ask Tailscale.
       let unpublished = false;
       if (kind === "client" && !origin) {
         const env = loadEnv();
-        const proxyPort = env.GALAHAD_PROXY_PORT ?? (env.GALAHAD_PORT ?? home.readConfig().port) + 1;
+        const proxyPort = env.INVINCIBLE_PROXY_PORT ?? (env.INVINCIBLE_PORT ?? home.readConfig().port) + 1;
         origin = (await servedOrigin(proxyPort)) ?? undefined;
         if (!origin) {
           unpublished = true;
@@ -866,8 +866,8 @@ Next:
         // Black on white whatever the terminal's colours, so a phone's camera reads it.
         if (process.stdout.isTTY && !flags["no-qr"]) console.log(`${qrToTerminal(encodeQr(created.url, "M"))}\n`);
         console.log(`  ${created.url}\n`);
-        if (unpublished) console.log(dim("The PWA doesn't look published on your tailnet: run `galahad expose` first, or pass --origin https://<where it's served>.\n"));
-      } else console.log(`On the new machine run (valid 10 minutes, single use):\n\n  galahad join ${created.invite}\n`);
+        if (unpublished) console.log(dim("The PWA doesn't look published on your tailnet: run `invincible expose` first, or pass --origin https://<where it's served>.\n"));
+      } else console.log(`On the new machine run (valid 10 minutes, single use):\n\n  invincible join ${created.invite}\n`);
       if (flags["no-wait"]) return;
       console.log(dim("Waiting for the device…"));
       const deadline = created.expiresAt;
@@ -906,7 +906,7 @@ Next:
       return;
     }
     case "revoke": {
-      if (!sub) fail("usage: galahad revoke <device>");
+      if (!sub) fail("usage: invincible revoke <device>");
       const fleet = await new Admin(home).call<FleetView>("fleet");
       const matches = activeDevicesMatching(fleet.devices, sub);
       if (!matches.length) fail(`no active device matches ${sub}`);
@@ -923,8 +923,8 @@ Next:
     }
 
     case "grant": {
-      // galahad grant <device> <scope…>: add permissions to a paired phone or browser.
-      if (!sub || !rest.length) fail("usage: galahad grant <device name or id> <scope…>  (e.g. galahad grant iphone sandbox)");
+      // invincible grant <device> <scope…>: add permissions to a paired phone or browser.
+      if (!sub || !rest.length) fail("usage: invincible grant <device name or id> <scope…>  (e.g. invincible grant iphone sandbox)");
       const admin = new Admin(home);
       const fleet = await admin.call<FleetView>("fleet");
       const matches = fleet.devices.filter(
@@ -950,12 +950,12 @@ Next:
       // His own looks (looks.ts): what he set himself to look at again, in your chats, until it comes.
       const admin = new Admin(home);
       if (sub === "cancel") {
-        if (!rest[0]) fail("usage: galahad looks cancel <id>");
+        if (!rest[0]) fail("usage: invincible looks cancel <id>");
         const { look } = await admin.call<{ look: LookView }>("cancelLook", { id: rest[0] });
         console.log(`Called off: ${look.note}`);
         return;
       }
-      if (sub) fail("usage: galahad looks [cancel <id>]");
+      if (sub) fail("usage: invincible looks [cancel <id>]");
       const { looks } = await admin.call<{ looks: LookView[] }>("looks");
       if (!looks.length) console.log(dim("No looks of his wait. He sets one in a chat when something isn't done yet (a deploy, a reply), and looks again then."));
       // When, as he said it: in the zone he was told, never this machine's locale.
@@ -967,7 +967,7 @@ Next:
       // While you were away (PLAN #37): --since 6h, 30m or 2d (the last day when not said).
       const raw = str("since") ?? "1d";
       const match = /^(\d+)\s*(m|h|d)$/.exec(raw);
-      if (!match) fail("usage: galahad away [--since 30m | 6h | 2d]");
+      if (!match) fail("usage: invincible away [--since 30m | 6h | 2d]");
       const since = Date.now() - Number(match![1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[match![2] as "m" | "h" | "d"];
       const { lines } = await new Admin(home).call<AwayView>("away", { since });
       if (!lines.length) console.log(dim(`Nothing happened since ${new Date(since).toLocaleString()}.`));
@@ -1006,7 +1006,7 @@ Next:
 
     case "remember": {
       const text = [sub, ...rest].filter(Boolean).join(" ");
-      if (!text) fail("usage: galahad remember <text>");
+      if (!text) fail("usage: invincible remember <text>");
       await new Admin(home).call("remember", { text, tags: flags.tag as string[] | undefined });
       console.log("Remembered.");
       return;
@@ -1016,25 +1016,25 @@ Next:
       const admin = new Admin(home);
       const facts = async () => (await admin.call("aboutYou")) as { kept: MemoryView[]; proposed: MemoryView[] };
       const which = async (ref: string | undefined): Promise<MemoryView> => {
-        if (!ref) fail(`usage: galahad about ${sub} <id>`);
+        if (!ref) fail(`usage: invincible about ${sub} <id>`);
         const { kept, proposed } = await facts();
         const found = [...kept, ...proposed].filter((m) => m.id === ref || m.id.startsWith(ref!));
-        if (found.length !== 1) fail(found.length ? `"${ref}" names more than one fact: give more of its id` : `no fact about you is "${ref}" (galahad about lists them)`);
+        if (found.length !== 1) fail(found.length ? `"${ref}" names more than one fact: give more of its id` : `no fact about you is "${ref}" (invincible about lists them)`);
         return found[0]!;
       };
       if (!sub || sub === "ls") {
         const { kept, proposed } = await facts();
-        if (!kept.length && !proposed.length) console.log("He keeps nothing about you yet. Tell him in chat, or: galahad about add <fact>");
+        if (!kept.length && !proposed.length) console.log("He keeps nothing about you yet. Tell him in chat, or: invincible about add <fact>");
         if (kept.length) console.log(bold("Kept: with every answer of his"));
         for (const m of kept) console.log(`  ${dim(m.id.slice(0, 12))}  ${m.text}`);
         if (proposed.length) console.log(bold("Proposed by him: waiting for you"));
         for (const m of proposed) console.log(`  ${dim(m.id.slice(0, 12))}  ${m.text}`);
-        if (proposed.length) console.log(dim("  galahad about keep <id> [--text …] keeps one (in your words) · galahad about rm <id> drops it"));
+        if (proposed.length) console.log(dim("  invincible about keep <id> [--text …] keeps one (in your words) · invincible about rm <id> drops it"));
         return;
       }
       if (sub === "add") {
         const text = rest.join(" ").trim();
-        if (!text) fail("usage: galahad about add <fact>");
+        if (!text) fail("usage: invincible about add <fact>");
         await admin.call("remember", { text, tags: [ABOUT_YOU_TAG] });
         console.log("Kept: it goes with every answer of his.");
         return;
@@ -1050,7 +1050,7 @@ Next:
         console.log("Removed: it goes with his answers no more.");
         return;
       }
-      fail("usage: galahad about [add <fact> | keep <id> [--text …] | rm <id>]");
+      fail("usage: invincible about [add <fact> | keep <id> [--text …] | rm <id>]");
       return;
     }
     case "recall": {
@@ -1062,7 +1062,7 @@ Next:
     }
 
     case "key": {
-      if (sub !== "add") fail("usage: galahad key add [--provider id]");
+      if (sub !== "add") fail("usage: invincible key add [--provider id]");
       // Recognised, sealed and its provider configured (key-cli.ts).
       await keyAddCommand(new Admin(home), await readSecret("Paste the API key (hidden): "), flags, console.log, dim);
       return;
@@ -1084,11 +1084,11 @@ Next:
         console.log("Disconnected.");
         return;
       }
-      if (sub) fail("usage: galahad telegram [connect | disconnect]");
+      if (sub) fail("usage: invincible telegram [connect | disconnect]");
       const { telegram } = await admin.call<{ telegram: TelegramView }>("telegram");
-      if (!telegram.connected) console.log("Not connected on this node. galahad telegram connect links a bot of yours.");
+      if (!telegram.connected) console.log("Not connected on this node. invincible telegram connect links a bot of yours.");
       else {
-        console.log(`${bold(telegram.bot ?? "a bot")} on ${telegram.node}: ${telegram.owner ? `answers ${telegram.owner}, and nobody else` : telegram.linkExpires ? `waiting for your code (until ${new Date(telegram.linkExpires).toLocaleTimeString()})` : "no account linked: galahad telegram connect gives a new code"}.`);
+        console.log(`${bold(telegram.bot ?? "a bot")} on ${telegram.node}: ${telegram.owner ? `answers ${telegram.owner}, and nobody else` : telegram.linkExpires ? `waiting for your code (until ${new Date(telegram.linkExpires).toLocaleTimeString()})` : "no account linked: invincible telegram connect gives a new code"}.`);
         if (telegram.problem) console.log(bold(telegram.problem));
       }
       return;
@@ -1101,7 +1101,7 @@ Next:
       }
       const admin = new Admin(home);
       if (sub === "connect") {
-        console.log("Make the app at api.slack.com/apps: Create New App → From a manifest, your workspace, and what galahad slack manifest prints; then Install to Workspace.");
+        console.log("Make the app at api.slack.com/apps: Create New App → From a manifest, your workspace, and what invincible slack manifest prints; then Install to Workspace.");
         console.log("Its two tokens: Basic Information → App-Level Tokens → Generate (with connections:write) makes the first; OAuth & Permissions has the Bot User OAuth Token.");
         // (Not a terminal: the two tokens, a line each, from standard input.)
         const [appToken, botToken] = process.stdin.isTTY
@@ -1119,11 +1119,11 @@ Next:
         console.log("Disconnected.");
         return;
       }
-      if (sub) fail("usage: galahad slack [manifest | connect | disconnect]");
+      if (sub) fail("usage: invincible slack [manifest | connect | disconnect]");
       const { slack } = await admin.call<{ slack: SlackView }>("slack");
-      if (!slack.connected) console.log("Not connected on this node. galahad slack connect links an app of yours (galahad slack manifest says what to make).");
+      if (!slack.connected) console.log("Not connected on this node. invincible slack connect links an app of yours (invincible slack manifest says what to make).");
       else {
-        console.log(`${bold(slack.bot ?? "an app")} in ${slack.workspace ?? "your workspace"} on ${slack.node}: ${slack.owner ? `answers ${slack.owner}, and nobody else` : slack.linkExpires ? `waiting for your code (until ${new Date(slack.linkExpires).toLocaleTimeString()})` : "no account linked: galahad slack connect gives a new code"}.`);
+        console.log(`${bold(slack.bot ?? "an app")} in ${slack.workspace ?? "your workspace"} on ${slack.node}: ${slack.owner ? `answers ${slack.owner}, and nobody else` : slack.linkExpires ? `waiting for your code (until ${new Date(slack.linkExpires).toLocaleTimeString()})` : "no account linked: invincible slack connect gives a new code"}.`);
         if (slack.problem) console.log(bold(slack.problem));
       }
       return;
@@ -1132,39 +1132,39 @@ Next:
     case "secret": {
       const admin = new Admin(home);
       if (sub === "set") {
-        if (!rest[0]) fail("usage: galahad secret set <name>");
+        if (!rest[0]) fail("usage: invincible secret set <name>");
         const value = await readSecret(`Value for ${rest[0]} (hidden): `);
         // (--base-url pins it to that address: the one place it may ever be sent, as for a knight's key, PLAN #17.)
         await admin.call("setSecret", { name: rest[0], value, provider: str("provider"), label: str("label"), connector: str("connector"), ...(str("base-url") ? { baseUrl: str("base-url") } : {}) });
         console.log(str("base-url") ? `Sealed into the vault, pinned to ${new URL(str("base-url")!).origin}.` : "Sealed into the vault.");
       } else if (sub === "rm") {
-        if (!rest[0]) fail("usage: galahad secret rm <name>");
+        if (!rest[0]) fail("usage: invincible secret rm <name>");
         if (!confirm(`Delete secret ${rest[0]} from every node?`)) return;
         await admin.call("deleteSecret", { name: rest[0] });
         console.log("Deleted.");
       } else if (sub === "request") {
-        if (!rest[0] || !str("reason")) fail('usage: galahad secret request <name> --reason "what it is for" [--provider id]');
+        if (!rest[0] || !str("reason")) fail('usage: invincible secret request <name> --reason "what it is for" [--provider id]');
         await admin.call("requestSecret", { name: rest[0], purpose: str("reason"), provider: str("provider") });
-        console.log(`Requested. Fill it with \`galahad secret set ${rest[0]}\` or on the PWA's Vault page.`);
+        console.log(`Requested. Fill it with \`invincible secret set ${rest[0]}\` or on the PWA's Vault page.`);
       } else if (sub === "dismiss") {
-        if (!rest[0]) fail("usage: galahad secret dismiss <name>");
+        if (!rest[0]) fail("usage: invincible secret dismiss <name>");
         await admin.call("dismissSecretRequest", { name: rest[0] });
         console.log("Dismissed: it's back in your Inbox only if he asks for it again.");
       } else {
         const [{ secrets, unlocked }, { requests }] = await Promise.all([admin.call("secrets"), admin.call("secretRequests")]);
         if (!unlocked) console.log(dim("(this node cannot decrypt the vault)"));
         for (const s of secrets) console.log(`  ${s.name.padEnd(20)} ${(s.provider ?? "").padEnd(14)} ${s.hint ?? ""}`);
-        if (!secrets.length) console.log("The vault is empty. `galahad key add` to add one.");
+        if (!secrets.length) console.log("The vault is empty. `invincible key add` to add one.");
         for (const r of requests) console.log(`  ${bold("requested")} ${r.name.padEnd(20)} ${dim(r.purpose)}`);
-        if (requests.length) console.log(dim("Fill one: galahad secret set <name> · dismiss one: galahad secret dismiss <name>"));
+        if (requests.length) console.log(dim("Fill one: invincible secret set <name> · dismiss one: invincible secret dismiss <name>"));
       }
       return;
     }
 
     case "run": {
-      // galahad run [--providers deepseek,anthropic] [--ttl 120] -- opencode …
+      // invincible run [--providers deepseek,anthropic] [--ttl 120] -- opencode …
       const cmd = [sub, ...rest].filter((part): part is string => typeof part === "string");
-      if (!cmd.length) fail("usage: galahad run [--providers a,b] [--ttl minutes] -- <command> [args…]");
+      if (!cmd.length) fail("usage: invincible run [--providers a,b] [--ttl minutes] -- <command> [args…]");
       const admin = new Admin(home);
       const providers = str("providers")?.split(",").filter(Boolean);
       const minted = await admin.call<{ token: string; info: { hash: string } }>("mintToken", {
@@ -1178,7 +1178,7 @@ Next:
       const openaiProvider = providers?.find((p) => p !== "anthropic") ?? "deepseek";
       const env: Record<string, string | undefined> = {
         ...process.env,
-        GALAHAD_GATEWAY: gateway,
+        INVINCIBLE_GATEWAY: gateway,
         ANTHROPIC_BASE_URL: `${gateway}/anthropic`,
         ANTHROPIC_AUTH_TOKEN: minted.token,
         OPENAI_BASE_URL: `${gateway}/${openaiProvider}`,
@@ -1186,23 +1186,23 @@ Next:
       };
       delete env.ANTHROPIC_API_KEY;
       process.stderr.write(dim(`[galahad] ${cmd[0]} gets a scoped gateway token (revoked on exit); real keys stay in the vault\n`));
-      // Revoked when the tool exits, however galahad run is stopped (see run-tool.ts).
+      // Revoked when the tool exits, however invincible run is stopped (see run-tool.ts).
       const start = () => Bun.spawn(cmd, { env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
       process.exit(await runWithToken(start, () => admin.call("revokeToken", { hash: minted.info.hash })));
     }
     case "awake": {
       // A Mac set to stay on (a Mac mini serving the fleet) is kept from sleeping while its node runs (keep-awake.ts).
-      if (!existsSync(home.configPath)) fail("this machine isn't a node yet: galahad init, or galahad join <invite>");
+      if (!existsSync(home.configPath)) fail("this machine isn't a node yet: invincible init, or invincible join <invite>");
       const config = home.readConfig();
       const mac = process.platform === "darwin";
       if (sub === "on" || sub === "off") {
         home.writeConfig({ ...config, keepAwake: sub === "on" });
         if (sub === "off") console.log("It may sleep again once the node next starts.");
-        else if (mac) console.log("This Mac will be kept awake while its node runs, from the node's next start (the app restarts it; a node install.sh made: launchctl kickstart -k gui/$(id -u)/sh.galahad.node).");
+        else if (mac) console.log("This Mac will be kept awake while its node runs, from the node's next start (the app restarts it; a node install.sh made: launchctl kickstart -k gui/$(id -u)/sh.invincible.node).");
         else console.log("Kept on. Only a Mac is kept awake this way: a Linux server doesn't sleep.");
         return;
       }
-      if (sub && sub !== "status") fail("usage: galahad awake on|off|status");
+      if (sub && sub !== "status") fail("usage: invincible awake on|off|status");
       const fleet = await new Admin(home).call<FleetView>("fleet").catch(() => null);
       const self = fleet?.devices.find((d) => d.id === fleet.self);
       const holding = self?.caps ? self.caps.awake === true : null;
@@ -1221,12 +1221,12 @@ Next:
       if (!sub || sub === "status") {
         const s = await admin.call<ScreenStatus>("screen", at);
         say(s);
-        if (!s.record || !s.control) console.log(dim("galahad screen allow shows macOS's prompts on that Mac; turn both on there, in System Settings → Privacy & Security."));
+        if (!s.record || !s.control) console.log(dim("invincible screen allow shows macOS's prompts on that Mac; turn both on there, in System Settings → Privacy & Security."));
         return;
       }
       if (sub === "allow") {
         say(await admin.call<ScreenStatus>("screenAllow", at));
-        console.log(dim("On that Mac, System Settings → Privacy & Security: turn Galahad on in Screen & System Audio Recording, and in Accessibility. Then galahad screen says both are allowed."));
+        console.log(dim("On that Mac, System Settings → Privacy & Security: turn Galahad on in Screen & System Audio Recording, and in Accessibility. Then invincible screen says both are allowed."));
         return;
       }
       if (sub === "look") {
@@ -1246,18 +1246,18 @@ Next:
         return;
       }
       if (sub === "approve" || sub === "deny") {
-        if (!rest[0]) fail(`usage: galahad screen ${sub} <session>`);
+        if (!rest[0]) fail(`usage: invincible screen ${sub} <session>`);
         const { session } = await admin.call<{ session: ScreenSessionView }>("decideScreen", { id: rest[0], allow: sub === "approve" });
-        console.log(session.state === "allowed" ? `Allowed: Galahad may use ${session.nodeName} itself until ${new Date(session.until!).toLocaleTimeString()}. galahad screen end ${session.id} ends it sooner.` : "Said no: nothing of it is his.");
+        console.log(session.state === "allowed" ? `Allowed: Galahad may use ${session.nodeName} itself until ${new Date(session.until!).toLocaleTimeString()}. invincible screen end ${session.id} ends it sooner.` : "Said no: nothing of it is his.");
         return;
       }
       if (sub === "end") {
-        if (!rest[0]) fail("usage: galahad screen end <session>");
+        if (!rest[0]) fail("usage: invincible screen end <session>");
         await admin.call("endScreen", { id: rest[0] });
         console.log("Ended: nothing of that Mac is his now.");
         return;
       }
-      fail("usage: galahad screen [status|allow|look] [--on <node>] [--out shot.jpg] | screen sessions | screen approve|deny|end <session>");
+      fail("usage: invincible screen [status|allow|look] [--on <node>] [--out shot.jpg] | screen sessions | screen approve|deny|end <session>");
       return;
     }
 
@@ -1268,7 +1268,7 @@ Next:
     }
 
     case "vault": {
-      if (sub !== "rotate") fail("usage: galahad vault rotate");
+      if (sub !== "rotate") fail("usage: invincible vault rotate");
       const result = await new Admin(home).call("rotateVault", {});
       console.log(`New vault key ${result.kid}; resealed ${result.resealed.length} secrets.`);
       return;
@@ -1277,7 +1277,7 @@ Next:
     case "provider": {
       const admin = new Admin(home);
       if (sub === "add") {
-        if (!rest[0]) fail("usage: galahad provider add <id>");
+        if (!rest[0]) fail("usage: invincible provider add <id>");
         const { providers } = await admin.call<{ providers: ProviderView[] }>("setProvider", {
           id: rest[0],
           preset: str("preset"),
@@ -1290,7 +1290,7 @@ Next:
         const elsewhere = keyElsewhereLine(providers.find((p) => p.id === rest[0]) ?? { id: rest[0], baseUrl: "" });
         if (elsewhere) console.log(elsewhere);
       } else if (sub === "models") {
-        if (!rest[0]) fail("usage: galahad provider models <id>");
+        if (!rest[0]) fail("usage: invincible provider models <id>");
         const { models } = await admin.call("providerModels", { id: rest[0] });
         for (const m of models) console.log(`${rest[0]}/${m}`);
       } else if (sub === "presets") {
@@ -1299,7 +1299,7 @@ Next:
         for (const p of presets) console.log(`  ${p.id.padEnd(wide)} ${p.kind.padEnd(10)} ${p.baseUrl || dim(p.note ?? "")}${p.plan ? dim(`  coding plan: ${p.plan.name}`) : ""}`);
       } else {
         const { providers } = await admin.call("providers");
-        if (!providers.length) console.log("No providers yet. `galahad key add` configures one.");
+        if (!providers.length) console.log("No providers yet. `invincible key add` configures one.");
         const wide = Math.max(14, ...providers.map((p: { id: string }) => p.id.length));
         for (const p of providers as ProviderView[]) {
           console.log(`  ${p.id.padEnd(wide)} ${p.kind.padEnd(10)} ${p.hasKey ? "key ✓" : p.baseUrl.includes("127.0.0.1") ? "local" : "no key"}  ${dim(p.baseUrl)}${planOf(p.id) ? dim("  coding plan: for coding only") : ""}`);
@@ -1313,27 +1313,27 @@ Next:
     case "roster": {
       const admin = new Admin(home);
       if (sub === "set") {
-        if (!rest[0] || rest.length < 2) fail("usage: galahad roster set <role> <provider/model>...");
+        if (!rest[0] || rest.length < 2) fail("usage: invincible roster set <role> <provider/model>...");
         await admin.call("setRoster", { role: rest[0], models: rest.slice(1) });
       }
       if (sub === "effort") {
         // How hard a role's models think: by the step (auto, the default), or one level you choose.
         const levels = ["auto", ...THINKING_EFFORTS];
-        if (rest.length !== 2 || !levels.includes(rest[1]!)) fail(`usage: galahad roster effort <role> <${levels.join("|")}>`);
+        if (rest.length !== 2 || !levels.includes(rest[1]!)) fail(`usage: invincible roster effort <role> <${levels.join("|")}>`);
         await admin.call("setRosterEffort", { role: rest[0], effort: rest[1] });
-        console.log(rest[1] === "auto" ? `${rest[0]} thinks as each step needs: routine turns less, hard ones more.` : `${rest[0]} thinks at ${rest[1]}, whatever the step. galahad roster effort ${rest[0]} auto puts it back.`);
+        console.log(rest[1] === "auto" ? `${rest[0]} thinks as each step needs: routine turns less, hard ones more.` : `${rest[0]} thinks at ${rest[1]}, whatever the step. invincible roster effort ${rest[0]} auto puts it back.`);
         return;
       }
       if (sub === "rm") {
         // A role you made goes (not while a knight works on it: the node says which); a built-in one goes back to its defaults.
-        if (rest.length !== 1) fail("usage: galahad roster rm <role>");
+        if (rest.length !== 1) fail("usage: invincible roster rm <role>");
         const { roster } = await admin.call<{ roster: Record<string, unknown> }>("setRoster", { role: rest[0], models: [] });
         console.log(roster[rest[0]!] ? `${rest[0]} is back to its default models.` : `${rest[0]} is removed.`);
         return;
       }
       if (sub === "check") {
         // What each model can do, measured: the quest loop's format, reading a screen, placing a click (about eight calls each).
-        if (!rest.length) fail("usage: galahad roster check <provider/model>... [--only format,reads,places]");
+        if (!rest.length) fail("usage: invincible roster check <provider/model>... [--only format,reads,places]");
         const only = typeof flags.only === "string" ? flags.only.split(",").map((p) => p.trim()).filter(Boolean) : [];
         for (const model of rest) {
           console.log(dim(`… checking ${model}`));
@@ -1353,12 +1353,12 @@ Next:
         };
         console.log(`  ${role.padEnd(10)} ${spec.models.map(shown).join(" → ")}${spec.configured ? "" : dim("  (default)")}${spec.custom ? dim("  (a role you made)") : ""}${spec.effort && spec.effort !== "auto" ? dim(`  (thinks at ${spec.effort})`) : ""}`);
       }
-      // (Each call thinks as its step needs, unless you pinned its role: galahad roster effort <role> <level|auto>.)
-      console.log(dim("  Each step thinks as it needs: routine turns less, hard ones more (galahad roster effort <role> <level|auto>)."));
+      // (Each call thinks as its step needs, unless you pinned its role: invincible roster effort <role> <level|auto>.)
+      console.log(dim("  Each step thinks as it needs: routine turns less, hard ones more (invincible roster effort <role> <level|auto>)."));
       for (const window of spent) console.log(dim(`  ${window.provider}: its allowance is spent until ${new Date(window.until).toISOString().slice(11, 16)} UTC; ${window.provider.includes("/") ? "it is" : "its models are"} passed over until then, and the next on each role answers.`));
       const checked = Object.entries(checks);
       if (checked.length) {
-        console.log(`\n  ${bold("Checked")} ${dim("(what each was seen to do: galahad roster check <provider/model>)")}`);
+        console.log(`\n  ${bold("Checked")} ${dim("(what each was seen to do: invincible roster check <provider/model>)")}`);
         for (const [model, check] of checked) console.log(`  ${model}: ${checkFacts(check).join(" · ")} ${dim(`· ${new Date(check.at).toISOString().slice(0, 10)}`)}`);
       }
       return;
@@ -1367,7 +1367,7 @@ Next:
     case "ask": {
       const text = [sub, ...rest].filter(Boolean).join(" ");
       const attach = (flags.attach as string[] | undefined) ?? [];
-      if (!text && !attach.length) fail("usage: galahad ask [--chat <id> [--steer | --queue | --aside [--bring]]] [--project <id>] [--temp] [--detach] [--attach file]... <prompt>");
+      if (!text && !attach.length) fail("usage: invincible ask [--chat <id> [--steer | --queue | --aside [--bring]]] [--project <id>] [--temp] [--detach] [--attach file]... <prompt>");
       // The turn runs on the node (turn-cli.ts): this terminal watches it, Ctrl-C stops it, --detach leaves him to it.
       const code = await askCommand(new Admin(home), text, {
         role: str("role"),
@@ -1402,10 +1402,10 @@ Next:
     case "chats": {
       const { conversations } = await new Admin(home).call<{ conversations: ConversationSummary[] }>("conversations");
       const shown = conversations.filter((c) => !str("project") || c.project === str("project"));
-      if (!shown.length) console.log(str("project") ? `No chats in ${str("project")}.` : "No chats yet. `galahad ask …` starts one.");
+      if (!shown.length) console.log(str("project") ? `No chats in ${str("project")}.` : "No chats yet. `invincible ask …` starts one.");
       for (const c of shown) {
         // Where each stands, at a glance: working, needs you, queued, stopped, failed (nothing to say when it's done); and
-        // whether an answer in it is new to you (read it with galahad chat <id>, or on any device).
+        // whether an answer in it is new to you (read it with invincible chat <id>, or on any device).
         const state = chatStateWords(c);
         console.log(`${c.pinned ? "★ " : "  "}${c.title}  ${c.unread ? `${bold("new")}  ` : ""}${state ? `${bold(state)}  ` : ""}${dim(`${c.id} · ${c.count} messages · ${new Date(c.updatedAt).toLocaleString()}${c.project ? ` · ${c.project}` : ""}`)}`);
       }
@@ -1415,13 +1415,13 @@ Next:
     case "chat": {
       const admin = new Admin(home);
       if (sub === "rm") {
-        if (!rest[0]) fail("usage: galahad chat rm <id>");
+        if (!rest[0]) fail("usage: invincible chat rm <id>");
         if (!flags.yes && !confirm("Delete this chat for good?")) return;
         const { deleted } = await admin.call<{ deleted: boolean }>("deleteConversation", { id: rest[0] });
         console.log(deleted ? "Deleted." : "No such chat.");
         return;
       }
-      if (!sub) fail("usage: galahad chat <id> | galahad chat rm <id>   (galahad chats lists them)");
+      if (!sub) fail("usage: invincible chat <id> | invincible chat rm <id>   (invincible chats lists them)");
       const { conversation } = await admin.call<{ conversation: ConversationView }>("conversation", { id: sub });
       console.log(`${bold(conversation.title)}  ${dim(`${conversation.id}${conversation.project ? ` · project ${conversation.project}` : ""}`)}\n`);
       const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1436,9 +1436,9 @@ Next:
         }
       }
       // What he's doing in it now, and what you queued behind it.
-      if (conversation.turn) console.log(`${bold("He's working on it now:")} ${turnLine(conversation.turn, Date.now())}\n${dim(`  galahad turn watch ${conversation.turn.id} · galahad turn stop ${conversation.turn.id} · galahad ask --chat ${conversation.id} --steer|--queue "…"`)}\n`);
-      if (conversation.queue.length) console.log(`${queueLines(conversation.queue, conversation.held).join("\n")}\n${dim(`  galahad queue ${conversation.id} [resume | rm <n|all> | send <n>]`)}\n`);
-      console.log(dim(`Go on with: galahad ask --chat ${conversation.id} "…"`));
+      if (conversation.turn) console.log(`${bold("He's working on it now:")} ${turnLine(conversation.turn, Date.now())}\n${dim(`  invincible turn watch ${conversation.turn.id} · invincible turn stop ${conversation.turn.id} · invincible ask --chat ${conversation.id} --steer|--queue "…"`)}\n`);
+      if (conversation.queue.length) console.log(`${queueLines(conversation.queue, conversation.held).join("\n")}\n${dim(`  invincible queue ${conversation.id} [resume | rm <n|all> | send <n>]`)}\n`);
+      console.log(dim(`Go on with: invincible ask --chat ${conversation.id} "…"`));
       // Read here: what he answered in it is no longer new, on any device.
       if (conversation.unread) await admin.call("seeConversation", { id: conversation.id }).catch(() => {});
       return;
@@ -1446,7 +1446,7 @@ Next:
 
     case "projects": {
       const { projects } = await new Admin(home).call<{ projects: ProjectView[] }>("projects");
-      if (!projects.length) console.log('No projects yet. `galahad project set <id> --name "…" --instructions "…"` starts one.');
+      if (!projects.length) console.log('No projects yet. `invincible project set <id> --name "…" --instructions "…"` starts one.');
       for (const p of projects) console.log(`  ${p.id.padEnd(20)} ${p.name}${p.repo ? dim(`  ${p.repo}`) : ""}${p.instructions ? dim(`\n  ${"".padEnd(20)} ${p.instructions.split("\n")[0]!.slice(0, 100)}`) : ""}`);
       return;
     }
@@ -1455,7 +1455,7 @@ Next:
       const admin = new Admin(home);
       if (sub === "git" || sub === "branch" || sub === "commit" || sub === "clone" || sub === "changes") {
         const id = rest[0];
-        if (!id) fail(`usage: galahad project ${sub} <id>${sub === "branch" ? " <name> [--new]" : sub === "commit" ? ' --message "…"' : ""}`);
+        if (!id) fail(`usage: invincible project ${sub} <id>${sub === "branch" ? " <name> [--new]" : sub === "commit" ? ' --message "…"' : ""}`);
         if (sub === "changes") {
           const { projects } = await admin.call<{ projects: ProjectView[] }>("projects");
           const project = projects.find((p) => p.id === id);
@@ -1472,9 +1472,9 @@ Next:
             : sub === "clone"
               ? await admin.call<ProjectGitView>("projectClone", { id })
               : sub === "branch"
-                ? await admin.call<ProjectGitView>("projectBranch", { id, branch: rest[1] ?? fail("usage: galahad project branch <id> <name> [--new]"), create: flags.new === true })
-                : await admin.call<ProjectGitView>("projectCommit", { id, message: str("message") ?? fail('usage: galahad project commit <id> --message "…"') });
-        if (view.state === "missing") console.log(`${view.checkout} isn't there yet: galahad project clone ${id}, or ask Galahad to start it.`);
+                ? await admin.call<ProjectGitView>("projectBranch", { id, branch: rest[1] ?? fail("usage: invincible project branch <id> <name> [--new]"), create: flags.new === true })
+                : await admin.call<ProjectGitView>("projectCommit", { id, message: str("message") ?? fail('usage: invincible project commit <id> --message "…"') });
+        if (view.state === "missing") console.log(`${view.checkout} isn't there yet: invincible project clone ${id}, or ask Galahad to start it.`);
         else if (view.state === "not-a-repository") console.log(`${view.checkout} is there, but it isn't a git repository.`);
         else {
           const against = view.upstream ? dim(` · ${view.ahead ?? 0} ahead, ${view.behind ?? 0} behind ${view.upstream}`) : "";
@@ -1484,13 +1484,13 @@ Next:
         return;
       }
       if (sub === "rm") {
-        if (!rest[0]) fail("usage: galahad project rm <id>");
+        if (!rest[0]) fail("usage: invincible project rm <id>");
         if (!flags.yes && !confirm(`Remove project ${rest[0]}? Its chats stay, outside any project.`)) return;
         await admin.call("removeProject", { id: rest[0] });
         console.log("Removed.");
         return;
       }
-      if (sub !== "set" || !rest[0]) fail('usage: galahad project set <id> --name "…" [--instructions "…" | --instructions-file path] [--repo https://…]   ·   galahad project rm <id>');
+      if (sub !== "set" || !rest[0]) fail('usage: invincible project set <id> --name "…" [--instructions "…" | --instructions-file path] [--repo https://…]   ·   invincible project rm <id>');
       const file = str("instructions-file");
       const instructions = file ? readFileSync(file, "utf8") : str("instructions");
       const { projects } = await admin.call<{ projects: ProjectView[] }>("projects");
@@ -1503,12 +1503,12 @@ Next:
         ...(instructions !== undefined ? { instructions } : {}),
         ...(str("repo") !== undefined ? { repo: str("repo") || null } : {}),
       });
-      console.log(`${bold(project.name)} (${project.id})${project.repo ? `  ${project.repo}` : ""}\n${dim("Chat in it: galahad ask --project " + project.id + ' "…", or the app\'s Projects page.')}`);
+      console.log(`${bold(project.name)} (${project.id})${project.repo ? `  ${project.repo}` : ""}\n${dim("Chat in it: invincible ask --project " + project.id + ' "…", or the app\'s Projects page.')}`);
       return;
     }
 
     case "token": {
-      if (sub !== "mint") fail("usage: galahad token mint --label <name>");
+      if (sub !== "mint") fail("usage: invincible token mint --label <name>");
       const result = await new Admin(home).call("mintToken", {
         label: str("label") ?? "arm",
         providers: str("providers")?.split(",").filter(Boolean),
@@ -1522,7 +1522,7 @@ Next:
 
     case "do": {
       const goal = [sub, ...rest].filter(Boolean).join(" ").trim();
-      if (!goal) fail('usage: galahad do [--net isolated|gateway|online] [--vm|--container] [--lab] [--on node] [--steps 30] [--timeout 300] [--keep] [--budget-usd 2] [--agent opencode --minutes 60 --repo url] "<goal>"');
+      if (!goal) fail('usage: invincible do [--net isolated|gateway|online] [--vm|--container] [--lab] [--on node] [--steps 30] [--timeout 300] [--keep] [--budget-usd 2] [--agent opencode --minutes 60 --repo url] "<goal>"');
       const budgetUsd = str("budget-usd") === undefined ? undefined : Number(str("budget-usd"));
       if (budgetUsd !== undefined && (!Number.isFinite(budgetUsd) || budgetUsd <= 0 || budgetUsd > 100)) fail("--budget-usd takes an amount in US dollars above 0 and at most 100, e.g. --budget-usd 2");
       const agentName = str("agent");
@@ -1571,7 +1571,7 @@ Next:
 
     case "investigate": {
       const question = [sub, ...rest].filter(Boolean).join(" ").trim();
-      if (!question) fail('usage: galahad investigate [--net isolated|gateway|online] [--workshop] [--vm|--container] [--on node] [--steps 40] [--timeout 600] [--keep] "<question>"');
+      if (!question) fail('usage: invincible investigate [--net isolated|gateway|online] [--workshop] [--vm|--container] [--on node] [--steps 40] [--timeout 600] [--keep] "<question>"');
       const network = str("net") ?? "isolated";
       if (!["isolated", "gateway", "online"].includes(network)) fail("--net must be isolated, gateway or online");
       const result = await investigateFromCli(new Admin(home), {
@@ -1592,7 +1592,7 @@ Next:
       const { investigations } = (await new Admin(home).call("investigations")) as { investigations: InvestigationView[] };
       const mark: Record<string, string> = { supported: "✓", refuted: "✗", inconclusive: "△" };
       if (command === "findings" || !sub) {
-        if (!investigations.length) console.log('No investigations yet: galahad investigate "<question>"');
+        if (!investigations.length) console.log('No investigations yet: invincible investigate "<question>"');
         for (const i of investigations) {
           const state = i.conclusion ? `${mark[i.conclusion]} ${i.conclusion}` : i.status;
           console.log(`  ${i.id}  ${state.padEnd(15)} ${dim(new Date(i.registeredAt).toLocaleString())}`);
@@ -1626,7 +1626,7 @@ ${i!.summary}` : ""}`);
 Reviewer:
 ${i!.review}`);
       if (i!.artifact) console.log(dim(`
-Evidence: galahad artifact ${i!.artifact}`));
+Evidence: invincible artifact ${i!.artifact}`));
       return;
     }
 
@@ -1634,7 +1634,7 @@ Evidence: galahad artifact ${i!.artifact}`));
       // One question from the command line: yes/no by default, a choice with --options, a score with --levels.
       const state = [sub, ...rest].filter(Boolean).join(" ").trim();
       const question = str("question");
-      if (!state || !question) fail('usage: galahad decide "<state>" --question "<question>" [--options a,b,c | --levels low,medium,high]');
+      if (!state || !question) fail('usage: invincible decide "<state>" --question "<question>" [--options a,b,c | --levels low,medium,high]');
       const options = str("options")?.split(",").map((o) => o.trim()).filter(Boolean);
       const levels = str("levels")?.split(",").map((l) => l.trim()).filter(Boolean);
       const q = options?.length
@@ -1654,7 +1654,7 @@ Evidence: galahad artifact ${i!.artifact}`));
 
     case "search": {
       const q = [sub, ...rest].filter(Boolean).join(" ").trim();
-      if (!q) fail('usage: galahad search "<words>" [--page 2]');
+      if (!q) fail('usage: invincible search "<words>" [--page 2]');
       const page = str("page") ? Number(str("page")) : undefined;
       const { results, suggestions } = (await new Admin(home).call("webSearch", { q, ...(page ? { page } : {}) })) as {
         results: { title: string; url: string; snippet: string; engines: string[] }[];
@@ -1670,7 +1670,7 @@ Evidence: galahad artifact ${i!.artifact}`));
 
     case "ship": {
       const id = sub;
-      if (!id || !/^art_[A-Za-z0-9_-]{22}$/.test(id) || !str("title")) fail('usage: galahad ship <artifact> --title "…" [--body …] [--base main] [--branch galahad/…] [--draft] [--ask] [-y]');
+      if (!id || !/^art_[A-Za-z0-9_-]{22}$/.test(id) || !str("title")) fail('usage: invincible ship <artifact> --title "…" [--body …] [--base main] [--branch invincible/…] [--draft] [--ask] [-y]');
       const admin = new Admin(home);
       let shipment: ShipManifest;
       try {
@@ -1685,7 +1685,7 @@ Evidence: galahad artifact ${i!.artifact}`));
       const connector = str("connector") ?? (await githubConnector(admin, where!.owner));
       console.log(`${bold(`${where!.owner}/${where!.repo}`)}: ${shipment!.files.length} file(s) on a new branch ${branch}, from ${shipment!.base.slice(0, 12)}, through ${connector}`);
       for (const f of shipment!.files.slice(0, 30)) console.log(`  ${f.deleted ? "deleted " : ""}${f.path}`);
-      if (shipment!.files.length > 30) console.log(dim(`  … ${shipment!.files.length - 30} more (galahad artifact ${id} changes.patch)`));
+      if (shipment!.files.length > 30) console.log(dim(`  … ${shipment!.files.length - 30} more (invincible artifact ${id} changes.patch)`));
       if (!flags.ask && !flags.yes && !confirm(`Open this pull request on ${where!.owner}/${where!.repo}?`)) return;
       const result = (await admin.call("callConnector", {
         connector,
@@ -1702,7 +1702,7 @@ Evidence: galahad artifact ${i!.artifact}`));
         },
         ...(flags.ask ? { ask: {}, why: `Ship ${shipment!.files.length} file(s) from ${id} to ${where!.owner}/${where!.repo}.` } : {}),
       })) as { status: "asked" | "done"; action?: string; result?: { ok: boolean; body: string } };
-      if (result.status === "asked") console.log(`Filed for your approval: galahad action approve ${result.action} (or the Inbox)`);
+      if (result.status === "asked") console.log(`Filed for your approval: invincible action approve ${result.action} (or the Inbox)`);
       else if (result.result?.ok) console.log(`✓ ${result.result.body}`);
       else fail(result.result?.body ?? "not shipped");
       return;
@@ -1752,7 +1752,7 @@ Evidence: galahad artifact ${i!.artifact}`));
         // A Mac given what its knights' VMs need (sandbox-setup.ts); a node of its own isn't needed for its first steps.
         const json = !!flags.json;
         const node = (): SetupNode | null => (home.exists() ? { name: home.readConfig().name, call: (route, input) => new Admin(home).call(route, input) } : null);
-        if (rest[0] && rest[0] !== "status") fail("usage: galahad sandbox setup [status] [--json]");
+        if (rest[0] && rest[0] !== "status") fail("usage: invincible sandbox setup [status] [--json]");
         process.exitCode = await sandboxSetup(systemSetupDeps({ node, say: (line) => console.log(json ? JSON.stringify(line) : setupWords(line)) }), { check: rest[0] === "status" });
         return;
       }
@@ -1784,13 +1784,13 @@ Evidence: galahad artifact ${i!.artifact}`));
       }
       if (sub === "exec") {
         const [id, ...cmd] = rest;
-        if (!id || !cmd.length) fail("usage: galahad sandbox exec <id> [--on node] -- <command…>");
+        if (!id || !cmd.length) fail("usage: invincible sandbox exec <id> [--on node] -- <command…>");
         const result = await admin.call("execSandbox", { id, cmd, ...(str("timeout") ? { timeoutSec: Number(str("timeout")) } : {}), ...(on ? { on } : {}) });
         printResult(result);
         process.exit(result.exitCode);
       }
       if (sub === "save") {
-        if (!rest[0]) fail("usage: galahad sandbox save <id> [/work/dir] [--label text]");
+        if (!rest[0]) fail("usage: invincible sandbox save <id> [/work/dir] [--label text]");
         const { artifact } = await admin.call("saveArtifact", {
           sandbox: rest[0],
           ...(rest[1] ? { path: rest[1] } : {}),
@@ -1798,18 +1798,18 @@ Evidence: galahad artifact ${i!.artifact}`));
           ...(on ? { on } : {}),
         });
         if (!artifact) console.log(`Nothing to keep in ${rest[1] ?? "/work/out"}.`);
-        else console.log(`Kept ${artifact.count} file(s), ${Math.max(1, Math.round(artifact.bytes / 1024))} KB: galahad artifact ${artifact.id}`);
+        else console.log(`Kept ${artifact.count} file(s), ${Math.max(1, Math.round(artifact.bytes / 1024))} KB: invincible artifact ${artifact.id}`);
         return;
       }
       if (sub === "rm") {
-        if (!rest[0]) fail("usage: galahad sandbox rm <id>");
+        if (!rest[0]) fail("usage: invincible sandbox rm <id>");
         await admin.call("destroySandbox", { id: rest[0], ...(on ? { on } : {}) });
         console.log("Sandbox destroyed.");
         return;
       }
       if (sub === "run") {
         const cmd = rest;
-        if (!cmd.length) fail("usage: galahad sandbox run [options] -- <command…>");
+        if (!cmd.length) fail("usage: invincible sandbox run [options] -- <command…>");
         const { sandbox } = await admin.call("createSandbox", {
           network: str("net") ?? "gateway",
           ...(str("cpus") ? { cpus: Number(str("cpus")) } : {}),
@@ -1837,12 +1837,12 @@ Evidence: galahad artifact ${i!.artifact}`));
           printResult(result);
           code = result.exitCode;
         } finally {
-          if (flags.keep) process.stderr.write(dim(`[kept: galahad sandbox exec ${sandbox.id} -- …]\n`));
+          if (flags.keep) process.stderr.write(dim(`[kept: invincible sandbox exec ${sandbox.id} -- …]\n`));
           else await admin.call("destroySandbox", { id: sandbox.id, ...(on ? { on } : {}) });
         }
         process.exit(code);
       }
-      fail("usage: galahad sandbox run|ls|exec|save|rm|build|setup — see `galahad help`");
+      fail("usage: invincible sandbox run|ls|exec|save|rm|build|setup — see `invincible help`");
     }
 
     case "artifacts":
@@ -1852,7 +1852,7 @@ Evidence: galahad artifact ${i!.artifact}`));
       const size = (bytes: number) => (bytes < 2 ** 20 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 2 ** 20).toFixed(1)} MB`);
       const id = command === "artifact" ? sub : undefined;
       if (!id) {
-        if (!artifacts.length) console.log("Nothing kept yet. Quests keep /work/out; `galahad sandbox save <id>` keeps any sandbox's.");
+        if (!artifacts.length) console.log("Nothing kept yet. Quests keep /work/out; `invincible sandbox save <id>` keeps any sandbox's.");
         for (const a of artifacts) {
           console.log(`  ${a.id}  ${new Date(a.savedAt).toLocaleString()}  ${String(a.count).padStart(4)} file(s) ${size(a.bytes).padStart(8)}  ${a.nodeName}${a.here ? "" : dim(" (elsewhere)")}`);
           console.log(`      ${a.label}${a.quest ? dim(` · ${a.quest}`) : ""}`);
@@ -1885,7 +1885,7 @@ Evidence: galahad artifact ${i!.artifact}`));
       }
       console.log(`${bold(artifact!.label)}  ${dim(`${artifact!.id} · ${artifact!.count} file(s) · ${size(artifact!.bytes)} · on ${artifact!.nodeName}${artifact!.quest ? ` · ${artifact!.quest}` : ""}`)}`);
       for (const f of artifact!.files) console.log(`  ${f.path.padEnd(48)} ${size(f.size).padStart(8)}  ${dim(f.sha256.slice(0, 12))}`);
-      console.log(dim(`\n  galahad artifact ${id} <file>  ·  galahad artifact ${id} --out ./results`));
+      console.log(dim(`\n  invincible artifact ${id} <file>  ·  invincible artifact ${id} --out ./results`));
       return;
     }
 
@@ -1906,7 +1906,7 @@ Evidence: galahad artifact ${i!.artifact}`));
         // The MCP server: stdout belongs to the protocol, so nothing else may print there.
         const label = str("arm") ?? "default";
         const config = home.readConfig();
-        const base = `http://127.0.0.1:${loadEnv().GALAHAD_PORT ?? config.port}`;
+        const base = `http://127.0.0.1:${loadEnv().INVINCIBLE_PORT ?? config.port}`;
         // --tools a,b: those alone, of what the arm's scopes allow (a Q-AMP grant's bridge runs it so). Named, and none: none.
         const tools = str("tools");
         const only = tools === undefined ? undefined : tools.split(",").map((t) => t.trim()).filter(Boolean);
@@ -1915,7 +1915,7 @@ Evidence: galahad artifact ${i!.artifact}`));
       }
       const target = rest[0];
       const targets = ["claude", "opencode", "codex", "hermes"];
-      if (!target || !targets.includes(target)) fail(`usage: galahad mcp install ${targets.join("|")} [--label name] [--apply]`);
+      if (!target || !targets.includes(target)) fail(`usage: invincible mcp install ${targets.join("|")} [--label name] [--apply]`);
       const label = str("label") ?? (target === "claude" ? "claude-code" : target);
       const minted = await new Admin(home).call<{ token: string; info: { scopes: string[] } }>("mintArm", { label });
       const tokenPath = home.writeArmToken(label, minted.token);
@@ -1934,13 +1934,13 @@ Evidence: galahad artifact ${i!.artifact}`));
         }
       } else if (target === "opencode") {
         console.log(
-          `Add to opencode.json (project) or ~/.config/opencode/opencode.json:\n\n${JSON.stringify({ mcp: { galahad: { type: "local", command: [bunPath, ...args], enabled: true } } }, null, 2)}\n`,
+          `Add to opencode.json (project) or ~/.config/opencode/opencode.json:\n\n${JSON.stringify({ mcp: { invincible: { type: "local", command: [bunPath, ...args], enabled: true } } }, null, 2)}\n`,
         );
       } else if (target === "codex") {
         console.log(`Add to ~/.codex/config.toml:\n\n[mcp_servers.galahad]\ncommand = ${JSON.stringify(bunPath)}\nargs = ${JSON.stringify(args)}\n`);
       } else {
         console.log(
-          `Add to your Hermes config (mcp_servers):\n\nmcp_servers:\n  galahad:\n    command: ${JSON.stringify(bunPath)}\n    args: ${JSON.stringify(args)}\n\n${dim("Check Hermes's MCP docs for the exact key in your version.")}`,
+          `Add to your Hermes config (mcp_servers):\n\nmcp_servers:\n  invincible:\n    command: ${JSON.stringify(bunPath)}\n    args: ${JSON.stringify(args)}\n\n${dim("Check Hermes's MCP docs for the exact key in your version.")}`,
         );
       }
       return;
@@ -1950,12 +1950,12 @@ Evidence: galahad artifact ${i!.artifact}`));
       if (sub !== "install") {
         // Galahad as an ACP agent (acp-agent.ts): stdout belongs to the protocol, so nothing else may print there.
         const config = home.readConfig();
-        const base = `http://127.0.0.1:${loadEnv().GALAHAD_PORT ?? config.port}`;
+        const base = `http://127.0.0.1:${loadEnv().INVINCIBLE_PORT ?? config.port}`;
         const token = home.readArmToken(str("arm") ?? "acp");
         await runAcpAgent({ base, token });
         return;
       }
-      if (rest.length) fail("usage: galahad acp install [--label name]");
+      if (rest.length) fail("usage: invincible acp install [--label name]");
       const label = str("label") ?? "acp";
       // What an ACP client shows may be read by others: his answers there carry nothing of yours, and he can do nothing
       // there but answer.
@@ -1971,20 +1971,20 @@ Evidence: galahad artifact ${i!.artifact}`));
       const admin = new Admin(home);
       if (sub === "grant" || sub === "ungrant") {
         const [label, ...scopes] = rest;
-        if (!label || !scopes.length) fail(`usage: galahad arms ${sub} <agent> <scope…>   e.g. galahad arms grant claude-code mind:read`);
+        if (!label || !scopes.length) fail(`usage: invincible arms ${sub} <agent> <scope…>   e.g. invincible arms grant claude-code mind:read`);
         const { arm } = (await admin.call("grantArm", sub === "grant" ? { label, add: scopes } : { label, remove: scopes })) as { arm: { label: string; scopes: string[] } };
         console.log(`${arm.label}: ${arm.scopes.join(", ")}`);
         console.log(dim("Its MCP server offers the tools at its next start (restart the agent)."));
         return;
       }
       if (sub === "revoke") {
-        if (!rest[0]) fail("usage: galahad arms revoke <label>");
+        if (!rest[0]) fail("usage: invincible arms revoke <label>");
         const { revoked } = await admin.call("revokeArm", { label: rest[0] });
         console.log(revoked ? `Revoked ${rest[0]}. Its MCP server will be refused from now on.` : `No arm named ${rest[0]}.`);
         return;
       }
       const { arms } = await admin.call("arms");
-      if (!arms.length) console.log("No agents connected. `galahad mcp install claude` to add one.");
+      if (!arms.length) console.log("No agents connected. `invincible mcp install claude` to add one.");
       for (const a of arms) console.log(`  ${a.label.padEnd(18)} ${dim(a.scopes.join(", "))}  since ${new Date(a.createdAt).toLocaleDateString()}`);
       return;
     }
@@ -2013,7 +2013,7 @@ Evidence: galahad artifact ${i!.artifact}`));
       const { questions } = await admin.call<{ questions: QuestionView[] }>("questions");
       if (sub === "answer" || sub === "decline") {
         const q = questions.find((x) => x.id === rest[0]);
-        if (!q) fail(`usage: galahad questions answer <id> name=value … | questions decline <id> (${rest[0] ? `no question ${rest[0]} waits` : "which one?"}: galahad questions lists them)`);
+        if (!q) fail(`usage: invincible questions answer <id> name=value … | questions decline <id> (${rest[0] ? `no question ${rest[0]} waits` : "which one?"}: invincible questions lists them)`);
         if (sub === "decline") {
           await admin.call("answerQuestion", { id: q.id, accept: false });
           console.log(`Said no to ${q.label}: its call goes on.`);
@@ -2032,7 +2032,7 @@ Evidence: galahad artifact ${i!.artifact}`));
         console.log(`Sent to ${q.label}: its call goes on.`);
         return;
       }
-      if (sub) fail("usage: galahad questions [answer <id> name=value … | decline <id>]");
+      if (sub) fail("usage: invincible questions [answer <id> name=value … | decline <id>]");
       if (!questions.length) console.log("No service asks you anything now.");
       for (const q of questions) {
         console.log(`${bold(q.id)} · ${plainLine(q.label)} asks (its call waits until ${new Date(q.expires).toLocaleTimeString()}):\n  ${plainLine(q.message)}`);
@@ -2041,7 +2041,7 @@ Evidence: galahad artifact ${i!.artifact}`));
           console.log(`  ${f.name}${f.required ? "" : " (optional)"}: ${plainLine(f.title)}${kind}${f.description ? dim(` · ${plainLine(f.description)}`) : ""}`);
         }
       }
-      if (questions.length) console.log(dim("Answer with galahad questions answer <id> name=value …, or galahad questions decline <id>."));
+      if (questions.length) console.log(dim("Answer with invincible questions answer <id> name=value …, or invincible questions decline <id>."));
       return;
     }
 
@@ -2082,11 +2082,11 @@ Evidence: galahad artifact ${i!.artifact}`));
         console.log(`  ${o.knights.map((k) => `@${k}`).join(" ")} · spent $${o.spentUsd.toFixed(2)} of $${o.budgetUsd}, held $${o.committedUsd.toFixed(2)}, left $${left.toFixed(2)} · tasks ${o.tasks.done} done, ${o.tasks.running} running, ${o.tasks.queued} waiting, ${o.tasks.failed} not done`);
         console.log(o.northStar.perCompleted === null ? "  none of its tasks done yet" : `  you stepped in ${o.northStar.perCompleted.toFixed(1)} times per completed task (${o.northStar.completed} done)`);
         if (o.notes) console.log(dim(`  plan: ${o.notes.split("\n")[0]!.slice(0, 140)}`));
-        console.log(dim(`  follow it: galahad roundtable chat ${o.room}`));
+        console.log(dim(`  follow it: invincible roundtable chat ${o.room}`));
       };
       if (!sub || sub === "ls") {
         const { outcomes } = await admin.call<{ outcomes: TeamOutcome[] }>("teamOutcomes");
-        if (!outcomes.length) console.log('No outcomes yet. galahad outcome add "<title>" --goal "…" --knight <id> --budget-usd 20');
+        if (!outcomes.length) console.log('No outcomes yet. invincible outcome add "<title>" --goal "…" --knight <id> --budget-usd 20');
         for (const o of outcomes) show(o);
         return;
       }
@@ -2094,7 +2094,7 @@ Evidence: galahad artifact ${i!.artifact}`));
         const title = rest.join(" ").trim();
         const knights = Array.isArray(flags.knight) ? (flags.knight as string[]) : flags.knight ? [String(flags.knight)] : [];
         const budgetUsd = Number(str("budget-usd"));
-        if (!title || !str("goal") || !knights.length || !Number.isFinite(budgetUsd)) fail('usage: galahad outcome add "<title>" --goal "…" --knight <id> [--knight <id>…] --budget-usd 20 [--done "…"] [--report-hour 9] [--tz Zone]');
+        if (!title || !str("goal") || !knights.length || !Number.isFinite(budgetUsd)) fail('usage: invincible outcome add "<title>" --goal "…" --knight <id> [--knight <id>…] --budget-usd 20 [--done "…"] [--report-hour 9] [--tz Zone]');
         const { outcome } = await admin.call<{ outcome: TeamOutcome }>("setTeamOutcome", {
           title,
           goal: str("goal"),
@@ -2109,7 +2109,7 @@ Evidence: galahad artifact ${i!.artifact}`));
         return;
       }
       if (sub === "pause" || sub === "resume" || sub === "stop") {
-        if (!rest[0]) fail(`usage: galahad outcome ${sub} <id>`);
+        if (!rest[0]) fail(`usage: invincible outcome ${sub} <id>`);
         if (sub === "stop" && !flags.yes && !confirm("Stop it? Its waiting work is stopped, and it ends.")) return;
         const { outcome } = await admin.call<{ outcome: TeamOutcome }>("controlTeamOutcome", { id: rest[0], action: sub });
         show(outcome);
@@ -2120,16 +2120,16 @@ Evidence: galahad artifact ${i!.artifact}`));
         const [id, amount] = rest;
         const raw = amount?.trim() ?? "";
         const by = Number(raw.replace(/^\+/, ""));
-        if (!id || !/^\+?\d+(\.\d+)?$/.test(raw) || !Number.isFinite(by)) fail("usage: galahad outcome budget <id> <usd | +usd>   (a new total, or +usd on top of it)");
+        if (!id || !/^\+?\d+(\.\d+)?$/.test(raw) || !Number.isFinite(by)) fail("usage: invincible outcome budget <id> <usd | +usd>   (a new total, or +usd on top of it)");
         const { outcomes } = await admin.call<{ outcomes: TeamOutcome[] }>("teamOutcomes");
         const now = outcomes.find((o) => o.id === id);
-        if (!now) fail(`no outcome ${id}: galahad outcome ls`);
+        if (!now) fail(`no outcome ${id}: invincible outcome ls`);
         const budgetUsd = Math.round((raw.startsWith("+") ? now!.budgetUsd + by : by) * 100) / 100;
         const { outcome } = await admin.call<{ outcome: TeamOutcome }>("controlTeamOutcome", { id, action: "budget", budgetUsd });
         show(outcome);
         return;
       }
-      fail("usage: galahad outcome [ls | add | pause | resume | stop | budget]");
+      fail("usage: invincible outcome [ls | add | pause | resume | stop | budget]");
       return;
     }
     case "roundtable":
@@ -2150,7 +2150,7 @@ Evidence: galahad artifact ${i!.artifact}`));
 
     case "rebuild": {
       const config = home.readConfig();
-      const store = new MindStore(home.mindPath);
+      const store = new LedgerStore(home.ledgerPath);
       store.expectFleet(config.fleet!);
       const before = store.digest();
       store.rebuild();
@@ -2161,11 +2161,11 @@ Evidence: galahad artifact ${i!.artifact}`));
     }
 
     default:
-      fail(`unknown command "${command}" — try \`galahad help\``);
+      fail(`unknown command "${command}" — try \`invincible help\``);
   }
 }
 
 await main().catch((error: unknown) => {
-  console.error(`galahad: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`invincible: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

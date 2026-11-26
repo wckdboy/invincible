@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { NOTIFY_DEFAULTS } from "@galahad/core/notify";
+import { NOTIFY_DEFAULTS } from "@invincible/core/notify";
 import { clockProblem, digestLine, isIos, keyBytes, pairingNote, perDayProblem, PUSH_STATE_TEXT, type PushEnv, pushState, pushSync, quietLine, REACH_DISMISS_MS, reachCard, reachDismissed, readOpenMessage, sameKey, todayLine, toTakeDown } from "./push.ts";
 
 /* Notifications on this device: the state it's in, and the checks the Settings fields make. */
@@ -49,12 +49,12 @@ describe("before pairing", () => {
 describe("a tapped notification, as the service worker tells an open page", () => {
   test("one of the app's places, and a kept chat for the chat page; anything else is no message of ours", () => {
     const chat = "cv_1234567890123456789012";
-    expect(readOpenMessage({ type: "galahad:open", open: "inbox", conversation: null })).toEqual({ route: "inbox" });
-    expect(readOpenMessage({ type: "galahad:open", open: "chat", conversation: chat })).toEqual({ route: "chat", conversation: chat });
+    expect(readOpenMessage({ type: "invincible:open", open: "inbox", conversation: null })).toEqual({ route: "inbox" });
+    expect(readOpenMessage({ type: "invincible:open", open: "chat", conversation: chat })).toEqual({ route: "chat", conversation: chat });
     // A chat only goes with the chat page, and only when it reads as one.
-    expect(readOpenMessage({ type: "galahad:open", open: "overview", conversation: chat })).toEqual({ route: "overview" });
-    expect(readOpenMessage({ type: "galahad:open", open: "chat", conversation: "<script>" })).toEqual({ route: "chat" });
-    for (const bad of [null, "galahad:open", { type: "galahad:updated" }, { type: "galahad:open", open: "vault" }, { type: "galahad:open", open: "journal" }, { type: "galahad:open", open: "https://evil.example" }, { type: "galahad:open" }]) {
+    expect(readOpenMessage({ type: "invincible:open", open: "overview", conversation: chat })).toEqual({ route: "overview" });
+    expect(readOpenMessage({ type: "invincible:open", open: "chat", conversation: "<script>" })).toEqual({ route: "chat" });
+    for (const bad of [null, "invincible:open", { type: "invincible:updated" }, { type: "invincible:open", open: "vault" }, { type: "invincible:open", open: "journal" }, { type: "invincible:open", open: "https://evil.example" }, { type: "invincible:open" }]) {
       expect(readOpenMessage(bad)).toBeNull();
     }
   });

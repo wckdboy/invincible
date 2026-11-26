@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { LoopRunView, NoticeView, TeamTask } from "@galahad/core";
+import type { LoopRunView, NoticeView, TeamTask } from "@invincible/core";
 import { AWAY_TASKS, awayLines } from "../src/away.ts";
 
 /*

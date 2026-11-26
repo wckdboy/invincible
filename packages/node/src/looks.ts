@@ -1,4 +1,4 @@
-import { LOOK_LIMITS, zonedInstant, zonedParts } from "@galahad/core";
+import { LOOK_LIMITS, zonedInstant, zonedParts } from "@invincible/core";
 import type { ChatStore, KeptLook } from "./chats.ts";
 import { type TurnHub, TurnError, type TurnSpec } from "./turns.ts";
 
@@ -28,7 +28,7 @@ export function lookAt(when: { in?: string; at?: string }, zone: string, now: nu
     at = zonedInstant({ year, month, day, hour, minute }, zone);
   } else throw new LookLaterError("say when: in (45m, 2h, 1d) or at (2026-11-25 09:00)");
   if (at - now < LOOK_LIMITS.minMs) throw new LookLaterError(`that is ${at <= now ? "past" : "less than a minute away"}: give a time to come`);
-  if (at - now > LOOK_LIMITS.aheadMs) throw new LookLaterError("that is more than 30 days away: a loop is for what's further off (galahad loop add … --at)");
+  if (at - now > LOOK_LIMITS.aheadMs) throw new LookLaterError("that is more than 30 days away: a loop is for what's further off (invincible loop add … --at)");
   return at;
 }
 

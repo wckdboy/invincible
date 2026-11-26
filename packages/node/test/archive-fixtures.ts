@@ -1,4 +1,4 @@
-import { normalize } from "@galahad/brain";
+import { normalize } from "@invincible/models";
 
 /*
  * Test stand-ins for the archive: a deterministic embedder that understands a few

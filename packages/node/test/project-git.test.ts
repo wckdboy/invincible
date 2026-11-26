@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BranchName } from "@galahad/core";
+import { BranchName } from "@invincible/core";
 import { actionDone, BRANCH_SCRIPT, CLONE_SCRIPT, COMMIT_SCRIPT, GIT_SCRIPT, gitView } from "../src/project-git.ts";
 import { LookError } from "../src/workspace-look.ts";
 
@@ -12,7 +12,7 @@ import { LookError } from "../src/workspace-look.ts";
  */
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const folder = () => { const dir = mkdtempSync(join(tmpdir(), "galahad-git-")); dirs.push(dir); return dir; };
+const folder = () => { const dir = mkdtempSync(join(tmpdir(), "invincible-git-")); dirs.push(dir); return dir; };
 const home = folder();
 const env = { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 const run = (script: string, ...args: string[]) => {

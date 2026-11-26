@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TeammateInput, type RouteName, type Teammate, type TeamMessage, type TeamRoom, type TeamRoomView, type TeamSnapshot } from "@galahad/core";
-import { knightColors } from "@galahad/core/avatar";
+import { TeammateInput, type RouteName, type Teammate, type TeamMessage, type TeamRoom, type TeamRoomView, type TeamSnapshot } from "@invincible/core";
+import { knightColors } from "@invincible/core/avatar";
 import { teamCommand } from "../src/team-cli.ts";
 
-/* `galahad roundtable` at a terminal, against what the node would answer. */
+/* `invincible roundtable` at a terminal, against what the node would answer. */
 
 const member = (id: string, over: Partial<Teammate> = {}): Teammate => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
 function node(teammates: Teammate[]) {
@@ -207,7 +207,7 @@ test("removing a knight asks first and says what goes with it; a no, or a VM nob
   // The listing still names the ones that were removed: their handles are taken.
   const lines = await printed(api, undefined, []);
   expect(lines).toContain("old · Old[31m · removed");
-  expect(lines).toContain("gone · Gone · removed · its conversations, kept to read: galahad roundtable chat room-abc, galahad roundtable chat room-def");
+  expect(lines).toContain("gone · Gone · removed · its conversations, kept to read: invincible roundtable chat room-abc, invincible roundtable chat room-def");
 });
 
 test("knights add --agent claude (or codex) asks the node for that harness, in a form its contract takes; the listing names it", async () => {
@@ -236,19 +236,19 @@ test("knights engram says whether the notes store is on, and turns it on or off 
   };
   const say = (line: string) => lines.push(line);
   await teamCommand(api, "engram", [], {}, say);
-  expect(lines.at(-1)).toBe("The notes store (Engram) is off: a knight's tasks are given none. Turn it on with: galahad roundtable engram on");
+  expect(lines.at(-1)).toBe("The notes store (Engram) is off: a knight's tasks are given none. Turn it on with: invincible roundtable engram on");
   await teamCommand(api, "engram", ["on"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamEngram", input: { on: true } });
   expect(lines.at(-1)).toBe("The notes store (Engram) is on. A knight's task is given it when the knight's VM has the pinned Engram, and says which it was. Notes stay in that VM: they are leads a task checks, never his memory.");
   await teamCommand(api, "engram", [], {}, say);
-  expect(lines.at(-1)).toBe("The notes store (Engram) is on: a knight's task is given it where its VM has the pinned Engram (Workspace, in the app, says which). Turn it off with: galahad roundtable engram off");
+  expect(lines.at(-1)).toBe("The notes store (Engram) is on: a knight's task is given it where its VM has the pinned Engram (Workspace, in the app, says which). Turn it off with: invincible roundtable engram off");
   await teamCommand(api, "engram", ["off"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamEngram", input: { on: false } });
   expect(lines.at(-1)).toBe("The notes store (Engram) is off. What knights kept stays in each VM, unused, under /work/.memory/engram.");
   // Anything but on or off is not sent anywhere.
   const before = asked.length;
-  await expect(teamCommand(api, "engram", ["maybe"], {}, say)).rejects.toThrow(/galahad roundtable engram \[on\|off\]/);
-  await expect(teamCommand(api, "engram", ["on", "--tools=agent"], {}, say)).rejects.toThrow(/galahad roundtable engram \[on\|off\]/);
+  await expect(teamCommand(api, "engram", ["maybe"], {}, say)).rejects.toThrow(/invincible roundtable engram \[on\|off\]/);
+  await expect(teamCommand(api, "engram", ["on", "--tools=agent"], {}, say)).rejects.toThrow(/invincible roundtable engram \[on\|off\]/);
   expect(asked).toHaveLength(before);
 });
 
@@ -266,7 +266,7 @@ test("roundtable ci says whether failing checks and reviews go back to the knigh
   };
   const say = (line: string) => lines.push(line);
   await teamCommand(api, "ci", [], {}, say);
-  expect(lines.at(-1)).toBe("Failing checks and reviews stay yours, except in an outcome, which gives them back on its own within its budget. Turn it on with: galahad roundtable ci on");
+  expect(lines.at(-1)).toBe("Failing checks and reviews stay yours, except in an outcome, which gives them back on its own within its budget. Turn it on with: invincible roundtable ci on");
   await teamCommand(api, "ci", ["on"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamCi", input: { on: true } });
   expect(lines.at(-1)).toStartWith("Failing checks, and reviews that ask for changes, go back to the knight whose work it was: a fix on the pull request's branch");
@@ -275,7 +275,7 @@ test("roundtable ci says whether failing checks and reviews go back to the knigh
   expect(asked.at(-1)).toEqual({ name: "teamCi", input: { on: false } });
   expect(lines.at(-1)).toStartWith("Failing checks and reviews stay yours");
   const before = asked.length;
-  await expect(teamCommand(api, "ci", ["maybe"], {}, say)).rejects.toThrow(/galahad roundtable ci \[on\|off\]/);
+  await expect(teamCommand(api, "ci", ["maybe"], {}, say)).rejects.toThrow(/invincible roundtable ci \[on\|off\]/);
   expect(asked).toHaveLength(before);
 });
 
@@ -341,7 +341,7 @@ test("knights trail prints what a task did as it happened, and --follow keeps re
   expect(asked).toEqual([{ name: "teamTrail", input: { task: "task-abcdefghijkl", after: 0 } }]);
   // (Times are the terminal's own: this machine's zone.)
   const at = (h: number, m: number, sec: number) => new Date(Date.UTC(2026, 10, 14, h, m, sec)).toTimeString().slice(0, 8);
-  expect(lines).toEqual([`${at(13, 5, 9)}  Plan · 1. Look.`, `${at(13, 5, 12)}  Running · ls[31m\n          second line`, "(still running: galahad roundtable trail task-abcdefghijkl --follow)"]);
+  expect(lines).toEqual([`${at(13, 5, 9)}  Plan · 1. Look.`, `${at(13, 5, 12)}  Running · ls[31m\n          second line`, "(still running: invincible roundtable trail task-abcdefghijkl --follow)"]);
   lines.length = 0;
   await teamCommand(api, "trail", ["task-abcdefghijkl"], { follow: true, "poll-ms": "1" }, (line) => lines.push(line));
   expect(asked.slice(1).map((a) => a.input.after)).toEqual([0, 3]);
@@ -374,7 +374,7 @@ test("roundtable give puts a task to the Roundtable: it says who takes it and wh
     "  Gareth (can't take it): its VM has no desktop",
     "task-abcdefghijkl queued in Bedivere's own conversation; completion requires its gates and independent review.",
   ]);
-  await expect(teamCommand(api, "give", [], {}, () => {})).rejects.toThrow(/usage: galahad roundtable give/);
+  await expect(teamCommand(api, "give", [], {}, () => {})).rejects.toThrow(/usage: invincible roundtable give/);
 });
 
 
@@ -384,7 +384,7 @@ test("a task a knight proposed is said to be waiting for you, and approved or de
   const proposed = { id: "task-abcdefghijkl", room: "forge", assignee: "ada", title: "Draft the notes", goal: "g", dependsOn: [], gates: [], status: "proposed", verified: false, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, proposedBy: "ada" };
   const api = { async call<T>(name: RouteName, input?: unknown): Promise<T> { if (name === "team") return { teammates: [member("ada")], rooms: [], tasks: [proposed], deliveries: [] } as T; calls.push({ name, input }); return {} as T; } };
   await teamCommand(api, undefined, [], {}, (line) => lines.push(line));
-  expect(lines).toContain("task-abcdefghijkl · proposed · ada · Draft the notes · proposed by ada: galahad roundtable approve task-abcdefghijkl");
+  expect(lines).toContain("task-abcdefghijkl · proposed · ada · Draft the notes · proposed by ada: invincible roundtable approve task-abcdefghijkl");
   await teamCommand(api, "approve", ["task-abcdefghijkl"], {}, (line) => lines.push(line));
   await teamCommand(api, "decline", ["task-abcdefghijkl"], {}, (line) => lines.push(line));
   expect(calls).toEqual([{ name: "controlTeam", input: { action: "approve", task: "task-abcdefghijkl" } }, { name: "controlTeam", input: { action: "stop", task: "task-abcdefghijkl" } }]);
@@ -406,7 +406,7 @@ test("a knight's own models: what it works on and what you may choose; set in or
   await teamCommand(api, "models", ["ada"], {}, (line) => lines.push(line));
   expect(lines).toEqual([
     "ada works on its role's models (engineer).",
-    "To choose, in order: galahad roundtable models <knight> provider/model…; --role gives it its role's again. You may choose:",
+    "To choose, in order: invincible roundtable models <knight> provider/model…; --role gives it its role's again. You may choose:",
     "  deepseek/deepseek-v4-pro",
     "  ollama/mimo-v2.6:9b · on mini",
   ]);
@@ -445,7 +445,7 @@ test("sensitive mode at a terminal: whether a knight is in it, on and off, and a
   await teamCommand(api, "sensitive", ["ada", "off"], {}, (line) => lines.push(line));
   expect(lines).toEqual([
     "ada works on nearai/Qwen/Qwen3.8-27B-abliterated, in that order.",
-    "To hold it to models of its own and nothing else: galahad roundtable sensitive ada on",
+    "To hold it to models of its own and nothing else: invincible roundtable sensitive ada on",
     "ada is in sensitive mode: every call of its work (its plan, its review, its conversations, its coding tool) goes to nearai/Qwen/Qwen3.8-27B-abliterated, in that order, and to nothing else.",
     "lin is in sensitive mode: every call of its work (its plan, its review, its conversations, its coding tool) goes to heabsy/heabsy/cyberheabsy, in that order, and to nothing else.",
     "ada works on nearai/Qwen/Qwen3.8-27B-abliterated, in that order.",
@@ -455,7 +455,7 @@ test("sensitive mode at a terminal: whether a knight is in it, on and off, and a
     { id: "lin", name: "Lin", sensitive: true, models: ["heabsy/heabsy/cyberheabsy"] },
     { id: "ada", name: "Ada", sensitive: false },
   ]);
-  await expect(teamCommand(api, "sensitive", ["ada", "maybe"], {}, () => {})).rejects.toThrow("usage: galahad roundtable sensitive <knight>");
+  await expect(teamCommand(api, "sensitive", ["ada", "maybe"], {}, () => {})).rejects.toThrow("usage: invincible roundtable sensitive <knight>");
   // A task in sensitive mode alone: on the models named, or with none named its knight's own; a knight with none is told what to do.
   lines.length = 0;
   calls.length = 0;
@@ -503,7 +503,7 @@ test("a knight's workspace from a terminal: a folder, a file, and what its task 
     `task-abcdefghijkl in /work/tasks/task-abcdefghijkl, from ${"a".repeat(12)}`, "M sync.ts  +2 -1", "A logo.png  (binary)", "? notes.md", "\n+export const retries = 3;",
   ]);
   expect(asked).toEqual([["teamFiles", { id: "ada" }], ["teamFile", { id: "ada", path: "/work/a.ts" }], ["teamChanges", { id: "ada" }]]);
-  await expect(teamCommand(api, "read", ["ada"], {}, () => {})).rejects.toThrow("usage: galahad roundtable read <knight> </work/path>");
+  await expect(teamCommand(api, "read", ["ada"], {}, () => {})).rejects.toThrow("usage: invincible roundtable read <knight> </work/path>");
 });
 
 test("a task's steps at a terminal, and the task given again from one of them, or from its start", async () => {
@@ -520,7 +520,7 @@ test("a task's steps at a terminal, and the task given again from one of them, o
   };
   await teamCommand(api, "steps", ["task-abcdefghijkl"], {}, (line) => lines.push(line));
   expect(lines[0]).toMatch(/^ {3}1 {2}\d\d:\d\d:\d\d {2}npm run build$/);
-  expect(lines[1]).toBe('Give it again from one: galahad roundtable again task-abcdefghijkl --from <step> ["<goal>"]');
+  expect(lines[1]).toBe('Give it again from one: invincible roundtable again task-abcdefghijkl --from <step> ["<goal>"]');
   lines.length = 0;
   await teamCommand(api, "again", ["task-abcdefghijkl", "Build", "it", "the", "other", "way."], { from: "1" }, (line) => lines.push(line));
   await teamCommand(api, "again", ["task-abcdefghijkl"], {}, (line) => lines.push(line));
@@ -559,11 +559,11 @@ test("keys of yours a knight may use, at a terminal: given (reads only unless --
   expect(lines[0]).toContain("ada has no keys of yours to use");
   expect(lines).toContain("stripe · reads only · in Authorization: Bearer · used 1 time in 30 days");
   expect(lines).toContain("acme · reads and writes · in x-api-key · used 12 times in 30 days");
-  await expect(teamCommand(api, "keys", ["ada", "add"], {}, () => {})).rejects.toThrow("usage: galahad roundtable keys");
+  await expect(teamCommand(api, "keys", ["ada", "add"], {}, () => {})).rejects.toThrow("usage: invincible roundtable keys");
 });
 
 test("export writes a knight as a file you carry; import shows it, then makes it a new knight here, never over one that's here", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-knight-file-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-knight-file-"));
   try {
     const ada = member("ada", { instructions: "Reviews pull requests.\n\nAsks before merging.", harness: "codex", keys: [{ secret: "stripe", header: "authorization", write: false }], memory: "the owner's private notes" });
     const lines: string[] = [];
@@ -599,7 +599,7 @@ test("export writes a knight as a file you carry; import shows it, then makes it
     await teamCommand(elsewhere([member("ada")]), "import", [path], { id: "ada2", yes: true }, (line) => made.push(line));
     expect(saved).toEqual([expect.objectContaining({ id: "ada2", name: "Ada", instructions: "Reviews pull requests.\n\nAsks before merging.", role: "engineer", harness: "codex", dailyTurns: 40 })]);
     expect(saved[0]).not.toHaveProperty("keys");
-    expect(made.at(-1)).toBe("Where it came from it was given stripe: none is given here unless you say so (galahad roundtable keys ada2 add <secret>).");
+    expect(made.at(-1)).toBe("Where it came from it was given stripe: none is given here unless you say so (invincible roundtable keys ada2 add <secret>).");
     // Not a knight file: said, and nothing made.
     await Bun.write(join(dir, "notes.md"), "# Notes\n");
     await expect(teamCommand(elsewhere([]), "import", [join(dir, "notes.md")], { yes: true }, () => {})).rejects.toThrow("That isn't a knight file");

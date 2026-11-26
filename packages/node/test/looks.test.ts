@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LOOK_LIMITS } from "@galahad/core";
+import { LOOK_LIMITS } from "@invincible/core";
 import { ChatStore, type KeptLook, type QueuedBy } from "../src/chats.ts";
 import { lookAt, LookLaterError, lookMessage, LookRunner, lookTime } from "../src/looks.ts";
 import { TurnError, TurnHub, type TurnSpec } from "../src/turns.ts";

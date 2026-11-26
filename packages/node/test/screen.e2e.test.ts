@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clientIdFromKey, type RouteName, routes, type Scope, type ScreenSessionView, type ScreenStatus, type ScreenView, signRequest, utf8 } from "@galahad/core";
-import { requestPairing, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { clientIdFromKey, type RouteName, routes, type Scope, type ScreenSessionView, type ScreenStatus, type ScreenView, signRequest, utf8 } from "@invincible/core";
+import { requestPairing, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -41,7 +41,7 @@ const helper: HelperRun = async (args) => {
   return { code: 0, stdout: "", stderr: "" };
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-screen-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-screen-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const bareHome = new Home(join(root, "bare"));
@@ -84,7 +84,7 @@ const screenLines = () => daemon.store.ledger(200).map((e) => e.body).filter((b)
 beforeAll(async () => {
   for (const [h, p, name] of [[home, port, "mini"], [bareHome, barePort, "ultra"]] as const) {
     const { identity, keystore } = await h.createIdentity("file");
-    const store = new MindStore(h.mindPath);
+    const store = new LedgerStore(h.ledgerPath);
     const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: name });
     store.close();
     h.writeConfig({ v: 1, name, fleet, port: p, keystore, advertise: "127.0.0.1" });

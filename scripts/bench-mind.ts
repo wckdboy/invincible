@@ -5,13 +5,13 @@
 //
 // Each size gets its own temp home with a log shaped like a real one (bench/mind/log.ts), every event really
 // signed and chained. Then each operation the daemon does on a timer is timed (median of several runs). Nothing
-// here touches ~/.galahad. `bun run bench mind` times the same operations at sizes that fit a few seconds, with a
+// here touches ~/.invincible. `bun run bench mind` times the same operations at sizes that fit a few seconds, with a
 // baseline to read them against (docs/BENCHMARKS.md).
 import { Database } from "bun:sqlite";
 import { copyFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildLog, lateEvent } from "../bench/mind/log.ts";
-import { MindStore, PullState } from "../packages/mind/src/index.ts";
+import { LedgerStore, PullState } from "../packages/ledger/src/index.ts";
 
 const sizes = process.argv.slice(2).map(Number).filter((n) => n > 0);
 const SIZES = sizes.length ? sizes : [5_000, 40_000, 400_000];
@@ -40,22 +40,22 @@ function bench(n: number): Row {
   const fleet = buildLog(n);
   const built = performance.now() - started;
   const row: Row = { events: n.toLocaleString("en-US") };
-  const opened: MindStore[] = [];
+  const opened: LedgerStore[] = [];
   try {
     let openMs = 0;
     {
       const t = performance.now();
-      new MindStore(fleet.path).close();
+      new LedgerStore(fleet.path).close();
       openMs = performance.now() - t;
     }
-    const store = new MindStore(fleet.path);
+    const store = new LedgerStore(fleet.path);
     opened.push(store);
     const self = { have: store.frontier(), digests: store.deviceDigests() };
     // A peer missing one of b's older events (a partial delivery).
     const holePath = join(fleet.dir, "hole.db");
     store.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     copyFileSync(fleet.path, holePath);
-    const hole = new MindStore(holePath);
+    const hole = new LedgerStore(holePath);
     hole.db.query("DELETE FROM events WHERE id = ?").run(fleet.oldB[0]!);
     hole.rebuild();
     const holed = { have: hole.frontier(), digests: hole.deviceDigests() };
@@ -77,7 +77,7 @@ function bench(n: number): Row {
         CREATE INDEX IF NOT EXISTS events_device ON events (device, hlc); PRAGMA user_version = 0;`);
       raw.close();
       const t = performance.now();
-      new MindStore(old).close();
+      new LedgerStore(old).close();
       row["first start, migrating"] = (performance.now() - t).toFixed(0);
     }
     row["frontier"] = time(() => store.frontier()).toFixed(1);
@@ -109,7 +109,7 @@ function bench(n: number): Row {
     }
     // The holed peer pulls until it's whole: every page, both sides, end to end.
     {
-      const holedStore = new MindStore(holePath);
+      const holedStore = new LedgerStore(holePath);
       opened.push(holedStore);
       const pull = new PullState(holedStore);
       pull.begin();

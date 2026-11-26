@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
-import type { RouteName, TeamSnapshot, Teammate, TerminalEvent, TerminalView } from "@galahad/core";
+import type { RouteName, TeamSnapshot, Teammate, TerminalEvent, TerminalView } from "@invincible/core";
 import { type Screen, terminalCommand } from "../src/terminal-cli.ts";
 
-/* `galahad terminal` at a terminal, against what the node would answer. */
+/* `invincible terminal` at a terminal, against what the node would answer. */
 
 const member = (id: string, over: Partial<Teammate> = {}): Teammate => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
-const view = (id: string, over: Partial<TerminalView> = {}): TerminalView => ({ id, sandbox: "0123456789", name: "galahad-sbx-0123456789", cols: 80, rows: 24, opened: 1, exitCode: null, watchers: 0, ...over });
+const view = (id: string, over: Partial<TerminalView> = {}): TerminalView => ({ id, sandbox: "0123456789", name: "invincible-sbx-0123456789", cols: 80, rows: 24, opened: 1, exitCode: null, watchers: 0, ...over });
 const out = (text: string): TerminalEvent => ({ type: "output", data: Buffer.from(text).toString("base64") });
 
 /** The node: what the command asked of it, a terminal's events as the test sends them, and how long an input takes. */
@@ -148,7 +148,7 @@ test("Ctrl-] leaves: what was typed before it is sent; a terminal opened here is
   t.type("\x1d");
   expect(await attached).toBe(0);
   expect(elsewhere.asked.some((a) => a.name === "closeTerminal")).toBe(false);
-  expect(t.said.at(-1)).toBe("[left: it is still open · galahad terminal attach tm_fromthephone0000]");
+  expect(t.said.at(-1)).toBe("[left: it is still open · invincible terminal attach tm_fromthephone0000]");
 });
 
 test("the node letting go of a terminal says how to take it up again", async () => {
@@ -158,17 +158,17 @@ test("the node letting go of a terminal says how to take it up again", async () 
   await tick();
   n.send(null);
   expect(await done).toBe(1);
-  expect(s.said.at(-1)).toBe("[the node let go of this terminal: take it up again with galahad terminal attach tm_opened0000000000]");
+  expect(s.said.at(-1)).toBe("[the node let go of this terminal: take it up again with invincible terminal attach tm_opened0000000000]");
 });
 
 test("a knight with no VM, or a name that is nothing: what to do instead; ls and close", async () => {
-  const n = node([member("percival")], [view("tm_aaaaaaaaaaaaaaaa", { name: "galahad-sbx-abcdef0123", cols: 90, rows: 30, watchers: 1 }), view("tm_bbbbbbbbbbbbbbbb", { exitCode: 0 })]);
+  const n = node([member("percival")], [view("tm_aaaaaaaaaaaaaaaa", { name: "invincible-sbx-abcdef0123", cols: 90, rows: 30, watchers: 1 }), view("tm_bbbbbbbbbbbbbbbb", { exitCode: 0 })]);
   const s = screen();
-  await expect(terminalCommand(n.api, "percival", [], s.screen, () => {})).rejects.toThrow("Percival has no VM yet: galahad roundtable provision percival");
+  await expect(terminalCommand(n.api, "percival", [], s.screen, () => {})).rejects.toThrow("Percival has no VM yet: invincible roundtable provision percival");
   await expect(terminalCommand(n.api, "lancelot", [], s.screen, () => {})).rejects.toThrow(/no knight or sandbox "lancelot"/);
   const lines: string[] = [];
   expect(await terminalCommand(n.api, "ls", [], s.screen, (line) => lines.push(line))).toBe(0);
-  expect(lines).toEqual(["tm_aaaaaaaaaaaaaaaa · galahad-sbx-abcdef0123 · 90×30 · watched by 1", "tm_bbbbbbbbbbbbbbbb · galahad-sbx-0123456789 · its shell ended (exit 0)"]);
+  expect(lines).toEqual(["tm_aaaaaaaaaaaaaaaa · invincible-sbx-abcdef0123 · 90×30 · watched by 1", "tm_bbbbbbbbbbbbbbbb · invincible-sbx-0123456789 · its shell ended (exit 0)"]);
   expect(await terminalCommand(n.api, "close", ["tm_aaaaaaaaaaaaaaaa"], s.screen, () => {})).toBe(0);
   expect(n.asked.at(-1)).toEqual({ name: "closeTerminal", input: { terminal: "tm_aaaaaaaaaaaaaaaa" } });
   await expect(terminalCommand(n.api, "close", ["nonsense"], s.screen, () => {})).rejects.toThrow(/usage/);

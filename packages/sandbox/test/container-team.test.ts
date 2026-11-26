@@ -52,7 +52,7 @@ async function knightOnAMac() {
     now: () => now,
   });
   const vm = await host.create({ network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 120, persistent: true, quest: QUEST, isolation: "vm", providers: ["deepseek"], diskGb: 20 });
-  const name = `galahad-sbx-${vm.id}`;
+  const name = `invincible-sbx-${vm.id}`;
   fake.calls.length = 0;
   ledger.length = 0;
   return { fake, host, vm, name, ledger, minted, revoked, stored, firewall, later: (ms: number) => void (now += ms) };
@@ -61,7 +61,7 @@ async function knightOnAMac() {
 describe("a knight's VM on a Mac", () => {
   test("its workspace is made to be kept, whatever becomes of its VM", async () => {
     const k = await knightOnAMac();
-    expect(k.fake.volumes.get(`${k.name}-work`)!.labels["dev.galahad.retained"]).toBe("1");
+    expect(k.fake.volumes.get(`${k.name}-work`)!.labels["dev.invincible.retained"]).toBe("1");
   });
 
   test("is resumed as on Linux: started when it had stopped, a fresh lease written in it as uid 1000", async () => {
@@ -78,7 +78,7 @@ describe("a knight's VM on a Mac", () => {
   test("is resumed only with the Mac's firewall on: it rejoins its networks as it starts, so it stays stopped and the error says why", async () => {
     const k = await knightOnAMac();
     k.fake.vms.get(k.name)!.state = "stopped";
-    k.firewall.state = { on: false, installed: true, soon: false, why: "the sandbox firewall's helper last ran 95 s ago: is it loaded? (sudo launchctl print system/sh.galahad.firewall)" };
+    k.firewall.state = { on: false, installed: true, soon: false, why: "the sandbox firewall's helper last ran 95 s ago: is it loaded? (sudo launchctl print system/sh.invincible.firewall)" };
     await expect(k.host.prepareTeam(k.vm.id, QUEST)).rejects.toThrow(/no sandbox is made on this Mac while its firewall isn't on: the sandbox firewall's helper last ran 95 s ago/);
     expect(k.fake.vms.get(k.name)!.state).toBe("stopped");
     expect(k.fake.calls.filter((c) => c[0] === "start")).toEqual([]);
@@ -94,8 +94,8 @@ describe("a knight's VM on a Mac", () => {
     const vm = k.fake.vms.get(k.name)!;
     expect(vm.volume).toBe(`${k.name}-work`);
     expect(vm.networks).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
-    expect(vm.labels["dev.galahad.quest"]).toBe(QUEST);
-    expect(vm.labels["dev.galahad.ephemeral"]).toBe("false");
+    expect(vm.labels["dev.invincible.quest"]).toBe(QUEST);
+    expect(vm.labels["dev.invincible.ephemeral"]).toBe("false");
     // Its volume was never left to be taken, and it is the one it had.
     expect(k.fake.volumes.has(`${k.name}-work`)).toBe(true);
     // A fresh lease for the providers it had, the old one revoked.
@@ -131,7 +131,7 @@ describe("a knight's VM on a Mac", () => {
     const vm = k.fake.vms.get(k.name)!;
     expect(vm.volume).toBe(`${k.name}-work`);
     expect(vm.networks).toEqual([NETWORKS.gateway.name]);
-    expect(k.ledger.at(-1)).toMatchObject({ class: "modify", verdict: "approved", detail: "made again from galahad/sandbox:1 as it is now · /work kept · gateway · 1 cpu · 2 GB" });
+    expect(k.ledger.at(-1)).toMatchObject({ class: "modify", verdict: "approved", detail: "made again from invincible/sandbox:1 as it is now · /work kept · gateway · 1 cpu · 2 GB" });
   });
 
   test("a new VM that won't start is cleared away and the old one put back as it was; the error says so", async () => {

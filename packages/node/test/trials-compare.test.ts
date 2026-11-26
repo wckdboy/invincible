@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type ChatStreamEvent, type RouteName, routes, TrialRecord, trialProblem, type TrialRunsView, TrialRunSettings, type TrialView } from "@galahad/core";
-import { ENGINEERING_SUITE, pose, REVIEWER_CASES } from "@galahad/brain";
+import { type ChatStreamEvent, type RouteName, routes, TrialRecord, trialProblem, type TrialRunsView, TrialRunSettings, type TrialView } from "@invincible/core";
+import { ENGINEERING_SUITE, pose, REVIEWER_CASES } from "@invincible/models";
 import { runTrials } from "../src/trial-cli.ts";
 import { trialCommand, UsageError } from "../src/trial-commands.ts";
 import { suiteNamed } from "../src/trial-suites.ts";
@@ -42,7 +42,7 @@ function fakeNode() {
         case "effort":
           return { quest: input.quest, attempts: input.effort, asked: input.effort, host: "ultra", reasons: [], budget: { perDay: 12, usedToday: 0 } } as T;
         case "createSandbox":
-          return { sandbox: { id: String(++created).padStart(10, "0"), node: "n_ultra", image: "galahad/lab:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [] } } as T;
+          return { sandbox: { id: String(++created).padStart(10, "0"), node: "n_ultra", image: "invincible/lab:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [] } } as T;
         case "execSandbox": {
           const command: string = input.cmd[2];
           if (command.includes("cat /work/out/answer.json")) {
@@ -160,7 +160,7 @@ describe("the reviewer, measured directly", () => {
   test("what a sweep is asked is checked before anything runs", async () => {
     const { node, recorded } = fakeNode();
     await expect(command(node, "sweep", ["swift", "a/b"], { suite: "reviewer" })).rejects.toThrow(UsageError);
-    await expect(command(node, "sweep", ["reviewer"], { suite: "reviewer" })).rejects.toThrow(/usage: galahad trial sweep/);
+    await expect(command(node, "sweep", ["reviewer"], { suite: "reviewer" })).rejects.toThrow(/usage: invincible trial sweep/);
     await expect(command(node, "sweep", ["reviewer", "nomodel"], { suite: "reviewer" })).rejects.toThrow(/a candidate is <provider>\/<model>/);
     await expect(command(node, "sweep", ["reviewer", "a/b"], { suite: "reviewer", pin: ["reviewer=c/d"] })).rejects.toThrow(/disagree/);
     await expect(command(node, "run", [], { suite: "warp" })).rejects.toThrow(/no trial suite "warp"/);
@@ -203,7 +203,7 @@ describe("does a change to the harness help? An A/B", () => {
     const [a, b] = Object.keys(runs);
     expect(await command(node, "compare", [a!, b!])).toBe(0);
     expect(out()).toContain("no-archive against baseline");
-    await expect(command(node, "compare", [a!, "r-none"])).rejects.toThrow(/usage: galahad trial compare/);
+    await expect(command(node, "compare", [a!, "r-none"])).rejects.toThrow(/usage: invincible trial compare/);
   });
 
   test("each side of an A/B keeps to half the budget: the first can't leave the second too little to be measured", async () => {
@@ -230,7 +230,7 @@ describe("does a change to the harness help? An A/B", () => {
 
   test("an A/B takes two different variants, named or spelled out; the named ones are listed", async () => {
     const { node } = fakeNode();
-    await expect(command(node, "ab", ["baseline"])).rejects.toThrow(/usage: galahad trial ab/);
+    await expect(command(node, "ab", ["baseline"])).rejects.toThrow(/usage: invincible trial ab/);
     await expect(command(node, "ab", ["baseline", "baseline"])).rejects.toThrow(/two different variants/);
     await expect(command(node, "ab", ["baseline", "warp"])).rejects.toThrow(/no variant "warp"/);
     await expect(command(node, "ab", ["baseline", "no-gates"], { effort: "2" })).rejects.toThrow(/not --variant or --effort/);

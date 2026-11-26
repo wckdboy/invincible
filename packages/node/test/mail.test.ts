@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { CATALOG, type ConnectorResult } from "@galahad/brain";
-import { type BuiltRequest, buildCall, ConnectorManifest, newNodeIdentity } from "@galahad/core";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
+import { CATALOG, type ConnectorResult } from "@invincible/models";
+import { type BuiltRequest, buildCall, ConnectorManifest, newNodeIdentity } from "@invincible/core";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { ConnectorService } from "../src/connectors.ts";
 import { addresses, gmailNatives, gmailWords, outlookNatives, rawMessage, subjectLine, wordsOf } from "../src/mail.ts";
 
@@ -206,7 +206,7 @@ test("the catalog's mail is Galahad's alone and private, signs in as you, and as
 
 test("a native's requests go to its connector's own origin or nowhere: one sent elsewhere is refused before it leaves", async () => {
   const identity = newNodeIdentity();
-  const store = new MindStore(":memory:");
+  const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   store.emit(identity, "connector.set", { id: "gmail", manifest: CATALOG.gmail!.manifest });

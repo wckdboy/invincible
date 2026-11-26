@@ -167,7 +167,7 @@ export type TeamTaskFrom = z.infer<typeof TeamTaskFrom>;
 /** One step of a task that can be started from: the command it ran, and the commit its workspace was kept as after it. */
 export interface TeamCheckpoint {
   step: number;
-  /** The commit object, under refs/galahad/checkpoints/<task>/<step> in the knight's repository. */
+  /** The commit object, under refs/invincible/checkpoints/<task>/<step> in the knight's repository. */
   commit: string;
   command: string;
   at: number;
@@ -408,7 +408,7 @@ export type TeamTaskRecord = z.infer<typeof TeamTaskRecord>;
 
 /**
  * What a task in a repository changed, kept on the node that hosts the knight's VM: the artifact that holds the
- * patch and the shipment (`galahad ship` turns it into a pull request, on your word), how many files, and the
+ * patch and the shipment (`invincible ship` turns it into a pull request, on your word), how many files, and the
  * commit the work began from.
  */
 export const TeamTaskChanges = z.strictObject({

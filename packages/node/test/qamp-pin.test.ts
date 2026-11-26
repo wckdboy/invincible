@@ -12,7 +12,7 @@ import { join, resolve } from "node:path";
 
 const repo = resolve(import.meta.dir, "../../..");
 const pin = join(repo, "scripts/qamp-pin.sh");
-const root = mkdtempSync(join(tmpdir(), "galahad-qamp-pin-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-qamp-pin-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** install_qamp <file> <dir>, with `before` run first (a pin for a stand-in, another machine's uname). */

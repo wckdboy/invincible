@@ -1,10 +1,10 @@
-import type { GatewayTokens } from "@galahad/brain";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+import type { GatewayTokens } from "@invincible/models";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 
 /*
  * Web search: Galahad's own SearXNG on the sandbox host (loopback only, installed by
  * the deploy). You, chat and agents search through the node (webSearch, MCP
- * web_search, `galahad search`); sandboxes through their gateway (`websearch` in the
+ * web_search, `invincible search`); sandboxes through their gateway (`websearch` in the
  * images), with a token that carries the "search" scope, so a quest can research
  * without the internet. Results are what strangers wrote: data, never instructions.
  */

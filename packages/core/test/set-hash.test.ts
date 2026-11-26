@@ -27,8 +27,10 @@ describe("the set hash sync compares device logs with", () => {
   test("its bytes are pinned: replicas on any version and platform compute the same digest", () => {
     // Changing these would make every node in a mixed fleet see every other one as holed.
     expect(SetHash.empty().digest()).toBe("5aAKqZkayKXuMQmETYSlVYO9IFcq0__NQnkvPDaxg60");
-    expect(SetHash.of(["a", "b"]).digest()).toBe("GwYhugaHfLbpH4y8Yk48stgMcEMeUnjdUYRSOYCQTLs");
-    expect(SetHash.of(["8SpuaToTVJa71zgvba41gtk83EkAB8nIV4TUfLJurdo"]).digest()).toBe("UCzbBZegwvGnN1D1NKFpWq-aqtalDgc8EaodLGqeYjg");
+    // (Pinned again on 26 November 2026, when the nonce became Invincible's own, inv/sethash1: a fresh fleet, so no
+    // replica on the older nonce shares a log with these.)
+    expect(SetHash.of(["a", "b"]).digest()).toBe("F0t0VVZoanToJ6EI29TDV_IyhHEBBM0IlAS7fIaluzo");
+    expect(SetHash.of(["8SpuaToTVJa71zgvba41gtk83EkAB8nIV4TUfLJurdo"]).digest()).toBe("9RCNCSMsvYoE54vafa8l_hcznM8irgVdPzgl2f-KCIE");
     expect(SetHash.empty().bytes().length).toBe(SET_HASH_BYTES);
   });
 
@@ -67,7 +69,7 @@ describe("the set hash sync compares device logs with", () => {
     const elements = ["a", "b", "event-3", "a"];
     const expected = new Uint8Array(2048);
     for (const element of elements) {
-      const lanes = chacha20(sha256(new TextEncoder().encode(element)), new TextEncoder().encode("galahad/set1"), new Uint8Array(2048));
+      const lanes = chacha20(sha256(new TextEncoder().encode(element)), new TextEncoder().encode("inv/sethash1"), new Uint8Array(2048));
       for (let i = 0; i < 2048; i += 2) {
         const sum = (expected[i]! | (expected[i + 1]! << 8)) + (lanes[i]! | (lanes[i + 1]! << 8));
         expected[i] = sum & 0xff;

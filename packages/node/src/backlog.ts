@@ -1,6 +1,6 @@
-import { type ExecResult, heldModels, type NodeIdentity, redact, TEAM_GALAHAD, TEAM_LIMITS, type Teammate, type TeamTask } from "@galahad/core";
-import { chat, STEP_EFFORT } from "@galahad/brain";
-import type { MindStore } from "@galahad/mind";
+import { type ExecResult, heldModels, type NodeIdentity, redact, TEAM_GALAHAD, TEAM_LIMITS, type Teammate, type TeamTask } from "@invincible/core";
+import { chat, STEP_EFFORT } from "@invincible/models";
+import type { LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
 import type { TeamStore } from "./team-store.ts";
 import type { TeamService } from "./team.ts";
@@ -12,9 +12,9 @@ import type { TeamService } from "./team.ts";
  * ROADMAP.md or TODO.md, read in the knight's VM as it last fetched it, with its newest commits) or of its open issues
  * (read through your GitHub connector), in its conversation with you. He approves it himself and it starts (your word,
  * 23 November 2026: he approves his own decisions and his knights'; what is monetary asks you): its money is its budget,
- * always set and at most BACKLOG.taskUsd, which must fit what is left of yours when you set one (`galahad usage
+ * always set and at most BACKLOG.taskUsd, which must fit what is left of yours when you set one (`invincible usage
  * budget`; TeamService.approveOwn holds the rule). Past that it waits for you as a proposal, to approve or decline. Each look is one answer of the planner's,
- * at a plan's care (roster.ts STEP_EFFORT). On until you say otherwise: `galahad roundtable backlog off`.
+ * at a plan's care (roster.ts STEP_EFFORT). On until you say otherwise: `invincible roundtable backlog off`.
  *
  * A proposal you leave unanswered for a day is looked at again with the repository as it is then: kept when it is still
  * the next step, else withdrawn (its step done by other work, or another first), the fresher one in its place. On the
@@ -108,15 +108,15 @@ ${redact(input.read.trim())}
 </repository>`;
 }
 
-export type BrainContext = Parameters<typeof chat>[0];
+export type ModelsContext = Parameters<typeof chat>[0];
 
 export interface BacklogOptions {
   store: TeamStore;
   service: () => TeamService;
-  mind: MindStore;
+  mind: LedgerStore;
   identity: NodeIdentity;
   /** The brain, as the node counts its calls (his own: server's brainFor). */
-  brain: () => BrainContext;
+  brain: () => ModelsContext;
   /** A command in the knight's VM (server's execTeam). */
   exec: (knight: Teammate, command: string, timeoutSec: number, signal: AbortSignal) => Promise<ExecResult>;
   /** Its repository's open issues, in lines (issueLines), through your GitHub connector; empty when it has none to read. */
@@ -244,7 +244,7 @@ export class BacklogRunner {
     if (this.approveIfHis(task, knight)) return this.o.store.task(task.id);
     // Past what is left of your budget it is money, so yours: in your Inbox, in the node's own words, it waits in its
     // conversation with you, to approve or decline.
-    this.o.mind.emit(this.o.identity, "notice.raised", { key: `backlog:${task.id}`, severity: "info", title: `Work proposed for ${knight.name}`, body: `${found.title}\nIt may spend $${task.budgetUsd}, more than is left of your budget, so it waits in your conversation with ${knight.name}, and starts when you approve it there (or galahad roundtable approve ${task.id}).`.slice(0, 600), source: "backlog", at: this.now() });
+    this.o.mind.emit(this.o.identity, "notice.raised", { key: `backlog:${task.id}`, severity: "info", title: `Work proposed for ${knight.name}`, body: `${found.title}\nIt may spend $${task.budgetUsd}, more than is left of your budget, so it waits in your conversation with ${knight.name}, and starts when you approve it there (or invincible roundtable approve ${task.id}).`.slice(0, 600), source: "backlog", at: this.now() });
     return task;
   }
 

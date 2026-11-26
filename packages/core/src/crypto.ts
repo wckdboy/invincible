@@ -101,13 +101,13 @@ export interface SealedBox extends Ciphertext {
 export function sealTo(recipient: Bytes, plaintext: Bytes, context: string): SealedBox {
   const eph = x25519.keygen();
   const shared = x25519.getSharedSecret(eph.secretKey, recipient);
-  const key = deriveKey(shared, `galahad/seal/v1|${context}`, 32, concat(eph.publicKey, recipient));
+  const key = deriveKey(shared, `invincible/seal/v1|${context}`, 32, concat(eph.publicKey, recipient));
   return { eph: b64u(eph.publicKey), ...aeadSeal(key, plaintext, context) };
 }
 
 export function openSealed(recipientSecret: Bytes, box: SealedBox, context: string): Bytes {
   const eph = fromB64u(box.eph);
   const shared = x25519.getSharedSecret(recipientSecret, eph);
-  const key = deriveKey(shared, `galahad/seal/v1|${context}`, 32, concat(eph, boxPublicKey(recipientSecret)));
+  const key = deriveKey(shared, `invincible/seal/v1|${context}`, 32, concat(eph, boxPublicKey(recipientSecret)));
   return aeadOpen(key, box, context);
 }

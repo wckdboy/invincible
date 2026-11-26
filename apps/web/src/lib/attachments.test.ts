@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { AttachmentRef, StoredMessage } from "@galahad/core";
-import { ATTACHMENT_LIMITS } from "@galahad/core/attachments";
+import type { AttachmentRef, StoredMessage } from "@invincible/core";
+import { ATTACHMENT_LIMITS } from "@invincible/core/attachments";
 import { ATTACH_ACCEPT, base64Of, nameOf, prepare, refusal } from "./attachments.ts";
 import { beginTurn, type Thread, turnOf } from "./turns.ts";
 

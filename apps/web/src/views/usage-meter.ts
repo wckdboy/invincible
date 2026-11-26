@@ -1,5 +1,5 @@
-import type { UsageMeter } from "@galahad/core";
-import { tokensLabel, usdLabel } from "@galahad/core/spend";
+import type { UsageMeter } from "@invincible/core";
+import { tokensLabel, usdLabel } from "@invincible/core/spend";
 import { type Ctx, errorMessage } from "../context.ts";
 import { spentWindowLines } from "../lib/usage-windows.ts";
 import { button, callout, meter, segmented, statTile } from "../ui/controls.ts";
@@ -8,7 +8,7 @@ import { h, replace } from "../ui/dom.ts";
 import { toast } from "../ui/toast.ts";
 
 /*
- * The usage meter (GET /api/usage/meter; the Apple apps' UsageMeterView, the terminal's `galahad usage`): this
+ * The usage meter (GET /api/usage/meter; the Apple apps' UsageMeterView, the terminal's `invincible usage`): this
  * period's model calls on the node at your prices against your budget, as a tile with a bar that stands still. Opened,
  * what they came to, what cost most, and the budget to set (a line to watch, never a stop).
  */

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy or update a Galahad node on a Linux or macOS host over SSH.
+# Deploy or update a Invincible node on a Linux or macOS host over SSH.
 #
 # Idempotent: re-running ships the current commit, keeps the node's identity and
 # mind, re-runs the test suite on the host, and restarts the service. Each commit
@@ -10,19 +10,19 @@
 #   scripts/deploy.sh <ssh-target> --found camelot [--name server]  first node of a new fleet
 #   scripts/deploy.sh <ssh-target> --join <invite> [--name server]  join an existing fleet
 #   scripts/deploy.sh <ssh-target>                                  update an existing node
-# root targets only (Galahad then runs as a dedicated `galahad` user, never as root):
-#   --sudo              give the galahad user passwordless sudo, with every command logged
+# root targets only (Invincible then runs as a dedicated `invincible` user, never as root):
+#   --sudo              give the invincible user passwordless sudo, with every command logged
 #   --expose <port>     publish the PWA with `tailscale serve` on that HTTPS port (tailnet only)
-#   --open-firewall     allow the Galahad port on tailscale0 when UFW is active
+#   --open-firewall     allow the Invincible port on tailscale0 when UFW is active
 #   --embedder          the archive's local embedder: Ollama (pinned, checksummed) on 127.0.0.1 only,
 #                       with qwen3-embedding:0.6b, hired as the embedder role unless you chose one
 #                       (opt-in; without it a deploy changes nothing here, and leaves an earlier install)
-#   --open-qamp         allow UDP 7781-7789 on tailscale0 when UFW is active: Q-AMP grants' bridges
-# other: --port 7777, --skip-tests,
+#   --open-qamp         allow UDP 7410-7419 on tailscale0 when UFW is active: Q-AMP grants' bridges
+# other: --port 7400, --skip-tests,
 #   --qamp <file>       Q-AMP's binary for the host (fetched by you: its forge is sign-in only), checked
 #                       there against scripts/qamp-pin.sh and installed for the node (<home>/bin/qamp)
 #
-# Transport: plain ssh by default; GALAHAD_SSH="tailscale ssh" uses Tailscale SSH.
+# Transport: plain ssh by default; INVINCIBLE_SSH="tailscale ssh" uses Tailscale SSH.
 set -euo pipefail
 
 if [[ $# -lt 1 || $1 == -* ]]; then
@@ -31,7 +31,7 @@ if [[ $# -lt 1 || $1 == -* ]]; then
 fi
 TARGET=$1
 shift
-NAME="-" MODE="update" FLEET="-" INVITE="-" PORT=7777 SKIP_TESTS=0 SUDO=0 EXPOSE=0 OPEN_FIREWALL=0 EMBEDDER=0 OPEN_QAMP=0 QAMP_FILE=""
+NAME="-" MODE="update" FLEET="-" INVITE="-" PORT=7400 SKIP_TESTS=0 SUDO=0 EXPOSE=0 OPEN_FIREWALL=0 EMBEDDER=0 OPEN_QAMP=0 QAMP_FILE=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --name) NAME=$2; shift 2 ;;
@@ -56,7 +56,7 @@ for value in "$NAME" "$FLEET" "$INVITE" "$PORT" "$EXPOSE"; do
   [[ $value =~ ^[A-Za-z0-9._-]+$ ]] || { echo "refusing unsafe argument: $value" >&2; exit 1; }
 done
 
-read -r -a SSH <<<"${GALAHAD_SSH:-ssh}"
+read -r -a SSH <<<"${INVINCIBLE_SSH:-ssh}"
 cd "$(git rev-parse --show-toplevel)"
 if [[ -n $(git status --porcelain) ]]; then
   echo "refusing to deploy: the working tree has uncommitted changes (deploys ship commits, not drafts)" >&2
@@ -68,8 +68,8 @@ echo "→ shipping $REV to $TARGET"
 # A fresh, private stage directory made on the server (mktemp -d: a name nobody can guess,
 # mode 700, owned by whoever deploys), so no one else on the host can plant or change what
 # root runs from it. It goes when the deploy ends, however it ends.
-STAGE=$("${SSH[@]}" "$TARGET" "mktemp -d /tmp/galahad-stage.XXXXXXXXXX" | tr -d '\r')
-[[ $STAGE =~ ^/tmp/galahad-stage\.[A-Za-z0-9]{10}$ ]] || { echo "the server didn't make a stage directory" >&2; exit 1; }
+STAGE=$("${SSH[@]}" "$TARGET" "mktemp -d /tmp/invincible-stage.XXXXXXXXXX" | tr -d '\r')
+[[ $STAGE =~ ^/tmp/invincible-stage\.[A-Za-z0-9]{10}$ ]] || { echo "the server didn't make a stage directory" >&2; exit 1; }
 trap '"${SSH[@]}" "$TARGET" "rm -rf -- $STAGE" || true' EXIT
 # The repository's own bytes: with core.autocrlf (Git for Windows' default) and a .gitattributes,
 # git archive would turn every script into CRLF, and bash on the target refuses it.

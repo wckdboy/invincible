@@ -1,5 +1,5 @@
-import type { ComputeNodeView, NodeCapacity, PeerStatus, PlacementNeeds, Presence } from "@galahad/core";
-import { cannotMake, CONTAINER_IMAGES, FIRST_IMAGES, OWN_IMAGES, type SandboxAsk } from "@galahad/sandbox";
+import type { ComputeNodeView, NodeCapacity, PeerStatus, PlacementNeeds, Presence } from "@invincible/core";
+import { cannotMake, CONTAINER_IMAGES, FIRST_IMAGES, OWN_IMAGES, type SandboxAsk } from "@invincible/sandbox";
 import { type Capabilities, isAlwaysOn } from "./capabilities.ts";
 
 /*

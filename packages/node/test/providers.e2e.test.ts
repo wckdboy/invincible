@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectProvider as recognised, originOf, PRESETS, preset } from "@galahad/brain";
-import { type RouteName, routes } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { detectProvider as recognised, originOf, PRESETS, preset } from "@invincible/models";
+import { type RouteName, routes } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { detectProvider, providerSetup } from "../../../apps/web/src/lib/text.ts";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -35,7 +35,7 @@ const caps: Capabilities = {
 
 const fakeKey = (id: string) => ["FAKE", id, "key", "for", "tests", crypto.randomUUID().slice(0, 8)].join("-");
 
-const root = mkdtempSync(join(tmpdir(), "galahad-providers-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-providers-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -64,7 +64,7 @@ async function ok<T = any>(name: RouteName, input?: unknown): Promise<T> {
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "providers-node" });
   store.close();
   home.writeConfig({ v: 1, name: "providers-node", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -99,7 +99,7 @@ describe("a provider's models, listed through the node", () => {
   });
 
   test("a Cloudflare AI Gateway lists none: it says they are yours to name", async () => {
-    const baseUrl = "https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/galahad/compat";
+    const baseUrl = "https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/invincible/compat";
     await ok("setSecret", { name: "cloudflare-ai", value: fakeKey("cloudflare-ai"), provider: "cloudflare-ai", baseUrl });
     await ok("setProvider", { id: "cloudflare-ai", baseUrl, secret: "cloudflare-ai" });
     const response = await call("providerModels", { id: "cloudflare-ai" });
@@ -109,7 +109,7 @@ describe("a provider's models, listed through the node", () => {
 });
 
 /*
- * Every preset configured the way each surface does it, against the node's own routes: `galahad key add` (key-cli.ts),
+ * Every preset configured the way each surface does it, against the node's own routes: `invincible key add` (key-cli.ts),
  * and the app's add-key sheet with the iPhone's Keys page (both run lib/text.ts' providerSetup, the iPhone through the
  * shared vectors). Each ends with its key sealed for it, pinned to its address, and usable by its provider. A
  * Cloudflare AI Gateway has no address of its own: the one given with its key is where it goes.
@@ -135,7 +135,7 @@ describe("every preset is configured, on every surface", () => {
     }
   }
 
-  test("with galahad key add: --provider for each, and --base-url for the one with no address of its own", async () => {
+  test("with invincible key add: --provider for each, and --base-url for the one with no address of its own", async () => {
     for (const p of PRESETS) {
       const lines: string[] = [];
       await keyAddCommand({ call: (name, input) => ok(name, input) }, fakeKey(p.id), { provider: p.id, ...(p.baseUrl ? {} : { "base-url": GATEWAY }) }, (line) => lines.push(line));
@@ -179,7 +179,7 @@ describe("every preset is configured, on every surface", () => {
 /*
  * A provider pointed at another region than its key was added for (Xiaomi's Token Plan answers at one of three, by
  * region). The key doesn't follow it (SECURITY.md, 2), and the node says so: which address the key was for. Added again
- * with the region's address next to it, as the app's and the iPhone's key sheets and `galahad key add --base-url` do,
+ * with the region's address next to it, as the app's and the iPhone's key sheets and `invincible key add --base-url` do,
  * it is pinned there and the provider set up there.
  */
 describe("a provider pointed at another region", () => {

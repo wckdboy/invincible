@@ -92,7 +92,7 @@ describe("the PWA bundle", () => {
 
   test("no drawing of a face is served: what was under /knights/ is gone", async () => {
     const assets = await buildAssets();
-    for (const path of ["/knights/", "/knights/galahad.webp", "/knights/galahad-helm.webp", "/knights/../index.html"]) expect(assets.has(path)).toBe(false);
+    for (const path of ["/knights/", "/knights/galahad.webp", "/knights/invincible-helm.webp", "/knights/../index.html"]) expect(assets.has(path)).toBe(false);
   });
 
   test("the app's typeface is its own: Geist, served from the node with its licence beside it, never fetched elsewhere", async () => {

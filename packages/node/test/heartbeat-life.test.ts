@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LoopView, type RouteName, routes, type SelfActionView } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type LoopView, type RouteName, routes, type SelfActionView } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -34,7 +34,7 @@ const caps: Capabilities = {
   tailscale: null,
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-life-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-life-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -72,7 +72,7 @@ const arm = async (label: string) => (await json<{ token: string }>(await call("
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "life-node" });
   store.close();
   home.writeConfig({ v: 1, name: "life-node", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -178,7 +178,7 @@ describe("a fleet that still holds his journal's loop, and what he wrote", () =>
     const old = loops.find((l) => l.name === "reflect")!;
     expect(old).toMatchObject({ name: "reflect", schedule: "30 21 * * *", enabled: true, task: null, label: "Galahad's journal", last: null, running: false });
     expect(old.problem).toContain("its task no longer exists (his journal");
-    expect(old.problem).toContain("galahad loop rm reflect");
+    expect(old.problem).toContain("invincible loop rm reflect");
     // By hand it's refused, in the same words; nothing was run or recorded.
     const refused = await call("runLoop", { name: "reflect" });
     expect(refused.status).toBe(409);

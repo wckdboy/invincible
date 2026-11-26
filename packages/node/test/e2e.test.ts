@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { b64u, clientIdFromKey, type FleetView, newNodeIdentity, routes, type RouteName, signRequest, utf8 } from "@galahad/core";
-import { requestPairing, signedFetch, signedPost, type SyncPage, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { b64u, clientIdFromKey, type FleetView, newNodeIdentity, routes, type RouteName, signRequest, utf8 } from "@invincible/core";
+import { requestPairing, signedFetch, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -59,7 +59,7 @@ function admin(home: Home, port: number) {
   };
 }
 
-const root = mkdtempSync(join(tmpdir(), "galahad-e2e-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-e2e-"));
 const homeA = new Home(join(root, "laptop"));
 const homeB = new Home(join(root, "server"));
 const portA = freePort();
@@ -92,7 +92,7 @@ beforeAll(async () => {
 
   // The laptop founds the fleet.
   const { identity, keystore } = await homeA.createIdentity("file");
-  const store = new MindStore(homeA.mindPath);
+  const store = new LedgerStore(homeA.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "laptop" });
   store.close();
   homeA.writeConfig({ v: 1, name: "laptop", fleet, port: portA, keystore, advertise: "127.0.0.1" });
@@ -132,7 +132,7 @@ describe("M0: one mind, two bodies", () => {
     await callA("approvePairing", { invite: pairings[0].invite, device: pairings[0].device });
 
     const { fleet } = await waitForApproval(join, { intervalMs: 50 });
-    const store = new MindStore(homeB.mindPath);
+    const store = new LedgerStore(homeB.ledgerPath);
     store.expectFleet(fleet);
     const page = await signedPost<SyncPage>(identity, laptop.endpoint, "/link/sync", { have: {} });
     store.ingest(page.events);

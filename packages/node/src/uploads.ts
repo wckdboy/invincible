@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ModelMessage, ToolImage } from "@galahad/brain";
-import { ATTACHMENT_LIMITS, type AttachmentRef, type AttachmentType, type ChatMessage, pictureType, textOf } from "@galahad/core";
+import type { ModelMessage, ToolImage } from "@invincible/models";
+import { ATTACHMENT_LIMITS, type AttachmentRef, type AttachmentType, type ChatMessage, pictureType, textOf } from "@invincible/core";
 import { clean } from "./archive/retrieval.ts";
 
 /*

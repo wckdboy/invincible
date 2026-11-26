@@ -21,7 +21,7 @@ export interface Action {
   class: ActionClass;
   /** e.g. "r2.bucket", "git.branch", "docker.container" */
   resource: string;
-  /** Concrete target, e.g. "galahad-backups" or "amiriteorg/galahad#feat/x". */
+  /** Concrete target, e.g. "invincible-backups" or "wckdboy/invincible#feat/x". */
   target: string;
   /** Present when the target was created by Galahad. */
   createdBy?: { quest: string; ephemeral: boolean };
@@ -58,7 +58,7 @@ export function decide(action: Action): Decision {
  * What Galahad approves himself, of what asks (your word, 23 November 2026: he approves his own decisions and his
  * knights'; what is monetary, legal or destructive still asks you). An outward call is his to answer only when what it
  * does is known, and is none of the three: his knights' work in the repositories you gave them, on GitHub (a pull
- * request from a galahad/… branch, a fix pushed onto one, an issue, a comment on an issue or a pull request, a review
+ * request from a invincible/… branch, a fix pushed onto one, an issue, a comment on an issue or a pull request, a review
  * that comments or asks for changes). Only you give a knight its repository, so he can't widen this himself. Everything else asks as
  * before: a delete, which can't be undone; whatever spends or books money; whatever speaks for you to other people or
  * in their places (mail, someone else's repository); the physical world; a review that approves (your word on your
@@ -98,8 +98,8 @@ export function ownApproval(call: OwnCall, repositories: readonly string[]): str
   const theirs = repositories.some((remote) => githubRepository(remote) === `${owner}/${repo}`.toLowerCase());
   if (!theirs) return null;
   const where = `${owner}/${repo}, a repository you gave a knight`;
-  if (call.native === "github.ship") return `a pull request of the work, on a galahad/… branch, in ${where}`;
-  if (call.native === "github.ship.update") return `a fix pushed onto its galahad/… branch, in ${where}`;
+  if (call.native === "github.ship") return `a pull request of the work, on a invincible/… branch, in ${where}`;
+  if (call.native === "github.ship.update") return `a fix pushed onto its invincible/… branch, in ${where}`;
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];
   if (!what) return null;
@@ -111,7 +111,7 @@ export function ownApproval(call: OwnCall, repositories: readonly string[]): str
 }
 
 /** A branch of Galahad's own, as the GitHub connector's shipments pin it (connector-catalog.ts). */
-const GALAHAD_BRANCH = /^galahad\/[A-Za-z0-9._-]{1,80}(\/[A-Za-z0-9._-]{1,80})?$/;
+const GALAHAD_BRANCH = /^invincible\/[A-Za-z0-9._-]{1,80}(\/[A-Za-z0-9._-]{1,80})?$/;
 
 /** "owner/repo" of a github.com repository's address (https or ssh), lowercased; null for anything else. */
 function githubRepository(remote: string): string | null {

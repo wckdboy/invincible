@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamDelivery, TeamRoom, TeamTask, Teammate } from "@galahad/core/team";
+import type { TeamDelivery, TeamRoom, TeamTask, Teammate } from "@invincible/core/team";
 import { galahadNeeds, rosterRows, knightOfCaller, type RosterInput } from "./roster.ts";
 
 const NOW = 1_000_000;

@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ConversationSummary, type ConversationView, type FleetView, type RouteName, routes, type TelegramView } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ConversationSummary, type ConversationView, type FleetView, type RouteName, routes, type TelegramView } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -33,7 +33,7 @@ const caps: Capabilities = {
 
 const TOKEN = "123456789:AAFakeTokenForTestsOnlyNotARealOne_xx";
 const OWNER = { id: 1001, username: "liege", first_name: "Liege" };
-const root = mkdtempSync(join(tmpdir(), "galahad-telegram-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-telegram-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -70,7 +70,7 @@ const telegramApi = Bun.serve({
     if (!match || match[1] !== TOKEN) return Response.json({ ok: false, description: "Unauthorized" }, { status: 401 });
     const method = match[2]!;
     const params = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    if (method === "getMe") return Response.json({ ok: true, result: { id: 42, username: "galahad_test_bot", is_bot: true } });
+    if (method === "getMe") return Response.json({ ok: true, result: { id: 42, username: "invincible_test_bot", is_bot: true } });
     if (method === "getFile") return Response.json({ ok: true, result: { file_id: params.file_id, file_path: params.file_id === "big" ? "photos/file_7.jpg" : "documents/report.pdf" } });
     if (method === "getUpdates") {
       const offset = Number(params.offset ?? 0);
@@ -113,7 +113,7 @@ const json = async <T,>(response: Response): Promise<T> => {
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "tg-node" });
   store.close();
   home.writeConfig({ v: 1, name: "tg-node", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -136,13 +136,13 @@ describe("Telegram", () => {
     expect((await call("telegramConnect", { token: "987654321:AAWrongTokenWrongTokenWrongTokenWrong" })).status).toBe(400);
     expect((await call("telegramConnect", { token: "not a token at all, clearly not one" })).status).toBe(400);
     const connected = await json<{ bot: string; code: string; device: string }>(await call("telegramConnect", { token: TOKEN }));
-    expect(connected.bot).toBe("@galahad_test_bot");
+    expect(connected.bot).toBe("@invincible_test_bot");
     expect(connected.code).toMatch(/^[A-Z2-9]{8}$/);
     code = connected.code;
     const { devices } = await json<FleetView>(await call("fleet", undefined));
-    expect(devices.find((d) => d.id === connected.device)).toMatchObject({ name: "Telegram (@galahad_test_bot)", kind: "client", scopes: ["chat", "mind:read"] });
+    expect(devices.find((d) => d.id === connected.device)).toMatchObject({ name: "Telegram (@invincible_test_bot)", kind: "client", scopes: ["chat", "mind:read"] });
     const { telegram } = await json<{ telegram: TelegramView }>(await call("telegram", undefined));
-    expect(telegram).toMatchObject({ connected: true, bot: "@galahad_test_bot", owner: null, node: "tg-node" });
+    expect(telegram).toMatchObject({ connected: true, bot: "@invincible_test_bot", owner: null, node: "tg-node" });
     expect(telegram.linkExpires).toBeGreaterThan(Date.now());
     // Connecting is yours alone: an agent may not.
     const arm = (await json<{ token: string }>(await call("mintArm", { label: "busybody" }))).token;

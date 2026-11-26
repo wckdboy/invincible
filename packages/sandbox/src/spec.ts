@@ -1,4 +1,4 @@
-import type { SandboxNetwork } from "@galahad/core";
+import type { SandboxNetwork } from "@invincible/core";
 
 /*
  * A sandbox is where a knight works: an unprivileged, resource-capped container
@@ -6,25 +6,25 @@ import type { SandboxNetwork } from "@galahad/core";
  * turns a spec into `docker` arguments, so the security posture is unit-tested.
  */
 
-export const LABEL = "dev.galahad";
-export const DEFAULT_IMAGE = "galahad/sandbox:1";
+export const LABEL = "dev.invincible";
+export const DEFAULT_IMAGE = "invincible/sandbox:1";
 /**
  * Kata Containers' shim: the container runs inside its own KVM microVM with its own kernel.
  * Docker finds `containerd-shim-kata-v2` on containerd's PATH, so Docker's config never changes.
  */
 export const KATA_RUNTIME = "io.containerd.kata.v2";
 /** Port of the sandbox-only model gateway listener on the gateway network's bridge IP. */
-export const SANDBOX_GATEWAY_PORT = 7779;
+export const SANDBOX_GATEWAY_PORT = 7402;
 
 /**
  * gateway: Docker `--internal` network: no route out; the only reachable host
- *          service is the sandbox gateway (UFW allows just that port on galahad0).
+ *          service is the sandbox gateway (UFW allows just that port on inv0).
  * online:  ordinary bridge with egress, plus the gateway network for models.
  * Inter-container traffic is disabled on both, so sandboxes cannot reach each other.
  */
 export const NETWORKS = {
-  gateway: { name: "galahad-gw", bridge: "galahad0", subnet: "172.31.250.0/24", gateway: "172.31.250.1", internal: true },
-  online: { name: "galahad-net", bridge: "galahad1", subnet: "172.31.249.0/24", gateway: "172.31.249.1", internal: false },
+  gateway: { name: "invincible-gw", bridge: "inv0", subnet: "172.31.250.0/24", gateway: "172.31.250.1", internal: true },
+  online: { name: "invincible-net", bridge: "inv1", subnet: "172.31.249.0/24", gateway: "172.31.249.1", internal: false },
 } as const;
 
 export interface SandboxSpec {
@@ -56,15 +56,15 @@ export interface SandboxSpec {
 }
 
 /** A stopped container that keeps the sandbox image in use, so image pruning (Coolify's nightly cleanup) leaves it alone. */
-export const KEEPER = "galahad-sandbox-image";
+export const KEEPER = "invincible-sandbox-image";
 
 /** The Lab: mathematics, physics and engineering tools (sandbox/lab/Dockerfile). */
-export const LAB_IMAGE = "galahad/lab:1";
+export const LAB_IMAGE = "invincible/lab:1";
 
 /** The knights' desktop: the workshop with a display, a window manager and a browser (sandbox/desktop/Dockerfile). Built after the workshop image, which it is made from. */
-export const DESKTOP_IMAGE = "galahad/desktop:1";
+export const DESKTOP_IMAGE = "invincible/desktop:1";
 /** Claude Code in the workshop image, for trials alone (sandbox/claude-code): tagged by its pinned release. */
-export const CLAUDE_CODE_IMAGE = "galahad/claude-code:2.1.319";
+export const CLAUDE_CODE_IMAGE = "invincible/claude-code:2.1.319";
 
 /**
  * Galahad's own images: where each is built from (under the sandbox directory) and the keeper that holds it. `base`:
@@ -72,9 +72,9 @@ export const CLAUDE_CODE_IMAGE = "galahad/claude-code:2.1.319";
  */
 export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: string; base?: string }>> = {
   [DEFAULT_IMAGE]: { context: ".", keeper: KEEPER },
-  [LAB_IMAGE]: { context: "lab", keeper: "galahad-lab-image" },
-  [DESKTOP_IMAGE]: { context: "desktop", keeper: "galahad-desktop-image", base: DEFAULT_IMAGE },
-  [CLAUDE_CODE_IMAGE]: { context: "claude-code", keeper: "galahad-claude-code-image", base: DEFAULT_IMAGE },
+  [LAB_IMAGE]: { context: "lab", keeper: "invincible-lab-image" },
+  [DESKTOP_IMAGE]: { context: "desktop", keeper: "invincible-desktop-image", base: DEFAULT_IMAGE },
+  [CLAUDE_CODE_IMAGE]: { context: "claude-code", keeper: "invincible-claude-code-image", base: DEFAULT_IMAGE },
 };
 
 /**
@@ -83,8 +83,8 @@ export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: stri
  */
 export const FIRST_IMAGES: readonly string[] = [DEFAULT_IMAGE, LAB_IMAGE, DESKTOP_IMAGE];
 
-export const containerName = (id: string) => `galahad-sbx-${id}`;
-export const volumeName = (id: string) => `galahad-sbx-${id}-work`;
+export const containerName = (id: string) => `invincible-sbx-${id}`;
+export const volumeName = (id: string) => `invincible-sbx-${id}-work`;
 
 export function labels(spec: SandboxSpec): Record<string, string> {
   return {
@@ -166,19 +166,19 @@ export function runArgs(spec: SandboxSpec): string[] {
 /** The gateway scope for web search (the node's own SearXNG): not a model provider. */
 export const SEARCH_SCOPE = "search";
 /** Environment that points tools at the sandbox gateway with a scoped token (never a key). */
-/** `keys`: the lease is good for keys of yours (PLAN #17): GALAHAD_KEYS says where the key gateway is. */
+/** `keys`: the lease is good for keys of yours (PLAN #17): INVINCIBLE_KEYS says where the key gateway is. */
 export function gatewayEnv(token: string, providers: string[], keys = false): Record<string, string> {
   const root = `http://${NETWORKS.gateway.gateway}:${SANDBOX_GATEWAY_PORT}`;
   const base = `${root}/gw`;
   const models = providers.filter((p) => p !== SEARCH_SCOPE);
   const openai = models.find((p) => p !== "anthropic");
   return {
-    GALAHAD_GATEWAY: base,
+    INVINCIBLE_GATEWAY: base,
     ...(models.includes("anthropic") ? { ANTHROPIC_BASE_URL: `${base}/anthropic`, ANTHROPIC_AUTH_TOKEN: token } : {}),
     ...(openai ? { OPENAI_BASE_URL: `${base}/${openai}`, OPENAI_API_KEY: token } : {}),
-    ...(providers.includes(SEARCH_SCOPE) ? { GALAHAD_SEARCH: `${root}/search` } : {}),
-    ...(keys ? { GALAHAD_KEYS: `${root}/key` } : {}),
-    GALAHAD_TOKEN: token,
+    ...(providers.includes(SEARCH_SCOPE) ? { INVINCIBLE_SEARCH: `${root}/search` } : {}),
+    ...(keys ? { INVINCIBLE_KEYS: `${root}/key` } : {}),
+    INVINCIBLE_TOKEN: token,
   };
 }
 
@@ -209,7 +209,7 @@ export const terminalArgs = (id: string, tag: string): string[] => [
   "--env",
   "TERM=xterm-256color",
   "--env",
-  `GALAHAD_TERMINAL=${tag}`,
+  `INVINCIBLE_TERMINAL=${tag}`,
   containerName(id),
   "sh",
   "-c",
@@ -223,7 +223,7 @@ export const terminalArgs = (id: string, tag: string): string[] => [
  * session (the shell) is killed if it is still there.
  */
 export const TERMINAL_HANG_UP = `t=$1
-tagged() { for d in /proc/[0-9]*; do tr '\\0' '\\n' < "$d/environ" 2>/dev/null | grep -qx "GALAHAD_TERMINAL=$t" && echo "\${d#/proc/}"; done; }
+tagged() { for d in /proc/[0-9]*; do tr '\\0' '\\n' < "$d/environ" 2>/dev/null | grep -qx "INVINCIBLE_TERMINAL=$t" && echo "\${d#/proc/}"; done; }
 for p in $(tagged); do kill -HUP "$p" 2>/dev/null; done
 sleep 2
 for p in $(tagged); do [ "$(sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | cut -d' ' -f4)" = "$p" ] && kill -KILL "$p" 2>/dev/null; done

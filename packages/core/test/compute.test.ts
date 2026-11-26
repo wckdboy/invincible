@@ -301,7 +301,7 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
 
   test("raising a default ceiling, and a second machine", () => {
     const lines = whatMoreBuys([{ name: "ultra", body: ultra, capacity, limit: null }], { effort: 3 } as ComputePlan);
-    expect(lines.some((l) => l.includes("galahad compute limit ultra"))).toBe(true);
+    expect(lines.some((l) => l.includes("invincible compute limit ultra"))).toBe(true);
     expect(lines.some((l) => /another machine/i.test(l))).toBe(true);
   });
 
@@ -309,7 +309,7 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
     // What ultra measured on 14 November 2026 (16 cores, two threads each): 13.2 cores' worth on its default 16 threads.
     const half = deriveCapacity(ultra, measured(ultra, 16, 13.2), null);
     expect(half.sandboxes).toBe(3);
-    const line = whatMoreBuys([{ name: "ultra", body: ultra, capacity: half, limit: null }], { effort: 3 } as ComputePlan).find((l) => l.includes("galahad compute limit ultra --cores 24"))!;
+    const line = whatMoreBuys([{ name: "ultra", body: ultra, capacity: half, limit: null }], { effort: 3 } as ComputePlan).find((l) => l.includes("invincible compute limit ultra --cores 24"))!;
     // A straight line from that is 5 slots on 24 threads: the most there could be, and said as that…
     expect(line).toMatch(/could carry up to 5 sandbox slots instead of 3/);
     expect(line).not.toMatch(/would carry|about 5/);
@@ -330,7 +330,7 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
     const warning = lines.find((l) => /model calls/.test(l));
     expect(warning).toMatch(/8 at once on keep/);
     expect(warning).toMatch(/12 slots/);
-    expect(warning).toMatch(/galahad compute limit keep --model-calls/);
+    expect(warning).toMatch(/invincible compute limit keep --model-calls/);
     // One machine: another would make eight slots for eight model calls. Nothing to warn of.
     expect(whatMoreBuys([fleet[0]!], { effort: 3 } as ComputePlan).some((l) => /model calls/.test(l))).toBe(false);
     // A ceiling you raised is yours: with room for them, nothing to warn of either.
@@ -362,7 +362,7 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
     const calibration = measured(body, 16, 15.6, { models: [{ runtime: "ollama", model: "qwen3:8b", tps: 41.3 }] });
     const suggested = computeSuggestions([{ id: "n_ultra", name: "ultra", body, calibration }], { swift: ["anthropic/claude-haiku-5-5"] });
     expect(suggested[0]).toMatchObject({ key: "compute-suggest:hire-local:n_ultra" });
-    expect(suggested[0]!.body).toContain("galahad roster set swift ollama/qwen3:8b");
+    expect(suggested[0]!.body).toContain("invincible roster set swift ollama/qwen3:8b");
     // Already hired (by name or by wildcard): nothing to suggest.
     expect(computeSuggestions([{ id: "n_ultra", name: "ultra", body, calibration }], { swift: ["ollama/*"] })).toEqual([]);
     // Too slow to be worth hiring: nothing.
@@ -393,6 +393,6 @@ describe("the Index per effort level", () => {
     expect(only.levels).toHaveLength(1);
     expect(only.levels[0]).toMatchObject({ effort: 1, n: 2 });
     expect(only.helps).toBeNull();
-    expect(only.verdict).toMatch(/galahad trial run --effort/);
+    expect(only.verdict).toMatch(/invincible trial run --effort/);
   });
 });

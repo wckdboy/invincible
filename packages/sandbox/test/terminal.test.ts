@@ -33,13 +33,13 @@ async function until(what: () => boolean, ms = 5000): Promise<void> {
 
 test.skipIf(process.platform !== "linux")("what a terminal started is hung up by its tag: what was started with nohup stays, a shell that ignores the hang-up is killed", async () => {
   const tag = `t${Date.now().toString(16)}`;
-  const env = { ...process.env, GALAHAD_TERMINAL: tag };
+  const env = { ...process.env, INVINCIBLE_TERMINAL: tag };
   // A shell with a job, and a job started with nohup: what a terminal's shell is like.
   const shell = Bun.spawn(["sh", "-c", "sleep 300 & echo $!; nohup sleep 301 >/dev/null 2>&1 & echo $!; wait"], { env, stdout: "pipe" });
   // A shell that leads its own session and ignores the hang-up: one that would otherwise never go.
   const stubborn = Bun.spawn(["setsid", "sh", "-c", "trap '' HUP; while :; do sleep 1; done"], { env });
   // Another terminal's shell, untouched.
-  const other = Bun.spawn(["sh", "-c", "sleep 303"], { env: { ...process.env, GALAHAD_TERMINAL: `${tag}x` } });
+  const other = Bun.spawn(["sh", "-c", "sleep 303"], { env: { ...process.env, INVINCIBLE_TERMINAL: `${tag}x` } });
   const reader = shell.stdout.getReader();
   let printed = "";
   while (printed.split("\n").length < 3) printed += new TextDecoder().decode((await reader.read()).value);

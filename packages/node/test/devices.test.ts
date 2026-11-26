@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { DeviceView } from "@galahad/core";
+import type { DeviceView } from "@invincible/core";
 import { activeDevicesMatching } from "../src/devices.ts";
 
 /*
- * `galahad revoke <device>` takes a name, an id or the start of an id. A phone that was
+ * `invincible revoke <device>` takes a name, an id or the start of an id. A phone that was
  * revoked and paired again keeps its name ("Safari on iPhone"), and the fleet lists the
  * revoked one first: the name must reach the phone that's still active, or a lost phone
  * can't be revoked by name at all.

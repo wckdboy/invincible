@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { TrialRecord, trialProblem } from "@galahad/core";
+import { TrialRecord, trialProblem } from "@invincible/core";
 import type { TrialJob } from "../src/trial-cli.ts";
 import { attemptCase, gateTail, TAIL_CHARS } from "../src/trial-yours.ts";
 import { GATES, widgets, widgetsCase, WIDGETS, YoursStandIn } from "./yours-standin.ts";

@@ -95,7 +95,7 @@ interface Built {
 }
 
 async function build(seed: number, w: World, entries: number): Promise<Built> {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-bench-archive-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-bench-archive-"));
   const store = new ArchiveStore(join(dir, "archive.db"), new LocalDiskBackend(join(dir, "blobs")));
   const r = rng(subSeed(seed, `archive-${entries}`));
   const topicOf = new Map<string, number>();

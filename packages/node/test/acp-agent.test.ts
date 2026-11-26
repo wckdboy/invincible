@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessage, ChatStreamEvent } from "@galahad/core";
+import type { ChatMessage, ChatStreamEvent } from "@invincible/core";
 import { ACP_VERSION, acpAgent, promptText } from "../src/acp-agent.ts";
 
 /*
@@ -33,7 +33,7 @@ describe("Galahad as an ACP agent", () => {
   test("initialize says what he is and that he asks the client for nothing; a session opens", async () => {
     const c = client(says());
     const init = await c.call("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true } } });
-    expect(init.result).toMatchObject({ protocolVersion: ACP_VERSION, agentCapabilities: { loadSession: false }, authMethods: [], agentInfo: { name: "galahad" } });
+    expect(init.result).toMatchObject({ protocolVersion: ACP_VERSION, agentCapabilities: { loadSession: false }, authMethods: [], agentInfo: { name: "invincible" } });
     const opened = await c.call("session/new", { cwd: "/tmp", mcpServers: [] });
     expect(opened.result.sessionId).toMatch(/^gal-/);
     // What he doesn't offer is said so, and a notification of it changes nothing.

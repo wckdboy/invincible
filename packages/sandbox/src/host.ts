@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type ActionClass, type Decision, decide, type ExecResult, isReservedGatewayScope, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, TeamWorkspaceQuest, VM_OVERHEAD, type VmOverhead } from "@galahad/core";
+import { type ActionClass, type Decision, decide, type ExecResult, isReservedGatewayScope, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, TeamWorkspaceQuest, VM_OVERHEAD, type VmOverhead } from "@invincible/core";
 import {
   CONTAINER_MAJOR,
   containerBuildArgs,
@@ -255,7 +255,7 @@ const repositoryUrl = (gateway: string, git: { connector: string; owner: string;
  * repository's configuration). The commit and up to 50 commits of its history, checked out detached, with no remote.
  */
 export const CHECKOUT_SCRIPT = `import json,os,subprocess,sys
-root, commit, lease = sys.argv[1], sys.argv[2], '/work/.galahad-gateway.json'
+root, commit, lease = sys.argv[1], sys.argv[2], '/work/.invincible-gateway.json'
 d = json.load(open(lease))
 os.remove(lease)
 def git(*a):
@@ -267,7 +267,7 @@ def git(*a):
     return r.stdout.strip()
 os.makedirs(root,exist_ok=True)
 git('init','-q')
-git('-c','http.extraHeader=Authorization: Bearer '+d['GALAHAD_TOKEN'],'fetch','--quiet','--no-tags','--depth','50',d['GALAHAD_REPO_URL'],commit)
+git('-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'fetch','--quiet','--no-tags','--depth','50',d['INVINCIBLE_REPO_URL'],commit)
 git('-c','advice.detachedHead=false','checkout','--quiet','--detach','FETCH_HEAD')
 head = git('rev-parse','HEAD')
 if head != commit: sys.exit('the checkout is at '+head+', not '+commit)
@@ -448,7 +448,7 @@ export class SandboxHost {
     }
     this.unkept = null;
     if (!(await this.hasImage())) {
-      this.unkept = `${DEFAULT_IMAGE} isn't built on this Mac, and the VMs that hold its networks up are made from it: galahad sandbox build`;
+      this.unkept = `${DEFAULT_IMAGE} isn't built on this Mac, and the VMs that hold its networks up are made from it: invincible sandbox build`;
       return;
     }
     // What runs, and on which network (null when container couldn't say: never read as "nothing", so no helper is restarted).
@@ -513,7 +513,7 @@ export class SandboxHost {
     if (!state.on) throw new SandboxError(`no sandbox is made on this Mac while its firewall isn't on: ${state.why}`, 424);
   }
 
-  /** A Mac's sandbox firewall, as it is now (mac-firewall.ts); null on Linux, whose is galahad-firewall's unit. */
+  /** A Mac's sandbox firewall, as it is now (mac-firewall.ts); null on Linux, whose is invincible-firewall's unit. */
   async firewallState(): Promise<MacFirewallState | null> {
     return this.apple ? (this.opts.firewall ?? (() => macFirewall()))() : null;
   }
@@ -591,7 +591,7 @@ export class SandboxHost {
     const own = OWN_IMAGES[image];
     if (own && !(await this.hasImage(image))) {
       // Gone (pruned) or never built: building it is Galahad's to do (create), rather than failing the quest.
-      if (!this.opts.imageContext) throw new SandboxError(`${image} is not built on this node yet: run \`galahad sandbox build${input.lab ? " --lab" : input.desktop ? " --desktop" : ""}\``, 424);
+      if (!this.opts.imageContext) throw new SandboxError(`${image} is not built on this node yet: run \`invincible sandbox build${input.lab ? " --lab" : input.desktop ? " --desktop" : ""}\``, 424);
       // Made from another of his own (the desktop from the workshop's): that one first, when it's gone too.
       const base = own.base && !(await this.hasImage(own.base)) ? own.base : null;
       for (const tag of base ? [base, image] : [image]) {
@@ -812,7 +812,7 @@ export class SandboxHost {
     const minted = this.opts.tokens.mint({ label: `sandbox:${id}`, providers: scopes, ...(models?.length ? { models: [...models] } : {}), ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
     this.tokenStore.put(id, minted.info.hash);
     const env = gatewayEnv(minted.token, covered, Boolean(keys?.length));
-    if (git) env.GALAHAD_REPO_URL = repositoryUrl(env.GALAHAD_GATEWAY!, git);
+    if (git) env.INVINCIBLE_REPO_URL = repositoryUrl(env.INVINCIBLE_GATEWAY!, git);
     if (!(await this.writeLease(id, env))) {
       this.opts.tokens.revoke(minted.info.hash);
       throw new SandboxError("could not prepare the teammate's model access", 424);
@@ -836,10 +836,10 @@ export class SandboxHost {
     return hash !== null && (this.opts.tokens.extend?.(hash, { ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 }) ?? false);
   }
 
-  /** A lease written inside a sandbox as /work/.galahad-gateway.json: JSON, never a shell's configuration. Whether it was. */
+  /** A lease written inside a sandbox as /work/.invincible-gateway.json: JSON, never a shell's configuration. Whether it was. */
   private async writeLease(id: string, env: Record<string, string>): Promise<boolean> {
     const payload = Buffer.from(JSON.stringify(env)).toString("base64");
-    const write = "import os,sys,base64,tempfile; f,p=tempfile.mkstemp(prefix='.galahad-gateway-',dir='/work'); os.write(f,base64.b64decode(sys.argv[1])); os.fsync(f); os.close(f); os.replace(p,'/work/.galahad-gateway.json')";
+    const write = "import os,sys,base64,tempfile; f,p=tempfile.mkstemp(prefix='.invincible-gateway-',dir='/work'); os.write(f,base64.b64decode(sys.argv[1])); os.fsync(f); os.close(f); os.replace(p,'/work/.invincible-gateway.json')";
     try {
       return (await this.docker(this.commandArgs(id, ["python3", "-c", write, payload], 30), 45_000)).code === 0;
     } catch {
@@ -861,8 +861,8 @@ export class SandboxHost {
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
     const minted = this.opts.tokens.mint({ label: `sandbox:${id}`, providers: [`git:${git.connector}:${git.owner}:${git.repo}`], ttlMinutes: 15, maxRequests: 100 });
     try {
-      const { GALAHAD_GATEWAY } = gatewayEnv(minted.token, []);
-      if (!(await this.writeLease(id, { GALAHAD_GATEWAY: GALAHAD_GATEWAY!, GALAHAD_TOKEN: minted.token, GALAHAD_REPO_URL: repositoryUrl(GALAHAD_GATEWAY!, git) }))) {
+      const { INVINCIBLE_GATEWAY } = gatewayEnv(minted.token, []);
+      if (!(await this.writeLease(id, { INVINCIBLE_GATEWAY: INVINCIBLE_GATEWAY!, INVINCIBLE_TOKEN: minted.token, INVINCIBLE_REPO_URL: repositoryUrl(INVINCIBLE_GATEWAY!, git) }))) {
         throw new SandboxError("could not give the sandbox its lease on the repository", 424);
       }
       const fetched = await this.docker(this.commandArgs(id, ["python3", "-c", CHECKOUT_SCRIPT, path, commit], 600), 615_000);
@@ -899,7 +899,7 @@ export class SandboxHost {
     const image = opts.desktop === true ? DESKTOP_IMAGE : opts.desktop === false ? DEFAULT_IMAGE : sandbox.image;
     const cannot = this.apple ? containerCannot({ desktop: image === DESKTOP_IMAGE }) : null;
     if (cannot) throw new SandboxError(cannot, 424);
-    if (!(await this.hasImage(image))) throw new SandboxError(`${image} is not built on this node: run \`galahad sandbox build${image === DESKTOP_IMAGE ? " --desktop" : ""}\` first`, 424);
+    if (!(await this.hasImage(image))) throw new SandboxError(`${image} is not built on this node: run \`invincible sandbox build${image === DESKTOP_IMAGE ? " --desktop" : ""}\` first`, 424);
     if (this.apple) {
       // On a Mac: stopped, deleted and made again on the same volume (no rename there), or put back as it was.
       await this.replaceTeamVm(sandbox, quest, { image, network, providers, cpus: sandbox.cpus, memoryGb: sandbox.memoryGb });
@@ -1123,7 +1123,7 @@ export class SandboxHost {
     if (sandbox.status !== "running") throw new SandboxError(`the teammate's VM is ${sandbox.status}`, 409);
     /** Why the VM's command failed, as the owner should read it. */
     const failed = (run: Run): never => {
-      if (run.code === 127 || /desktop: (command )?not found/.test(run.stderr)) throw new SandboxError("this teammate's VM has no desktop: have it made again with one (galahad roundtable provision <id> --remake --desktop)", 424);
+      if (run.code === 127 || /desktop: (command )?not found/.test(run.stderr)) throw new SandboxError("this teammate's VM has no desktop: have it made again with one (invincible roundtable provision <id> --remake --desktop)", 424);
       throw new SandboxError(`the desktop could not do that: ${redact(run.stderr.trim().split("\n").at(-1) ?? "").slice(0, 300) || `exit ${run.code}`}`, 424);
     };
     if (argv) {
@@ -1261,7 +1261,7 @@ export class SandboxHost {
     return reaped;
   }
 
-  /** The ids of every galahad sandbox the engine has, any node's; null when it couldn't say (never read as "none"). */
+  /** The ids of every invincible sandbox the engine has, any node's; null when it couldn't say (never read as "none"). */
   private async aliveIds(): Promise<Set<string> | null> {
     if (this.apple) {
       const listing = await this.docker(containerListArgs());
@@ -1427,7 +1427,7 @@ const runnerOf =
 /**
  * On a Mac: container's service started, when it is installed and stopped. It doesn't start itself at boot (the Mac
  * mini found it stopped after macOS updated itself and restarted, 17 November 2026), and a node there hosts nothing
- * until it runs. It never fetches a kernel (`galahad sandbox setup` does, the app's step 3, with the owner): without
+ * until it runs. It never fetches a kernel (`invincible sandbox setup` does, the app's step 3, with the owner): without
  * one the service runs and no VM starts. "running": it was; "started"; "failed"; null: no container here.
  */
 export async function startContainerService(runner?: DockerRunner, bin = "container"): Promise<"running" | "started" | "failed" | null> {

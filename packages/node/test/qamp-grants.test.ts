@@ -3,8 +3,8 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OWNER_SCOPES, type QampTool } from "@galahad/core";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+import { OWNER_SCOPES, type QampTool } from "@invincible/core";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import { ArmTokens } from "../src/arms.ts";
 import { Home } from "../src/home.ts";
 import { grantScopes, mayGrant, QampGrantError, QampGrants, type QampProcess, type QampRunner, unspecified } from "../src/qamp-grants.ts";
@@ -91,7 +91,7 @@ function grants(extra: Partial<ConstructorParameters<typeof QampGrants>[0]> = {}
     arms,
     home,
     address: () => address,
-    port: 7777,
+    port: 7400,
     runner: qamp,
     mcpCommand: (label, tools) => ["/fake/bun", "/fake/cli.ts", "mcp", "--arm", label, "--tools", tools.join(","), "--home", home.dir],
     ledger: (entry) => void lines.push(entry),
@@ -108,7 +108,7 @@ function grants(extra: Partial<ConstructorParameters<typeof QampGrants>[0]> = {}
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "galahad-qamp-grants-"));
+  root = mkdtempSync(join(tmpdir(), "invincible-qamp-grants-"));
   home = new Home(join(root, "node"));
   home.ensureDir();
   db = new Database(":memory:");
@@ -212,8 +212,8 @@ describe("a grant made", () => {
       "--", "/fake/bun", "/fake/cli.ts", "mcp", "--arm", grant.label, "--tools", "fleet,compute", "--home", home.dir,
     ]);
     // Its environment is what its MCP server needs to reach this node, nothing else of the daemon's.
-    expect(Object.keys(bridge.env).sort()).toEqual(["GALAHAD_HOME", "GALAHAD_PORT", "HOME", "PATH", ...(process.env.TMPDIR ? ["TMPDIR"] : [])].sort());
-    expect(bridge.env.GALAHAD_PORT).toBe("7777");
+    expect(Object.keys(bridge.env).sort()).toEqual(["INVINCIBLE_HOME", "INVINCIBLE_PORT", "HOME", "PATH", ...(process.env.TMPDIR ? ["TMPDIR"] : [])].sort());
+    expect(bridge.env.INVINCIBLE_PORT).toBe("7400");
     expect(g.list()).toEqual([grant]);
   });
 

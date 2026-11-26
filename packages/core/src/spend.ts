@@ -1,7 +1,7 @@
 /*
  * What model calls cost: tokens as the provider reported them, tallied by role and
  * model, and money only where the owner has stated a price. No dependencies (no zod):
- * the PWA imports this directly (@galahad/core/spend), so the CLI, the PWA and every
+ * the PWA imports this directly (@invincible/core/spend), so the CLI, the PWA and every
  * node compute the same totals from the same counts.
  *
  * Nothing here is an estimate. A call whose provider said nothing is counted as a
@@ -120,7 +120,7 @@ export function priceFor(prices: Prices, model: string): Price | null {
 /**
  * Your prices as money goes (your word, 23 November 2026: a budget of yours is outside the coding plans): a coding
  * plan's calls are paid for already, so every model of one of `plans` (their provider ids) costs nothing more, priced
- * by you or not. What each would cost at your prices stays yours to see (`galahad price`, the trials). Budgets, the
+ * by you or not. What each would cost at your prices stays yours to see (`invincible price`, the trials). Budgets, the
  * usage meter and what a task or an outcome spent are counted this way.
  */
 export function moneyPrices(prices: Prices, plans: readonly string[]): Prices {

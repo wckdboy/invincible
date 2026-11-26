@@ -1,13 +1,13 @@
-import { redact, type TeamKeyGrant } from "@galahad/core";
-import type { GatewayTokens } from "@galahad/brain";
-import type { Vault } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+import { redact, type TeamKeyGrant } from "@invincible/core";
+import type { GatewayTokens } from "@invincible/models";
+import type { Vault } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 
 /*
  * Keys a knight uses but never sees (PLAN #17). A knight's script calls an API you gave it a key for through the
  * gateway, with its VM's gateway token where the key would go:
  *
- *   curl -H "Authorization: Bearer $GALAHAD_TOKEN" "$GALAHAD_KEYS/stripe/v1/charges"
+ *   curl -H "Authorization: Bearer $INVINCIBLE_TOKEN" "$INVINCIBLE_KEYS/stripe/v1/charges"
  *
  * and the call leaves for the key's pinned address with the vault's key put in, in the header you chose. The key never
  * enters the VM. The token is good for the keys you gave its knight alone (scope `key:<secret>:<header>:<read|write>`),
@@ -43,14 +43,14 @@ export interface KeyGatewayContext {
  */
 export function ungivable(vault: Pick<Vault, "info">, secret: string): string | null {
   const info = vault.info(secret);
-  if (!info) return `there is no secret ${secret} in the vault: galahad secret set ${secret} --base-url https://api.example.com`;
+  if (!info) return `there is no secret ${secret} in the vault: invincible secret set ${secret} --base-url https://api.example.com`;
   if (info.provider) return `${secret} is ${info.provider}'s key, used where Galahad holds its terms (the model gateway, a connector's calls): make a key of its own for the knight`;
-  if (!info.origin) return `${secret} is pinned to no address, so there is nowhere it may go: set it again with its API's address (galahad secret set ${secret} --base-url https://…)`;
+  if (!info.origin) return `${secret} is pinned to no address, so there is nowhere it may go: set it again with its API's address (invincible secret set ${secret} --base-url https://…)`;
   if (!info.origin.startsWith("https://")) return `${secret} is pinned to ${info.origin}: a key a knight uses goes over https only`;
   return null;
 }
 
-const json = (status: number, message: string) => Response.json({ error: { type: "galahad_key_gateway", message } }, { status });
+const json = (status: number, message: string) => Response.json({ error: { type: "invincible_key_gateway", message } }, { status });
 
 export async function handleKeyGateway(req: Request, ctx: KeyGatewayContext): Promise<Response> {
   const url = new URL(req.url);
@@ -72,11 +72,11 @@ export async function handleKeyGateway(req: Request, ctx: KeyGatewayContext): Pr
     }
   }
   const scope = (ctx.tokens.scopesOf(token) ?? []).find((s) => s.startsWith(`key:${name}:`) && SCOPE.test(s));
-  if (!scope) return json(401, token ? `this knight was given no key ${name}` : "no gateway token: send $GALAHAD_TOKEN where the key would go");
+  if (!scope) return json(401, token ? `this knight was given no key ${name}` : "no gateway token: send $INVINCIBLE_TOKEN where the key would go");
   const verdict = ctx.tokens.consume(token, scope);
   if (!verdict.ok) return json(401, verdict.reason);
   const [, , header, mode] = scope.match(SCOPE)!;
-  if (mode !== "write" && !READS.has(req.method)) return json(403, `your liege gave this knight the key ${name} to read with: a ${req.method} changes something, and waits for leave to write (galahad roundtable keys <knight> add ${name} --write)`);
+  if (mode !== "write" && !READS.has(req.method)) return json(403, `your liege gave this knight the key ${name} to read with: a ${req.method} changes something, and waits for leave to write (invincible roundtable keys <knight> add ${name} --write)`);
 
   // Its address and its value, as the vault holds them now: a key unpinned, or given to a provider since, goes nowhere.
   const why = ungivable(ctx.vault, name);

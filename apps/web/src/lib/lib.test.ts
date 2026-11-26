@@ -3,7 +3,7 @@ import { fuzzyMatch, rank } from "./fuzzy.ts";
 import { type Block, type Inline, inlineText, parseInline, parseMarkdown, safeHref } from "./markdown.ts";
 import { describeSchedule, onceSoon, scheduleProblem } from "./schedule.ts";
 import { describeWake as describeWakeHere, describeWakes } from "./wakes.ts";
-import { describeWake, type LoopWake } from "@galahad/core";
+import { describeWake, type LoopWake } from "@invincible/core";
 import { detectProvider, detectSignIn, matchRanges, parseCommand, planLine, providerSetup, roleParts } from "./text.ts";
 import { countdown, duration, hlcMs, minutesLabel, relativeTime } from "./time.ts";
 
@@ -213,11 +213,11 @@ describe("text helpers", () => {
     );
     // Only inside the coding tools its terms name: never his own calls.
     expect(planLine(plan("GLM Coding Plan", { native: false, tools: "unattended" }))).toBe(
-      "GLM Coding Plan is a coding plan its terms allow only inside the coding tools they name: a knight's coding tool runs on it, and so does one you run yourself (galahad run). Galahad never calls it himself.",
+      "GLM Coding Plan is a coding plan its terms allow only inside the coding tools they name: a knight's coding tool runs on it, and so does one you run yourself (invincible run). Galahad never calls it himself.",
     );
     // Interactive use only: a tool you run yourself, and nothing of his or the knights'.
     expect(planLine(plan("Kimi Code", { native: false, tools: "interactive" }))).toBe(
-      "Kimi Code is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (galahad run), and never to Galahad or a knight's work.",
+      "Kimi Code is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (invincible run), and never to Galahad or a knight's work.",
     );
     expect(planLine({ id: "anthropic" })).toBeNull();
     expect(planLine(undefined)).toBeNull();
@@ -241,7 +241,7 @@ describe("text helpers", () => {
 
   test("a preset with no address of its own (a Cloudflare AI Gateway) is set up at the address given with its key", () => {
     const data = { providers: [], presets: [{ id: "cloudflare-ai", baseUrl: "", note: "Your gateway's address: --base-url …" }] };
-    const gateway = "https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/galahad/compat";
+    const gateway = "https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/invincible/compat";
     expect(providerSetup(data, "cloudflare-ai", "cloudflare-ai", true, gateway)).toEqual({ request: { id: "cloudflare-ai", baseUrl: gateway, secret: "cloudflare-ai" }, say: "cloudflare-ai is configured and ready." });
     // With none given, it says what is still needed, as ever.
     expect(providerSetup(data, "cloudflare-ai", "cloudflare-ai", true)).toEqual({ request: null, say: "Your gateway's address: --base-url …" });
@@ -299,15 +299,15 @@ describe("what wakes a loop", () => {
     { kind: "webhook" },
     { kind: "mail", connector: "gmail", query: "from:boss@example.com" },
     { kind: "mail", connector: "outlook" },
-    { kind: "github", owner: "amiriteorg", repo: "galahad", on: ["ci.failed", "pushed"], branch: "main" },
+    { kind: "github", owner: "amiriteorg", repo: "invincible", on: ["ci.failed", "pushed"], branch: "main" },
     { kind: "github", owner: "amiriteorg", repo: "site", on: ["pushed"] },
-    { kind: "github", owner: "amiriteorg", repo: "galahad", on: ["issue.opened", "pr.opened", "ci.failed"] },
+    { kind: "github", owner: "amiriteorg", repo: "invincible", on: ["issue.opened", "pr.opened", "ci.failed"] },
   ];
 
   test("is said here as the node and the terminal say it", () => {
     for (const wake of wakes) expect(describeWakeHere(wake)).toBe(describeWake(wake));
-    expect(describeWakeHere(wakes[3]!)).toBe("a failed CI run on main or a push in amiriteorg/galahad");
-    expect(describeWakeHere(wakes[5]!)).toBe("a new issue or a new pull request or a failed CI run in amiriteorg/galahad");
+    expect(describeWakeHere(wakes[3]!)).toBe("a failed CI run on main or a push in amiriteorg/invincible");
+    expect(describeWakeHere(wakes[5]!)).toBe("a new issue or a new pull request or a failed CI run in amiriteorg/invincible");
   });
 
   test("in a sentence with its cooldown, and nothing when nothing else wakes it", () => {

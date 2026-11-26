@@ -1,4 +1,4 @@
-import type { TeamDelivery, TeamEngramStatus, TeamHarness, TeamMessage, TeamSnapshot, TeamTask, Teammate } from "@galahad/core/team";
+import type { TeamDelivery, TeamEngramStatus, TeamHarness, TeamMessage, TeamSnapshot, TeamTask, Teammate } from "@invincible/core/team";
 
 /** What a knight's page shows: its timeline, or its Workspace panel. (A room has only its timeline.) */
 export type TeamTab = "chat" | "workspace";

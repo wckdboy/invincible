@@ -2,11 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bodyFingerprint, type Calibration, ceilingThreads, clientIdFromKey, type DoctorCheck, type DoctorReport, type FindingView, KERNEL, type LedgerEntry, type NoticeView, REFERENCE_SINGLE, type RouteName, routes, type Scope, signRequest, utf8 } from "@galahad/core";
-import { requestPairing, waitForApproval } from "@galahad/link";
-import { windowsOf } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
-import type { DockerRunner } from "@galahad/sandbox";
+import { bodyFingerprint, type Calibration, ceilingThreads, clientIdFromKey, type DoctorCheck, type DoctorReport, type FindingView, KERNEL, type LedgerEntry, type NoticeView, REFERENCE_SINGLE, type RouteName, routes, type Scope, signRequest, utf8 } from "@invincible/core";
+import { requestPairing, waitForApproval } from "@invincible/link";
+import { windowsOf } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
+import type { DockerRunner } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
 import type { Measure } from "../src/compute/service.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -165,7 +165,7 @@ async function until(done: () => boolean | Promise<boolean>, timeoutMs = 8000): 
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -286,7 +286,7 @@ describe("faults the owner's server has had, each with its own line and advice",
       const first = check(report, "role.planner.first");
       expect(first.state).toBe("needs-you");
       expect(first.line).toBe('planner\'s first model, keyless/big, is skipped on every answer (provider "keyless" has no key in the vault); stand-in/worker answers instead');
-      expect(first.fix).toContain("galahad roster set planner stand-in/worker");
+      expect(first.fix).toContain("invincible roster set planner stand-in/worker");
       expect(check(report, "role.planner").state).toBe("ok");
       expect(report.tally.broken).toBe(0);
       expect(doctorExitOf(report)).toBe(1);
@@ -332,7 +332,7 @@ describe("faults the owner's server has had, each with its own line and advice",
   });
 
   test("a VM's eyes on a coding plan its tools may use are well, not a model he lacks; on one for a tool you run yourself, they can't see", async () => {
-    // Two plans with their keys in the vault (fakes, made here), as `galahad key add` leaves them.
+    // Two plans with their keys in the vault (fakes, made here), as `invincible key add` leaves them.
     for (const id of ["opencode-go", "kimi-coding"]) {
       await json(admin("setSecret", { name: id, value: `FAKE-${id}-${"0".repeat(24)}`, provider: id }));
       await json(admin("setProvider", { id, secret: id }));
@@ -345,7 +345,7 @@ describe("faults the owner's server has had, each with its own line and advice",
       await json(admin("setRoster", { role: "eyes", models: ["kimi-coding/k3"] }));
       const blind = check(await doctor({ offline: true }), "role.eyes.plan");
       expect(blind.state).toBe("needs-you");
-      expect(blind.fix).toBe("Hire a model a VM's tools may use: galahad roster set eyes <provider/model>.");
+      expect(blind.fix).toBe("Hire a model a VM's tools may use: invincible roster set eyes <provider/model>.");
     } finally {
       await json(admin("setRoster", { role: "eyes", models: [] }));
       for (const id of ["opencode-go", "kimi-coding"]) {
@@ -388,7 +388,7 @@ describe("faults the owner's server has had, each with its own line and advice",
     try {
       const report = await doctor({ offline: true });
       expect(check(report, "sandbox.image")).toMatchObject({ state: "needs-you" });
-      expect(check(report, "sandbox.image").fix).toContain("galahad sandbox build");
+      expect(check(report, "sandbox.image").fix).toContain("invincible sandbox build");
       expect(check(report, "sandbox.start").line).toContain("the image is missing");
       const issued = dockerCommands.slice(before);
       expect(issued).not.toContain("build");
@@ -405,7 +405,7 @@ describe("faults the owner's server has had, each with its own line and advice",
       expect(check(report, "mind.clock")).toMatchObject({ state: "needs-you" });
       expect(check(report, "mind.clock").fix).toContain("timedatectl set-ntp true");
       expect(check(report, "app.published")).toMatchObject({ state: "needs-you" });
-      expect(check(report, "app.published").fix).toContain("galahad expose");
+      expect(check(report, "app.published").fix).toContain("invincible expose");
       expect(check(report, "sandbox.firewall")).toMatchObject({ state: "broken" });
       expect(check(report, "mind.backup").line).toContain("20 days old");
       expect(check(report, "service.unit").line).toContain("restarted it 4 times");
@@ -457,16 +457,16 @@ describe("with no node running", () => {
   test("it says so, looks at what a stopped node leaves on disk, and exits 2", async () => {
     const stoppedHome = new Home(join(root, "stopped"));
     const { identity, keystore } = await stoppedHome.createIdentity("file");
-    const store = new MindStore(stoppedHome.mindPath);
+    const store = new LedgerStore(stoppedHome.ledgerPath);
     const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "sleeper" });
     store.close();
     stoppedHome.writeConfig({ v: 1, name: "sleeper", fleet, port: freePort(), keystore, advertise: "127.0.0.1" });
     const lines: string[] = [];
-    const code = await doctorCommand({ call: () => Promise.reject(new Error("no daemon on http://127.0.0.1:1 — start it with `galahad serve`")) }, {}, () => stoppedReport(stoppedHome, "http://127.0.0.1:1"), (line) => lines.push(line));
+    const code = await doctorCommand({ call: () => Promise.reject(new Error("no daemon on http://127.0.0.1:1 — start it with `invincible serve`")) }, {}, () => stoppedReport(stoppedHome, "http://127.0.0.1:1"), (line) => lines.push(line));
     expect(code).toBe(2);
     const text = lines.join("\n");
     expect(text).toContain("the node isn't running: nothing answers on http://127.0.0.1:1");
-    expect(text).toContain("galahad serve");
+    expect(text).toContain("invincible serve");
     expect(text).toContain("the mind's database passes SQLite's integrity check");
     // Any other failure is the command's own, not "the node is down".
     await expect(doctorCommand({ call: () => Promise.reject(new Error("requires scope fleet:admin")) }, {}, () => stoppedReport(stoppedHome, "x"))).rejects.toThrow("fleet:admin");

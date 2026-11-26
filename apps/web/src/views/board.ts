@@ -1,4 +1,4 @@
-import { moneyPrices, type Prices, usdLabel } from "@galahad/core/spend";
+import { moneyPrices, type Prices, usdLabel } from "@invincible/core/spend";
 import type { Ctx } from "../context.ts";
 import { GALAHAD } from "../lib/arrange.ts";
 import { besideChip, withState } from "../lib/knight-state.ts";

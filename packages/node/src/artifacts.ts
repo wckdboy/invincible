@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, resolve, sep } from "node:path";
-import { type ArtifactView, type NodeIdentity, randomId } from "@galahad/core";
-import type { MindStore } from "@galahad/mind";
-import type { ExtractLimits, ExtractResult, LedgerEntryInput } from "@galahad/sandbox";
+import { type ArtifactView, type NodeIdentity, randomId } from "@invincible/core";
+import type { LedgerStore } from "@invincible/ledger";
+import type { ExtractLimits, ExtractResult, LedgerEntryInput } from "@invincible/sandbox";
 
 /*
  * Artifacts: a sandbox's work products, kept after the sandbox is gone. A quest
  * writes reports, plots, data and models to /work/out; the node copies that out
- * (through the hostile-archive extractor in @galahad/sandbox), keeps the files in
+ * (through the hostile-archive extractor in @invincible/sandbox), keeps the files in
  * its home, and records in the mind what they are: paths, sizes, SHA-256s. Any
  * device sees the record; the files are served by the node that holds them.
  */
@@ -30,7 +30,7 @@ export class ArtifactError extends Error {
 type Collect = (sandbox: string, from: string, dest: string, limits: ExtractLimits) => Promise<ExtractResult | null>;
 
 export interface ArtifactStoreOptions {
-  store: MindStore;
+  store: LedgerStore;
   identity: NodeIdentity;
   /** Where this node keeps artifact files (its home/artifacts). */
   dir: string;

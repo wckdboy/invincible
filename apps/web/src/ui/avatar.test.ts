@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AVATAR_EXPRESSIONS, KNIGHT_TINTS, knightColors } from "@galahad/core/avatar";
+import { AVATAR_EXPRESSIONS, KNIGHT_TINTS, knightColors } from "@invincible/core/avatar";
 import { avatarEditor, KNIGHT_CSS, seat, stateChip, workerAvatar, type WorkerAvatarOptions } from "./avatar.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with

@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ConnectorView, type RouteName, routes } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ConnectorView, type RouteName, routes } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -19,7 +19,7 @@ import { freePort } from "./ports.ts";
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "oauth-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-oauth-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-oauth-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -72,7 +72,7 @@ beforeAll(async () => {
     },
   });
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });

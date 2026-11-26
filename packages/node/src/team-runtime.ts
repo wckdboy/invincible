@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type QuestEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_GALAHAD, TEAM_LIMITS, TEAM_OWNER, type Teammate, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK } from "@galahad/core";
-import { driverFor, ENGRAM_PROBE, ENGRAM_VERSION, OWN_SIGN_IN, agentModelName, chat, choreRole, commandsRun, engramFound, engramProjectFor, engramShell, runQuest, sameModel, workRole, type AgentDriver, type AgentModel, type BrainContext, type ChatTools, type QuestEvent, type ToolImage, type ToolSpec, type Trip } from "@galahad/brain";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type QuestEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_GALAHAD, TEAM_LIMITS, TEAM_OWNER, type Teammate, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK } from "@invincible/core";
+import { driverFor, ENGRAM_PROBE, ENGRAM_VERSION, OWN_SIGN_IN, agentModelName, chat, choreRole, commandsRun, engramFound, engramProjectFor, engramShell, runQuest, sameModel, workRole, type AgentDriver, type AgentModel, type ModelsContext, type ChatTools, type QuestEvent, type ToolImage, type ToolSpec, type Trip } from "@invincible/models";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { questEvidence, questTrail } from "./skills-quest.ts";
 import type { TeamRunContext } from "./team.ts";
 
 export interface TeamRuntimeDeps {
-  brain(teammate: Teammate): BrainContext;
+  brain(teammate: Teammate): ModelsContext;
   enter(signal: AbortSignal): Promise<() => void>;
   /** Fixed identity and exact workspace binding are enforced by the server. */
   exec(teammate: Teammate, command: string, timeout: number, signal: AbortSignal): Promise<ExecResult>;
@@ -162,14 +162,14 @@ const after = (history: TeamMessage[], through: string | undefined): TeamMessage
  * command, without model access, and says so: on 22 November 2026 a knight deleted its own, and every command of its
  * task failed from then on, the polls of its coding tool's run among them, so the task never ended.
  */
-export const withGateway = (command: string, lease = "/work/.galahad-gateway.json"): string => {
+export const withGateway = (command: string, lease = "/work/.invincible-gateway.json"): string => {
   const script = [
     "import json,os,sys",
     `p=${JSON.stringify(lease)}`,
     "try: d=json.load(open(p))",
     "except (OSError, ValueError): d=None",
     "if not isinstance(d, dict): d={}; sys.stderr.write('(Galahad: '+p+' is missing or unreadable, so this command has no model access)\\n')",
-    "allowed={'GALAHAD_GATEWAY','OPENAI_API_KEY','OPENAI_BASE_URL','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','GALAHAD_TOKEN','GALAHAD_REPO_URL','GALAHAD_KEYS'}",
+    "allowed={'INVINCIBLE_GATEWAY','OPENAI_API_KEY','OPENAI_BASE_URL','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','INVINCIBLE_TOKEN','INVINCIBLE_REPO_URL','INVINCIBLE_KEYS'}",
     "os.environ.update({k:v for k,v in d.items() if k in allowed and isinstance(v,str)})",
     "os.execvp('bash',['bash','-lc',sys.argv[1]])",
   ].join("\n");
@@ -203,8 +203,8 @@ if not os.path.isdir(root) and from_commit:
 elif not os.path.isdir(root):
     how = 'fetched'
     try:
-        d = json.load(open('/work/.galahad-gateway.json'))
-        got = subprocess.run(['git','-C',repo,'-c','http.extraHeader=Authorization: Bearer '+d['GALAHAD_TOKEN'],'fetch','--quiet','--prune',d['GALAHAD_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*'],capture_output=True,timeout=300)
+        d = json.load(open('/work/.invincible-gateway.json'))
+        got = subprocess.run(['git','-C',repo,'-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'fetch','--quiet','--prune',d['INVINCIBLE_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*'],capture_output=True,timeout=300)
         if got.returncode: how = 'stale'
     except Exception:
         how = 'stale'
@@ -225,7 +225,7 @@ print(open(kept).read() if os.path.exists(kept) else subprocess.check_output(['g
 export function keysLine(keys: readonly TeamKeyGrant[] | undefined, address: (secret: string) => string | null = () => null): string {
   if (!keys?.length) return "";
   const each = keys.map((k) => `${k.secret}${address(k.secret) ? ` at ${address(k.secret)}` : ""} (${k.write ? "reads and writes" : "reads only"})`).join("; ");
-  return ` Keys of your liege's you may use through the gateway, never seeing them (every use is recorded): ${each}. Call \`$GALAHAD_KEYS/<name>/<path>\` with \`Authorization: Bearer $GALAHAD_TOKEN\` (or $GALAHAD_TOKEN in the API's own key header): the call goes to the key's address with the key put in.`;
+  return ` Keys of your liege's you may use through the gateway, never seeing them (every use is recorded): ${each}. Call \`$INVINCIBLE_KEYS/<name>/<path>\` with \`Authorization: Bearer $INVINCIBLE_TOKEN\` (or $INVINCIBLE_TOKEN in the API's own key header): the call goes to the key's address with the key put in.`;
 }
 
 /**
@@ -244,7 +244,7 @@ export function checkpointCommand(root: string, task: string, step: number, last
     `GIT_INDEX_FILE=${quote(index)} git add -A . >/dev/null 2>&1`,
     `T=$(GIT_INDEX_FILE=${quote(index)} git write-tree)`,
     "P=$(git rev-parse HEAD)",
-    `if [ "$T $P" = ${quote(last)} ]; then echo same; else C=$(git commit-tree --no-gpg-sign "$T" -p "$P" -m ${quote(`Galahad: task ${task}, after step ${step}`)}) && git update-ref ${quote(`refs/galahad/checkpoints/${task}/${step}`)} "$C" && echo "$C $T $P"; fi`,
+    `if [ "$T $P" = ${quote(last)} ]; then echo same; else C=$(git commit-tree --no-gpg-sign "$T" -p "$P" -m ${quote(`Galahad: task ${task}, after step ${step}`)}) && git update-ref ${quote(`refs/invincible/checkpoints/${task}/${step}`)} "$C" && echo "$C $T $P"; fi`,
   ].join(" && ");
 }
 
@@ -609,14 +609,14 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       };
       const exec = async (command: string, timeout = 120) => {
         await keeping;
-        return deps.exec(teammate, withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export GALAHAD_EYES=${quote(sees)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
+        return deps.exec(teammate, withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
       };
       let agent;
       if (teammate.harness !== "native") {
         // (An ACP agent calls whatever you set it up to: sensitive mode can't hold its calls to the models it names.)
         if (held && teammate.harness === "acp") throw new Error(`${teammate.name} works in an ACP agent of your own, which calls the models you set it up with: work in sensitive mode runs on Galahad's own harness, OpenCode, Hermes, Claude Code or Codex, whose calls go through its VM's gateway`);
         const driver = driverFor(teammate.harness, teammate.acp);
-        if (!driver) throw new Error(teammate.harness === "acp" ? "Name the command that starts its ACP agent in its VM (galahad roundtable add <id> --agent acp --acp \"goose acp\")" : `No ${teammate.harness} driver is available`);
+        if (!driver) throw new Error(teammate.harness === "acp" ? "Name the command that starts its ACP agent in its VM (invincible roundtable add <id> --agent acp --acp \"goose acp\")" : `No ${teammate.harness} driver is available`);
         const probe = await exec(driver.check, 30);
         // (A check that failed says why in its own words. A vendor's tool whose bridge answered is spoken for below: there, or not.)
         const answered = Boolean(driver.signIn) && /"type":\s*"status"/.test(probe.stdout);
@@ -630,7 +630,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         const offered = task.budgetUsd !== undefined && deps.countable ? roster.filter((m) => m.own || deps.countable!(`${m.provider}/${m.model}`)) : roster;
         const ready = harnessReadiness(driver, probe, offered, deps.modelsOutside?.(worker), workRole(teammate.role), held !== null);
         // (A tool signed in on its own in this VM still runs on that, as ever: only the gateway's models are held to it.)
-        if (!ready.ready && roster.length && !offered.length) throw new Error(`${driver.title} has no model its budget can count: you've set no price for ${roster.map(agentModelName).join(", ")} (galahad price set <provider/model> <$ per million in> <$ per million out>), and a task with a budget never runs on what it would count as nothing`);
+        if (!ready.ready && roster.length && !offered.length) throw new Error(`${driver.title} has no model its budget can count: you've set no price for ${roster.map(agentModelName).join(", ")} (invincible price set <provider/model> <$ per million in> <$ per million out>), and a task with a budget never runs on what it would count as nothing`);
         if (!ready.ready) throw new Error(`${driver.title} can't work in this VM yet: ${ready.reason}`);
         const saved = (await exec(`cat ${quote(sessionFile)} 2>/dev/null || true`, 10)).stdout.trim();
         agent = { driver, models: ready.models, workdir: root, ...(/^[A-Za-z0-9_.:-]{1,160}$/.test(saved) ? { session: saved } : {}) };
@@ -656,7 +656,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let saidSameReview = false;
       // Its own tools where they were measured: on the roster's engineer models, in Galahad's own loop (toolsLoop).
       const tools = Boolean(deps.toolsLoop) && !agent && !held && !teammate.models?.length;
-      const outcome = await runQuest({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. /work/.galahad-gateway.json is your model access, written by Galahad for this task: never move, change or delete it.${screen}${keysLine(teammate.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: teammate.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "" } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(agent ? { agent } : {}), ...(engram ? { engram } : {}) }, {
+      const outcome = await runQuest({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. /work/.invincible-gateway.json is your model access, written by Galahad for this task: never move, change or delete it.${screen}${keysLine(teammate.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: teammate.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "" } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(agent ? { agent } : {}), ...(engram ? { engram } : {}) }, {
         // (keepReads: a knight sees whole what it reads, and it stays in view while it is current. The first real outcome's
         // knights, shown 8,000 characters of each, read one file in 26 then 34 commands, and three tasks ended with nothing
         // written: quest.ts keepReads. Each command has TEAM_COMMAND_SECONDS: at 120 s, the repository's own tests were cut off.)
@@ -746,7 +746,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
             changes = { artifact, files, base };
             const offer = task.fix
               ? `Offered to you as a push onto ${task.fix.branch}, where it began: the pull request updates once you approve it.`
-              : `A pull request, on your word: galahad ship ${artifact} --title ${JSON.stringify(task.title)}`;
+              : `A pull request, on your word: invincible ship ${artifact} --title ${JSON.stringify(task.title)}`;
             changed = `Changes: ${count}, kept as ${artifact}. ${verified ? offer : "Not verified: read them before you ship them."}`;
           } catch (error) {
             changed = `Changes: ${count}, but they could not be kept: ${redact(String((error as Error).message ?? error)).slice(0, 200)}`;

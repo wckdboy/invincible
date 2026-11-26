@@ -1,7 +1,7 @@
-import { inputQueue, plainLine, type RouteName, TERMINAL_ID, type TeamSnapshot, type TerminalEvent, type TerminalView } from "@galahad/core";
+import { inputQueue, plainLine, type RouteName, TERMINAL_ID, type TeamSnapshot, type TerminalEvent, type TerminalView } from "@invincible/core";
 
 /*
- * `galahad terminal`: a shell in a knight's VM or a sandbox, on a real terminal, from this one. What you type goes to
+ * `invincible terminal`: a shell in a knight's VM or a sandbox, on a real terminal, from this one. What you type goes to
  * the node in order (core's inputQueue); what it shows comes back as it comes. Ctrl-] leaves: a terminal opened here is closed with it, one taken up from elsewhere is left open.
  */
 
@@ -22,7 +22,7 @@ export interface Screen {
 }
 
 const LEAVE = "\x1d";
-const USAGE = "usage: galahad terminal <knight|sandbox> | terminal attach <terminal> | terminal close <terminal> | terminal ls";
+const USAGE = "usage: invincible terminal <knight|sandbox> | terminal attach <terminal> | terminal close <terminal> | terminal ls";
 
 /** A size the node takes: this terminal's, within the bounds a terminal has. */
 const sizeOf = (screen: Screen) => {
@@ -33,7 +33,7 @@ const sizeOf = (screen: Screen) => {
 export async function terminalCommand(api: TerminalApi, sub: string | undefined, rest: string[], screen: Screen, print: (line: string) => void): Promise<number> {
   if (sub === undefined || sub === "ls") {
     const { terminals } = await api.call<{ terminals: TerminalView[] }>("terminals");
-    if (!terminals.length) print("No terminals open on this node. Open one with galahad terminal <knight|sandbox>.");
+    if (!terminals.length) print("No terminals open on this node. Open one with invincible terminal <knight|sandbox>.");
     for (const t of terminals) print(`${t.id} · ${plainLine(t.name)} · ${t.exitCode === null ? `${t.cols}×${t.rows}${t.watchers ? ` · watched by ${t.watchers}` : ""}` : `its shell ended (exit ${t.exitCode})`}`);
     return 0;
   }
@@ -53,8 +53,8 @@ async function sandboxOf(api: TerminalApi, target: string): Promise<string> {
   if (/^[a-f0-9]{10}$/.test(target)) return target;
   const { teammates } = await api.call<TeamSnapshot>("team");
   const knight = teammates.find((m) => m.id === target || m.name.toLowerCase() === target.toLowerCase());
-  if (!knight) throw new Error(`no knight or sandbox "${plainLine(target)}": galahad roundtable lists the knights, galahad sandbox ls the sandboxes`);
-  if (!knight.workspace) throw new Error(`${plainLine(knight.name)} has no VM yet: galahad roundtable provision ${knight.id}`);
+  if (!knight) throw new Error(`no knight or sandbox "${plainLine(target)}": invincible roundtable lists the knights, invincible sandbox ls the sandboxes`);
+  if (!knight.workspace) throw new Error(`${plainLine(knight.name)} has no VM yet: invincible roundtable provision ${knight.id}`);
   return knight.workspace.id;
 }
 
@@ -101,11 +101,11 @@ async function attach(api: TerminalApi, id: string, screen: Screen, opened: bool
   if (failed && !left && code === null) throw failed;
   if (left) {
     if (opened) await api.call("closeTerminal", { terminal: id }).catch(() => {});
-    screen.say(opened ? "[left: the terminal is closed]" : `[left: it is still open · galahad terminal attach ${id}]`);
+    screen.say(opened ? "[left: the terminal is closed]" : `[left: it is still open · invincible terminal attach ${id}]`);
     return 0;
   }
   if (code === null) {
-    screen.say(`[the node let go of this terminal: take it up again with galahad terminal attach ${id}]`);
+    screen.say(`[the node let go of this terminal: take it up again with invincible terminal attach ${id}]`);
     return 1;
   }
   screen.say(`[its shell ended: exit ${code}]`);

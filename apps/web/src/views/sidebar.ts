@@ -80,7 +80,7 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
     const look = `${now.tone}/${state}/${elsewhere}`;
     if (look !== shownFace) {
       shownFace = look;
-      replace(face, orb({ size: 34, tone: now.tone, mood: elsewhere ? undefined : orbMoodOfState(state), key: "galahad:side" }));
+      replace(face, orb({ size: 34, tone: now.tone, mood: elsewhere ? undefined : orbMoodOfState(state), key: "invincible:side" }));
     }
     if (line.textContent !== now.text) line.textContent = now.text;
     line.dataset.tone = now.tone;

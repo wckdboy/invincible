@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { RouteName, SkillDetail, SkillsView, SkillVersionView, SkillView } from "@galahad/core";
+import type { RouteName, SkillDetail, SkillsView, SkillVersionView, SkillView } from "@invincible/core";
 import { docFromFlags, parseProof, skillPage, skillRow, skillsCommand, stateWords, versionLine } from "../src/skills-cli.ts";
 
-/* `galahad skills` at a terminal: what it prints, what it sends, and that approving shows the whole of what's approved first. */
+/* `invincible skills` at a terminal: what it prints, what it sends, and that approving shows the whole of what's approved first. */
 
 const V1 = "a".repeat(43);
 const V2 = "b".repeat(43);
@@ -153,7 +153,7 @@ describe("the commands", () => {
     expect(printed).toHaveLength(5);
     expect(printed[0]).toContain("sk_bbbbbbbbbbbbbbbb  proposed, waits for you");
     expect(printed[1]).toContain("sk_aaaaaaaaaaaaaaaa  in use");
-    expect(printed[2]).toContain("1 retired (kept, never offered): galahad skills --all");
+    expect(printed[2]).toContain("1 retired (kept, never offered): invincible skills --all");
     expect(printed[3]).toContain("1 waits for your approval");
     expect(printed[4]).toContain("Distilling: 1234 of 6000 tokens used in the last day");
     printed = [];
@@ -205,7 +205,7 @@ describe("the commands", () => {
     for (const [sub, route, input, said] of [
       ["lock", "lockSkill", { id: "sk_aaaaaaaaaaaaaaaa", locked: true }, 'Locked: he may use "Fix a failing test", not change it.'],
       ["unlock", "lockSkill", { id: "sk_aaaaaaaaaaaaaaaa", locked: false }, 'Unlocked: he may revise "Fix a failing test" again, if he wrote it.'],
-      ["retire", "retireSkill", { id: "sk_aaaaaaaaaaaaaaaa", retired: true }, 'Retired: "Fix a failing test" is kept with every version, and offered to nobody. galahad skills restore sk_aaaaaaaaaaaaaaaa puts it back.'],
+      ["retire", "retireSkill", { id: "sk_aaaaaaaaaaaaaaaa", retired: true }, 'Retired: "Fix a failing test" is kept with every version, and offered to nobody. invincible skills restore sk_aaaaaaaaaaaaaaaa puts it back.'],
       ["restore", "retireSkill", { id: "sk_aaaaaaaaaaaaaaaa", retired: false }, 'Restored: "Fix a failing test" is in use.'],
     ] as const) {
       printed = [];
@@ -252,7 +252,7 @@ describe("the commands", () => {
     await skillsCommand(node, "import", ["https://github.com/anthropics/skills/tree/main/skills/pdf"], {}, hooks());
     expect(node.calls).toEqual([{ name: "importSkill", input: { url: "https://github.com/anthropics/skills/tree/main/skills/pdf" } }]);
     expect(printed[0]).toBe('Taken in as text: "PDF forms" (sk_bbbbbbbbbbbbbbbb), from github.com/anthropics/skills/skills/pdf. Only its SKILL.md was read; nothing in its folder runs.');
-    expect(printed.at(-1)).toContain("galahad skills approve sk_bbbbbbbbbbbbbbbb");
+    expect(printed.at(-1)).toContain("invincible skills approve sk_bbbbbbbbbbbbbbbb");
     await expect(skillsCommand(api({}), "import", [], {}, hooks())).rejects.toThrow("which folder?");
   });
 

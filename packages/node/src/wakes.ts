@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { canonical, describeWake, type Json, type LoopWake, type NodeIdentity, redact } from "@galahad/core";
-import { installedConnector } from "@galahad/brain";
-import type { MindStore } from "@galahad/mind";
+import { canonical, describeWake, type Json, type LoopWake, type NodeIdentity, redact } from "@invincible/core";
+import { installedConnector } from "@invincible/models";
+import type { LedgerStore } from "@invincible/ledger";
 import { loopRecords, type WakeEvent } from "./loops.ts";
 
 /*
@@ -91,7 +91,7 @@ export function wokenData(woken: readonly WakeEvent[], room = 3000): string {
 }
 
 export interface WakeWatcherOptions {
-  store: MindStore;
+  store: LedgerStore;
   identity: NodeIdentity;
   local: Database;
   log: (message: string) => void;

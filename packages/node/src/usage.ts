@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { costOf, mergeSpend, type Price, spendTotal, type Usage, type UsageBudgetInput, type UsageLine, type UsageMeter, type UsageRow, type UsageWindow } from "@galahad/core";
+import { costOf, mergeSpend, type Price, spendTotal, type Usage, type UsageBudgetInput, type UsageLine, type UsageMeter, type UsageRow, type UsageWindow } from "@invincible/core";
 
 /*
  * This node's own count of its model calls: for each day, who asked, the role and the

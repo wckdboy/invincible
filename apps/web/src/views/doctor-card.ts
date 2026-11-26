@@ -1,4 +1,4 @@
-import type { DoctorCheck, DoctorReport } from "@galahad/core/doctor";
+import type { DoctorCheck, DoctorReport } from "@invincible/core/doctor";
 import { isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { checkLine, doctorCard, readDoctorReport, STATE_LABEL, stateTone } from "../lib/doctor.ts";

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { type ActionView, findSecrets, type NodeIdentity } from "@galahad/core";
-import type { MindStore } from "@galahad/mind";
+import { type ActionView, findSecrets, type NodeIdentity } from "@invincible/core";
+import type { LedgerStore } from "@invincible/ledger";
 
 /*
  * After you ship, the node that shipped follows the pull request's checks (CI). A ship you approved names the
@@ -121,7 +121,7 @@ export function ciVerdict(runs: CheckRun[], sinceShipMs: number): CiVerdict {
 }
 
 export interface CiWatchOptions {
-  store: MindStore;
+  store: LedgerStore;
   identity: NodeIdentity;
   local: Database;
   /** The pull requests to follow (shippedPulls over the outbox). */
@@ -217,7 +217,7 @@ export class CiWatch {
       const message = (error as Error).message;
       if (/has no tool "pull"/.test(message)) {
         this.noConflicts.add(pull.connector);
-        this.o.log(`ci: ${pull.connector} can't read a pull request yet; add it again to have conflicts followed (galahad connector add github)`);
+        this.o.log(`ci: ${pull.connector} can't read a pull request yet; add it again to have conflicts followed (invincible connector add github)`);
       } else this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: conflicts: ${message}`);
     }
   }
@@ -236,7 +236,7 @@ export class CiWatch {
       this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: ${message}`);
       // A GitHub connector installed before it could read checks: said once, not every few minutes for a day.
       if (/has no tool "checks"/.test(message)) {
-        this.o.log("ci: the GitHub connector can't read checks yet; add it again to have shipped pull requests followed (galahad connector add github)");
+        this.o.log("ci: the GitHub connector can't read checks yet; add it again to have shipped pull requests followed (invincible connector add github)");
         this.o.local.query("INSERT OR REPLACE INTO ci_watch (action, state, at) VALUES (?, 'unreadable', ?)").run(pull.action, now);
       }
     }
@@ -279,7 +279,7 @@ export class CiWatch {
       const message = (error as Error).message;
       if (/has no tool "pull\.(reviews|comments)"/.test(message)) {
         this.noReviews.add(pull.connector);
-        this.o.log(`ci: ${pull.connector} can't read reviews yet; add it again to have reviews followed (galahad connector add github)`);
+        this.o.log(`ci: ${pull.connector} can't read reviews yet; add it again to have reviews followed (invincible connector add github)`);
       } else this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: reviews: ${message}`);
     }
   }

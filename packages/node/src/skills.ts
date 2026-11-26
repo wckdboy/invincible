@@ -45,10 +45,10 @@ import {
   type SkillView,
   tidyPlan,
   versionUsable,
-} from "@galahad/core";
-import { type BrainContext, chat } from "@galahad/brain";
-import type { MindStore, SkillRecord, Vault } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+} from "@invincible/core";
+import { type ModelsContext, chat } from "@invincible/models";
+import type { LedgerStore, SkillRecord, Vault } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import { fenceLines } from "./archive/retrieval.ts";
 import { queryTerms } from "./archive/search.ts";
 import { reconcile } from "./heartbeat.ts";
@@ -158,7 +158,7 @@ export const skillView = (record: SkillRecord): SkillView => viewOf(record, skil
 const ORDER: Record<SkillView["state"], number> = { proposed: 0, "in-use": 1, stale: 2, retired: 3 };
 
 /** Every skill: what waits for you first (a proposed skill, a version waiting), then in use, stale, retired; the latest touched first within each. */
-export function listSkills(store: Pick<MindStore, "skills">): SkillView[] {
+export function listSkills(store: Pick<LedgerStore, "skills">): SkillView[] {
   const waits = (s: SkillView) => (s.state !== "retired" && s.pending ? 0 : 1);
   return store
     .skills()
@@ -167,7 +167,7 @@ export function listSkills(store: Pick<MindStore, "skills">): SkillView[] {
 }
 
 /** One skill in full: every version kept, and the quests and answers it was given to. */
-export function skillDetail(store: Pick<MindStore, "skill" | "skillUses">, id: string): SkillDetail | null {
+export function skillDetail(store: Pick<LedgerStore, "skill" | "skillUses">, id: string): SkillDetail | null {
   const record = store.skill(id);
   if (!record) return null;
   const history = skillVersions(record);
@@ -192,7 +192,7 @@ interface Usable extends OfferedSkill {
 }
 
 /** The skills that may be given to a model: in use or stale, with a version that's trusted or approved by you. */
-export function usableSkills(store: Pick<MindStore, "skills">): Usable[] {
+export function usableSkills(store: Pick<LedgerStore, "skills">): Usable[] {
   const out: Usable[] = [];
   for (const record of store.skills()) {
     const versions = skillVersions(record);
@@ -214,7 +214,7 @@ export interface GivenSkills {
 }
 
 export interface SkillsDeps {
-  store: MindStore;
+  store: LedgerStore;
   identity: NodeIdentity;
   log(message: string): void;
   /** A line in the signed ledger (each distillation is one: the day's spend is counted from them). */
@@ -606,7 +606,7 @@ export class SkillsService {
               severity: "info" as const,
               title: `${waiting.length} skill${waiting.length === 1 ? " waits" : "s wait"} for your approval`,
               // By id and author only: a notice is read by agents, and these words aren't theirs to read yet.
-              body: `${waiting.slice(0, 8).map((s) => `${s.id} (by ${skillAuthor(s.by)})`).join("; ")}. None is given to a model until you approve it: read each in full first (galahad skills show <id>, or the Skills page).`.slice(0, 2000),
+              body: `${waiting.slice(0, 8).map((s) => `${s.id} (by ${skillAuthor(s.by)})`).join("; ")}. None is given to a model until you approve it: read each in full first (invincible skills show <id>, or the Skills page).`.slice(0, 2000),
             },
           ]
         : []),
@@ -629,12 +629,12 @@ const ASK_TIMEOUT_MS = 90_000;
  * any background call), stopped once it has written its share or after ASK_TIMEOUT_MS.
  */
 export function skillAsker(ctx: {
-  store: MindStore;
+  store: LedgerStore;
   vault: Vault;
   fetch?: typeof fetch | undefined;
   governor?: { enterModel(opts: { wait: boolean }, signal?: AbortSignal): Promise<() => void> };
   /** Told of each model call, for the node's count of them (usage.ts). */
-  spent?: BrainContext["spent"];
+  spent?: ModelsContext["spent"];
 }): SkillsDeps["ask"] {
   return async (role, prompt, maxChars, outer) => {
     const stop = new AbortController();

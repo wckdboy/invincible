@@ -1,10 +1,10 @@
-import type { SandboxView } from "@galahad/core";
+import type { SandboxView } from "@invincible/core";
 import { outcomeBar, isOutcomeRoom } from "./outcome-bar.ts";
-import { findSecrets } from "@galahad/core/secret-scan";
-import type { TeamEngramStatus, TeamHarness, TeamMessage, TeamRoomView, TeamSnapshot, TeamTask, Teammate } from "@galahad/core/team";
-import { TEAM_LIMITS } from "@galahad/core/team-limits";
-import { moneyPrices, type Price } from "@galahad/core/spend";
-import { avatarExpression } from "@galahad/core/avatar";
+import { findSecrets } from "@invincible/core/secret-scan";
+import type { TeamEngramStatus, TeamHarness, TeamMessage, TeamRoomView, TeamSnapshot, TeamTask, Teammate } from "@invincible/core/team";
+import { TEAM_LIMITS } from "@invincible/core/team-limits";
+import { moneyPrices, type Price } from "@invincible/core/spend";
+import { avatarExpression } from "@invincible/core/avatar";
 import { isAbort, isUnavailable } from "../api.ts";
 import { errorMessage, type View } from "../context.ts";
 import { GALAHAD } from "../lib/arrange.ts";

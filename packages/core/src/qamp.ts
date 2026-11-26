@@ -20,10 +20,10 @@ export const QAMP_TOOLS_ALLOWED = "fleet, compute, place and ledger are the tool
 export const QAMP_TTL = { min: 60, default: 3600, max: 86_400 } as const;
 
 /** The UDP ports a node's bridges listen on, one a grant: what the tailnet firewall rule opens (deploy.sh --open-qamp). */
-export const QAMP_PORTS = { first: 7781, last: 7789 } as const;
+export const QAMP_PORTS = { first: 7410, last: 7419 } as const;
 
 /** What an agent's grant is named by: its arm is `qamp.<id>`. */
-export const QampGrantId = z.string().regex(/^[0-9a-f]{10}$/, "a grant's id: 10 hex digits (galahad qamp grants lists them)");
+export const QampGrantId = z.string().regex(/^[0-9a-f]{10}$/, "a grant's id: 10 hex digits (invincible qamp grants lists them)");
 
 /** A grant's arm, by its id. The prefix is reserved: no agent installed by hand may take it. */
 export const qampArm = (id: string): string => `qamp.${id}`;

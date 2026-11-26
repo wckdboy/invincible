@@ -1,5 +1,5 @@
-import type { MemoryView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { MemoryView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { ApiError } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { shortId } from "../lib/text.ts";

@@ -70,7 +70,7 @@ export function fakeContainer(): FakeContainer {
     vms: new Map(),
     volumes: new Map(),
     networks: new Set(["default"]),
-    images: new Set(["galahad/sandbox:1"]),
+    images: new Set(["invincible/sandbox:1"]),
     service: true,
     version: "1.7.1",
     execs: [],
@@ -159,7 +159,7 @@ export function fakeContainer(): FakeContainer {
           return found.length ? ok(JSON.stringify(found.map(shape))) : no("container not found");
         }
         case "exec": {
-          const at = rest.findIndex((a) => a.startsWith("galahad-sbx-"));
+          const at = rest.findIndex((a) => a.startsWith("invincible-sbx-"));
           const vm = fake.vms.get(rest[at]!);
           if (!vm) return no(`container not found: ${rest[at]}`);
           if (vm.state !== "running") return no(`container ${vm.name} is not running`);

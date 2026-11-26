@@ -1,6 +1,6 @@
 import { statfsSync } from "node:fs";
-import type { NodeIdentity } from "@galahad/core";
-import type { MindStore } from "@galahad/mind";
+import type { NodeIdentity } from "@invincible/core";
+import type { LedgerStore } from "@invincible/ledger";
 
 /*
  * The heartbeat: Galahad's regular look around. Cheap, deterministic checks of the
@@ -88,8 +88,8 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
       severity: CORE_ROLES.has(role.role) ? "warn" : "info",
       title: `No model can play ${role.role}`,
       body: role.plans
-        ? `${role.models.join(", ")} ${role.models.length === 1 ? "is" : "are"} on a coding plan, which can't play ${role.role}: its terms keep it to coding, or to a tool you run yourself. Hire a model that can: galahad roster set ${role.role} <provider/model>.`
-        : `None of ${role.models.join(", ") || "(no models)"} has a key here or a running local runtime. Add a key (galahad key add) or change the roster.`,
+        ? `${role.models.join(", ")} ${role.models.length === 1 ? "is" : "are"} on a coding plan, which can't play ${role.role}: its terms keep it to coding, or to a tool you run yourself. Hire a model that can: invincible roster set ${role.role} <provider/model>.`
+        : `None of ${role.models.join(", ") || "(no models)"} has a key here or a running local runtime. Add a key (invincible key add) or change the roster.`,
     });
   }
 
@@ -110,13 +110,13 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
         key: `loop-orphaned:${loop.name}`,
         severity: "warn",
         title: `Loop ${loop.name} has no runner`,
-        body: "The node it runs on was revoked. Move it: galahad loop set " + loop.name + " --on <node>.",
+        body: "The node it runs on was revoked. Move it: invincible loop set " + loop.name + " --on <node>.",
       });
       continue;
     }
     const last = loop.recent.slice(0, 3);
     if (last.length === 3 && last.every((status) => status === "failed")) {
-      out.push({ key: `loop-failing:${loop.name}`, severity: "warn", title: `Loop ${loop.name} keeps failing`, body: "Its last three runs failed. See galahad loop runs " + loop.name + "." });
+      out.push({ key: `loop-failing:${loop.name}`, severity: "warn", title: `Loop ${loop.name} keeps failing`, body: "Its last three runs failed. See invincible loop runs " + loop.name + "." });
     }
   }
 
@@ -125,7 +125,7 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
       key: `equivocation:${fork.id}`,
       severity: "alert",
       title: `${fork.name} signed two different histories`,
-      body: "Its key may be in someone else's hands. Revoke it (galahad revoke), then rotate the keys it could read.",
+      body: "Its key may be in someone else's hands. Revoke it (invincible revoke), then rotate the keys it could read.",
     });
   }
 
@@ -139,7 +139,7 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
         title: `${connector.label} needs its key`,
         body:
           connector.key === "missing"
-            ? "Its secret isn't in the vault yet. Add it from the Vault page or with galahad secret set."
+            ? "Its secret isn't in the vault yet. Add it from the Vault page or with invincible secret set."
             : "Its secret is pinned to another origin, so it's never sent. Set it again for this connector.",
       });
     }
@@ -168,7 +168,7 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
       key: `sandbox-image:${s.self.id}`,
       severity: "info",
       title: `The sandbox image is missing on ${s.self.name}`,
-      body: "Something removed it (image pruning?). Galahad rebuilds it the next time a sandbox is needed, or now with galahad sandbox build.",
+      body: "Something removed it (image pruning?). Galahad rebuilds it the next time a sandbox is needed, or now with invincible sandbox build.",
       node: s.self.id,
     });
   }
@@ -196,7 +196,7 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
       key: `compute-unmeasured:${node.id}`,
       severity: "info",
       title: `${node.name} hasn't measured itself`,
-      body: `He counts one sandbox slot on it until it has. Ask it to: galahad compute calibrate ${node.name} (it takes a few seconds, at low priority).`,
+      body: `He counts one sandbox slot on it until it has. Ask it to: invincible compute calibrate ${node.name} (it takes a few seconds, at low priority).`,
     });
   }
   // What more compute could do, as suggestions: installing, downloading and hiring are yours.
@@ -243,7 +243,7 @@ interface NoticeValue {
  * what the heartbeat raised before and no longer finds. Notices about another
  * node's body are left alone (only that node can see its own disk).
  */
-export function reconcile(store: MindStore, identity: NodeIdentity, findings: Finding[], now: number, source = "heartbeat"): { raised: number; cleared: number } {
+export function reconcile(store: LedgerStore, identity: NodeIdentity, findings: Finding[], now: number, source = "heartbeat"): { raised: number; cleared: number } {
   let raised = 0;
   let cleared = 0;
   const found = new Map(findings.map((f) => [f.key, f]));
@@ -277,7 +277,7 @@ export function reconcile(store: MindStore, identity: NodeIdentity, findings: Fi
  * fails or needs attention and cleared by its next good run. (The heartbeat's
  * own findings are already notices.) Unchanged news writes nothing.
  */
-export function loopNotice(store: MindStore, identity: NodeIdentity, loop: string, status: "ok" | "attention" | "failed", summary: string, now: number): void {
+export function loopNotice(store: LedgerStore, identity: NodeIdentity, loop: string, status: "ok" | "attention" | "failed", summary: string, now: number): void {
   const key = `loop:${loop}`;
   const current = store.lww<NoticeValue>(`notice:${key}`)?.value;
   if (status === "ok") {
@@ -298,7 +298,7 @@ export const TELLS_KEPT = 5;
  * A run of a loop that tells you (its task `tell`): a notice of its own in your Inbox, with what woke it, told on your
  * phone by the loop's name only (core notify.ts, toldItem). Its source names the loop; the oldest beyond a few go.
  */
-export function tellNotice(store: MindStore, identity: NodeIdentity, loop: { name: string; label: string | null }, run: string, summary: string, now: number): void {
+export function tellNotice(store: LedgerStore, identity: NodeIdentity, loop: { name: string; label: string | null }, run: string, summary: string, now: number): void {
   const key = `tell:${loop.name}:${run}`;
   const body = summary.trim().slice(0, 600) || "It happened.";
   store.emit(identity, "notice.raised", { key, severity: "info", title: loop.label ?? `Loop ${loop.name}`, body, source: `tell:${loop.name}`, at: now });

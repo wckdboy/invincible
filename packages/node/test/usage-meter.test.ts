@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { moneyPrices } from "@galahad/core";
-import { PLAN_PROVIDERS } from "@galahad/brain";
+import { moneyPrices } from "@invincible/core";
+import { PLAN_PROVIDERS } from "@invincible/models";
 import { meterLine } from "../src/trial-commands.ts";
 import { UsageStore } from "../src/usage.ts";
 
@@ -73,11 +73,11 @@ describe("the meter in a line", () => {
     const meter = { node: "ultra", per: "month" as const, since: "2026-11-01", budgetUsd: 10, spentUsd: 3.4, complete: false, unpriced: ["local/qwen"], tokens: 3_611_000, calls: 3, leftUsd: 6.6, top: [] };
     expect(meterLine(meter)).toBe("This month: at least $3.40 of $10.0, $6.60 left · 3.61M tokens in 3 calls · no price for local/qwen");
     expect(meterLine({ ...meter, per: "day", complete: true, unpriced: [], budgetUsd: 2, spentUsd: 2.1, leftUsd: 0, calls: 1 })).toBe("Today: $2.10 of $2.00, spent · 3.61M tokens in 1 call");
-    expect(meterLine({ ...meter, budgetUsd: null, leftUsd: null, complete: true, unpriced: [] })).toBe("This month: $3.40 no budget (galahad usage budget <usd> sets one) · 3.61M tokens in 3 calls");
+    expect(meterLine({ ...meter, budgetUsd: null, leftUsd: null, complete: true, unpriced: [] })).toBe("This month: $3.40 no budget (invincible usage budget <usd> sets one) · 3.61M tokens in 3 calls");
   });
 });
 
 test("nothing priced yet is $0, never at least $0", () => {
   const meter = { node: "ultra", per: "month" as const, since: "2026-11-01", budgetUsd: null, spentUsd: 0, complete: false, unpriced: [], tokens: 0, calls: 14, leftUsd: null, top: [] };
-  expect(meterLine(meter)).toBe("This month: $0 no budget (galahad usage budget <usd> sets one) · 0 tokens in 14 calls");
+  expect(meterLine(meter)).toBe("This month: $0 no budget (invincible usage budget <usd> sets one) · 0 tokens in 14 calls");
 });

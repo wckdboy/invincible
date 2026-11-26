@@ -173,7 +173,7 @@ describe("he comes to you: a push becomes a notification", () => {
 describe("the number on the app's icon", () => {
   test("starts from the count a page last set, and a push about something new that waits for you adds one", async () => {
     badges.length = 0;
-    await dispatch("message", { data: { type: "galahad:badge", count: 2 } });
+    await dispatch("message", { data: { type: "invincible:badge", count: 2 } });
     await push({ v: 1, kind: "approval", title: "Galahad: approve this?", body: "Push to main", open: "inbox", tag: "t-approval0123456789abcd" });
     expect(badges).toEqual([3]);
     // The same thing told again, and news that doesn't wait for you, add nothing.
@@ -184,14 +184,14 @@ describe("the number on the app's icon", () => {
     await push({ kind: "advert" });
     expect(badges).toEqual([3, 4]);
     // A page that has seen the Inbox sets it again: the next push counts from there.
-    await dispatch("message", { data: { type: "galahad:badge", count: 0 } });
+    await dispatch("message", { data: { type: "invincible:badge", count: 0 } });
     await push({ v: 1, kind: "question", title: "Galahad asks", body: "Which branch?", open: "chat", conversation: CHAT, tag: "t-question0123456789abcd" });
     expect(badges).toEqual([3, 4, 1]);
   });
 
   test("a message that isn't a page's count changes nothing", async () => {
-    await dispatch("message", { data: { type: "galahad:badge", count: 5 } });
-    for (const data of [{ type: "galahad:badge", count: -1 }, { type: "galahad:badge", count: "9" }, { type: "something-else", count: 9 }, null]) await dispatch("message", { data });
+    await dispatch("message", { data: { type: "invincible:badge", count: 5 } });
+    for (const data of [{ type: "invincible:badge", count: -1 }, { type: "invincible:badge", count: "9" }, { type: "something-else", count: 9 }, null]) await dispatch("message", { data });
     badges.length = 0;
     await push({ v: 1, kind: "needs-you", title: "Galahad: this needs you", body: "low on disk", open: "inbox", tag: "t-needsyou0123456789abcd" });
     expect(badges).toEqual([6]);
@@ -207,7 +207,7 @@ describe("a tap opens the app at the right place", () => {
     const { closed } = await tap();
     expect(closed).toBe(true);
     // The page you're looking at, not just the first one.
-    expect(windows[1]!.messages).toEqual([{ type: "galahad:open", open: "chat", conversation: CHAT }]);
+    expect(windows[1]!.messages).toEqual([{ type: "invincible:open", open: "chat", conversation: CHAT }]);
     expect(windows[1]!.focused).toBe(1);
     expect(windows[0]!.messages).toEqual([]);
     expect(opened).toEqual([]);
@@ -267,6 +267,6 @@ describe("a tap opens the app at the right place", () => {
   test("when the browser replaces this device's subscription, open pages are told to hand the node the new one", async () => {
     windows = [windowAt(`${ORIGIN}/#/overview`)];
     await dispatch("pushsubscriptionchange", {});
-    expect(windows[0]!.messages).toEqual([{ type: "galahad:push-changed" }]);
+    expect(windows[0]!.messages).toEqual([{ type: "invincible:push-changed" }]);
   });
 });

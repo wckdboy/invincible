@@ -11,13 +11,13 @@ const dockerfile = readFileSync(new URL("../../../sandbox/claude-code/Dockerfile
 const arg = (name: string): string => new RegExp(`^ARG ${name}=(\\S+)$`, "m").exec(dockerfile)?.[1] ?? "";
 
 test("it is the workshop image, made where a trial needs it, and kept like the others", () => {
-  expect(dockerfile).toMatch(/^FROM galahad\/sandbox:1$/m);
-  expect(OWN_IMAGES[CLAUDE_CODE_IMAGE]).toEqual({ context: "claude-code", keeper: "galahad-claude-code-image", base: DEFAULT_IMAGE });
+  expect(dockerfile).toMatch(/^FROM invincible\/sandbox:1$/m);
+  expect(OWN_IMAGES[CLAUDE_CODE_IMAGE]).toEqual({ context: "claude-code", keeper: "invincible-claude-code-image", base: DEFAULT_IMAGE });
 });
 
 test("its tag is the release it pins, so a new pin is a new image and never the old one under the new name", () => {
   expect(arg("CLAUDE_CODE_VERSION")).toMatch(/^\d+\.\d+\.\d+$/);
-  expect(CLAUDE_CODE_IMAGE).toBe(`galahad/claude-code:${arg("CLAUDE_CODE_VERSION")}`);
+  expect(CLAUDE_CODE_IMAGE).toBe(`invincible/claude-code:${arg("CLAUDE_CODE_VERSION")}`);
 });
 
 test("what it downloads is Anthropic's release, over https, and is checked before it is installed", () => {

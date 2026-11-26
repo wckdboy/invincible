@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, closeSync, existsSync, openSync } from "node:fs";
-import { AttachmentRef, findSecrets, randomId, readAlike, redact } from "@galahad/core";
-import { isOrbProfile, type AvatarActivity } from "@galahad/core/avatar";
+import { AttachmentRef, findSecrets, randomId, readAlike, redact } from "@invincible/core";
+import { isOrbProfile, type AvatarActivity } from "@invincible/core/avatar";
 import { z } from "zod";
 import {
   TEAM_GALAHAD, TEAM_LIMITS, TEAM_OWNER, TeammateInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,

@@ -2,14 +2,14 @@ import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newNodeIdentity, type ExecResult, type TeamCheckpoint, type Teammate, type TeamRoom, type TeamTask, type TeamMessage } from "@galahad/core";
-import { taskStep, type AvatarExpression } from "@galahad/core/avatar";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
-import { acpDriver, AGENTS, OWN_SIGN_IN, type QuestEvent } from "@galahad/brain";
+import { newNodeIdentity, type ExecResult, type TeamCheckpoint, type Teammate, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
+import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
+import { acpDriver, AGENTS, OWN_SIGN_IN, type QuestEvent } from "@invincible/models";
 import { harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "../src/team-runtime.ts";
 import type { TeamRunContext } from "../src/team.ts";
 
-const stores: MindStore[] = [];
+const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
 const member: Teammate = { id: "ada", name: "Ada", instructions: "Keep changes small.", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: "host", workspace: { node: "host", id: "0123456789" }, memory: "private working note", createdAt: 1, updatedAt: 1 };
 const room: TeamRoom = { id: "forge", name: "Forge", members: ["ada"], direct: false, turnBudget: 4, paused: false, createdAt: 1, updatedAt: 1 };
@@ -22,7 +22,7 @@ const call = (name: string, input: unknown) => ({ tool_calls: [{ index: 0, id: n
 
 function fixture(script: object[], overrides: Partial<TeamRuntimeDeps> = {}, usage?: object) {
   const identity = newNodeIdentity();
-  const store = new MindStore(":memory:"); stores.push(store);
+  const store = new LedgerStore(":memory:"); stores.push(store);
   foundFleet(store, identity, { fleetName: "hivemind", nodeName: "keep" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
@@ -55,7 +55,7 @@ test("workspace tool calls keep the assigned VM and share one bounded preparatio
   expect(await f.runtime.respond(member, room, [], f.context)).toBe("Checked the workspace.");
   expect(f.prepared).toEqual(["ada"]);
   expect(f.commands).toHaveLength(2);
-  expect(f.commands.every((command) => command.includes("/work/.galahad-gateway.json"))).toBe(true);
+  expect(f.commands.every((command) => command.includes("/work/.invincible-gateway.json"))).toBe(true);
   expect(f.held()).toBe(0);
 });
 
@@ -291,13 +291,13 @@ test("sensitive mode: when none of its models answers, the work waits and asks t
 
 test("a knight with keys of yours is told each one's name and address, whether it may write, and how to call through the gateway", async () => {
   const keyed: Teammate = { ...member, keys: [{ secret: "stripe", header: "authorization", write: false }, { secret: "acme", header: "x-api-key", write: true }] };
-  expect(keysLine(keyed.keys, (secret) => (secret === "stripe" ? "https://api.stripe.com" : null))).toBe(" Keys of your liege's you may use through the gateway, never seeing them (every use is recorded): stripe at https://api.stripe.com (reads only); acme (reads and writes). Call `$GALAHAD_KEYS/<name>/<path>` with `Authorization: Bearer $GALAHAD_TOKEN` (or $GALAHAD_TOKEN in the API's own key header): the call goes to the key's address with the key put in.");
+  expect(keysLine(keyed.keys, (secret) => (secret === "stripe" ? "https://api.stripe.com" : null))).toBe(" Keys of your liege's you may use through the gateway, never seeing them (every use is recorded): stripe at https://api.stripe.com (reads only); acme (reads and writes). Call `$INVINCIBLE_KEYS/<name>/<path>` with `Authorization: Bearer $INVINCIBLE_TOKEN` (or $INVINCIBLE_TOKEN in the API's own key header): the call goes to the key's address with the key put in.");
   expect(keysLine(undefined)).toBe("");
   const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], { teammate: () => keyed, keyAddress: () => "https://api.stripe.com" });
   expect((await f.runtime.executeTask(keyed, task, f.context)).verified).toBe(true);
   expect(JSON.stringify(f.bodies.map((b) => b.messages))).toContain("Keys of your liege's you may use through the gateway");
   // (And its commands are given where the key gateway is, from the lease in its VM, never a key or a token written in.)
-  expect(f.commands.some((command) => command.includes("'GALAHAD_KEYS'"))).toBe(true);
+  expect(f.commands.some((command) => command.includes("'INVINCIBLE_KEYS'"))).toBe(true);
   expect(f.commands.some((command) => /gw_[A-Za-z0-9]/.test(command))).toBe(false);
 });
 
@@ -514,7 +514,7 @@ test("a VM on another node: its node is asked what the tool spent, and that is c
 });
 
 test("a knight's task is given the skills that bear on its goal (its planner whole, its engineer their opening, never its reviewer), and its verified work is told so it can teach one", async () => {
-  const SKILLS = { text: "<galahad-skills>Run the migrations before the importer. Then the whole of it.</galahad-skills>", brief: "<galahad-skills>Run the migrations before the importer.</galahad-skills>" };
+  const SKILLS = { text: "<invincible-skills>Run the migrations before the importer. Then the whole of it.</invincible-skills>", brief: "<invincible-skills>Run the migrations before the importer.</invincible-skills>" };
   const asked: { teammate: string; task: string }[] = [];
   const taught: { teammate: string; task: string; evidence: any }[] = [];
   const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
@@ -811,7 +811,7 @@ test("a roster model this VM's gateway token doesn't cover is not run on, and th
   expect(commands.some((c) => c.includes("setsid"))).toBe(false);
 });
 
-/* The VM's notes store (Engram, packages/brain/src/engram.ts): one switch for a node's knights, off unless its
+/* The VM's notes store (Engram, packages/models/src/engram.ts): one switch for a node's knights, off unless its
  * owner turns it on. On, a task is given the store when its VM has the pinned binary, and says which it was. */
 const NATIVE_SCRIPT = () => [say("1. Make the change and test it."), say("```sh\necho built\n```"), say("DONE\nBuilt and checked."), say("PASS\nThe gate and command output support the result.")];
 /** A native knight's task in a VM that answers the store's version question as told. */
@@ -955,13 +955,13 @@ function repoTask(options: { start?: string; changed?: number; reviewer?: string
 }
 
 test("a fix to a pull request's failing checks starts on that pull request's branch, and its verified work is offered as a push onto it, not as a new pull request", async () => {
-  const fix = { ...task, title: "Fix the failing checks on you/project#12", fix: { connector: "github", owner: "you", repo: "project", branch: "galahad/units", pr: 12, head: BASE } };
+  const fix = { ...task, title: "Fix the failing checks on you/project#12", fix: { connector: "github", owner: "you", repo: "project", branch: "invincible/units", pr: 12, head: BASE } };
   const t = repoTask({ task: fix });
   const outcome = await t.run();
   // The branch is the start script's third argument (it starts there as fetched, or not at all).
-  expect(plain(t.commands[0]!)).toEndWith(` '/work/tasks/${task.id}' '/work/.agent/base/${task.id}' 'galahad/units'`);
-  expect(outcome.output).toContain(`Changes: 2 files, kept as ${KEPT}. Offered to you as a push onto galahad/units, where it began: the pull request updates once you approve it.`);
-  expect(outcome.output).not.toContain("galahad ship");
+  expect(plain(t.commands[0]!)).toEndWith(` '/work/tasks/${task.id}' '/work/.agent/base/${task.id}' 'invincible/units'`);
+  expect(outcome.output).toContain(`Changes: 2 files, kept as ${KEPT}. Offered to you as a push onto invincible/units, where it began: the pull request updates once you approve it.`);
+  expect(outcome.output).not.toContain("invincible ship");
 });
 
 test("a knight's steps are kept as they end (PLAN #15): after each command of its own, before the next one runs; a step that changed nothing is the step before's", async () => {
@@ -1007,7 +1007,7 @@ test("a knight's task in a repository starts from the repository as it is now, i
   // the command), makes the task's worktree from what it fetched, and writes down the commit it started from.
   expect(start).toStartWith("python3 -c '");
   expect(start).toEndWith(` '/work/tasks/${task.id}' '/work/.agent/base/${task.id}'`);
-  for (const part of ["'fetch'", "GALAHAD_REPO_URL", "/work/.galahad-gateway.json", "'worktree','add','--detach'", "origin/HEAD"]) expect(start).toContain(part);
+  for (const part of ["'fetch'", "INVINCIBLE_REPO_URL", "/work/.invincible-gateway.json", "'worktree','add','--detach'", "origin/HEAD"]) expect(start).toContain(part);
   expect(start).not.toMatch(/gw_[A-Za-z0-9]/);
   // Its commits carry its own name, at an address that can't be anyone's: with none, the first real task's knight copied
   // the repository's owner's from its history (19 November 2026).
@@ -1033,7 +1033,7 @@ test("what it changed is kept to read and to ship: a patch and a shipment from w
   expect(t.kept).toEqual([{ path: out, label: "Build · ada · verified" }]);
   expect(outcome.changes).toEqual({ artifact: KEPT, files: 2, base: BASE });
   expect(outcome.output).toContain(`Base: ${BASE.slice(0, 12)}`);
-  expect(outcome.output).toContain(`Changes: 2 files, kept as ${KEPT}. A pull request, on your word: galahad ship ${KEPT} --title "Build"`);
+  expect(outcome.output).toContain(`Changes: 2 files, kept as ${KEPT}. A pull request, on your word: invincible ship ${KEPT} --title "Build"`);
 });
 
 test("work that was not verified is kept too, and says so where it says how to ship; nothing changed keeps nothing", async () => {
@@ -1042,7 +1042,7 @@ test("work that was not verified is kept too, and says so where it says how to s
   expect(unverified.verified).toBe(false);
   expect(sentBack.kept).toEqual([{ path: `/work/out/tasks/${task.id}`, label: "Build · ada · not verified" }]);
   expect(unverified.output).toContain(`Changes: 2 files, kept as ${KEPT}. Not verified: read them before you ship them.`);
-  expect(unverified.output).not.toContain("galahad ship");
+  expect(unverified.output).not.toContain("invincible ship");
   const none = repoTask({ changed: 0 });
   const nothing = await none.run();
   expect(none.kept).toEqual([]);
@@ -1107,7 +1107,7 @@ test("a task's commands have a temporary directory of their own on the workspace
   expect(String(f.bodies[1].messages.find((m: any) => m.role === "user").content)).toContain("Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can.");
   // And what its lease is: on 22 November 2026 a knight tidying up after its work took it for something a test had
   // left behind and deleted it, and with it the model access its coding tool's next run would have read.
-  expect(String(f.bodies[1].messages.find((m: any) => m.role === "user").content)).toContain("/work/.galahad-gateway.json is your model access, written by Galahad for this task: never move, change or delete it.");
+  expect(String(f.bodies[1].messages.find((m: any) => m.role === "user").content)).toContain("/work/.invincible-gateway.json is your model access, written by Galahad for this task: never move, change or delete it.");
   // The last thing asked of the VM: the task's temporary directory is removed.
   expect(plain(commands.at(-1)!)).toBe(`rm -rf '${temp}'`);
 });
@@ -1183,13 +1183,13 @@ test("a knight with a desktop and a model that can see is given its eyes: each c
     return { told: String(f.bodies[1].messages.find((m: any) => m.role === "user").content), ran: plain(plain(commands.find((c) => c.includes("desktop look"))!)) };
   };
   const seeing = await run("opencode-go/gpt-6-luna");
-  expect(seeing.ran).toContain("export GALAHAD_EYES='opencode-go/gpt-6-luna' && ");
+  expect(seeing.ran).toContain("export INVINCIBLE_EYES='opencode-go/gpt-6-luna' && ");
   expect(seeing.told).toContain('`desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).');
   // (No angle brackets in what a knight is told: a model copied them onto its own command fence, and nothing ran.)
   expect(seeing.told.slice(seeing.told.indexOf("This VM has a desktop"), seeing.told.indexOf("to click).") + 10)).not.toMatch(/[<>]/);
   // No model that sees on the roster: the desktop is still there to read as text, and nothing is promised of looking.
   const blind = await run(null);
-  expect(blind.ran).not.toContain("GALAHAD_EYES");
+  expect(blind.ran).not.toContain("INVINCIBLE_EYES");
   expect(blind.told).toContain("This VM has a desktop");
   expect(blind.told).not.toContain("desktop look");
 });
@@ -1278,16 +1278,16 @@ test("the files your messages carried go with the conversation: the newest pictu
 test("a knight's command runs with its lease's model access, and without it, saying so, when the lease is gone or broken", () => {
   // On 22 November 2026 a knight deleted its lease; every command in its VM failed from then on, its coding tool's
   // progress polls among them, and its task never ended.
-  const dir = mkdtempSync(join(tmpdir(), "galahad-lease-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-lease-"));
   try {
-    const lease = join(dir, ".galahad-gateway.json");
+    const lease = join(dir, ".invincible-gateway.json");
     const run = (path: string) => {
       const r = Bun.spawnSync(["bash", "-c", withGateway("echo ran; echo \"${OPENAI_BASE_URL:-none}\"; echo \"${SHELL_SECRET:-none}\"", path)], { env: { PATH: process.env.PATH ?? "", HOME: dir } });
       return { exit: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
     };
     // Its lease: what it may use is set, and nothing else it holds.
-    writeFileSync(lease, JSON.stringify({ OPENAI_BASE_URL: "http://127.0.0.1:7777/gw/x", SHELL_SECRET: "never set" }));
-    expect(run(lease)).toEqual({ exit: 0, out: "ran\nhttp://127.0.0.1:7777/gw/x\nnone\n", err: "" });
+    writeFileSync(lease, JSON.stringify({ OPENAI_BASE_URL: "http://127.0.0.1:7400/gw/x", SHELL_SECRET: "never set" }));
+    expect(run(lease)).toEqual({ exit: 0, out: "ran\nhttp://127.0.0.1:7400/gw/x\nnone\n", err: "" });
     // Gone, or not JSON: the command still runs, with no model access, and says why.
     for (const broken of [join(dir, "gone.json"), (writeFileSync(lease, "not json"), lease)]) {
       const r = run(broken);

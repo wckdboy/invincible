@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { newNodeIdentity, type ChatStreamEvent, type Prices, type TeamTaskRecord } from "@galahad/core";
-import type { chat as Chat, ChatTools } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { newNodeIdentity, type ChatStreamEvent, type Prices, type TeamTaskRecord } from "@invincible/core";
+import type { chat as Chat, ChatTools } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { OUTCOME_LIMITS, OutcomeRunner } from "../src/outcomes.ts";
 import { TeamStore } from "../src/team-store.ts";
 import { TeamService } from "../src/team.ts";
@@ -26,7 +26,7 @@ afterEach(async () => {
 function world(steps: Step[] = [], record?: (title: string) => { verified: boolean; record?: TeamTaskRecord; output?: string; error?: string }, hold?: Promise<void>) {
   let now = Date.UTC(2026, 10, 18, 6, 0);
   const identity = newNodeIdentity();
-  const mind = new MindStore(":memory:");
+  const mind = new LedgerStore(":memory:");
   foundFleet(mind, identity, { fleetName: "camelot", nodeName: "ultra" });
   const store = new TeamStore(":memory:", () => now);
   for (const [id, name] of [["ada", "Ada"], ["lin", "Lin"], ["sam", "Sam"]] as const) store.saveTeammate({ id, name });

@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { type AnswerStatus, AttachmentRef, type ChatMessage, chatState, type ConversationSummary, LookHeld, type LookView, type QueueHold, randomId, type StoredMessage, type StoredStep } from "@galahad/core";
+import { type AnswerStatus, AttachmentRef, type ChatMessage, chatState, type ConversationSummary, LookHeld, type LookView, type QueueHold, randomId, type StoredMessage, type StoredStep } from "@invincible/core";
 import { z } from "zod";
 
 /*

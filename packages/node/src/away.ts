@@ -1,4 +1,4 @@
-import type { AwayLine, LoopRunView, NoticeView, TeamTask } from "@galahad/core";
+import type { AwayLine, LoopRunView, NoticeView, TeamTask } from "@invincible/core";
 
 /*
  * While you were away (PLAN #37): what happened since you last looked, in a few lines, from what the node holds and no

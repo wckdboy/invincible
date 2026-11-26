@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { DoctorCheck, DoctorReport } from "@galahad/core/doctor";
-import { doctorTally } from "@galahad/core/doctor";
+import type { DoctorCheck, DoctorReport } from "@invincible/core/doctor";
+import { doctorTally } from "@invincible/core/doctor";
 import { checkLine, doctorCard, readDoctorReport, stateTone } from "./doctor.ts";
 
 /* The doctor's card: what needs you first, everything else grouped; and the report read at the page's boundary. */
@@ -22,7 +22,7 @@ describe("the doctor's card", () => {
     const view = doctorCard(
       report(
         [
-          check("app.published", "app", "needs-you", "Tailscale isn't publishing the app", "galahad expose"),
+          check("app.published", "app", "needs-you", "Tailscale isn't publishing the app", "invincible expose"),
           check("vault.open", "vault", "broken", "can't open the vault", "Re-grant it"),
           check("role.planner", "models", "ok", "planner: x/y answered", undefined, 840),
         ],

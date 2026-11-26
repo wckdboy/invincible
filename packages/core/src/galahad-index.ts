@@ -1,6 +1,6 @@
 /*
  * The Galahad Index, and the seeded generator trials pose their problems with.
- * No dependencies (no zod): the PWA imports this directly (@galahad/core/galahad-index),
+ * No dependencies (no zod): the PWA imports this directly (@invincible/core/galahad-index),
  * so the CLI, the PWA and every node compute the same number from the same scores.
  */
 import { costOf, type Prices, spendTotal, type UsageLine } from "./spend.ts";
@@ -182,7 +182,7 @@ export function effortReport(
   const base = levels.find((l) => l.effort === 1);
   const top = [...levels].reverse().find((l) => l.effort > 1);
   if (!base || !top || base.n < 2 || top.n < 2) {
-    return { levels, helps: null, verdict: "Not measured at more than one effort level yet: galahad trial run --effort 3 (and one at --effort 1) to see whether more compute helps." };
+    return { levels, helps: null, verdict: "Not measured at more than one effort level yet: invincible trial run --effort 3 (and one at --effort 1) to see whether more compute helps." };
   }
   const said = (l: EffortIndex) => `${percent(l.mean)} (${percent(l.low)}–${percent(l.high)}, ${l.n} trials)`;
   if (top.low > base.high) return { levels, helps: true, verdict: `More effort measurably helps: effort ${top.effort} scores ${said(top)} against ${said(base)} at effort 1, and the intervals don't overlap.` };

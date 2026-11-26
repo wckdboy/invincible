@@ -1,4 +1,4 @@
-import type { ConversationSummary, MemoryView, ProjectView } from "@galahad/core";
+import type { ConversationSummary, MemoryView, ProjectView } from "@invincible/core";
 import { isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { projectIdFrom } from "../lib/chats.ts";

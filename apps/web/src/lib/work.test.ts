@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamSnapshot, TeamTask, Teammate } from "@galahad/core/team";
+import type { TeamSnapshot, TeamTask, Teammate } from "@invincible/core/team";
 import { atAGlance, attended, byAttention, doingNow, failedGate, inboxBeyond, inProject, NEW_FOR_MS, projectBadge, projectKey, seenOnOpen, shortSpan, spentSince, taskState, workOf } from "./work.ts";
 
 const NOW = 1_764_000_000_000;
@@ -19,20 +19,20 @@ const snapshot = (teammates: Teammate[], tasks: TeamTask[], seen?: Record<string
 // each task a thread of its own, the knight on it beside it.
 describe("the work, by project", () => {
   test("a project is a repository: its address however it was written, its name its own last part or a project's of yours", () => {
-    expect(projectKey("https://github.com/amiriteorg/galahad")).toBe("github.com/amiriteorg/galahad");
-    expect(projectKey("https://GitHub.com/amiriteorg/galahad.git/")).toBe("github.com/amiriteorg/galahad");
-    expect(projectKey("https://sovware.io/amiriteorg/galahad")).toBe("sovware.io/amiriteorg/galahad");
+    expect(projectKey("https://github.com/amiriteorg/invincible")).toBe("github.com/amiriteorg/invincible");
+    expect(projectKey("https://GitHub.com/amiriteorg/invincible.git/")).toBe("github.com/amiriteorg/invincible");
+    expect(projectKey("https://github.com/amiriteorg/invincible")).toBe("github.com/amiriteorg/invincible");
     expect(projectKey("not a url")).toBeNull();
-    const work = workOf({ snapshot: snapshot([knight("gareth", "https://github.com/amiriteorg/galahad"), knight("kay", "https://github.com/amiriteorg/importer")], [task("gareth", "done", 30)]), projects: [{ id: "imp", name: "The importer", instructions: "", repo: "https://github.com/amiriteorg/importer.git", checkout: "/work/projects/imp", updatedAt: 1 }], now: NOW });
+    const work = workOf({ snapshot: snapshot([knight("gareth", "https://github.com/amiriteorg/invincible"), knight("kay", "https://github.com/amiriteorg/importer")], [task("gareth", "done", 30)]), projects: [{ id: "imp", name: "The importer", instructions: "", repo: "https://github.com/amiriteorg/importer.git", checkout: "/work/projects/imp", updatedAt: 1 }], now: NOW });
     expect(work.projects.map((p) => [p.name, p.repo, p.host, p.knights])).toEqual([
-      ["galahad", "https://github.com/amiriteorg/galahad", "github.com", ["gareth"]],
+      ["invincible", "https://github.com/amiriteorg/invincible", "github.com", ["gareth"]],
       ["The importer", "https://github.com/amiriteorg/importer", "github.com", ["kay"]],
     ]);
   });
 
   test("each task is in its knight's project, the newest first; a knight with no repository's are other work", () => {
     const tasks = [task("gareth", "done", 90, { verified: true }), task("percival", "failed", 20), task("gareth", "running", 5, { progress: "Gate 1/2 · bun test" }), task("gareth", "stopped", 300)];
-    const work = workOf({ snapshot: snapshot([knight("gareth", "https://github.com/amiriteorg/galahad"), knight("percival", null)], tasks), projects: [], now: NOW });
+    const work = workOf({ snapshot: snapshot([knight("gareth", "https://github.com/amiriteorg/invincible"), knight("percival", null)], tasks), projects: [], now: NOW });
     expect(work.projects).toHaveLength(1);
     expect(work.projects[0]!.tasks.map((t) => t.id)).toEqual([tasks[2]!.id, tasks[0]!.id, tasks[3]!.id]);
     expect(work.other!.tasks.map((t) => t.id)).toEqual([tasks[1]!.id]);
@@ -81,7 +81,7 @@ describe("the work, by project", () => {
 // Your word, 26 November 2026: "project/tasks/coding t3code style for the knights": one list, what needs you first, each
 // task a row of three lines.
 describe("the work by attention", () => {
-  const GALAHAD = "https://github.com/amiriteorg/galahad";
+  const GALAHAD = "https://github.com/amiriteorg/invincible";
   const ada = knight("ada", GALAHAD);
   const arm = (handle: string) => `arm:team.0123456789.${handle}`;
 
@@ -143,7 +143,7 @@ describe("the work by attention", () => {
     const running = task("ada", "running", 2, { progress: "Running · bun test packages/link\nmore" });
     const [row] = attended({ snapshot: snapshot([ada], [running], {}), projects: [{ name: "Galahad", repo: `${GALAHAD}.git` }], now: NOW }).working;
     expect(row).toEqual({
-      id: running.id, room: running.room, title: running.title, project: { key: "github.com/amiriteorg/galahad", name: "Galahad", badge: "G" },
+      id: running.id, room: running.room, title: running.title, project: { key: "github.com/amiriteorg/invincible", name: "Galahad", badge: "G" },
       knight: { id: "ada", name: "Ada", avatar: undefined }, state: "working", attention: "working", word: "Working · 7m", tone: "work", age: null,
       detail: "bun test packages/link", mono: true, at: running.updatedAt,
     });
@@ -163,10 +163,10 @@ describe("the work by attention", () => {
     const work = attended({ snapshot: snapshot([ada, kay, knight("percival", null)], tasks, { "knight:ada": NOW }), projects: [], now: NOW });
     expect(work.projects).toEqual([
       { key: "github.com/amiriteorg/importer", name: "importer", badge: "I", count: 1 },
-      { key: "github.com/amiriteorg/galahad", name: "galahad", badge: "G", count: 1 },
+      { key: "github.com/amiriteorg/invincible", name: "invincible", badge: "I", count: 1 },
       { key: "other", name: "Other work", badge: "", count: 1 },
     ]);
-    const galahad = inProject(work, "github.com/amiriteorg/galahad");
+    const galahad = inProject(work, "github.com/amiriteorg/invincible");
     expect(byAttention(galahad).map((row) => row.id)).toEqual([tasks[0]!.id]);
     expect(byAttention(inProject(work, null)).map((row) => row.id)).toEqual([tasks[1]!.id, tasks[2]!.id, tasks[0]!.id]);
   });

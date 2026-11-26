@@ -1,5 +1,5 @@
 import { b64u, type NotifyPayload, notifyReach, tagOf, zonedParts } from "../../packages/core/src/index.ts";
-import type { MindStore } from "../../packages/mind/src/index.ts";
+import type { LedgerStore } from "../../packages/ledger/src/index.ts";
 import { FAILING_AFTER, NotifyService, type NotifySources } from "../../packages/node/src/notify.ts";
 import { NotifyStore, type Subscription } from "../../packages/node/src/notify-store.ts";
 import type { PushDelivery, PushOutcome, PushTarget } from "../../packages/node/src/push-send.ts";
@@ -145,7 +145,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
     { id: PHONE, name: "iPhone", kind: "client" as const, scopes: SCOPES },
     { id: LAPTOP, name: "MacBook", kind: "client" as const, scopes: SCOPES },
   ];
-  const mind = { activeDevice: (id: string) => devices.find((d) => d.id === id) ?? null, devices: () => devices } as unknown as MindStore;
+  const mind = { activeDevice: (id: string) => devices.find((d) => d.id === id) ?? null, devices: () => devices } as unknown as LedgerStore;
 
   /* ---------- the push services, as the devices' are this week ---------- */
   let phoneToken = "ab".repeat(32);

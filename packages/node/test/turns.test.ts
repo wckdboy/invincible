@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { rmSync } from "node:fs";
-import type { Steering } from "@galahad/brain";
-import type { ChatStreamEvent } from "@galahad/core";
+import type { Steering } from "@invincible/models";
+import type { ChatStreamEvent } from "@invincible/core";
 import { ChatStore, type Queued, type QueuedBy } from "../src/chats.ts";
 import { asideMessages, broughtBack, TurnError, TurnHub, type TurnSpec } from "../src/turns.ts";
 
@@ -610,7 +610,7 @@ describe("the queue", () => {
 
 describe("when the node stops, and comes back", () => {
   test("turns are stopped and kept as stopped, the queue is held, and a restart sends nothing by itself", async () => {
-    const path = `${process.env.TEMP ?? "/tmp"}/galahad-turns-${Date.now()}-${Math.random().toString(36).slice(2)}.db`;
+    const path = `${process.env.TEMP ?? "/tmp"}/invincible-turns-${Date.now()}-${Math.random().toString(36).slice(2)}.db`;
     const chats = new ChatStore(path);
     const hub = new TurnHub({ chats });
     const answer = scriptedAnswer();
@@ -658,7 +658,7 @@ describe("when the node stops, and comes back", () => {
 
 describe("a chat store from before read and unread", () => {
   test("counts everything he answered before it as read; what he answers after is new", () => {
-    const path = `${process.env.TEMP ?? "/tmp"}/galahad-unread-${Date.now()}-${Math.random().toString(36).slice(2)}.db`;
+    const path = `${process.env.TEMP ?? "/tmp"}/invincible-unread-${Date.now()}-${Math.random().toString(36).slice(2)}.db`;
     let clock = 1_000;
     const before = new ChatStore(path, () => clock++);
     const id = before.create({ title: "Old", project: null, role: "planner" }).id;

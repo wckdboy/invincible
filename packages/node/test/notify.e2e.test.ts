@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { b64u, clientIdFromKey, fromB64u, type LedgerEntry, type NotifyView, pushPublicKey, type RouteName, routes, type Scope, signRequest, tagOf, type TurnView, utf8 } from "@galahad/core";
-import { requestPairing, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { b64u, clientIdFromKey, fromB64u, type LedgerEntry, type NotifyView, pushPublicKey, type RouteName, routes, type Scope, signRequest, tagOf, type TurnView, utf8 } from "@invincible/core";
+import { requestPairing, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -27,7 +27,7 @@ import { freePort } from "./ports.ts";
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "notify-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-notify-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-notify-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -162,7 +162,7 @@ let tablet: Paired;
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -437,7 +437,7 @@ describe("what he sends", () => {
 
   test("your rules' tells are a switch of their own: off, a tell says nothing; on again, the one that stands is told", async () => {
     const before = phone.browser.received.length;
-    // The switch Settings shows (and `galahad notify kinds told off` sends): the node refused it once.
+    // The switch Settings shows (and `invincible notify kinds told off` sends): the node refused it once.
     const off = await phone.call("setNotify", { kinds: { told: false } });
     expect(off.status).toBe(200);
     expect(((await off.json()) as { prefs: NotifyView["prefs"] }).prefs.kinds).toEqual({ "needs-you": true, approval: true, finished: true, question: true, told: false });
@@ -685,7 +685,7 @@ describe("a chat turn nobody is watching", () => {
   });
 });
 
-describe("from a terminal: galahad notify", () => {
+describe("from a terminal: invincible notify", () => {
   const api = { call: <T,>(name: RouteName, input?: unknown) => json<T>(admin(name, input)) };
   const run = async (sub?: string, rest: string[] = [], flags: Record<string, string | boolean> = {}) => {
     const lines: string[] = [];
@@ -709,7 +709,7 @@ describe("from a terminal: galahad notify", () => {
     expect(await run("kinds", ["question", "off", "finished", "off"])).toMatch(/off\s+question/);
     expect((await view()).prefs.kinds).toMatchObject({ question: false, finished: false });
     await run("kinds", ["question", "on", "finished", "on"]);
-    // Your rules' tells too, which the node once refused (galahad notify kinds told off).
+    // Your rules' tells too, which the node once refused (invincible notify kinds told off).
     expect(await run("kinds", ["told", "off"])).toMatch(/off\s+told/);
     expect((await view()).prefs.kinds.told).toBe(false);
     expect(await run("kinds", ["told", "on"])).toMatch(/on\s+told/);
@@ -728,7 +728,7 @@ describe("from a terminal: galahad notify", () => {
     await expect(run("kinds", ["finished"])).rejects.toThrow("then on or off");
     await expect(run("quiet", ["10pm-7am"])).rejects.toThrow("two times of day");
     await expect(run("limit", ["0"])).rejects.toThrow("from 1 to 50");
-    await expect(run("dance")).rejects.toThrow("usage: galahad notify");
+    await expect(run("dance")).rejects.toThrow("usage: invincible notify");
   });
 
   test("a device is named by its name or the start of its id, never guessed between two", async () => {
@@ -869,7 +869,7 @@ describe("the Android app: kept on the node, collected by the app", () => {
 });
 
 describe("your day, in your own time", () => {
-  test("quiet hours follow the zone your device says (x-galahad-tz), not the node's: 22:30 in Copenhagen holds a warning (Probe D)", async () => {
+  test("quiet hours follow the zone your device says (x-invincible-tz), not the node's: 22:30 in Copenhagen holds a warning (Probe D)", async () => {
     await tomorrow();
     // The phone is on (its own subscription, handed over again as its app does), the node's setting London's (Ultra's
     // once was), and a device of yours says it is in Copenhagen.
@@ -878,7 +878,7 @@ describe("your day, in your own time", () => {
     const traveller = await pair("traveller", ["mind:read"]);
     // 22:30 in Copenhagen: 21:30 in London, and UTC.
     advance(((Math.ceil((clock - 21.5 * 3600_000) / 86_400_000) * 86_400_000 + 21.5 * 3600_000 - clock) % 86_400_000) - 61_000);
-    expect((await traveller.call("notify", undefined, undefined, { "x-galahad-tz": "Europe/Copenhagen" })).status).toBe(200);
+    expect((await traveller.call("notify", undefined, undefined, { "x-invincible-tz": "Europe/Copenhagen" })).status).toBe(200);
     const before = phone.browser.received.length;
     raise("zone:night", "warn", "a finding in the night");
     await look();

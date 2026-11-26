@@ -3,9 +3,9 @@ import { decide, type OwnCall, ownApproval } from "../src/index.ts";
 
 describe("oath gate", () => {
   test("creating infrastructure is free; deleting it asks", () => {
-    expect(decide({ class: "create", resource: "r2.bucket", target: "galahad-cache" }).verdict).toBe("allow");
-    expect(decide({ class: "modify", resource: "r2.lifecycle", target: "galahad-cache" }).verdict).toBe("allow");
-    expect(decide({ class: "delete", resource: "r2.bucket", target: "galahad-cache" }).verdict).toBe("ask");
+    expect(decide({ class: "create", resource: "r2.bucket", target: "invincible-cache" }).verdict).toBe("allow");
+    expect(decide({ class: "modify", resource: "r2.lifecycle", target: "invincible-cache" }).verdict).toBe("allow");
+    expect(decide({ class: "delete", resource: "r2.bucket", target: "invincible-cache" }).verdict).toBe("ask");
   });
 
   test("a quest may clean up only the ephemeral things it created", () => {
@@ -28,18 +28,18 @@ describe("oath gate", () => {
 // Your word, 23 November 2026: he approves his own decisions and his knights'; what is monetary, legal or destructive
 // still asks you.
 describe("what Galahad approves himself", () => {
-  const KNIGHTS = ["https://github.com/amiriteorg/galahad", "git@github.com:wckdboy/Engram.git"];
-  const github = (over: Partial<OwnCall>): OwnCall => ({ class: "outward", origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/pulls", args: { owner: "amiriteorg", repo: "galahad", head: "galahad/units" }, ...over });
+  const KNIGHTS = ["https://github.com/amiriteorg/invincible", "git@github.com:wckdboy/Engram.git"];
+  const github = (over: Partial<OwnCall>): OwnCall => ({ class: "outward", origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/pulls", args: { owner: "amiriteorg", repo: "invincible", head: "invincible/units" }, ...over });
 
   test("his knights' work in the repositories you gave them: a pull request, a fix onto its branch, an issue, a comment, a review that isn't an approval", () => {
-    expect(ownApproval(github({ native: "github.ship" }), KNIGHTS)).toBe("a pull request of the work, on a galahad/… branch, in amiriteorg/galahad, a repository you gave a knight");
-    expect(ownApproval(github({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}" }), KNIGHTS)).toBe("a fix pushed onto its galahad/… branch, in amiriteorg/galahad, a repository you gave a knight");
-    expect(ownApproval(github({ path: "/repos/{owner}/{repo}/issues" }), KNIGHTS)).toBe("an issue in amiriteorg/galahad, a repository you gave a knight");
+    expect(ownApproval(github({ native: "github.ship" }), KNIGHTS)).toBe("a pull request of the work, on a invincible/… branch, in amiriteorg/invincible, a repository you gave a knight");
+    expect(ownApproval(github({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}" }), KNIGHTS)).toBe("a fix pushed onto its invincible/… branch, in amiriteorg/invincible, a repository you gave a knight");
+    expect(ownApproval(github({ path: "/repos/{owner}/{repo}/issues" }), KNIGHTS)).toBe("an issue in amiriteorg/invincible, a repository you gave a knight");
     expect(ownApproval(github({ path: "/repos/{owner}/{repo}/issues/{number}/comments" }), KNIGHTS)).toStartWith("a comment in");
     expect(ownApproval(github({}), KNIGHTS)).toStartWith("a pull request in");
-    for (const event of ["COMMENT", "REQUEST_CHANGES", "comment"]) expect(ownApproval(github({ path: "/repos/{owner}/{repo}/pulls/{number}/reviews", args: { owner: "amiriteorg", repo: "galahad", event } }), KNIGHTS)).toStartWith("a review in");
+    for (const event of ["COMMENT", "REQUEST_CHANGES", "comment"]) expect(ownApproval(github({ path: "/repos/{owner}/{repo}/pulls/{number}/reviews", args: { owner: "amiriteorg", repo: "invincible", event } }), KNIGHTS)).toStartWith("a review in");
     // A repository is the same one however its address is written, whatever its case.
-    expect(ownApproval(github({ args: { owner: "WCKDboy", repo: "engram", head: "galahad/units" } }), KNIGHTS)).toStartWith("a pull request in WCKDboy/engram");
+    expect(ownApproval(github({ args: { owner: "WCKDboy", repo: "engram", head: "invincible/units" } }), KNIGHTS)).toStartWith("a pull request in WCKDboy/engram");
   });
 
   test("everything else waits for you", () => {
@@ -48,7 +48,7 @@ describe("what Galahad approves himself", () => {
     // No knight of yours has a repository: nothing is his.
     expect(ownApproval(github({ native: "github.ship" }), [])).toBeNull();
     // A review that approves is your word on your account (branch protection counts it), and one that says no event isn't known.
-    expect(ownApproval(github({ path: "/repos/{owner}/{repo}/pulls/{number}/reviews", args: { owner: "amiriteorg", repo: "galahad", event: "APPROVE" } }), KNIGHTS)).toBeNull();
+    expect(ownApproval(github({ path: "/repos/{owner}/{repo}/pulls/{number}/reviews", args: { owner: "amiriteorg", repo: "invincible", event: "APPROVE" } }), KNIGHTS)).toBeNull();
     expect(ownApproval(github({ path: "/repos/{owner}/{repo}/pulls/{number}/reviews" }), KNIGHTS)).toBeNull();
     // What GitHub's API does elsewhere isn't known to be safe: a merge, a delete.
     expect(ownApproval(github({ method: "PUT", path: "/repos/{owner}/{repo}/pulls/{number}/merge" }), KNIGHTS)).toBeNull();
@@ -58,8 +58,8 @@ describe("what Galahad approves himself", () => {
     expect(ownApproval(github({ native: "gmail.send" }), KNIGHTS)).toBeNull();
     expect(ownApproval({ class: "outward", origin: "https://gmail.googleapis.com", native: "gmail.send", method: "POST", path: "/gmail/v1/users/me/messages/send", args: { to: "someone@example.com" } }, KNIGHTS)).toBeNull();
     // A repository that isn't named as text isn't named.
-    expect(ownApproval(github({ args: { owner: ["amiriteorg"], repo: "galahad" } }), KNIGHTS)).toBeNull();
+    expect(ownApproval(github({ args: { owner: ["amiriteorg"], repo: "invincible" } }), KNIGHTS)).toBeNull();
     // A pull request from a branch that isn't his (yours, or another fork's), or from none, is yours (Percival's review).
-    for (const head of ["feat/orders", "main", "someone:galahad/units", "galahad/", undefined]) expect([head, ownApproval(github({ args: { owner: "amiriteorg", repo: "galahad", ...(head === undefined ? {} : { head }) } }), KNIGHTS)]).toEqual([head, null]);
+    for (const head of ["feat/orders", "main", "someone:invincible/units", "invincible/", undefined]) expect([head, ownApproval(github({ args: { owner: "amiriteorg", repo: "invincible", ...(head === undefined ? {} : { head }) } }), KNIGHTS)]).toEqual([head, null]);
   });
 });

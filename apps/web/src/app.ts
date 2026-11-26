@@ -34,7 +34,7 @@ function init(): void {
   if (!("serviceWorker" in navigator) || !isSecureContext) return;
   let offered = false;
   navigator.serviceWorker.addEventListener("message", (event: MessageEvent) => {
-    if (offered || (event.data as { type?: string } | null)?.type !== "galahad:updated") return;
+    if (offered || (event.data as { type?: string } | null)?.type !== "invincible:updated") return;
     offered = true;
     toast("A new version of Galahad is ready", { action: { label: "Reload", run: () => location.reload() }, duration: 0 });
   });

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
-import { ATTACHMENT_LIMITS, type AttachmentRef, b64u, type ChatStreamEvent, clientIdentity, type ClientIdentity, fromB64u, newClientSecret, type Scope, signRequest } from "@galahad/core";
-import { sseData } from "@galahad/brain";
-import type { Vault } from "@galahad/mind";
+import { ATTACHMENT_LIMITS, type AttachmentRef, b64u, type ChatStreamEvent, clientIdentity, type ClientIdentity, fromB64u, newClientSecret, type Scope, signRequest } from "@invincible/core";
+import { sseData } from "@invincible/models";
+import type { Vault } from "@invincible/ledger";
 import { cappedBytes, keepFile } from "./chat-files.ts";
 import { telegramAnswer } from "./chat-format.ts";
 
@@ -221,7 +221,7 @@ export class TelegramGateway {
     if (!message || message.chat.type !== "private" || !message.from || message.from.is_bot) return;
     const text = message.text?.trim() ?? "";
     if (!owner) {
-      // Linking: the code from `galahad telegram connect`, from your own account, before it expires. Anything else, unanswered.
+      // Linking: the code from `invincible telegram connect`, from your own account, before it expires. Anything else, unanswered.
       const link = this.get<{ code: string; expires: number }>("link");
       const sent = /^\/start(?:@\w+)?\s+([A-Za-z0-9]{8})$/.exec(text)?.[1]?.toUpperCase();
       if (!link || !sent || link.expires <= this.now() || sent !== link.code) return;

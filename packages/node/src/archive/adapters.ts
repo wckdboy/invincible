@@ -1,9 +1,9 @@
-import { archiveId, type ConversationSummary, isTrialQuest, Preregistration, type StoredMessage, type StoredStep, TRIAL_ARCHIVE_KIND, type TrialRecord, type Trust } from "@galahad/core";
-import type { MindStore } from "@galahad/mind";
+import { archiveId, type ConversationSummary, isTrialQuest, Preregistration, type StoredMessage, type StoredStep, TRIAL_ARCHIVE_KIND, type TrialRecord, type Trust } from "@invincible/core";
+import type { LedgerStore } from "@invincible/ledger";
 import type { ArtifactStore } from "../artifacts.ts";
 import { asText, extOf, mightBeModel, modelFacts, transcript } from "./chunk.ts";
 import type { IncomingEntry, IncomingFile } from "./store.ts";
-import { skillAuthor, skillInWords, versionUsable } from "@galahad/core";
+import { skillAuthor, skillInWords, versionUsable } from "@invincible/core";
 import { skillVersions } from "../skills.ts";
 
 /*
@@ -64,7 +64,7 @@ function after<T>(items: { key: string; item: T }[], cursor: string | null, limi
  * the adapter reads back until it reaches its cursor; a daily sweep finds a memory that
  * synced in late with an older clock.
  */
-export function memoriesAdapter(mind: Pick<MindStore, "recall">): ArchiveAdapter {
+export function memoriesAdapter(mind: Pick<LedgerStore, "recall">): ArchiveAdapter {
   return {
     name: "memories",
     sweepEveryMs: DAY,
@@ -106,7 +106,7 @@ export function memoriesAdapter(mind: Pick<MindStore, "recall">): ArchiveAdapter
  * ran, and what was found. Model output shaped by what a sandbox computed, so it's
  * `untrusted`, as the mind already remembers it. Linked to its evidence.
  */
-export function investigationsAdapter(mind: Pick<MindStore, "lwwPrefix" | "lww">): ArchiveAdapter {
+export function investigationsAdapter(mind: Pick<LedgerStore, "lwwPrefix" | "lww">): ArchiveAdapter {
   return {
     name: "investigations",
     sweepEveryMs: DAY,
@@ -161,7 +161,7 @@ export function investigationsAdapter(mind: Pick<MindStore, "lwwPrefix" | "lww">
  * `trial`, which is never offered to a model as context: a record holds the answers of its seed and the names of
  * its hidden checks.
  */
-export function trialsAdapter(mind: Pick<MindStore, "lwwPrefix">): ArchiveAdapter {
+export function trialsAdapter(mind: Pick<LedgerStore, "lwwPrefix">): ArchiveAdapter {
   return {
     name: "trials",
     sweepEveryMs: DAY,
@@ -348,7 +348,7 @@ export function chatsAdapter(chats: ChatSource, archive: ArchiveLookup, opts: { 
  * it and from which quest; a later version is an entry of its own. The archive's own context never offers
  * them (he is given skills through their own fence, by where each stands now); a search finds them as records.
  */
-export function skillsAdapter(mind: Pick<MindStore, "skills">): ArchiveAdapter {
+export function skillsAdapter(mind: Pick<LedgerStore, "skills">): ArchiveAdapter {
   return {
     name: "skills",
     sweepEveryMs: DAY,

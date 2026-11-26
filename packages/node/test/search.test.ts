@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { GatewayTokens } from "@galahad/brain";
-import { gatewayEnv, type LedgerEntryInput } from "@galahad/sandbox";
+import { GatewayTokens } from "@invincible/models";
+import { gatewayEnv, type LedgerEntryInput } from "@invincible/sandbox";
 import { handleSandboxSearch, SearchError, searchWeb } from "../src/search.ts";
 
 /*
@@ -57,7 +57,7 @@ describe("searching from a sandbox", () => {
     const ledger: LedgerEntryInput[] = [];
     const s = searxng(RESULTS);
     const call = (query: string, token: string) =>
-      handleSandboxSearch(new Request(`http://172.31.250.1:7779/search${query}`, { headers: { authorization: `Bearer ${token}` } }), { tokens, ledger: (e) => ledger.push(e), fetch: s.fetch });
+      handleSandboxSearch(new Request(`http://172.31.250.1:7402/search${query}`, { headers: { authorization: `Bearer ${token}` } }), { tokens, ledger: (e) => ledger.push(e), fetch: s.fetch });
     return { tokens, ledger, call, s };
   };
 
@@ -83,12 +83,12 @@ describe("searching from a sandbox", () => {
 
   test("a sandbox with search gets its address; search is never mistaken for a model provider", () => {
     const env = gatewayEnv("gw_test", ["search", "orcarouter"]);
-    expect(env.GALAHAD_SEARCH).toBe("http://172.31.250.1:7779/search");
-    expect(env.OPENAI_BASE_URL).toBe("http://172.31.250.1:7779/gw/orcarouter");
+    expect(env.INVINCIBLE_SEARCH).toBe("http://172.31.250.1:7402/search");
+    expect(env.OPENAI_BASE_URL).toBe("http://172.31.250.1:7402/gw/orcarouter");
     const searchOnly = gatewayEnv("gw_test", ["search"]);
     expect(searchOnly.OPENAI_BASE_URL).toBeUndefined();
-    expect(searchOnly.GALAHAD_TOKEN).toBe("gw_test");
-    expect(gatewayEnv("gw_test", ["orcarouter"]).GALAHAD_SEARCH).toBeUndefined();
+    expect(searchOnly.INVINCIBLE_TOKEN).toBe("gw_test");
+    expect(gatewayEnv("gw_test", ["orcarouter"]).INVINCIBLE_SEARCH).toBeUndefined();
   });
 });
 
@@ -119,7 +119,7 @@ describe("websearch, in the images", () => {
     });
     try {
       const run = Bun.spawn(["sh", join(REPO, "sandbox", "websearch"), "finite", "element"], {
-        env: { ...process.env, GALAHAD_SEARCH: `http://127.0.0.1:${server.port}/search`, GALAHAD_TOKEN: "gw_test" },
+        env: { ...process.env, INVINCIBLE_SEARCH: `http://127.0.0.1:${server.port}/search`, INVINCIBLE_TOKEN: "gw_test" },
         stdout: "pipe",
       });
       const out = await new Response(run.stdout).text();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamTrailEntry } from "@galahad/core/team";
+import type { TeamTrailEntry } from "@invincible/core/team";
 import { commandKind, costWords, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, workedFor, workSummary } from "./steps.ts";
 
 /* A task's trail as the node writes it (team-runtime.ts progress()), its lines in the order they happened. */

@@ -69,11 +69,11 @@ describe("a Mac's sandboxes (Apple's container)", () => {
 
 describe("the Lab", () => {
   test("a Lab sandbox is told by its image", () => {
-    expect(isLab("galahad/lab:1")).toBe(true);
-    expect(isLab("galahad/lab:2")).toBe(true);
-    expect(isLab("galahad/sandbox:latest")).toBe(false);
-    expect(isLab("someone/galahad/lab:1")).toBe(false);
-    expect(isLab("galahad/laboratory:1")).toBe(false);
+    expect(isLab("invincible/lab:1")).toBe(true);
+    expect(isLab("invincible/lab:2")).toBe(true);
+    expect(isLab("invincible/sandbox:latest")).toBe(false);
+    expect(isLab("someone/invincible/lab:1")).toBe(false);
+    expect(isLab("invincible/laboratory:1")).toBe(false);
   });
 });
 

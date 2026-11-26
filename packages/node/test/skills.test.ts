@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { DISTIL_MAX_TOKENS, HlcClock, newNodeIdentity, type NodeIdentity, type QuestEvidence, SKILL_DISTIL_RESOURCE, SKILL_STALE_AFTER_MS, type SkillDoc, SKILLS_BUDGET, SKILLS_OFFERED } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+import { DISTIL_MAX_TOKENS, HlcClock, newNodeIdentity, type NodeIdentity, type QuestEvidence, SKILL_DISTIL_RESOURCE, SKILL_STALE_AFTER_MS, type SkillDoc, SKILLS_BUDGET, SKILLS_OFFERED } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import { DISTIL_MIN_TOKENS, listSkills, MAX_WAITING, SkillError, type SkillsDeps, SkillsService, usableSkills, WITHHELD } from "../src/skills.ts";
 import { learnedLines, questEvidence, questTrail } from "../src/skills-quest.ts";
 
@@ -41,7 +41,7 @@ const evidence = (over: Partial<QuestEvidence> = {}): QuestEvidence => ({
 const reply = (d: Partial<SkillDoc> & { revises?: string } = {}) => JSON.stringify({ ...doc(), proof: [{ command: "bun test parser", expect: "0 fail" }], ...d });
 
 interface Rig {
-  store: MindStore;
+  store: LedgerStore;
   identity: NodeIdentity;
   skills: SkillsService;
   /** What the stand-in model was asked, and what it answers next. */
@@ -59,7 +59,7 @@ function rig(): Rig {
   const identity = newNodeIdentity();
   let now = Date.UTC(2026, 10, 12, 12);
   // The mind's clock follows the test's, so "fourteen days later" is fourteen days later in the log too.
-  const store = new MindStore(":memory:", new HlcClock(() => now));
+  const store = new LedgerStore(":memory:", new HlcClock(() => now));
   foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   const ledger = (entry: LedgerEntryInput) => void store.emit(identity, "ledger.recorded", Object.fromEntries(Object.entries(entry).filter(([, v]) => v !== undefined)) as LedgerEntryInput);
   const r: Rig = {
@@ -75,7 +75,7 @@ function rig(): Rig {
       now = value;
     },
     log: [],
-    sandbox: (quest, network) => ledger({ class: "create", resource: "docker.container", target: `galahad-sbx-${quest}`, verdict: "allow", quest, detail: `container · ${network} · 4 cpu · 8 GB · 20 GB disk · galahad/workshop:1` }),
+    sandbox: (quest, network) => ledger({ class: "create", resource: "docker.container", target: `invincible-sbx-${quest}`, verdict: "allow", quest, detail: `container · ${network} · 4 cpu · 8 GB · 20 GB disk · invincible/workshop:1` }),
     ledger: () => store.ledger(200).map((e) => ({ resource: e.body.resource, target: e.body.target, detail: e.body.detail })),
     skills: null as unknown as SkillsService,
   };

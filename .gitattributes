@@ -1,2 +1,0 @@
-# A replica written by the store before chains were adopted: byte-exact, for the migration test.
-packages/mind/test/fixtures/*.db binary

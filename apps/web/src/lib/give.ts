@@ -1,4 +1,4 @@
-import type { TeamGiveInput } from "@galahad/core/team";
+import type { TeamGiveInput } from "@invincible/core/team";
 
 /*
  * Giving a task (pure: no DOM). The commands that prove it is done, as typed; a task given to the Roundtable

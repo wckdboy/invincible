@@ -1,4 +1,4 @@
-import type { Calibration, ComputeLimit, ComputeNodeView, ComputeView, EffortAsk, NodeCapacity } from "@galahad/core";
+import type { Calibration, ComputeLimit, ComputeNodeView, ComputeView, EffortAsk, NodeCapacity } from "@invincible/core";
 import { type Ctx, errorMessage } from "../context.ts";
 import { attemptLine, budgetText, ceilingChange, ceilingOwner, ceilingText, effortText, fleetSlots, limitRanges, measuredFacts, modelCallsText, slotsText, strengthText } from "../lib/compute.ts";
 import { plural } from "../lib/text.ts";
@@ -182,7 +182,7 @@ function openEffort(ctx: Ctx, view: ComputeView, changed: () => void): void {
       { class: "stack loose" },
       h("div", { class: "stack tight" }, h("div", { class: "label" }, "Attempts at a quest when he chooses"), levels.el, h("p", { class: "tiny subtle" }, "Auto takes what the free slots allow, up to 3. Each attempt works in its own sandbox and is reviewed; the independent reviewer takes the best on the evidence alone.")),
       budget.el,
-      h("p", { class: "tiny subtle" }, "Each attempt beyond a quest's first counts against the day's budget. A level you name yourself (galahad do --effort 3) stands whatever the budget."),
+      h("p", { class: "tiny subtle" }, "Each attempt beyond a quest's first counts against the day's budget. A level you name yourself (invincible do --effort 3) stands whatever the budget."),
       note,
     ),
     footer: save,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { doctorExit, doctorLines, doctorTally, doctorVerdict } from "@galahad/core";
+import { doctorExit, doctorLines, doctorTally, doctorVerdict } from "@invincible/core";
 import { type Diagnosis, type DoctorFacts, diagnose, doctorFindings, reportOf, span, VM_TOOLS_CANT } from "../src/doctor.ts";
 
 /*
@@ -27,7 +27,7 @@ function healthy(): DoctorFacts {
       newestEventAt: NOW - 20_000,
       timeSynced: true,
       peers: [{ name: "rack", alwaysOn: true, online: true, lastSeen: NOW - 4000, error: null, clockOffsetMs: 300 }],
-      backup: { dir: "/var/lib/galahad/backups", exists: true, newestAt: NOW - 9 * HOUR, files: 14 },
+      backup: { dir: "/var/lib/invincible/backups", exists: true, newestAt: NOW - 9 * HOUR, files: 14 },
     },
     vault: { unlocked: true, secrets: 6, requests: [] },
     roles: [
@@ -56,7 +56,7 @@ function healthy(): DoctorFacts {
       { name: "nightly", enabled: true, runner: "ultra", runnerOnline: true, problem: null, recent: ["ok"], lastAt: NOW - 15 * HOUR, next: NOW + 9 * HOUR },
     ],
     connectors: [{ id: "github", label: "GitHub", host: "api.github.com", key: "ready", problem: null, reach: { ok: true, ms: 120, error: null } }],
-    app: { missing: [], published: "https://ultra.tail1234.ts.net:8443", local: "http://127.0.0.1:7778" },
+    app: { missing: [], published: "https://ultra.tail1234.ts.net:8443", local: "http://127.0.0.1:7401" },
     disk: { freeGb: 412, totalGb: 1800 },
     service: { restarts: 0, warnings: [] },
     notify: { devices: 2, failing: [], keyProblem: null },
@@ -111,7 +111,7 @@ describe("each fault gives its own line and advice", () => {
   test("this node: revoked, a key file others can read, a missing key file, an open home", () => {
     const revoked = fault((f) => (f.self.active = false), "node.identity");
     expect(revoked.state).toBe("broken");
-    expect(revoked.fix).toContain("galahad join");
+    expect(revoked.fix).toContain("invincible join");
 
     const open = fault((f) => (f.keys.keyFile = { exists: true, mode: 0o644 }), "node.keys");
     expect(open.state).toBe("broken");
@@ -142,7 +142,7 @@ describe("each fault gives its own line and advice", () => {
     const fork = fault((f) => (f.mind.forks = [{ id: "n_old", name: "old-laptop" }]), "mind.chain");
     expect(fork.state).toBe("broken");
     expect(fork.line).toContain("old-laptop");
-    expect(fork.fix).toContain("galahad revoke");
+    expect(fork.fix).toContain("invincible revoke");
 
     const behind = fault((f) => (f.mind.newestEventAt = NOW + 20 * MIN), "mind.clock");
     expect(behind.state).toBe("broken");
@@ -179,9 +179,9 @@ describe("each fault gives its own line and advice", () => {
     alone.mind.peers = [];
     expect(byId(diagnose(alone), "mind.sync").line).toContain("only node");
 
-    const none = fault((f) => (f.mind.backup = { dir: "/var/lib/galahad/backups", exists: false, newestAt: null, files: 0 }), "mind.backup");
+    const none = fault((f) => (f.mind.backup = { dir: "/var/lib/invincible/backups", exists: false, newestAt: null, files: 0 }), "mind.backup");
     expect(none.state).toBe("needs-you");
-    expect(none.fix).toContain("GALAHAD_BACKUP_DIR");
+    expect(none.fix).toContain("INVINCIBLE_BACKUP_DIR");
     expect(none.finding).toBeUndefined(); // the doctor says it; the heartbeat doesn't nag about a choice
     const old = fault((f) => (f.mind.backup!.newestAt = NOW - 12 * DAY), "mind.backup");
     expect(old.line).toContain("12 days old");
@@ -189,8 +189,8 @@ describe("each fault gives its own line and advice", () => {
     // A node that started minutes ago hasn't missed its first (it's kept ten minutes after the start): not asked for yet.
     const young = healthy();
     young.self.startedAt = NOW - 2 * MIN;
-    young.mind.backup = { dir: "/var/lib/galahad/backups", exists: false, newestAt: null, files: 0 };
-    expect(byId(diagnose(young), "mind.backup")).toMatchObject({ state: "ok", line: "no backup of the mind yet: the node keeps its first ten minutes after it starts, in /var/lib/galahad/backups" });
+    young.mind.backup = { dir: "/var/lib/invincible/backups", exists: false, newestAt: null, files: 0 };
+    expect(byId(diagnose(young), "mind.backup")).toMatchObject({ state: "ok", line: "no backup of the mind yet: the node keeps its first ten minutes after it starts, in /var/lib/invincible/backups" });
     young.self.startedAt = NOW - 20 * MIN;
     expect(byId(diagnose(young), "mind.backup").state).toBe("needs-you");
   });
@@ -207,7 +207,7 @@ describe("each fault gives its own line and advice", () => {
     expect(models.map((c) => c.id)).toEqual(["models.none"]);
     expect(models[0]).toMatchObject({ state: "broken", line: "no provider is set up here yet, so no model can answer" });
     expect(models[0]!.fix).toContain("A key for anthropic, openrouter or deepseek is enough");
-    expect(models[0]!.fix).toContain("galahad key add");
+    expect(models[0]!.fix).toContain("invincible key add");
     // One provider set up, and the roles are judged one by one, as ever.
     fresh.providers = { setUp: 1, byDefault: ["anthropic"] };
     expect(diagnose(fresh).filter((c) => c.area === "models").map((c) => c.id)).toEqual(["role.planner", "role.engineer", "role.reviewer", "role.embedder"]);
@@ -215,7 +215,7 @@ describe("each fault gives its own line and advice", () => {
     fresh.roles[0]!.models = ["anthropic/claude-opus-5-5", "openrouter/anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro"].map((ref) => ({ ref, problem: `provider "${ref.slice(0, ref.indexOf("/"))}" is not configured` }));
     fresh.roles[0]!.unset = true;
     expect(byId(diagnose(fresh), "role.planner")).toMatchObject({ state: "broken", line: "no model can play planner: its defaults name anthropic, openrouter and deepseek, none of them set up here" });
-    expect(byId(diagnose(fresh), "role.planner").fix).toBe("Add a key for one of them (galahad key add), or hire a model you have a key for: galahad roster set planner <provider/model>.");
+    expect(byId(diagnose(fresh), "role.planner").fix).toBe("Add a key for one of them (invincible key add), or hire a model you have a key for: invincible roster set planner <provider/model>.");
   });
 
   test("the vault: locked, and keys he's waiting for", () => {
@@ -227,7 +227,7 @@ describe("each fault gives its own line and advice", () => {
   });
 
   test("models: a coding plan on a role does his coding and nothing else, and is never a model he lacks", () => {
-    // The roster `galahad key add` suggests for a plan: the plan first for the tools, a model of his own behind it.
+    // The roster `invincible key add` suggests for a plan: the plan first for the tools, a model of his own behind it.
     const planned = healthy();
     planned.roles[1]!.models = [{ ref: "zai-coding/glm-5.3", problem: null, plan: true }, ...planned.roles[1]!.models];
     const checks = diagnose(planned);
@@ -252,7 +252,7 @@ describe("each fault gives its own line and advice", () => {
     expect(mute.state).toBe("broken");
     expect(mute.line).toContain("coding plan");
     expect(mute.line).toContain("coding work only");
-    expect(mute.fix).toContain("galahad roster set planner");
+    expect(mute.fix).toContain("invincible roster set planner");
     // A plan with no key is said once, as the tools' lack and not his: the role itself is still well.
     const unkeyed = healthy();
     unkeyed.roles[1]!.models = [{ ref: "zai-coding/glm-5.3", problem: 'provider "zai-coding" has no key in the vault', plan: true }, { ref: "kimi-coding/k3", problem: 'provider "kimi-coding" is not configured', plan: true }, ...unkeyed.roles[1]!.models];
@@ -260,7 +260,7 @@ describe("each fault gives its own line and advice", () => {
     expect(lack.state).toBe("needs-you");
     expect(lack.line).toContain("zai-coding/glm-5.3");
     expect(lack.line).toContain("kimi-coding/k3");
-    expect(lack.fix).toBe("Add the plan's key: galahad key add --provider zai-coding.");
+    expect(lack.fix).toBe("Add the plan's key: invincible key add --provider zai-coding.");
     expect(byId(diagnose(unkeyed), "role.engineer").state).toBe("ok");
     expect(byId(diagnose(unkeyed), "role.engineer").line).not.toContain("tools use");
     // A plan behind a model he lacks is still not the model that answers instead.
@@ -292,7 +292,7 @@ describe("each fault gives its own line and advice", () => {
     const said = diagnose(blind).filter((c) => c.id.startsWith("role.eyes"));
     expect(said.map((c) => [c.id, c.state])).toEqual([["role.eyes.plan", "needs-you"]]);
     expect(said[0]!.line).toBe(`kimi-coding/k3 (${VM_TOOLS_CANT}): on eyes, which can't use it`);
-    expect(said[0]!.fix).toBe("Hire a model a VM's tools may use: galahad roster set eyes <provider/model>.");
+    expect(said[0]!.fix).toBe("Hire a model a VM's tools may use: invincible roster set eyes <provider/model>.");
   });
 
   test("models: the first model skipped on every answer, none usable, a refusal, a filter, a refused key, a timeout", () => {
@@ -302,7 +302,7 @@ describe("each fault gives its own line and advice", () => {
     expect(skipped.state).toBe("needs-you");
     expect(skipped.line).toContain("skipped on every answer");
     expect(skipped.line).toContain("deepseek/deepseek-chat answers instead");
-    expect(skipped.fix).toContain("galahad roster set planner deepseek/deepseek-chat");
+    expect(skipped.fix).toContain("invincible roster set planner deepseek/deepseek-chat");
     expect(skipped.finding?.severity).toBe("info");
 
     const none = fault((f) => {
@@ -370,13 +370,13 @@ describe("each fault gives its own line and advice", () => {
     const down = fault((f) => (f.archive!.embedder.probe = { ok: false, ms: 3, error: "connection refused (127.0.0.1:11434)" }), "archive.embedder");
     expect(down.state).toBe("needs-you");
     expect(down.line).toContain("connection refused");
-    expect(down.fix).toContain("galahad-ollama");
+    expect(down.fix).toContain("invincible-ollama");
     expect(down.finding?.severity).toBe("warn");
     const failing = fault((f) => (f.archive!.embedder = { model: "openrouter/embed", state: "failing", error: "503 from provider", local: false, probe: null }), "archive.embedder");
-    expect(failing.fix).toContain("galahad provider list");
+    expect(failing.fix).toContain("invincible provider list");
     expect(fault((f) => (f.archive!.embedder = { model: null, state: "none", error: null, local: null, probe: null }), "archive.embedder").state).toBe("ok");
 
-    expect(fault((f) => (f.archive!.off = true), "archive.index").fix).toContain("GALAHAD_ARCHIVE=off");
+    expect(fault((f) => (f.archive!.off = true), "archive.index").fix).toContain("INVINCIBLE_ARCHIVE=off");
     expect(fault((f) => (f.archive!.sourceErrors = [{ name: "chats", error: "database is locked" }]), "archive.index").line).toContain("chats (database is locked)");
     const waiting = healthy();
     waiting.archive!.backlog = 300;
@@ -400,7 +400,7 @@ describe("each fault gives its own line and advice", () => {
     const pruned = diagnose(image);
     expect(byId(pruned, "sandbox.image")).toMatchObject({ state: "needs-you" });
     expect(byId(pruned, "sandbox.image").line).toContain("cleanup may have pruned it");
-    expect(byId(pruned, "sandbox.image").fix).toContain("galahad sandbox build");
+    expect(byId(pruned, "sandbox.image").fix).toContain("invincible sandbox build");
     expect(byId(pruned, "sandbox.start").line).toContain("the image is missing");
 
     expect(fault((f) => (f.sandbox.host!.networks = false), "sandbox.networks").state).toBe("needs-you");
@@ -414,7 +414,7 @@ describe("each fault gives its own line and advice", () => {
 
     const firewall = fault((f) => (f.sandbox.host!.firewall = "inactive"), "sandbox.firewall");
     expect(firewall.state).toBe("broken");
-    expect(firewall.fix).toContain("systemctl restart galahad-firewall");
+    expect(firewall.fix).toContain("systemctl restart invincible-firewall");
     expect(firewall.finding?.severity).toBe("warn");
     expect(fault((f) => (f.sandbox.host!.firewall = "missing"), "sandbox.firewall").state).toBe("needs-you");
     expect(fault((f) => (f.sandbox.host!.diskLimited = false), "sandbox.disk").fix).toContain("--sudo");
@@ -437,18 +437,18 @@ describe("each fault gives its own line and advice", () => {
     expect(byId(checks, "sandbox.networks").line).toBe("both sandbox networks are there, each held up by a VM of the node's own");
     const down = healthy();
     down.sandbox.host = { ...down.sandbox.host!, engine: "container", docker: false, kvm: false, firewall: null, start: null };
-    expect(byId(diagnose(down), "sandbox.docker")).toMatchObject({ state: "broken", line: "Apple's container isn't answering on this Mac", fix: expect.stringContaining("galahad sandbox setup starts its service") });
+    expect(byId(diagnose(down), "sandbox.docker")).toMatchObject({ state: "broken", line: "Apple's container isn't answering on this Mac", fix: expect.stringContaining("invincible sandbox setup starts its service") });
     const failed = healthy();
     failed.sandbox.host = { ...failed.sandbox.host!, engine: "container", kvm: false, firewall: null, start: [{ kind: "vm", ok: false, ms: 3000, error: "Error: failed to boot" }] };
     expect(byId(diagnose(failed), "sandbox.start.vm").fix).toContain("container system logs");
     // A Mac with container found but not running hosts nothing: the line says why, and how.
     const stopped = healthy();
     stopped.sandbox = { host: null, others: [], container: { version: "1.7.1", running: false } };
-    expect(byId(diagnose(stopped), "sandbox.host")).toMatchObject({ state: "needs-you", fix: expect.stringContaining("run galahad sandbox setup here: it starts Apple's container (1.7.1 is installed)") });
+    expect(byId(diagnose(stopped), "sandbox.host")).toMatchObject({ state: "needs-you", fix: expect.stringContaining("run invincible sandbox setup here: it starts Apple's container (1.7.1 is installed)") });
     // Running with no kernel, no VM starts: said, and how to fetch it. With one, nothing is said of it.
     const bare = healthy();
     bare.sandbox = { ...bare.sandbox, host: { ...bare.sandbox.host!, engine: "container", kvm: false, firewall: null, start: null }, container: { version: "1.7.1", running: true, kernel: false } };
-    expect(byId(diagnose(bare), "sandbox.kernel")).toMatchObject({ state: "needs-you", line: "Apple's container has no kernel for its VMs yet, so none starts here", fix: expect.stringContaining("galahad sandbox setup") });
+    expect(byId(diagnose(bare), "sandbox.kernel")).toMatchObject({ state: "needs-you", line: "Apple's container has no kernel for its VMs yet, so none starts here", fix: expect.stringContaining("invincible sandbox setup") });
     bare.sandbox.container!.kernel = true;
     expect(diagnose(bare).some((c) => c.id === "sandbox.kernel")).toBe(false);
   });
@@ -462,13 +462,13 @@ describe("each fault gives its own line and advice", () => {
     expect(mac({ on: true, installed: true, soon: false, why: null })).toMatchObject({ state: "ok", line: expect.stringContaining("never this Mac or your networks") });
     // On, and this release's (or not looked at): ok. On with another release's rules: put this release's in place.
     expect(mac({ on: true, installed: true, soon: false, why: null, release: "current" }).state).toBe("ok");
-    expect(mac({ on: true, installed: true, soon: false, why: null, release: "other" })).toMatchObject({ state: "needs-you", line: "this Mac's sandbox firewall is on, with another release's rules", fix: expect.stringContaining("galahad sandbox setup") });
+    expect(mac({ on: true, installed: true, soon: false, why: null, release: "other" })).toMatchObject({ state: "needs-you", line: "this Mac's sandbox firewall is on, with another release's rules", fix: expect.stringContaining("invincible sandbox setup") });
     const missing = mac({ on: false, installed: false, soon: false, why: "isn't installed" });
-    expect(missing).toMatchObject({ state: "needs-you", line: expect.stringContaining("makes no sandboxes"), fix: "galahad sandbox setup, or This Mac in the app (it asks for your password once)." });
+    expect(missing).toMatchObject({ state: "needs-you", line: expect.stringContaining("makes no sandboxes"), fix: "invincible sandbox setup, or This Mac in the app (it asks for your password once)." });
     expect(missing.finding?.severity).toBe("info");
-    expect(mac({ on: false, installed: true, soon: true, why: "the galahad-gw network has no bridge on this Mac yet" })).toMatchObject({ state: "needs-you", line: expect.stringContaining("no bridge on this Mac yet") });
+    expect(mac({ on: false, installed: true, soon: true, why: "the invincible-gw network has no bridge on this Mac yet" })).toMatchObject({ state: "needs-you", line: expect.stringContaining("no bridge on this Mac yet") });
     const off = mac({ on: false, installed: true, soon: false, why: "pf isn't on, so the sandbox firewall's rules hold nothing" });
-    expect(off).toMatchObject({ state: "broken", fix: expect.stringContaining("galahad firewall status") });
+    expect(off).toMatchObject({ state: "broken", fix: expect.stringContaining("invincible firewall status") });
     expect(off.finding).toMatchObject({ severity: "warn", title: expect.stringContaining("The sandbox firewall is off on") });
   });
 
@@ -477,7 +477,7 @@ describe("each fault gives its own line and advice", () => {
     const stale = fault((f) => (f.compute!.due = "changed"), "compute.calibration");
     expect(stale.state).toBe("needs-you");
     expect(stale.line).toContain("stale");
-    expect(stale.fix).toContain("galahad compute calibrate");
+    expect(stale.fix).toContain("invincible compute calibrate");
     expect(fault((f) => (f.compute!.lastAt = NOW - 45 * DAY), "compute.calibration").line).toContain("45 days ago");
     const waiting = healthy();
     waiting.compute!.waiting = 2;
@@ -489,7 +489,7 @@ describe("each fault gives its own line and advice", () => {
     expect(fault((f) => (f.loops[1]!.problem = "schedule: not a schedule"), "loop.nightly").state).toBe("needs-you");
     const failing = fault((f) => (f.loops[1]!.recent = ["failed", "failed", "failed"]), "loop.nightly");
     expect(failing.state).toBe("broken");
-    expect(failing.fix).toContain("galahad loop runs nightly");
+    expect(failing.fix).toContain("invincible loop runs nightly");
     expect(fault((f) => (f.loops[1]!.recent = ["failed", "ok"]), "loop.nightly").state).toBe("needs-you");
     expect(fault((f) => (f.loops[1]!.recent = ["interrupted"]), "loop.nightly").line).toContain("interrupted");
     expect(fault((f) => (f.loops[1]!.runnerOnline = false), "loop.nightly").line).toContain("offline");
@@ -497,7 +497,7 @@ describe("each fault gives its own line and advice", () => {
     paused.loops[1]!.enabled = false;
     expect(byId(diagnose(paused), "loop.nightly")).toMatchObject({ state: "ok" });
     expect(byId(diagnose(healthy()), "loop.heartbeat").line).toBe("heartbeat on ultra: last ran 12 minutes ago (ok), next in 18 minutes");
-    expect(fault((f) => (f.loops = f.loops.filter((l) => l.name !== "heartbeat")), "loops.heartbeat").fix).toContain("galahad loop add heartbeat");
+    expect(fault((f) => (f.loops = f.loops.filter((l) => l.name !== "heartbeat")), "loops.heartbeat").fix).toContain("invincible loop add heartbeat");
   });
 
   test("connectors: invalid, no key, a key pinned elsewhere, unreachable, not probed", () => {
@@ -523,7 +523,7 @@ describe("each fault gives its own line and advice", () => {
     expect(build.finding?.severity).toBe("warn");
     const serve = fault((f) => (f.app.published = null), "app.published");
     expect(serve.state).toBe("needs-you");
-    expect(serve.fix).toContain("galahad expose");
+    expect(serve.fix).toContain("invincible expose");
     expect(serve.finding?.severity).toBe("warn");
     // A laptop that isn't published is a personal machine, not a fault; a node that can't tell says so.
     const laptop = healthy();
@@ -572,7 +572,7 @@ describe("each fault gives its own line and advice", () => {
     // A device that keeps failing: the other devices are told which (the heartbeat's titles are told), and what to do.
     const failing = reach({ devices: 3, failing: [{ device: "iPhone", error: "Apple's push service answered 500" }, { device: "iPad", error: "Apple's push service answered 500" }], keyProblem: null, lost: 0, asks: 1 });
     expect(failing.state).toBe("needs-you");
-    expect(failing.finding).toEqual({ key: `doctor:notify.devices:${healthy().self.id}`, severity: "warn", title: "Notifications aren't reaching iPhone and iPad", body: "The last ones didn't arrive. On that device, turn notifications off and on again; galahad notify test sends one." });
+    expect(failing.finding).toEqual({ key: `doctor:notify.devices:${healthy().self.id}`, severity: "warn", title: "Notifications aren't reaching iPhone and iPad", body: "The last ones didn't arrive. On that device, turn notifications off and on again; invincible notify test sends one." });
     // Facts from before these were known read as before.
     expect(reach({ devices: 0, failing: [], keyProblem: null }).finding).toBeUndefined();
   });
@@ -582,7 +582,7 @@ describe("each fault gives its own line and advice", () => {
     expect(fault((f) => (f.disk = { freeGb: 0.6, totalGb: 1800 }), "disk.home").state).toBe("broken");
     const restarts = fault((f) => (f.service.restarts = 3), "service.unit");
     expect(restarts.state).toBe("needs-you");
-    expect(restarts.fix).toContain("journalctl -u galahad");
+    expect(restarts.fix).toContain("journalctl -u invincible");
     const log = fault((f) => (f.service.warnings = [{ at: NOW - 5 * MIN, text: "outbox: fetch failed" }, { at: NOW - 3 * HOUR, text: "ledger write failed: disk" }]), "service.log");
     expect(log.state).toBe("needs-you");
     expect(log.line).toContain("1 line of trouble in its log in the last hour, the latest: outbox: fetch failed");
@@ -633,7 +633,7 @@ describe("a knight's own setup", () => {
     const line = check(facts, "knight.ada.sensitive")!;
     expect(line).toMatchObject({ area: "models", state: "broken" });
     expect(line.line).toContain("Ada is in sensitive mode, and none of its models can be used here");
-    expect(line.fix).toContain("galahad key add --provider");
+    expect(line.fix).toContain("invincible key add --provider");
     expect(line.finding).toMatchObject({ severity: "warn", title: "Ada can't work in sensitive mode" });
     // With one that can, it is well, and says how many can't.
     const some = { ...healthy(), knights: [{ id: "ada", name: "Ada", sensitive: [{ ref: "nearai/a", problem: null }, { ref: "heabsy/b", problem: "no key" }], keys: [] }] };
@@ -643,7 +643,7 @@ describe("a knight's own setup", () => {
   test("a key of yours given to a knight that can go nowhere now needs you; one that can is well", () => {
     const facts = { ...healthy(), knights: [{ id: "ada", name: "Ada", sensitive: null, keys: [{ secret: "stripe", problem: null }, { secret: "acme", problem: "acme is pinned to no address, so there is nowhere it may go" }] }] };
     expect(check(facts, "knight.ada.key.stripe")).toMatchObject({ area: "vault", state: "ok" });
-    expect(check(facts, "knight.ada.key.acme")).toMatchObject({ area: "vault", state: "needs-you", fix: "Pin it again (galahad secret set acme --base-url https://…), or take it back (galahad roundtable keys ada rm acme)." });
+    expect(check(facts, "knight.ada.key.acme")).toMatchObject({ area: "vault", state: "needs-you", fix: "Pin it again (invincible secret set acme --base-url https://…), or take it back (invincible roundtable keys ada rm acme)." });
     // A node with no Roundtable, or no knight set up so, says nothing of knights.
     expect(diagnose(healthy()).some((d) => d.id.startsWith("knight."))).toBe(false);
   });

@@ -1,4 +1,4 @@
-import { AVATAR_EXPRESSIONS, isOrbProfile, KNIGHT_TINT_NAMES, KNIGHT_TINTS, knightColors, type AvatarExpression, type OrbProfile } from "@galahad/core/avatar";
+import { AVATAR_EXPRESSIONS, isOrbProfile, KNIGHT_TINT_NAMES, KNIGHT_TINTS, knightColors, type AvatarExpression, type OrbProfile } from "@invincible/core/avatar";
 import { type KnightState, STATES } from "../lib/knight-state.ts";
 import { orbToneOfState } from "../lib/orb.ts";
 import { orbMoodOfExpression } from "../lib/orb-motion.ts";
@@ -62,7 +62,7 @@ export function workerAvatar(options: WorkerAvatarOptions): HTMLElement {
   const expression = !options.still && AVATAR_EXPRESSIONS.includes(options.expression!) ? options.expression! : "idle";
   const mood = options.still ? undefined : orbMoodOfExpression(expression);
   const label = options.still ? `${name}'s orb` : `${name} · ${expression}`;
-  if (id === "galahad") return h("span", { class: "worker-avatar", "data-galahad": "true" }, orb({ size, label, mood, key: "galahad:face" }));
+  if (id === "galahad") return h("span", { class: "worker-avatar", "data-galahad": "true" }, orb({ size, label, mood, key: "invincible:face" }));
   return h("span", { class: "worker-avatar", "data-expression": expression }, knightFace({ id, profile: options.profile, size, mood, label, key: `face:${id}` }));
 }
 

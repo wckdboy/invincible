@@ -1,5 +1,5 @@
-import type { RuleView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { RuleView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { type Ctx, errorMessage } from "../context.ts";
 import { type RuleDoes, ruleFromForm, ruleParts, ruleWhen } from "../lib/rules.ts";
 import { absoluteTime, relativeTime } from "../lib/time.ts";

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { randomId, type Scope, sha256B64u } from "@galahad/core";
+import { randomId, type Scope, sha256B64u } from "@invincible/core";
 
 /*
  * Arm tokens: how coding agents (Claude Code, OpenCode, Codex, Hermes, T3 Code)

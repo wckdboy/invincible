@@ -1,5 +1,5 @@
-import type { ExecResult, SandboxView, TrialRecord } from "@galahad/core";
-import { type QuestTiming, span, timingLine } from "@galahad/brain";
+import type { ExecResult, SandboxView, TrialRecord } from "@invincible/core";
+import { type QuestTiming, span, timingLine } from "@invincible/models";
 import {
   AGENTIC_DIFF,
   AGENTIC_EVIDENCE,
@@ -17,7 +17,7 @@ import {
   REPO,
   RESULT_FILE,
   treeCommand,
-} from "@galahad/brain";
+} from "@invincible/models";
 import { type NodeClient, questId, runNodeQuest } from "./quest-cli.ts";
 import { harnessOptions, heldToEffort, nothingAnswered, tellPassedOver, type TrialJob, type TrialUnit } from "./trial-cli.ts";
 

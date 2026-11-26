@@ -1,6 +1,6 @@
-import type { TrialAnswer, TrialRunSettings, TrialView, UsageRow } from "@galahad/core";
-import { costed, costIndex, type Interval } from "@galahad/core/galahad-index";
-import { costOf, type Price, priceFor, type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel } from "@galahad/core/spend";
+import type { TrialAnswer, TrialRunSettings, TrialView, UsageRow } from "@invincible/core";
+import { costed, costIndex, type Interval } from "@invincible/core/galahad-index";
+import { costOf, type Price, priceFor, type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel } from "@invincible/core/spend";
 
 /*
  * What trials and model calls cost, as people read it. Pure functions (no DOM),

@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bodyFingerprint, type Calibration, ceilingThreads, type LedgerEntry, REFERENCE_SINGLE, routes, type RouteName } from "@galahad/core";
-import type { QuestEvent } from "@galahad/brain";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { bodyFingerprint, type Calibration, ceilingThreads, type LedgerEntry, REFERENCE_SINGLE, routes, type RouteName } from "@invincible/core";
+import type { QuestEvent } from "@invincible/models";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import type { Measure } from "../src/compute/service.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -16,9 +16,9 @@ import { freePort } from "./ports.ts";
 
 /*
  * Your tripwires on Galahad's own quests, end to end over real HTTP on a real node (stand-ins only for Docker and the
- * models): a quest from a terminal (`galahad do`) and a loop's quest read your rules from the node before each
+ * models): a quest from a terminal (`invincible do`) and a loop's quest read your rules from the node before each
  * command, a refused command never reaches the sandbox, a halt ends the quest, and each trip is a line in the ledger
- * under the quest and a line of `galahad do`'s output.
+ * under the quest and a line of `invincible do`'s output.
  */
 
 const caps: Capabilities = {
@@ -38,7 +38,7 @@ const caps: Capabilities = {
   sandbox: { image: true, networks: true },
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-tripwires-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-tripwires-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const docker = fakeDocker();
@@ -95,7 +95,7 @@ const trips = async () => (await call<{ entries: LedgerEntry[] }>("ledger")).ent
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -123,7 +123,7 @@ describe("a quest from a terminal", () => {
     expect(ran()).toContain("echo hi > /work/out/hi.txt");
     expect(asked.filter((a) => a.role === "engineer")[1]!.prompt).toStartWith('Not run: your liege\'s tripwire "no-locks" refuses this command (the word `bun.lock` matches `*.lock`).');
     expect(await trips()).toMatchObject([{ target: "no-locks", verdict: "deny", class: "forbidden", quest, reason: "your tripwire refused the command: the word `bun.lock` matches `*.lock`", detail: "rm -f bun.lock" }]);
-    // What `galahad do` prints of it.
+    // What `invincible do` prints of it.
     const trip = events.find((e) => e.type === "tripped")!;
     const printed: string[] = [];
     const log = console.log;

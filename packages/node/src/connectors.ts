@@ -29,7 +29,7 @@ import {
   randomId,
   redact,
   toolDigest,
-} from "@galahad/core";
+} from "@invincible/core";
 import {
   callMcpTool,
   type ConnectorResult,
@@ -44,9 +44,9 @@ import {
   mergeMcpTools,
   type OAuthEndpoints,
   sendConnectorRequest,
-} from "@galahad/brain";
-import type { MindStore, Vault } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+} from "@invincible/models";
+import type { LedgerStore, Vault } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import { GALAHAD_ARM } from "./arms.ts";
 
 /*
@@ -95,7 +95,7 @@ export class ConnectorCallError extends Error {
 export type NativeTool = (manifest: ConnectorManifest, args: Record<string, ArgValue>, send: (request: BuiltRequest) => Promise<ConnectorResult>) => Promise<ConnectorResult>;
 
 export interface ConnectorServiceOptions {
-  store: MindStore;
+  store: LedgerStore;
   vault: Vault;
   identity: NodeIdentity;
   local: Database;
@@ -141,7 +141,7 @@ export class ConnectorService {
 
   private manifest(id: string): ConnectorManifest {
     const manifest = installedConnector(this.o.store, id);
-    if (!manifest) throw new ConnectorCallError(404, `no connector "${id}" is installed (galahad connector add ${id})`);
+    if (!manifest) throw new ConnectorCallError(404, `no connector "${id}" is installed (invincible connector add ${id})`);
     return manifest;
   }
 
@@ -254,7 +254,7 @@ export class ConnectorService {
       if (error instanceof ConnectorError) throw new ConnectorCallError(424, error.message);
       throw new ConnectorCallError(502, `${manifest.label} unreachable: ${redact(String((error as Error).message ?? error))}`);
     }
-    if (!live) throw new ConnectorCallError(404, `${manifest.label} no longer has ${tool.remote}: galahad connector refresh ${manifest.id} lists what it has now`);
+    if (!live) throw new ConnectorCallError(404, `${manifest.label} no longer has ${tool.remote}: invincible connector refresh ${manifest.id} lists what it has now`);
     this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `tools/list ${tool.remote}`.slice(0, 256), verdict: "allow", reason: "a tool's whole definition, before a call", detail: caller.kind === "owner" ? "by you" : `by ${caller.by}` });
     const text = live.description.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").trim();
     const schema = JSON.stringify(live.inputSchema ?? {});

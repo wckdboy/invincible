@@ -37,10 +37,10 @@ import {
   redact,
   SELF_ACTION_QUEST,
   whatMoreBuys,
-} from "@galahad/core";
-import { roster } from "@galahad/brain";
-import type { Device, MindStore } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+} from "@invincible/core";
+import { roster } from "@invincible/models";
+import type { Device, LedgerStore } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 import type { Capabilities } from "../capabilities.ts";
 import type { Governor } from "./governor.ts";
 
@@ -58,7 +58,7 @@ import type { Governor } from "./governor.ts";
 export type Measure = (reason: CalibrationReason, body: ComputeBody, limit: ComputeLimit | null) => Promise<Calibration>;
 
 export interface ComputeDeps {
-  store: MindStore;
+  store: LedgerStore;
   identity: NodeIdentity;
   nodeName: string;
   caps: () => Capabilities | null;
@@ -330,7 +330,7 @@ export class ComputeService {
         key: "compute-adapted",
         severity: "info",
         title: recorded ? "Galahad adapted to a change in his compute" : "Galahad took stock of his compute",
-        body: `${changes.join("\n")}\nHis own defaults, re-derived: a ceiling of yours overrides them (galahad compute limit <node> …).`.slice(0, 2000),
+        body: `${changes.join("\n")}\nHis own defaults, re-derived: a ceiling of yours overrides them (invincible compute limit <node> …).`.slice(0, 2000),
         source: "compute",
         at,
       });

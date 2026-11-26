@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { newNodeIdentity, type Teammate, type TeamRoom, type TeamTask } from "@galahad/core";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
+import { newNodeIdentity, type Teammate, type TeamRoom, type TeamTask } from "@invincible/core";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { teamRuntime, type TeamRuntimeDeps } from "../src/team-runtime.ts";
 import type { TeamRunContext } from "../src/team.ts";
 
-const stores: MindStore[] = [];
+const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
 
 const member: Teammate = { id: "ada", name: "Ada", instructions: "Keep changes small.", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: "host", workspace: { node: "host", id: "0123456789" }, memory: "private working note", createdAt: 1, updatedAt: 1 };
@@ -15,7 +15,7 @@ const say = (text: string) => ({ content: text });
 
 function fixture(script: object[], overrides: Partial<TeamRuntimeDeps> = {}) {
   const identity = newNodeIdentity();
-  const store = new MindStore(":memory:"); stores.push(store);
+  const store = new LedgerStore(":memory:"); stores.push(store);
   foundFleet(store, identity, { fleetName: "hivemind", nodeName: "keep" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });

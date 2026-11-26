@@ -1,5 +1,5 @@
-import type { ConnectorView, FindingView, LoopRunView, LoopTask, LoopView, LoopWake, SelfActionView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { ConnectorView, FindingView, LoopRunView, LoopTask, LoopView, LoopWake, SelfActionView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { gatesFromText } from "../lib/quests.ts";
 import { describeSchedule, onceSoon, scheduleProblem } from "../lib/schedule.ts";
@@ -293,7 +293,7 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
     field("Your checklist (optional)", checklist, { hint: "Plain words, read each run by the swift role. It answers all clear, or with a short note." }),
   );
 
-  const goal = h("textarea", { class: "textarea", rows: 4, maxlength: 4000, placeholder: "e.g. Read the open issues in amiriteorg/galahad and summarise what changed this week." });
+  const goal = h("textarea", { class: "textarea", rows: 4, maxlength: 4000, placeholder: "e.g. Read the open issues in wckdboy/invincible and summarise what changed this week." });
   let network: NetworkMode = task0?.kind === "quest" ? task0.network : "isolated";
   if (task0?.kind === "quest") goal.value = task0.goal;
   const netExplain = h("div");

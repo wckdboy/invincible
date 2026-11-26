@@ -58,7 +58,7 @@ const unixSockets = process.platform !== "win32";
 describe.skipIf(!unixSockets)("talking to the helper", () => {
   // A skipped block's body still runs (to collect it) but its afterAll doesn't: set nothing up.
   if (!unixSockets) return;
-  const dir = mkdtempSync(join(tmpdir(), "galahad-ws-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-ws-"));
   const path = join(dir, "helper.sock");
   const heard: string[] = [];
   const server = Bun.listen({
@@ -70,7 +70,7 @@ describe.skipIf(!unixSockets)("talking to the helper", () => {
         const [verb, id] = line.split(" ");
         socket.end(
           verb === "ping" ? "ok\n"
-          : verb === "create" ? `ok /var/lib/galahad-workspaces/${id}\n`
+          : verb === "create" ? `ok /var/lib/invincible-workspaces/${id}\n`
           : verb === "stats-v2" ? "ok 100 50\n0123456789 10 1 1 1762780000 1\n"
           : verb === "remove" && id === "ffffffffff" ? "error cannot unmount\n"
           : "ok\n",
@@ -86,7 +86,7 @@ describe.skipIf(!unixSockets)("talking to the helper", () => {
   test("one line out, the answer back; refusals become errors", async () => {
     const helper = new WorkspaceHelper(path, 5000);
     expect(await helper.available()).toBe(true);
-    expect(await helper.create("0123456789", 20)).toBe("/var/lib/galahad-workspaces/0123456789");
+    expect(await helper.create("0123456789", 20)).toBe("/var/lib/invincible-workspaces/0123456789");
     expect((await helper.stats()).images[0]).toMatchObject({ id: "0123456789", retained: true });
     await helper.remove("0123456789");
     await expect(helper.remove("ffffffffff")).rejects.toThrow(/cannot unmount/);
@@ -168,7 +168,7 @@ describe.skipIf(!unixSockets)("talking to the helper", () => {
 
 describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
   test("remount preserves existing data; retained data requires remove-owned", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-helper-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-helper-"));
     const root = join(dir, "workspaces");
     const bin = join(dir, "bin");
     const trace = join(dir, "mounts");
@@ -179,9 +179,9 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
     writeFileSync(join(bin, "chown"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
     writeFileSync(join(bin, "mountpoint"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
     writeFileSync(join(bin, "mount"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_WORKSPACE_TRACE"\n', { mode: 0o700 });
-    const source = readFileSync(new URL("../../../sandbox/galahad-workspace", import.meta.url), "utf8");
-    expect(source.match(/^ROOT=\/var\/lib\/galahad-workspaces$/gm)).toHaveLength(1);
-    const isolated = source.replace(/^ROOT=\/var\/lib\/galahad-workspaces$/m, 'ROOT="$TEST_WORKSPACE_ROOT"');
+    const source = readFileSync(new URL("../../../sandbox/invincible-workspace", import.meta.url), "utf8");
+    expect(source.match(/^ROOT=\/var\/lib\/invincible-workspaces$/gm)).toHaveLength(1);
+    const isolated = source.replace(/^ROOT=\/var\/lib\/invincible-workspaces$/m, 'ROOT="$TEST_WORKSPACE_ROOT"');
     const ask = (command: string) => {
       const result = Bun.spawnSync(["sh", "-c", isolated], {
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_WORKSPACE_ROOT: root, TEST_WORKSPACE_TRACE: trace },
@@ -219,7 +219,7 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
 
   // (It runs the installed helper's shell, which starts processes: 30 s, not bun's 5, for a busy machine; on 19 November 2026 it ran past 5 s under load.)
   test("a workspace grows where it is mounted, or unmounted after a check, and never shrinks or grows another's disk", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-helper-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-helper-"));
     const root = join(dir, "workspaces");
     const bin = join(dir, "bin");
     const trace = join(dir, "calls");
@@ -234,8 +234,8 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
     writeFileSync(join(bin, "mountpoint"), '#!/bin/sh\n[ "$TEST_MOUNTED" = 1 ]\n', { mode: 0o700 });
     writeFileSync(join(bin, "findmnt"), '#!/bin/sh\necho "$TEST_SOURCE"\n', { mode: 0o700 });
     writeFileSync(join(bin, "stat"), '#!/bin/sh\necho "$TEST_SIZE"\n', { mode: 0o700 });
-    const source = readFileSync(new URL("../../../sandbox/galahad-workspace", import.meta.url), "utf8");
-    const isolated = source.replace(/^ROOT=\/var\/lib\/galahad-workspaces$/m, 'ROOT="$TEST_WORKSPACE_ROOT"');
+    const source = readFileSync(new URL("../../../sandbox/invincible-workspace", import.meta.url), "utf8");
+    const isolated = source.replace(/^ROOT=\/var\/lib\/invincible-workspaces$/m, 'ROOT="$TEST_WORKSPACE_ROOT"');
     const ask = (command: string, env: { mounted: boolean; source?: string; size?: number; backing?: string }) => {
       rmSync(trace, { force: true });
       const result = Bun.spawnSync(["sh", "-c", isolated], {

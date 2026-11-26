@@ -183,7 +183,7 @@ const KNIGHT_FIELDS = ["id", "name", "role", "models", "sensitive", "harness", "
  * its record and its keys never go into it, only the names of the keys it was given.
  */
 export function knightToFile(knight: KnightFile): { text: string; scrubbed: number } {
-  const settings: Record<string, unknown> = { galahad: KNIGHT_FILE };
+  const settings: Record<string, unknown> = { invincible: KNIGHT_FILE };
   for (const field of KNIGHT_FIELDS) {
     const value = knight[field];
     if (value === undefined || value === null || (Array.isArray(value) && !value.length)) continue;
@@ -214,7 +214,7 @@ export function knightFromFile(text: string): { ok: true; knight: KnightFile; ig
       settings[field[1]!] = raw.replace(/^(["'])(.*)\1$/, "$2");
     }
   }
-  if (settings.galahad !== KNIGHT_FILE) return { ok: false, why: `it isn't a knight file (its settings don't open with galahad: "${KNIGHT_FILE}")` };
+  if (settings.invincible !== KNIGHT_FILE) return { ok: false, why: `it isn't a knight file (its settings don't open with invincible: "${KNIGHT_FILE}")` };
   const id = typeof settings.id === "string" ? settings.id.trim() : "";
   const name = typeof settings.name === "string" ? settings.name.trim() : "";
   if (!id) return { ok: false, why: "it names no id" };
@@ -226,7 +226,7 @@ export function knightFromFile(text: string): { ok: true; knight: KnightFile; ig
   const words = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
   const list = (value: unknown): string[] | undefined => (Array.isArray(value) && value.every((v) => typeof v === "string") ? (value as string[]) : undefined);
   for (const [key, value] of Object.entries(settings)) {
-    if (key === "galahad" || key === "id" || key === "name") continue;
+    if (key === "invincible" || key === "id" || key === "name") continue;
     if (key === "role" && words(value)) knight.role = value.trim();
     else if (key === "models" && list(value)) knight.models = list(value);
     else if (key === "sensitive" && typeof value === "boolean") knight.sensitive = value;

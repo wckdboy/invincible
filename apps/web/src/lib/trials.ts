@@ -1,5 +1,5 @@
-import type { InvestigationView, TrialAnswer, TrialView } from "@galahad/core";
-import { galahadIndex } from "@galahad/core/galahad-index";
+import type { InvestigationView, TrialAnswer, TrialView } from "@invincible/core";
+import { galahadIndex } from "@invincible/core/galahad-index";
 
 /*
  * Trials and findings, as people read them. Pure functions (no DOM), unit-tested.

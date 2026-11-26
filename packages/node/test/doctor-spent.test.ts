@@ -31,7 +31,7 @@ function base(): DoctorFacts {
     compute: null,
     loops: [],
     connectors: [],
-    app: { missing: [], published: null, local: "http://127.0.0.1:7778" },
+    app: { missing: [], published: null, local: "http://127.0.0.1:7401" },
     disk: null,
     service: { restarts: 0, warnings: [] },
   };
@@ -104,7 +104,7 @@ describe("an allowance window that ends by itself", () => {
     ];
     const plan = byId(diagnose(facts), "role.engineer.plan");
     expect(plan.state).toBe("needs-you");
-    expect(plan.fix).toBe("Add the plan's key: galahad key add --provider zai-coding.");
+    expect(plan.fix).toBe("Add the plan's key: invincible key add --provider zai-coding.");
   });
 
   test("a role whose only model is spent is still said as now: no model can play", () => {
@@ -126,7 +126,7 @@ describe("an allowance window that ends by itself", () => {
     expect(coder.line).toBe(`no model can play plan-coder: opencode-go/deepseek-v4-pro (${SPENT_PROBLEM})`);
     expect(hasId(diagnose(facts), "role.plan-coder.plan")).toBe(false);
     // Nothing to add a key for: the window ends by itself (Percival's review, 22 November 2026).
-    expect(coder.fix).toBe("It comes back by itself when its allowance resets (said above). To have plan-coder played before then: galahad roster set plan-coder <provider/model>.");
+    expect(coder.fix).toBe("It comes back by itself when its allowance resets (said above). To have plan-coder played before then: invincible roster set plan-coder <provider/model>.");
   });
 });
 

@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { b64u, decodeHlc, encodeHlc, type GEvent, HlcClock, type Json, newNodeIdentity, type NodeIdentity, signEvent } from "../../packages/core/src/index.ts";
-import { enrollDevice, foundFleet, MindStore } from "../../packages/mind/src/index.ts";
+import { enrollDevice, foundFleet, LedgerStore } from "../../packages/ledger/src/index.ts";
 
 /*
  * A log as months of work would leave it, for timing what the mind does with it
@@ -12,7 +12,7 @@ import { enrollDevice, foundFleet, MindStore } from "../../packages/mind/src/ind
  * entries (every sandbox exec is one), loop runs, memories and notices. Every
  * event is really signed and chained; they're written straight into the log and
  * the views rebuilt, as if they had arrived over months. Nothing touches
- * ~/.galahad.
+ * ~/.invincible.
  */
 
 export interface BenchLog {
@@ -27,14 +27,14 @@ export interface BenchLog {
 
 /** A log of `n` signed, chained events from three nodes, written in bulk, views rebuilt. */
 export function buildLog(n: number): BenchLog {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-bench-"));
-  const path = join(dir, "mind.db");
+  const dir = mkdtempSync(join(tmpdir(), "invincible-bench-"));
+  const path = join(dir, "ledger.db");
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const c = newNodeIdentity();
   // The fleet was founded long enough ago for one event a second up to an hour ago.
   const founded = Date.now() - (n + 7_200) * 1_000;
-  const store = new MindStore(path, new HlcClock(() => founded));
+  const store = new LedgerStore(path, new HlcClock(() => founded));
   foundFleet(store, a, { fleetName: "bench", nodeName: "founder" });
   enrollDevice(store, a, { device: b.id, name: "sandbox-host", kind: "node", box: b64u(b.boxPublic) });
   enrollDevice(store, a, { device: c.id, name: "third", kind: "node", box: b64u(c.boxPublic) });
@@ -97,7 +97,7 @@ export function buildLog(n: number): BenchLog {
 }
 
 /** An event from `c`, dated after its own head but before the log's newest event: it arrived late. */
-export function lateEvent(store: MindStore, c: NodeIdentity, kind: "ledger.recorded" | "memory.added"): GEvent {
+export function lateEvent(store: LedgerStore, c: NodeIdentity, kind: "ledger.recorded" | "memory.added"): GEvent {
   const head = store.event(store.head(c.id)!)!;
   const { ms, counter } = decodeHlc(head.hlc);
   const body: Json = kind === "ledger.recorded" ? { class: "read", resource: "bench", target: "late", verdict: "allow" } : { text: "a late thought" };

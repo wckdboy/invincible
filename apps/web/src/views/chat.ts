@@ -1,6 +1,6 @@
-import type { AttachmentRef, AwayView, ChatMessage, ChatStreamEvent, ConversationSummary, ConversationView, ProjectView, QuestView, UnreadChat } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
-import type { QueuedMessage, QueueHold, TurnView } from "@galahad/core/turns";
+import type { AttachmentRef, AwayView, ChatMessage, ChatStreamEvent, ConversationSummary, ConversationView, ProjectView, QuestView, UnreadChat } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
+import type { QueuedMessage, QueueHold, TurnView } from "@invincible/core/turns";
 import { type Api, ApiError, isAbort } from "../api.ts";
 import { errorMessage, type Live, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
@@ -836,7 +836,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
 
   // (An orb of its own: he can be writing here while something waits on you, and his header's orb says the latter.)
   let writing: { id: number; orb: HTMLElement } | null = null;
-  const writingOrb = (id: number): HTMLElement => (writing?.id === id ? writing : (writing = { id, orb: orb({ size: 28, mood: "working", key: "galahad:writing" }) })).orb;
+  const writingOrb = (id: number): HTMLElement => (writing?.id === id ? writing : (writing = { id, orb: orb({ size: 28, mood: "working", key: "invincible:writing" }) })).orb;
 
   function renderTurn(turn: Turn): HTMLElement {
     // A look of his come back: his own note, never shown as yours.

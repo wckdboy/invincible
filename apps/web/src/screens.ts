@@ -57,7 +57,7 @@ export function renderWelcome(root: HTMLElement, identity: BrowserIdentity | nul
             event.preventDefault();
             const invite = inviteFrom(field.value);
             if (!invite) {
-              problem.textContent = "That isn't an invite link. Copy the whole link `galahad invite --client` prints.";
+              problem.textContent = "That isn't an invite link. Copy the whole link `invincible invite --client` prints.";
               return;
             }
             onInvite(invite);
@@ -93,7 +93,7 @@ export function renderWelcome(root: HTMLElement, identity: BrowserIdentity | nul
         h(
           "ol",
           { class: "steps-num" },
-          h("li", {}, h("div", {}, h("span", { class: "strong plain" }, "On any of your nodes, run"), copyField("galahad invite --client"))),
+          h("li", {}, h("div", {}, h("span", { class: "strong plain" }, "On any of your nodes, run"), copyField("invincible invite --client"))),
           h("li", {}, h("div", {}, h("span", {}, installed() ? "Copy the link it prints and paste it below. It works once and expires in ten minutes." : ["Open the link it prints ", h("strong", {}, "on this device"), ", or paste it below. It works once and expires in ten minutes."]))),
           h("li", {}, h("div", {}, h("span", {}, "Both screens show a six-digit code. Approve on the node ", h("strong", {}, "only if the codes match"), "."))),
         ),
@@ -129,7 +129,7 @@ export function renderRevoked(root: HTMLElement): void {
       h(
         "section",
         { class: "card" },
-        h("p", { class: "small muted" }, "To pair again, forget this browser's key, then open a fresh invite from ", h("span", { class: "mono" }, "galahad invite --client"), "."),
+        h("p", { class: "small muted" }, "To pair again, forget this browser's key, then open a fresh invite from ", h("span", { class: "mono" }, "invincible invite --client"), "."),
         h("p", { class: "tiny subtle" }, "If this browser was approved on another node only moments ago, the news may still be on its way here: try again first."),
         h("div", { class: "row wrap centered" }, forget, button("Try again", { icon: "retry", onClick: () => location.reload() })),
       ),
@@ -144,7 +144,7 @@ export function renderInsecure(root: HTMLElement): void {
     root,
     solo(
       hero("A secure connection is needed.", "Device keys only work over HTTPS (or on localhost)."),
-      h("section", { class: "card" }, h("p", { class: "small muted" }, "On the node, run this and open the HTTPS address it prints:"), copyField("galahad expose")),
+      h("section", { class: "card" }, h("p", { class: "small muted" }, "On the node, run this and open the HTTPS address it prints:"), copyField("invincible expose")),
       footer(),
     ),
   );

@@ -4,11 +4,9 @@ dist/
 *.log
 /build/
 *.db
-# …except the migration tests' replicas: throwaway keys, fake vault values.
-!packages/mind/test/fixtures/*.db
 *.db-wal
 *.db-shm
-.galahad*/
+.invincible*/
 .env*
 REVISION
 

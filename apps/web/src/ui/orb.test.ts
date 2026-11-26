@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { knightColors } from "@galahad/core/avatar";
+import { knightColors } from "@invincible/core/avatar";
 import { GALAHAD_RING } from "../lib/field-orb.ts";
 import { knightFace, orb, type OrbTone } from "./orb.ts";
 

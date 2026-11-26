@@ -1,4 +1,4 @@
-import { blendHex, knightColors } from "@galahad/core/avatar";
+import { blendHex, knightColors } from "@invincible/core/avatar";
 import { AURUM, FIELD_RIM, type FieldColours } from "./field.ts";
 import { ORB_LONGEST_STEP, orbRand, orbSeed, type OrbMood } from "./orb-motion.ts";
 

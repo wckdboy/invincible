@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TrialRecord, trialProblem } from "@galahad/core";
+import { TrialRecord, trialProblem } from "@invincible/core";
 import type { TrialJob } from "../src/trial-cli.ts";
 import { attemptCase, heldOutTestsOf } from "../src/trial-yours.ts";
 import { GATES, widgetsCase, WIDGETS, YoursStandIn } from "./yours-standin.ts";
@@ -22,7 +22,7 @@ const git = (dir: string, ...args: string[]) => {
 
 /** An invented repository at a base commit, and the knight's change as a patch (the working tree back at base). */
 function repoOf(base: Record<string, string>, knight: Record<string, string>): { dir: string; base: string; patch: Uint8Array; remove(): void } {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-heldout-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-heldout-"));
   const write = (path: string, content: string) => {
     mkdirSync(join(dir, ...path.split("/").slice(0, -1)), { recursive: true });
     writeFileSync(join(dir, path), content);

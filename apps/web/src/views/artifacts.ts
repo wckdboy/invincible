@@ -1,4 +1,4 @@
-import type { ArtifactView, SandboxView } from "@galahad/core";
+import type { ArtifactView, SandboxView } from "@invincible/core";
 import { ApiError, isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import {

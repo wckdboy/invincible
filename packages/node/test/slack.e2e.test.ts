@@ -3,8 +3,8 @@ import type { ServerWebSocket } from "bun";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ConversationSummary, type ConversationView, type FleetView, type RouteName, routes, SLACK_APP_MANIFEST, type SlackView } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ConversationSummary, type ConversationView, type FleetView, type RouteName, routes, SLACK_APP_MANIFEST, type SlackView } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -41,7 +41,7 @@ const BOT_TOKEN = ["xoxb", "1234567890", "1234567890123", "FakeTokenForTestsOnly
 const OWNER = "U0OWNER001";
 const STRANGER = "U0STRANGER";
 const DM = "D0OWNERDM1";
-const root = mkdtempSync(join(tmpdir(), "galahad-slack-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-slack-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -143,7 +143,7 @@ const json = async <T,>(response: Response): Promise<T> => {
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "slack-node" });
   store.close();
   home.writeConfig({ v: 1, name: "slack-node", fleet, port, keystore, advertise: "127.0.0.1" });

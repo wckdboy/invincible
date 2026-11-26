@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ChatStreamEvent, type RouteName, routes } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ChatStreamEvent, type RouteName, routes } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -18,7 +18,7 @@ import { freePort } from "./ports.ts";
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "client-tools-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-client-tools-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-client-tools-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -66,7 +66,7 @@ async function events(input: object): Promise<ChatStreamEvent[]> {
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });

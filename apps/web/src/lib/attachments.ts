@@ -1,5 +1,5 @@
-import type { AttachmentRef, AttachmentType } from "@galahad/core";
-import { ATTACHMENT_LIMITS, pictureType, textOf } from "@galahad/core/attachments";
+import type { AttachmentRef, AttachmentType } from "@invincible/core";
+import { ATTACHMENT_LIMITS, pictureType, textOf } from "@invincible/core/attachments";
 import type { Api } from "../api.ts";
 import { imageDataUrl } from "./artifacts.ts";
 
@@ -7,7 +7,7 @@ import { imageDataUrl } from "./artifacts.ts";
  * Files you attach to a message (the node keeps them: packages/node/src/uploads.ts). A picture is drawn again before it
  * goes, at most so many pixels on its long side and as a JPEG (a PNG stays a PNG while it fits), which leaves its
  * metadata behind (where a photo was taken, the camera); a GIF goes as it is. Anything else must be text (UTF-8).
- * What a file is, is read from its bytes by the node's own rule (@galahad/core/attachments), never from its name.
+ * What a file is, is read from its bytes by the node's own rule (@invincible/core/attachments), never from its name.
  */
 
 /** What the file picker offers: pictures, and the kinds of text one attaches (logs, notes, code, data). */

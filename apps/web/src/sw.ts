@@ -1,4 +1,4 @@
-import { GENERIC_NOTIFICATION, isConversationId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@galahad/core/notify-payload";
+import { GENERIC_NOTIFICATION, isConversationId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@invincible/core/notify-payload";
 import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBadgeMessage, readBadgeState, showBadge } from "./lib/badge.ts";
 
 /*
@@ -13,7 +13,7 @@ import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBad
  * drawn by the app itself: there are no pictures of them to keep.)
  */
 
-const VERSION = "galahad-shell-v10";
+const VERSION = "invincible-shell-v10";
 // (Not the SVG icons: the app never shows them, a browser fetches its favicon itself, and the installer its icons.)
 const SHELL = ["/", "/app.js", "/boot.js", "/manifest.webmanifest", "/icon-192.png", "/apple-touch-icon.png", "/fonts/geist.woff2"];
 const NEVER_CACHE = ["/api/", "/link/", "/gw/"];
@@ -84,7 +84,7 @@ sw.addEventListener("activate", (event) => {
 
 /** Tell open pages that a newer app has been fetched, so they can offer a reload. */
 async function announceUpdate(): Promise<void> {
-  for (const client of await sw.clients.matchAll({ type: "window" })) client.postMessage({ type: "galahad:updated" });
+  for (const client of await sw.clients.matchAll({ type: "window" })) client.postMessage({ type: "invincible:updated" });
 }
 
 async function fromShell(event: FetchEventLike, key: string): Promise<Response> {
@@ -237,7 +237,7 @@ async function openFromNotification(data: unknown): Promise<void> {
   // The page you're looking at, else any that's open.
   const page = pages.find((p) => p.visibilityState === "visible") ?? pages[0];
   if (page) {
-    page.postMessage({ type: "galahad:open", open: target.open, conversation: target.conversation ?? null });
+    page.postMessage({ type: "invincible:open", open: target.open, conversation: target.conversation ?? null });
     try {
       await page.focus?.();
       return;
@@ -259,5 +259,5 @@ sw.addEventListener("notificationclick", (event) => {
 
 /** The browser replaced this device's subscription: an open page hands the new one to the node (the worker holds no key to sign with). */
 sw.addEventListener("pushsubscriptionchange", (event) => {
-  event.waitUntil(sw.clients.matchAll({ type: "window" }).then((pages) => pages.forEach((page) => page.postMessage({ type: "galahad:push-changed" }))));
+  event.waitUntil(sw.clients.matchAll({ type: "window" }).then((pages) => pages.forEach((page) => page.postMessage({ type: "invincible:push-changed" }))));
 });

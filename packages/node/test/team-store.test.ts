@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { avatarExpression } from "@galahad/core/avatar";
-import { TEAM_LIMITS } from "@galahad/core/team-limits";
-import { SENSITIVE_WORK } from "@galahad/core";
+import { avatarExpression } from "@invincible/core/avatar";
+import { TEAM_LIMITS } from "@invincible/core/team-limits";
+import { SENSITIVE_WORK } from "@invincible/core";
 import { TeamStore, TeamError } from "../src/team-store.ts";
 
 const stores: TeamStore[] = [];
@@ -36,7 +36,7 @@ describe("what is new to you", () => {
   });
 
   test("a store from before it counts everything until then as seen", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-seen-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-seen-")); dirs.push(dir); const path = join(dir, "team.db");
     let clock = 1_000;
     const store = make(path, () => clock);
     setup(store);
@@ -53,7 +53,7 @@ describe("what is new to you", () => {
 
 describe("private team persistence", () => {
   test("a knight's own models are kept through edits that leave them out and a reopen; none, or null, gives it its role's again", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-models-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-models-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
     expect(store.saveTeammate({ id: "ada", name: "Ada" }).models).toBeUndefined();
     expect(store.saveTeammate({ id: "ada", name: "Ada", models: ["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"] }).models).toEqual(["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"]);
@@ -68,7 +68,7 @@ describe("private team persistence", () => {
   });
 
   test("an orb's colour survives omitted edits and reopens; explicit null resets it to the handle's", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
     const avatar = { v: 2 as const, color: "#ffccdd" };
     expect(store.saveTeammate({ id: "ada", name: "Ada" }).avatar).toBeUndefined();
@@ -82,7 +82,7 @@ describe("private team persistence", () => {
     expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
   });
   test("a colour chosen for a knight's orb is kept as it was chosen, through edits that leave it out and a reopen; a bad one is refused", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
     expect(store.saveTeammate({ id: "ada", name: "Ada", avatar: { v: 2, color: "#3ABEFF" } }).avatar).toEqual({ v: 2, color: "#3abeff" });
     store.saveTeammate({ id: "ada", name: "Augusta" }); close(store);
@@ -95,7 +95,7 @@ describe("private team persistence", () => {
     expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
   });
   test("legacy records get deterministic appearances without rewriting their saved JSON", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
     const { avatar: _unused, ...legacy } = store.saveTeammate({ id: "ada", name: "Ada", instructions: "Preserve this instruction." }); close(store);
     const raw = JSON.stringify(legacy);
@@ -108,7 +108,7 @@ describe("private team persistence", () => {
     db.close();
   });
   test("knights, memory, workspace, messages and queued work survive reopen; files stay private", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-")); dirs.push(dir);
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir);
     const path = join(dir, "team.db");
     const store = make(path); setup(store);
     store.remember("ada", "The fixture uses Bun.");
@@ -122,7 +122,7 @@ describe("private team persistence", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
   test("opening team tables does not rewrite unrelated existing tables", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-")); dirs.push(dir);
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir);
     const path = join(dir, "team.db");
     const before = new Database(path); before.exec("CREATE TABLE previous_data(value TEXT); INSERT INTO previous_data VALUES('kept');"); before.close();
     make(path);
@@ -149,7 +149,7 @@ describe("private team persistence", () => {
     expect(() => store.setWorkspace("lin", { node: "host", id: "0123456789" })).toThrow(/another knight/);
   });
   test("provisioning intent survives reopen and neither its host nor a bound repository silently changes", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     store.saveTeammate({ id: "ada", name: "Ada", repository: "https://github.com/example/fixture.git" });
     store.planWorkspace("ada", "chosen-host"); close(store);
@@ -163,7 +163,7 @@ describe("private team persistence", () => {
   });
   test("a task keeps what it did as it happened: every progress line in order, with its time, readable from any point and after the task has ended", () => {
     // (Until 14 November 2026 a task held only its last line: one that failed left nothing to read, and nothing could follow one as it worked.)
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir); const path = join(dir, "team.db");
     let clock = 1_000;
     const store = make(path, () => clock++); setup(store);
     const task = store.createTask({ room: "workshop", assignee: "ada", title: "Build", goal: "Build it" });
@@ -267,7 +267,7 @@ describe("team boundaries", () => {
     expect(store.messages("workshop")).toHaveLength(0);
   });
   test("a finished task keeps what its run came to, as the runner counted it, and a reopened store still says it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-")); dirs.push(dir);
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir);
     const store = make(join(dir, "team.db")); setup(store);
     const task = store.createTask({ room: "workshop", assignee: "ada", title: "Check", goal: "Check" });
     expect(store.task(task.id)!.record).toBeUndefined();
@@ -365,7 +365,7 @@ describe("team boundaries", () => {
 
 describe("Galahad's own computer", () => {
   test("its binding is kept as a knight's VM is, said in the snapshot, cleared when it goes, and survives a reopen", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-computer-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-computer-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
     expect(store.computer()).toBeNull();
     expect(store.snapshot().computer).toBeUndefined();
@@ -431,7 +431,7 @@ describe("the knights Galahad makes for himself", () => {
   });
 
   test("provenance survives a reopen, and an older record without it is yours", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-made-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-made-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     store.recruit(job("scout"), "ada");
     const { createdBy: _made, instructionsBy: _written, ...legacy } = store.teammate("lin")!; close(store);
@@ -571,7 +571,7 @@ describe("removing a knight", () => {
   };
 
   test("it is retired, not erased: gone from the team and from work, with its words and its record kept", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-remove-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-remove-")); dirs.push(dir); const path = join(dir, "team.db");
     let now = 1_000_000;
     const store = make(path, () => now);
     setup(store);
@@ -647,7 +647,7 @@ describe("removing a knight", () => {
   });
 
   test("what it left unfinished can't be started again, and never stalls the others", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-remove-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-remove-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     const hers = store.createTask({ room: "workshop", assignee: "ada", title: "Hers", goal: "Do it." });
     const his = store.createTask({ room: "workshop", assignee: "lin", title: "His", goal: "Do it." });
@@ -717,7 +717,7 @@ describe("removing a knight", () => {
   });
 
   test("an older database's job in such a conversation is stopped when its turn comes, without a turn spent", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-remove-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-remove-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     const peers = store.direct("lin", "ada");
     const opened = store.post({ room: "workshop", text: "@ada @lin: talk." });
@@ -748,7 +748,7 @@ describe("removing a knight", () => {
 
 describe("the notes store's switch", () => {
   test("on unless you turned it off: in a new team and in one from before there was a switch; your off is kept across a restart, and the snapshot says it only when it is on", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-engram-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-engram-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     // You asked for the knights to have it (15 November 2026): a team that never said no has it.
     expect(store.engram()).toBe(true);
@@ -862,7 +862,7 @@ describe("your files at the Roundtable", () => {
   const log = { id: "b".repeat(64), name: "build.log", type: "text/plain" as const, bytes: 300 };
 
   test("a message of yours carries them, with words or without, and they are kept with it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-files-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-files-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     const sent = store.post({ room: "workshop", text: "", attachments: [picture, log] });
     expect(sent).toMatchObject({ speaker: "owner", text: "", attachments: [picture, log] });
@@ -885,7 +885,7 @@ describe("your files at the Roundtable", () => {
   });
 
   test("a database from before files takes them after it is opened again", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-team-files-")); dirs.push(dir); const path = join(dir, "team.db");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-files-")); dirs.push(dir); const path = join(dir, "team.db");
     const old = new Database(path);
     old.exec(`CREATE TABLE team_rooms (id TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE team_chains (id TEXT PRIMARY KEY, budget INTEGER NOT NULL, spent INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE team_messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, room TEXT NOT NULL REFERENCES team_rooms(id), speaker TEXT NOT NULL, speaker_name TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL, chain_id TEXT NOT NULL REFERENCES team_chains(id));`);

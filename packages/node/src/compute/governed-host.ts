@@ -1,5 +1,5 @@
-import { clampNeed, type Decision, type ExecResult, type NodeCapacity, type SandboxView } from "@galahad/core";
-import { type CreateInput, type DesktopAction, type DesktopView, SandboxError, SandboxHost, type SandboxHostOptions } from "@galahad/sandbox";
+import { clampNeed, type Decision, type ExecResult, type NodeCapacity, type SandboxView } from "@invincible/core";
+import { type CreateInput, type DesktopAction, type DesktopView, SandboxError, SandboxHost, type SandboxHostOptions } from "@invincible/sandbox";
 import { CapacityError, type Governor } from "./governor.ts";
 
 /*

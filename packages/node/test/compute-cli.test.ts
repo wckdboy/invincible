@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bodyFingerprint, type Calibration, type ComputeBody, type ComputeNodeView, type ComputeView, deriveCapacity, derivePlan, KERNEL, REFERENCE_SINGLE, whatMoreBuys } from "@galahad/core";
+import { bodyFingerprint, type Calibration, type ComputeBody, type ComputeNodeView, type ComputeView, deriveCapacity, derivePlan, KERNEL, REFERENCE_SINGLE, whatMoreBuys } from "@invincible/core";
 import { ago, computeCommand, describeCompute, limitLine, measuredLine, parseEffort } from "../src/compute-cli.ts";
 
 /* The terminal's census: every number a node measured, its ceiling and why, what's in use and waiting. */
@@ -42,10 +42,10 @@ const view: ComputeView = {
   adapted: { at: NOW - 3_600_000, changes: ["ultra: 2 → 3 sandbox slots."] },
   work: [{ quest: "q-xyz789", label: "compute the tip deflection", effort: 3, asked: "auto", by: "you", since: NOW, reasons: [], attempts: [{ index: 2, doing: "The engineer is thinking", station: "forge", model: "deepseek/deepseek-chat", sandbox: "0123456789", active: true, last: NOW }] }],
   more: whatMoreBuys([{ name: "ultra", body, capacity, limit: null }], plan),
-  suggestions: [{ key: "compute-suggest:hire-local:n_ultra", title: "Galahad suggests: hire ollama/qwen3:8b for the swift role", body: "…galahad roster set swift ollama/qwen3:8b" }],
+  suggestions: [{ key: "compute-suggest:hire-local:n_ultra", title: "Galahad suggests: hire ollama/qwen3:8b for the swift role", body: "…invincible roster set swift ollama/qwen3:8b" }],
 };
 
-describe("galahad compute", () => {
+describe("invincible compute", () => {
   test("the census says what each node measured, its ceiling and why, slots in use and waiting, the work in hand, and what more would buy", () => {
     const text = describeCompute(view, NOW);
     expect(text).toContain("2 of 4 sandbox slots in use");
@@ -70,14 +70,14 @@ describe("galahad compute", () => {
     expect(text).toContain("8.0 of the 14 threads he may use are taken");
     // A node that hasn't measured itself, with your ceiling.
     expect(text).toContain("due to measure itself (it never has)");
-    expect(text).toContain("not yet: galahad compute calibrate rack");
+    expect(text).toContain("not yet: invincible compute calibrate rack");
     expect(text).toContain("yours: 8 threads");
     expect(text).toContain("(in use: not known)");
     // Work in hand, what more would buy, what he suggests, and when he last adapted.
     expect(text).toContain("q-xyz789  effort 3 (auto)");
     expect(text).toContain("attempt 2  at the forge");
     expect(text).toContain("What more compute would buy");
-    expect(text).toContain("galahad compute limit ultra --cores 24");
+    expect(text).toContain("invincible compute limit ultra --cores 24");
     expect(text).toContain("hire ollama/qwen3:8b for the swift role");
     expect(text).toContain("His defaults were last re-derived 60 minutes ago: ultra: 2 → 3 sandbox slots.");
   });

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { runQuest, type QuestRole } from "@galahad/brain";
+import { runQuest, type QuestRole } from "@invincible/models";
 
 const sh = (command: string) => `Next step.\n\`\`\`sh\n${command}\n\`\`\``;
 

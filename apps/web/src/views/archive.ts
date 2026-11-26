@@ -1,5 +1,5 @@
-import type { ArchiveEntryView, ArchiveFileView, ArchiveHit, ArchiveSearchView, ArchiveStatusView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { ArchiveEntryView, ArchiveFileView, ArchiveHit, ArchiveSearchView, ArchiveStatusView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { ApiError, isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { type ArchiveFilter, bytesShort, deleteName, embeddedShare, embedderLine, emptyFilter, filtering, filterSummary, KIND_INFO, kindInfo, searchBody, SPANS, type Span, TRUST_LABEL, type Trust } from "../lib/archive.ts";

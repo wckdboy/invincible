@@ -1,6 +1,6 @@
-import type { TeamCheckpoint, TeamTask } from "@galahad/core/team";
-import { taskRecordFacts } from "@galahad/core/team-record";
-import type { Price } from "@galahad/core/spend";
+import type { TeamCheckpoint, TeamTask } from "@invincible/core/team";
+import { taskRecordFacts } from "@invincible/core/team-record";
+import type { Price } from "@invincible/core/spend";
 import { type Api, isAbort } from "../api.ts";
 import type { Ctx } from "../context.ts";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, type TaskAction, taskActions, taskBadge, taskEnd } from "../lib/task-card.ts";

@@ -38,14 +38,14 @@ export type ApplePushInput = z.infer<typeof ApplePushInput>;
 /**
  * The owner's Apple push key (Apple Developer: Keys, with Apple Push Notifications service), as the node keeps it: the
  * .p8 file's text, the key's ID, their Team ID and the app it notifies (its bundle id). Sealed in the vault, pinned to
- * Apple's push service; given on stdin (`galahad notify apple-key`), never on a command line.
+ * Apple's push service; given on stdin (`invincible notify apple-key`), never on a command line.
  */
 export const ApplePushKeyInput = z.strictObject({
   // (Written as -{5} so the pattern itself never reads as a key to a secret scanner.)
   key: z.string().max(4096).regex(/-{5}BEGIN PRIVATE KEY-{5}[A-Za-z0-9+/=\s]+-{5}END PRIVATE KEY-{5}/, "the .p8 file's whole text, as Apple gave it"),
   keyId: z.string().regex(/^[A-Z0-9]{10}$/, "the key's ID: ten capital letters and digits"),
   teamId: z.string().regex(/^[A-Z0-9]{10}$/, "your Team ID: ten capital letters and digits"),
-  topic: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/, "the app's bundle id").default("org.amirite.galahad"),
+  topic: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/, "the app's bundle id").default("industries.invincible.app"),
 });
 export type ApplePushKeyInput = z.infer<typeof ApplePushKeyInput>;
 

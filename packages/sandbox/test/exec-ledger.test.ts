@@ -20,7 +20,7 @@ function hostWithLedger() {
     if (args[0] === "info") return { code: 0, stdout: "26.0.0", stderr: "" };
     if (args[0] === "ps") return { code: 0, stdout: ID, stderr: "" };
     if (args[0] === "inspect") {
-      return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: "galahad/sandbox:1" }, State: { Status: "running" } }]), stderr: "" };
+      return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: "invincible/sandbox:1" }, State: { Status: "running" } }]), stderr: "" };
     }
     return { code: 0, stdout: "", stderr: "" };
   };

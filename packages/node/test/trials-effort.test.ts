@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type ChatStreamEvent, type ComputeNodeView, type ComputeView, type NodeCapacity, type RouteName, TrialRecord, type TrialView } from "@galahad/core";
-import { ENGINEERING_SUITE, pose, type TrialProblem } from "@galahad/brain";
+import { type ChatStreamEvent, type ComputeNodeView, type ComputeView, type NodeCapacity, type RouteName, TrialRecord, type TrialView } from "@invincible/core";
+import { ENGINEERING_SUITE, pose, type TrialProblem } from "@invincible/models";
 import { describeEffort, planParallel, runTrials } from "../src/trial-cli.ts";
 
 /*
@@ -84,7 +84,7 @@ function fakeNode(options: { pick: string; slots?: number }) {
           // The sandbox's id says which attempt it is.
           const id = `${String(created).padStart(9, "0")}${input.attempt?.index ?? 1}`;
           node.questOf.set(id, input.attempt?.quest ?? input.quest);
-          return { sandbox: { id, node: "n_ultra", image: "galahad/lab:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [] } } as T;
+          return { sandbox: { id, node: "n_ultra", image: "invincible/lab:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [] } } as T;
         }
         case "fleet":
           throw new Error("not needed");

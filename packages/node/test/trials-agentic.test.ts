@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type ChatStreamEvent, type RouteName, routes, TrialRecord, trialProblem, type TrialView, VARIANTS } from "@galahad/core";
-import { AGENTIC_SUITE, GRADE, poseTask, REPO, type Solution } from "@galahad/brain";
+import { type ChatStreamEvent, type RouteName, routes, TrialRecord, trialProblem, type TrialView, VARIANTS } from "@invincible/core";
+import { AGENTIC_SUITE, GRADE, poseTask, REPO, type Solution } from "@invincible/models";
 import { attemptTask, timeNote } from "../src/trial-agentic.ts";
 import { describeTrial, nothingAnswered, runTrials, type TrialJob } from "../src/trial-cli.ts";
 import { suiteNamed } from "../src/trial-suites.ts";
@@ -64,13 +64,13 @@ function fakeNode(script: Scripted) {
           const id = String(++n).padStart(10, "0");
           created.push({ id, input });
           sandboxes.box(id);
-          return { sandbox: { id, node: "n_ultra", image: "galahad/workshop:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [] } } as T;
+          return { sandbox: { id, node: "n_ultra", image: "invincible/workshop:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [] } } as T;
         }
         case "fleet":
           throw new Error("not needed");
         case "execSandbox": {
           routes.execSandbox.input.parse(input);
-          if (script.noTree && String(input.cmd[2]).includes("galahad-trial:tree")) return { exitCode: 1, stdout: "", stderr: "bun: not found", durationMs: 1, truncated: false } as T;
+          if (script.noTree && String(input.cmd[2]).includes("invincible-trial:tree")) return { exitCode: 1, stdout: "", stderr: "bun: not found", durationMs: 1, truncated: false } as T;
           const answer = await sandboxes.exec(input.id, input.cmd[2]);
           return { exitCode: answer.exitCode, stdout: answer.stdout, stderr: answer.stderr ?? "", durationMs: 1, truncated: false } as T;
         }
@@ -154,7 +154,7 @@ describe("an agentic trial", () => {
     expect(fake.destroyed.indexOf(engineer!.id)).toBeLessThan(fake.destroyed.indexOf(grader!.box.id));
     expect(grader!.box.files.get(GRADE.script)).toBe(posed.script);
     expect(fake.sandboxes.under(grader!.box, GRADE.repo)).toEqual(fake.sandboxes.under(engineer!, REPO));
-    expect(grader!.box.commands.filter((c) => c.includes("galahad-trial:check")).map((c) => c.split("\n")[0]!.split(" ")[2])).toEqual(posed.checks.map((c) => c.key));
+    expect(grader!.box.commands.filter((c) => c.includes("invincible-trial:check")).map((c) => c.split("\n")[0]!.split(" ")[2])).toEqual(posed.checks.map((c) => c.key));
     // And the grading sandbox is gone afterwards.
     expect(fake.destroyed).toContain(grader!.box.id);
   });
@@ -389,7 +389,7 @@ describe("a run of the agentic suite", () => {
     expect(engineer!.commands).toContain(`${EXPORTS}cd /work/repo && bun bench.mjs`);
     expect(engineer!.commands.filter((c) => c === "cd /work/repo && bun bench.mjs")).toHaveLength(1);
     // What the trial itself does in the sandbox (putting the repository in, taking the work out) is as it was.
-    expect(engineer!.commands.filter((c) => c.includes("galahad-trial:")).some((c) => c.includes("ENGRAM"))).toBe(false);
+    expect(engineer!.commands.filter((c) => c.includes("invincible-trial:")).some((c) => c.includes("ENGRAM"))).toBe(false);
     // The hidden tests' sandbox is asked nothing about a store and given none.
     expect(given.graders()[0]!.box.commands.some((c) => /engram/i.test(c))).toBe(false);
 
@@ -406,7 +406,7 @@ describe("a run of the agentic suite", () => {
       const crashed = (await run(without, "engram")).trials[0]!;
       expect(crashed).toMatchObject({ status: "crashed", score: 0 });
       expect(crashed.note).toContain("no Engram 3.7.2");
-      expect(crashed.note).toContain("galahad sandbox build");
+      expect(crashed.note).toContain("invincible sandbox build");
       expect(without.chats.filter((chat) => chat.role === "engineer")).toEqual([]);
     }
   });

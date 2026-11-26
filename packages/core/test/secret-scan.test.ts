@@ -29,7 +29,7 @@ describe("secret scanning", () => {
       "Please refactor the sync engine and add tests for the vault rotation.",
       "commit 0f6a77a3c9e1b2d4f5a6b7c8d9e0f1a2b3c4d5e6 fixed it", // git sha: hex only
       `my laptop is ${newNodeIdentity().id}`,
-      "https://github.com/amiriteorg/galahad/blob/main/docs/ARCHITECTURE.md",
+      "https://github.com/amiriteorg/invincible/blob/main/docs/ARCHITECTURE.md",
       "bundle 7f3a9c1e5b2d8f406a1c3e5b7d9f2a4c.min.js is the one the page loads", // a hashed file name
       "see 7f3a9c1e5b2d8f406a1c3e5b7d9f2a4c.d41d8cd98f00b204e9800998ecf8427e for both digests",
       "put tp-your-key in its place, as on a TP-Link router's page; http-proxy-middleware-configuration is a name", // MiMo's placeholder; tp- inside a word

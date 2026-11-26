@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { type RouteName, routes } from "@galahad/core";
+import { type RouteName, routes } from "@invincible/core";
 import { ARM_DEFAULT_SCOPES } from "./arms.ts";
 import { INSTRUCTIONS, type ToolApi, toolsFor } from "./tools.ts";
 
@@ -38,7 +38,7 @@ class ArmClient implements ToolApi {
       });
     } catch {
       if (this.signal?.aborted) throw new Error("the caller cancelled this call");
-      throw new Error(`no Galahad node is running at ${this.base}; start it with \`galahad serve\``);
+      throw new Error(`no Galahad node is running at ${this.base}; start it with \`invincible serve\``);
     }
     const body = (await response.json().catch(() => ({}))) as { error?: string; status?: number };
     if (!response.ok) throw new Error(body.error ?? `${response.status} ${response.statusText}`);
@@ -71,7 +71,7 @@ export interface McpOptions {
   /** The arm's scopes (from whoami): tools that need more aren't offered at all. Unknown: an arm's defaults. */
   scopes?: string[];
   /**
-   * These tools alone (`galahad mcp --tools a,b`), of those its scopes allow: a grant to an agent on another machine
+   * These tools alone (`invincible mcp --tools a,b`), of those its scopes allow: a grant to an agent on another machine
    * (qamp-grants.ts), whose arm's mind:read would otherwise offer your memories too. Absent: every tool they allow.
    */
   only?: readonly string[];
@@ -79,7 +79,7 @@ export interface McpOptions {
 
 export function createMcpServer(opts: McpOptions): McpServer {
   const api = new ArmClient(opts.base, opts.token);
-  const server = new McpServer({ name: "galahad", title: "Galahad", version: opts.version }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "invincible", title: "Galahad", version: opts.version }, { instructions: INSTRUCTIONS });
 
   for (const t of toolsFor(opts.scopes ?? ARM_DEFAULT_SCOPES).filter((t) => !opts.only || opts.only.includes(t.name))) {
     server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: t.input, ...(t.annotations ? { annotations: t.annotations } : {}) }, async (args: unknown, extra: { signal?: AbortSignal }) => {

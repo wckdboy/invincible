@@ -1,4 +1,4 @@
-import type { SandboxNetwork } from "@galahad/core";
+import type { SandboxNetwork } from "@invincible/core";
 import { containerName, DEFAULT_IMAGE, LABEL, labels, NETWORKS, type SandboxSpec, volumeName } from "./spec.ts";
 
 /*
@@ -15,7 +15,7 @@ import { containerName, DEFAULT_IMAGE, LABEL, labels, NETWORKS, type SandboxSpec
 export const CONTAINER_MAJOR = 1;
 
 /**
- * Apple's container as a Mac is given it when it has none (`galahad sandbox setup`, the app's step 3): Apple's signed
+ * Apple's container as a Mac is given it when it has none (`invincible sandbox setup`, the app's step 3): Apple's signed
  * installer at the release this driver was checked against on the Mac mini, pinned to the SHA-256 GitHub records for
  * it (signed "Developer ID Installer: Apple Inc. - Containerization" and notarized, as pkgutil read it, 17 November
  * 2026). It installs to /usr/local. A Mac that has container already keeps the one it has.
@@ -42,7 +42,7 @@ export const containerSystemStartArgs = (kernel: boolean): string[] => ["system"
 
 /**
  * The network `container system start` makes, which its builder joins (`container build`). No sandbox is put on it: an
- * online sandbox's way out is Galahad's own galahad-net, as on Docker, so the Mac's firewall knows every address.
+ * online sandbox's way out is Galahad's own invincible-net, as on Docker, so the Mac's firewall knows every address.
  */
 export const DEFAULT_NETWORK = "default";
 
@@ -130,7 +130,7 @@ export const DOCKER_ON_A_MAC: Readonly<Record<string, { container: string | null
   },
   "--ulimit": { container: "--ulimit", holds: "same", why: "nofile=8192:8192, as on Docker (ulimits.md)." },
   "--network": {
-    container: "--network galahad-net --network galahad-gw (online) · --network galahad-gw --no-dns (gateway)",
+    container: "--network invincible-net --network invincible-gw (online) · --network invincible-gw --no-dns (gateway)",
     holds: "refused",
     why: "online: Galahad's own NAT network, then the gateway network, egress first, as on Docker (its resolver is the network's gateway). gateway: the internal network alone, with no resolver (it reaches the gateway by its address). isolated (--network none) has no counterpart: it isn't made on a Mac (CONTAINER_CANNOT).",
   },
@@ -139,7 +139,7 @@ export const DOCKER_ON_A_MAC: Readonly<Record<string, { container: string | null
   "--internal": {
     container: "--internal",
     holds: "same",
-    why: "Host-only, with no way out (the reference: \"Restrict to host-only network\"). What galahad-firewall adds on Ultra, one port of the host and nothing else, is the Mac's firewall (mac-firewall.ts): pf, from a root helper, and no sandbox is made here while it isn't on.",
+    why: "Host-only, with no way out (the reference: \"Restrict to host-only network\"). What invincible-firewall adds on Ultra, one port of the host and nothing else, is the Mac's firewall (mac-firewall.ts): pf, from a root helper, and no sandbox is made here while it isn't on.",
   },
   "--subnet": { container: "--subnet", holds: "same", why: "Docker's subnets, 172.31.250.0/24 and 172.31.249.0/24, so the gateway's address and the lease's URL are the same." },
   "--gateway": {
@@ -237,7 +237,7 @@ export const containerTerminalArgs = (id: string, tag: string): string[] => [
   "--env",
   "TERM=xterm-256color",
   "--env",
-  `GALAHAD_TERMINAL=${tag}`,
+  `INVINCIBLE_TERMINAL=${tag}`,
   containerName(id),
   "sh",
   "-c",
@@ -263,7 +263,7 @@ export const containerInspectArgs = (names: string[]): string[] => ["inspect", .
  * held up, a bridge never goes. Each is no sandbox and carries none of a sandbox's labels, so it is never listed,
  * counted or reaped as one. The gateway's is made first.
  */
-export const KEEPERS = { gateway: "galahad-gateway-keeper", online: "galahad-online-keeper" } as const;
+export const KEEPERS = { gateway: "invincible-gateway-keeper", online: "invincible-online-keeper" } as const;
 export const GATEWAY_KEEPER = KEEPERS.gateway;
 export const containerKeeperArgs = (image: string, kind: "gateway" | "online"): string[] => [
   "run",

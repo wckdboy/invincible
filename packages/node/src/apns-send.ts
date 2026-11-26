@@ -1,5 +1,5 @@
 import http2 from "node:http2";
-import { b64u, findSecrets, GENERIC_NOTIFICATION, isQuietKind, type NotifyPayload, readNotifyPayload, sha256Bytes, utf8 } from "@galahad/core";
+import { b64u, findSecrets, GENERIC_NOTIFICATION, isQuietKind, type NotifyPayload, readNotifyPayload, sha256Bytes, utf8 } from "@invincible/core";
 import type { PushDelivery, PushOutcome, PushTarget } from "./push-send.ts";
 
 /*
@@ -82,12 +82,12 @@ export function applePayload(payload: NotifyPayload, delivery?: Pick<PushDeliver
   const quiet = delivery?.urgency === "low" || isQuietKind(payload.kind);
   return JSON.stringify({
     aps: { alert: { title: payload.title, body: payload.body }, ...(quiet ? {} : { sound: "default" }), "interruption-level": quiet ? "passive" : "active", "thread-id": payload.kind, ...(category ? { category } : {}) },
-    galahad: { v: 1, kind: payload.kind, open: payload.open, tag: payload.tag, ...(payload.conversation ? { conversation: payload.conversation } : {}), ...(payload.action ? { action: payload.action } : {}) },
+    invincible: { v: 1, kind: payload.kind, open: payload.open, tag: payload.tag, ...(payload.conversation ? { conversation: payload.conversation } : {}), ...(payload.action ? { action: payload.action } : {}) },
   });
 }
 
 export interface ApplePushOptions {
-  /** The key, read from the vault when it is needed; null: none was added (`galahad notify apple-key`). */
+  /** The key, read from the vault when it is needed; null: none was added (`invincible notify apple-key`). */
   key: () => ApplePushKey | null;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -176,7 +176,7 @@ export class ApplePushSender {
     const device = appleTarget(target.endpoint);
     if (!device) return { ok: false, gone: true, status: null, error: "this isn't an iPhone app's subscription", attempts: 0 };
     const key = this.o.key();
-    if (!key) return { ok: false, gone: false, status: null, error: "this node has no Apple push key: add it with `galahad notify apple-key`", attempts: 0 };
+    if (!key) return { ok: false, gone: false, status: null, error: "this node has no Apple push key: add it with `invincible notify apple-key`", attempts: 0 };
     // The last look: a payload of ours, with nothing that looks like a secret. Otherwise it says only that something needs you.
     const checked = readNotifyPayload(payload);
     const safe = checked && !findSecrets(`${checked.title}\n${checked.body}`).length ? checked : GENERIC_NOTIFICATION;

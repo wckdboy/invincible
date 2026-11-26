@@ -1,4 +1,4 @@
-import type { LoopWake } from "@galahad/core";
+import type { LoopWake } from "@invincible/core";
 
 const GITHUB_WORDS: Record<Extract<LoopWake, { kind: "github" }>["on"][number], string> = { "ci.failed": "a failed CI run", pushed: "a push", "issue.opened": "a new issue", "pr.opened": "a new pull request" };
 

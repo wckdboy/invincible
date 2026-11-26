@@ -1,4 +1,4 @@
-import { findSecrets } from "@galahad/core/secret-scan";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { type Api, isAbort } from "../api.ts";
 import { errorMessage } from "../context.ts";
 import { button, callout, spinner } from "../ui/controls.ts";

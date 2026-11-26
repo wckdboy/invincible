@@ -1,5 +1,5 @@
-import type { ActionView, ConnectorToolView, ConnectorView, OrderView } from "@galahad/core";
-import { findSecrets } from "@galahad/core/secret-scan";
+import type { ActionView, ConnectorToolView, ConnectorView, OrderView } from "@invincible/core";
+import { findSecrets } from "@invincible/core/secret-scan";
 import { type Ctx, errorMessage } from "../context.ts";
 import {
   type ArgMode,

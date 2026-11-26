@@ -53,7 +53,7 @@ const call = {
   connector: "github",
   tool: "pr.create",
   class: "outward",
-  args: { owner: "amiriteorg", repo: "galahad", head: "feat/orders", base: "main", title: "Standing orders" },
+  args: { owner: "amiriteorg", repo: "invincible", head: "feat/orders", base: "main", title: "Standing orders" },
   by: "arm:loop.release",
   digest,
 };
@@ -86,7 +86,7 @@ describe("what you can sign", () => {
     expect(orderProblems(terms({ args: { owner: "amiri*", repo: "*" } }), github, NOW).join()).toMatch(/pin at least one/);
   });
   test("a delete names exactly one thing", () => {
-    const del = { ...order, tool: "branch.delete", class: "delete" as const, args: { owner: "amiriteorg", repo: "galahad", branch: "scratch/*" } };
+    const del = { ...order, tool: "branch.delete", class: "delete" as const, args: { owner: "amiriteorg", repo: "invincible", branch: "scratch/*" } };
     expect(orderProblems(del, github, NOW).join()).toMatch(/no \* \(in branch\)/);
     expect(orderProblems({ ...del, args: { ...del.args, branch: "scratch/old" } }, github, NOW)).toEqual([]);
   });
@@ -140,7 +140,7 @@ describe("which calls an order answers", () => {
 });
 
 describe("standing orders for a native tool", () => {
-  test("shipping pull requests can be pre-approved for one repository's galahad/* branches", () => {
+  test("shipping pull requests can be pre-approved for one repository's invincible/* branches", () => {
     const manifest = ConnectorManifest.parse({
       id: "github",
       label: "GitHub",
@@ -156,8 +156,8 @@ describe("standing orders for a native tool", () => {
         },
       },
     });
-    const terms = { connector: "github", tool: "ship", class: "outward" as const, args: { owner: "amiriteorg", repo: "galahad", branch: "galahad/*" }, until: NOW + 86_400_000 };
+    const terms = { connector: "github", tool: "ship", class: "outward" as const, args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/*" }, until: NOW + 86_400_000 };
     expect(orderProblems(terms, manifest, NOW)).toEqual([]);
-    expect(orderProblems({ ...terms, args: { branch: "galahad/*" } }, manifest, NOW).join(" ")).toMatch(/owner|repo/);
+    expect(orderProblems({ ...terms, args: { branch: "invincible/*" } }, manifest, NOW).join(" ")).toMatch(/owner|repo/);
   });
 });

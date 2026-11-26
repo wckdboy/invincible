@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { CONTAINER_RELEASE, containerKernel, MAC_FIREWALL, macFirewallHelper, macFirewallPlist, type MacFirewallState } from "@galahad/sandbox";
+import { CONTAINER_RELEASE, containerKernel, MAC_FIREWALL, macFirewallHelper, macFirewallPlist, type MacFirewallState } from "@invincible/sandbox";
 import { cancelledPrompt, promptArgs, shellQuote } from "../src/as-root.ts";
 import { sandboxSetup, type SetupDeps, type SetupLine, type SetupNode, setupRootScript, setupWords } from "../src/sandbox-setup.ts";
 
 /*
- * `galahad sandbox setup` (sandbox-setup.ts) on a stand-in Mac: its container, root's places, launchd and the node are
+ * `invincible sandbox setup` (sandbox-setup.ts) on a stand-in Mac: its container, root's places, launchd and the node are
  * all this file's, so nothing here touches the machine it runs on. What setting a Mac up does for real was run on the
  * Mac mini (docs/MAC.md).
  */
@@ -50,7 +50,7 @@ function mac(over: Mac = {}) {
   /** The node's admin routes this file answers, as the node would. */
   const answer = async (route: string, input?: unknown): Promise<any> => {
     calls.push({ route, input });
-    if (!m.node!.running) throw new Error("no daemon on http://127.0.0.1:7777 — start it with `galahad serve`");
+    if (!m.node!.running) throw new Error("no daemon on http://127.0.0.1:7400 — start it with `invincible serve`");
     if (route === "fleet") return { self: "dev-mini", devices: [{ id: "dev-ultra", caps: { sandbox: {} } }, { id: "dev-mini", caps: m.node!.hosting ? { sandbox: { engine: "container" } } : { sandbox: null } }] };
     if (route === "buildSandboxImage") {
       if (!m.node!.build) throw new Error("container build failed: no space left on device");
@@ -110,7 +110,7 @@ function mac(over: Mac = {}) {
     },
     sha256: async () => over.digest ?? CONTAINER_RELEASE.sha256,
     tempDir: () => {
-      folders.push(`/private/var/folders/xy/T/galahad-setup-${folders.length}`);
+      folders.push(`/private/var/folders/xy/T/invincible-setup-${folders.length}`);
       return folders.at(-1)!;
     },
     removeDir: (path) => void removed.push(path),
@@ -141,7 +141,7 @@ function mac(over: Mac = {}) {
 /** Everything a set-up Mac has. */
 const SET_UP: Mac = { installed: true, running: true, kernel: true, image: true, firewall: "current", wall: { on: true }, node: { hosting: true } };
 
-describe("galahad sandbox setup", () => {
+describe("invincible sandbox setup", () => {
   test("a Mac with nothing: each step in order, the password asked for once, and a VM made to be sure", async () => {
     const t = mac();
     expect(await sandboxSetup(t.deps)).toBe(0);
@@ -163,7 +163,7 @@ describe("galahad sandbox setup", () => {
     expect(t.removed).toEqual(t.folders);
     // Its service started with its kernel; the node restarted by launchd; the image built by the node; then the proof.
     expect(t.ran.filter((a) => a[1] === "system" && a[2] === "start")).toEqual([[CONTAINER_RELEASE.command, "system", "start", "--enable-kernel-install", "--timeout", "60"]]);
-    expect(t.ran.filter((a) => a[0] === "/bin/launchctl")).toEqual([["/bin/launchctl", "kickstart", "-k", "gui/501/sh.galahad.node"]]);
+    expect(t.ran.filter((a) => a[0] === "/bin/launchctl")).toEqual([["/bin/launchctl", "kickstart", "-k", "gui/501/sh.invincible.node"]]);
     expect(t.calls.map((c) => c.route).filter((r) => r !== "fleet")).toEqual(["buildSandboxImage", "createSandbox", "execSandbox", "destroySandbox"]);
     expect(t.calls.find((c) => c.route === "createSandbox")!.input).toEqual({ network: "gateway", cpus: 1, memoryGb: 1, ttlMinutes: 10, on: "mini" });
     expect(last.vm!.said).toMatch(/^one was made through the firewall, ran a command, and was removed, in \d+ s$/);
@@ -289,7 +289,7 @@ describe("galahad sandbox setup", () => {
       ["image", "skipped"],
       ["vm", "skipped"],
     ]);
-    expect(t.last().node!.said).toBe("this Mac isn't a node yet: make it one (in the app, or with galahad init or galahad join), then set this up again");
+    expect(t.last().node!.said).toBe("this Mac isn't a node yet: make it one (in the app, or with invincible init or invincible join), then set this up again");
   });
 
   test("a node that isn't running, or that launchd doesn't run, is said so, not started", async () => {
@@ -298,7 +298,7 @@ describe("galahad sandbox setup", () => {
     expect(down.last().node).toEqual({ step: "node", state: "failed", said: "it isn't running: start it, then set this up again" });
     const byHand = mac({ ...SET_UP, node: { hosting: false, launchd: false } });
     expect(await sandboxSetup(byHand.deps)).toBe(1);
-    expect(byHand.last().node!.said).toBe("launchd doesn't run it (sh.galahad.node), so it isn't restarted from here: restart it, then set this up again");
+    expect(byHand.last().node!.said).toBe("launchd doesn't run it (sh.invincible.node), so it isn't restarted from here: restart it, then set this up again");
     expect(byHand.last().image).toEqual({ step: "image", state: "skipped", said: "waits for the node" });
   });
 
@@ -346,12 +346,12 @@ describe("what it says", () => {
 
 describe("what root runs", () => {
   test("Apple's installer, copied where only root can write, checked there against the pinned digest, installed, removed", () => {
-    const script = setupRootScript({ pkg: "/private/var/folders/xy/T/galahad-setup-1/container.pkg", firewall: true }, CLI);
+    const script = setupRootScript({ pkg: "/private/var/folders/xy/T/invincible-setup-1/container.pkg", firewall: true }, CLI);
     expect(script.split("\n")).toEqual([
       "set -e",
-      "d=$(/usr/bin/mktemp -d /private/var/tmp/galahad-container.XXXXXX)",
+      "d=$(/usr/bin/mktemp -d /private/var/tmp/invincible-container.XXXXXX)",
       `trap '/bin/rm -rf "\${d:?}"' EXIT`,
-      `/bin/cp '/private/var/folders/xy/T/galahad-setup-1/container.pkg' "$d/container.pkg"`,
+      `/bin/cp '/private/var/folders/xy/T/invincible-setup-1/container.pkg' "$d/container.pkg"`,
       `[ "$(/usr/bin/shasum -a 256 "$d/container.pkg" | /usr/bin/cut -c1-64)" = '${CONTAINER_RELEASE.sha256}' ] || { echo "The installer isn't the one Apple published for container 1.7.1: not installed." >&2; exit 3; }`,
       `/usr/sbin/installer -pkg "$d/container.pkg" -target /`,
       `'${CLI[0]}' '${CLI[1]}' firewall install`,

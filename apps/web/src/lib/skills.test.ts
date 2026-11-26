@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SKILL_LIMITS, type SkillDetail, type SkillVersionView, type SkillView } from "@galahad/core/skills";
+import { SKILL_LIMITS, type SkillDetail, type SkillVersionView, type SkillView } from "@invincible/core/skills";
 import { budgetLine, docFromForm, formOf, originWords, shownVersion, skillGroups, stateBadge, trustWords, waitingVersion } from "./skills.ts";
 
 /* The Skills page's reasoning: what waits comes first, what each state and origin is called, and the editor's fields. */

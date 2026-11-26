@@ -320,7 +320,7 @@ export interface BuiltRequest {
   headers: Record<string, string>;
   body?: string;
   class: ConnectorTool["class"];
-  /** What the ledger and approvals show, e.g. "POST /repos/amiriteorg/galahad/issues". */
+  /** What the ledger and approvals show, e.g. "POST /repos/wckdboy/invincible/issues". */
   target: string;
 }
 

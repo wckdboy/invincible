@@ -3,8 +3,8 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LoopRunView, type LoopView, type RouteName, routes } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type LoopRunView, type LoopView, type RouteName, routes } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -33,7 +33,7 @@ const caps: Capabilities = {
   tailscale: null,
 };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-wakes-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-wakes-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -67,7 +67,7 @@ async function runsOf(loop: string, count: number): Promise<LoopRunView[]> {
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "wakes-node" });
   store.close();
   home.writeConfig({ v: 1, name: "wakes-node", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -114,7 +114,7 @@ describe("a loop woken by its webhook", () => {
     expect(run!.summary.startsWith("Woken by a webhook.")).toBe(true);
     expect(run!.run).toMatch(/^w/);
     // The same delivery again (a sender's retry): accepted, and it wakes nothing.
-    const retried = await hook("deploys", body, { "x-galahad-signature": sign(body, secret), "x-github-delivery": "delivery-1" });
+    const retried = await hook("deploys", body, { "x-invincible-signature": sign(body, secret), "x-github-delivery": "delivery-1" });
     expect(await retried.json()).toEqual({ ok: true, woken: false });
     // A body past the limit is refused before it's read.
     expect((await hook("deploys", "x".repeat(70 * 1024), { "x-hub-signature-256": sign("x", secret) })).status).toBe(413);
@@ -136,7 +136,7 @@ describe("a loop woken by its webhook", () => {
   test("a loop that tells you: each run a notice of its own with what woke it, the oldest beyond five gone", async () => {
     const set = await json<{ hookSecret: string }>(await call("setLoop", { name: "doorbell", schedule: "never", task: { kind: "tell", text: "Someone rang" }, wakes: [{ kind: "webhook" }], cooldownMs: 60_000 }));
     const body = JSON.stringify({ ring: 1 });
-    expect((await hook("doorbell", body, { "x-hub-signature-256": sign(body, set.hookSecret), "x-galahad-delivery": "ring-1" })).status).toBe(202);
+    expect((await hook("doorbell", body, { "x-hub-signature-256": sign(body, set.hookSecret), "x-invincible-delivery": "ring-1" })).status).toBe(202);
     await runsOf("doorbell", 1);
     type Notice = { key: string; title: string; body: string; source: string };
     const tells = async () => (await json<{ notices: Notice[] }>(await call("notices", undefined))).notices.filter((n) => n.source === "tell:doorbell");

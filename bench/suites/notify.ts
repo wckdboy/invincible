@@ -1,5 +1,5 @@
 import { type NotifyPayload } from "../../packages/core/src/index.ts";
-import type { MindStore } from "../../packages/mind/src/index.ts";
+import type { LedgerStore } from "../../packages/ledger/src/index.ts";
 import { NotifyService, type NotifySources } from "../../packages/node/src/notify.ts";
 import { NotifyStore } from "../../packages/node/src/notify-store.ts";
 import { quantile, type Suite } from "../lib.ts";
@@ -59,7 +59,7 @@ export const suite: Suite = {
       quests: { list: () => [], onChange: () => () => {} },
     };
     const device = { id: "c_bench-phone", name: "iPhone", kind: "client", scopes: ["mind:read", "chat", "vault:read", "brain:write"] };
-    const mind = { activeDevice: (id: string) => (id === device.id ? device : null), devices: () => [device] } as unknown as MindStore;
+    const mind = { activeDevice: (id: string) => (id === device.id ? device : null), devices: () => [device] } as unknown as LedgerStore;
     const sender = { publicKey: async () => "key", send: async (_t: unknown, _p: NotifyPayload) => ({ ok: true, gone: false, status: 200, error: null, attempts: 1 }) };
     const service = new NotifyService({ mind, nodeName: "bench", db, sender, allowed: [], sources, ledger: () => {}, log: () => {}, now: () => clock, tickMs: false });
     await service.tick();

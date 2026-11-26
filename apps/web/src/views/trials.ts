@@ -1,7 +1,7 @@
-import type { TrialRunsView, TrialView } from "@galahad/core";
-import { effortReport } from "@galahad/core/galahad-index";
-import { type Price, tokensLabel, usdLabel } from "@galahad/core/spend";
-import { type Comparison, doneLine, doneReport, modelReport, type ModelRow, reviewerReport, type ReviewerRow, type RoleReport, variantReport } from "@galahad/core/trial-reports";
+import type { TrialRunsView, TrialView } from "@invincible/core";
+import { effortReport } from "@invincible/core/galahad-index";
+import { type Price, tokensLabel, usdLabel } from "@invincible/core/spend";
+import { type Comparison, doneLine, doneReport, modelReport, type ModelRow, reviewerReport, type ReviewerRow, type RoleReport, variantReport } from "@invincible/core/trial-reports";
 import { isUnavailable } from "../api.ts";
 import type { Ctx, View } from "../context.ts";
 import { plural } from "../lib/text.ts";
@@ -23,7 +23,7 @@ import { icon } from "../ui/icons.ts";
  * (tokens as the providers reported them, money at your prices), each problem over
  * every run, every answer or hidden check, and what the records say when runs are
  * compared: per effort, per model in each role, per variant of the harness. Runs
- * start from a terminal (`galahad trial run`).
+ * start from a terminal (`invincible trial run`).
  */
 
 const MARK: Record<Mark, { label: string; tone: Tone }> = {
@@ -272,7 +272,7 @@ export const trialsView: View = (root, ctx, { scope }) => {
         h("div", { class: "card" }, h("div", { class: "rows" }, ...report.rows.map(modelRow))),
         callout("quiet", h("div", { class: "stack tight" }, h("p", {}, report.best), h("p", {}, report.bestForCost)), { title: `As ${report.role}`, icon: "models" }),
       ]),
-      h("p", { class: "tiny subtle" }, "Each row is the same seeded tasks with one role held to one model and every other role as the roster has it (galahad trial sweep). A model is \"best\" only when its interval clears the others'."),
+      h("p", { class: "tiny subtle" }, "Each row is the same seeded tasks with one role held to one model and every other role as the roster has it (invincible trial sweep). A model is \"best\" only when its interval clears the others'."),
     );
   }
 
@@ -286,7 +286,7 @@ export const trialsView: View = (root, ctx, { scope }) => {
       ...comparisons.map((c) =>
         callout(c.verdict === "helps" ? "ok" : c.verdict === "hurts" ? "warn" : "quiet", h("div", { class: "stack tight" }, ...c.lines.map((line) => h("p", { class: "small" }, line))), { title: `${c.b.name}: ${title(c)}`, icon: "gauge" }),
       ),
-      h("p", { class: "tiny subtle" }, "A variant is a named set of harness switches (gates, the planner's own gates, effort, skills, the archive's context, revisions), recorded with its run. It \"helps\" only when its interval clears the baseline's (galahad trial ab)."),
+      h("p", { class: "tiny subtle" }, "A variant is a named set of harness switches (gates, the planner's own gates, effort, skills, the archive's context, revisions), recorded with its run. It \"helps\" only when its interval clears the baseline's (invincible trial ab)."),
     );
   }
 
@@ -456,8 +456,8 @@ export const trialsView: View = (root, ctx, { scope }) => {
               "div",
               { class: "stack tight" },
               h("p", {}, "Four suites, each graded by a program: engineering problems with exact answers, agentic tasks with hidden tests, the reviewer's own cases, and your knights' tasks that passed review, worked again and graded by their own gates. Start a run from a terminal on a node; a run keeps to a budget and says first what past runs cost."),
-              copyField("galahad trial run"),
-              copyField("galahad trial run --suite agentic"),
+              copyField("invincible trial run"),
+              copyField("invincible trial run --suite agentic"),
             ),
           }),
         );

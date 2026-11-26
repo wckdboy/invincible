@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type ChatStreamEvent, type RouteName, routes, spendTotal, TrialRecord, TrialRunId, type TrialRunsView, type TrialView, type Usage, VARIANTS } from "@galahad/core";
-import { ENGINEERING_SUITE, pose, type TrialProblem } from "@galahad/brain";
+import { type ChatStreamEvent, type RouteName, routes, spendTotal, TrialRecord, TrialRunId, type TrialRunsView, type TrialView, type Usage, VARIANTS } from "@invincible/core";
+import { ENGINEERING_SUITE, pose, type TrialProblem } from "@invincible/models";
 import { DEFAULT_TOKENS_PER_ATTEMPT, describeCost, describeDone, describeFallback, describeTrial, estimateLabel, estimateRun, freshRunId, runTrials, type TrialUnit } from "../src/trial-cli.ts";
 import { parseBudget, parsePins, parseTokens } from "../src/trial-commands.ts";
 
@@ -46,7 +46,7 @@ function fakeNode(options: FakeOptions = {}) {
           return { quest: input.quest, attempts: input.effort, asked: input.effort, host: "ultra", reasons: [], budget: { perDay: 12, usedToday: 0 } } as T;
         case "createSandbox":
           created += 1;
-          return { sandbox: { id: String(created).padStart(10, "0"), node: "n_ultra", image: "galahad/lab:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [], quest: input.quest } } as T;
+          return { sandbox: { id: String(created).padStart(10, "0"), node: "n_ultra", image: "invincible/lab:1", network: input.network, isolation: "container", cpus: 4, memoryGb: 8, providers: [], quest: input.quest } } as T;
         case "fleet":
           throw new Error("not needed");
         case "execSandbox": {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ArgValue } from "@galahad/core";
+import type { ArgValue } from "@invincible/core";
 import { z } from "zod";
 import type { ArtifactStore } from "./artifacts.ts";
 import type { NativeTool } from "./connectors.ts";

@@ -1,6 +1,6 @@
-import { authFor, type GatewayTokens, installedConnector } from "@galahad/brain";
-import type { MindStore, Vault } from "@galahad/mind";
-import type { LedgerEntryInput } from "@galahad/sandbox";
+import { authFor, type GatewayTokens, installedConnector } from "@invincible/models";
+import type { LedgerStore, Vault } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 
 /*
  * The git read gateway: how a sandbox clones a private repository without ever
@@ -23,7 +23,7 @@ const PATH = /^\/git\/([a-z][a-z0-9-]{0,39})\/([A-Za-z0-9_.-]{1,100})\/([A-Za-z0
 export const gitScope = (connector: string, owner: string, repo: string) => `git:${connector}:${owner}:${repo}`;
 
 export interface GitGatewayContext {
-  store: MindStore;
+  store: LedgerStore;
   vault: Vault;
   tokens: GatewayTokens;
   ledger?: (entry: LedgerEntryInput) => void;

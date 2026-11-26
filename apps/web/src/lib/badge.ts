@@ -1,4 +1,4 @@
-import type { NotifyPayload } from "@galahad/core/notify-payload";
+import type { NotifyPayload } from "@invincible/core/notify-payload";
 
 /*
  * The number on the app's icon, where the system shows one (an iPhone or a Mac, from iOS and macOS's
@@ -32,13 +32,13 @@ export function readBadgeState(raw: unknown): BadgeState {
   return { base, tags: tags.slice(-TAGS_KEPT) };
 }
 
-/** A page's message setting the count ({ type: "galahad:badge", count }), or null if it isn't one. */
+/** A page's message setting the count ({ type: "invincible:badge", count }), or null if it isn't one. */
 export function readBadgeMessage(data: unknown): number | null {
   const d = (data && typeof data === "object" ? data : {}) as { type?: unknown; count?: unknown };
-  return d.type === "galahad:badge" && isCount(d.count) ? d.count : null;
+  return d.type === "invincible:badge" && isCount(d.count) ? d.count : null;
 }
 
-export const badgeMessage = (count: number) => ({ type: "galahad:badge", count: Math.min(MOST, Math.max(0, Math.floor(count))) });
+export const badgeMessage = (count: number) => ({ type: "invincible:badge", count: Math.min(MOST, Math.max(0, Math.floor(count))) });
 
 /** After a push is shown: one more, if it's about something new that waits for you. */
 export function afterPush(state: BadgeState, payload: Pick<NotifyPayload, "kind" | "tag">): BadgeState {

@@ -1,7 +1,7 @@
 /*
  * What a message of yours may carry (api.ts's AttachmentRef), and what a file is by its bytes: one rule for the node,
  * which checks each file as it comes (packages/node/src/uploads.ts), and for the apps, which say so before it goes.
- * Nothing here depends on anything, so the PWA takes it alone (@galahad/core/attachments).
+ * Nothing here depends on anything, so the PWA takes it alone (@invincible/core/attachments).
  */
 
 /** Pictures (PNG, JPEG, WebP, GIF, as their bytes say), which a model that sees is shown; and text (UTF-8). */

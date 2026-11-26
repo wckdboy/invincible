@@ -1,4 +1,4 @@
-import { Steering } from "@galahad/brain";
+import { Steering } from "@invincible/models";
 import {
   type AttachmentRef,
   type ChatMessage,
@@ -15,7 +15,7 @@ import {
   type TurnLimits,
   type TurnState,
   type TurnView,
-} from "@galahad/core";
+} from "@invincible/core";
 import type { ChatStore, Queued, QueuedBy } from "./chats.ts";
 import { TOOLS } from "./tools.ts";
 

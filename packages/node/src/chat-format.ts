@@ -1,4 +1,4 @@
-import { artifactTitle, compactNumber, isBlockKind, readArtifact, readChart, readChoices, readStats, readSteps } from "@galahad/core/blocks";
+import { artifactTitle, compactNumber, isBlockKind, readArtifact, readChart, readChoices, readStats, readSteps } from "@invincible/core/blocks";
 
 /*
  * His answer, as a chat app shows it: in its own markup (Telegram's HTML, Slack's mrkdwn: bold, italic, code, links,

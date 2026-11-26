@@ -1,4 +1,4 @@
-import type { AvatarExpression } from "@galahad/core/avatar";
+import type { AvatarExpression } from "@invincible/core/avatar";
 
 /*
  * What Galahad is doing now, in one line, for the chat's header: idle, working on

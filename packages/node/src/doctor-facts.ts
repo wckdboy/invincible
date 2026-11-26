@@ -1,10 +1,10 @@
 import { readdirSync, readFileSync, statSync, statfsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, redact, type Teammate } from "@galahad/core";
-import { type BrainContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@galahad/brain";
-import type { MindStore, Vault } from "@galahad/mind";
-import { containerKernel, macFirewallInstalled, type SandboxHost } from "@galahad/sandbox";
+import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, redact, type Teammate } from "@invincible/core";
+import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
+import type { LedgerStore, Vault } from "@invincible/ledger";
+import { containerKernel, macFirewallInstalled, type SandboxHost } from "@invincible/sandbox";
 import type { ArchiveService } from "./archive/service.ts";
 import { ungivable } from "./key-gateway.ts";
 import type { Assets } from "./assets.ts";
@@ -171,7 +171,7 @@ export class TroubleLog {
 /* ---------- gathering ---------- */
 
 export interface DoctorDeps {
-  store: MindStore;
+  store: LedgerStore;
   vault: Vault;
   identity: NodeIdentity;
   nodeName: string;
@@ -184,7 +184,7 @@ export interface DoctorDeps {
   governor: Governor;
   compute: ComputeService;
   archive: ArchiveService | null;
-  /** The archive's background work was turned off (GALAHAD_ARCHIVE=off). */
+  /** The archive's background work was turned off (INVINCIBLE_ARCHIVE=off). */
   archiveOff: boolean;
   assets: Assets;
   port: number;
@@ -192,7 +192,7 @@ export interface DoctorDeps {
   startedAt: number;
   trouble: TroubleLog;
   system: DoctorSystem;
-  /** Where backups of the mind are kept, when the owner said (GALAHAD_BACKUP_DIR). */
+  /** Where backups of the mind are kept, when the owner said (INVINCIBLE_BACKUP_DIR). */
   backupDir?: string;
   /** How the node reaches models and services (tests pass a stand-in). */
   fetch?: typeof fetch;
@@ -234,7 +234,7 @@ function modelProblem(deps: DoctorDeps, ref: string): string | null {
   } catch {
     return "not a <provider>/<model> reference";
   }
-  // Its allowance spent until a time its provider gave: passed over until then (brain/windows.ts), and said so.
+  // Its allowance spent until a time its provider gave: passed over until then (models/windows.ts), and said so.
   const spent = windowsOf(deps.store).spentFor(ref);
   if (spent) return windowsOf(deps.store).why(spent);
   // (A coding plan's model is the knights' tools' to use: what is asked of it is whether a tool would get its key.)
@@ -258,7 +258,7 @@ function concrete(deps: DoctorDeps, ref: string): string | null {
 }
 
 /** One word from one model, through the same door every answer of his goes through. Stopped at its first word. */
-async function askOneWord(ctx: BrainContext, ref: string, outer?: AbortSignal): Promise<{ ref: string; ok: boolean; ms: number; error: string | null }> {
+async function askOneWord(ctx: ModelsContext, ref: string, outer?: AbortSignal): Promise<{ ref: string; ok: boolean; ms: number; error: string | null }> {
   const stop = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -322,7 +322,7 @@ async function rolesOf(deps: DoctorDeps, ask: boolean, signal?: AbortSignal): Pr
     if (!wanted.has(ref) && wanted.size >= MAX_MODEL_PROBES) continue;
     wanted.set(ref, [...(wanted.get(ref) ?? []), role]);
   }
-  const ctx: BrainContext = { store: deps.store, vault: deps.vault, ...(deps.fetch ? { fetch: deps.fetch } : {}) };
+  const ctx: ModelsContext = { store: deps.store, vault: deps.vault, ...(deps.fetch ? { fetch: deps.fetch } : {}) };
   await Promise.all(
     [...wanted].map(async ([ref, askers]) => {
       const probe = await askOneWord(ctx, ref, signal);
@@ -373,9 +373,9 @@ async function sandboxOf(deps: DoctorDeps, deep: boolean): Promise<DoctorFacts["
   const microVMs = !!caps?.sandbox?.vm;
   let firewall: NonNullable<DoctorFacts["sandbox"]["host"]>["firewall"] = null;
   if (deps.system.platform === "linux") {
-    const unit = await deps.system.run(["systemctl", "is-active", "galahad-firewall.service"]);
+    const unit = await deps.system.run(["systemctl", "is-active", "invincible-firewall.service"]);
     // is-active prints the state and exits non-zero unless it's active; a unit that doesn't exist reads "inactive" too.
-    if (unit) firewall = unit.stdout === "active" ? "active" : (await deps.system.run(["systemctl", "cat", "galahad-firewall.service"]))?.code === 0 ? "inactive" : "missing";
+    if (unit) firewall = unit.stdout === "active" ? "active" : (await deps.system.run(["systemctl", "cat", "invincible-firewall.service"]))?.code === 0 ? "inactive" : "missing";
   }
   // A Mac's own, as the node reads it (its helper's status and the bridges): no sandbox is made there while it is off.
   const wall = await host.firewallState().catch(() => null);
@@ -481,7 +481,7 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
     // undefined: this machine can't be asked (no Tailscale here, or a test). null: asked, and nothing publishes the app.
     system.run(["tailscale", "serve", "status", "--json"]).then((r) => (r && r.code === 0 ? servedOriginFrom(r.stdout || "{}", deps.proxyPort) : undefined)),
     system.underSystemd
-      ? system.run(["systemctl", "show", "galahad.service", "-p", "NRestarts", "--value"]).then((r) => (r && r.code === 0 && /^\d+$/.test(r.stdout) ? Number(r.stdout) : null))
+      ? system.run(["systemctl", "show", "invincible.service", "-p", "NRestarts", "--value"]).then((r) => (r && r.code === 0 && /^\d+$/.test(r.stdout) ? Number(r.stdout) : null))
       : Promise.resolve(null),
   ]);
 

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { RouteName, RuleView } from "@galahad/core";
+import type { RouteName, RuleView } from "@invincible/core";
 import { describeRule, ruleCommand } from "../src/rule-cli.ts";
 
-/* `galahad rule` at a terminal: what it prints, and what it sends (exactly your rule, never anything you didn't say). */
+/* `invincible rule` at a terminal: what it prints, and what it sends (exactly your rule, never anything you didn't say). */
 
 const at = Date.UTC(2026, 10, 16, 9, 30);
 const view = (name: string, rule: RuleView["rule"], setVia: string | null = null): RuleView => ({ name, rule, setAt: at, setVia });
@@ -47,7 +47,7 @@ describe("what a rule says", () => {
   });
 });
 
-describe("galahad rule ls", () => {
+describe("invincible rule ls", () => {
   test("each rule, what it does and when; one this node doesn't understand is said, never applied; and what they cover", async () => {
     const node = api({
       rules: {
@@ -77,11 +77,11 @@ describe("galahad rule ls", () => {
   test("with none, says so and how to add one", async () => {
     await ruleCommand(api({ rules: { rules: [] } }), "ls", [], {});
     expect(printed.join("\n")).toContain("No rules yet.");
-    expect(printed.join("\n")).toContain('galahad rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text]');
+    expect(printed.join("\n")).toContain('invincible rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text]');
   });
 });
 
-describe("galahad rule add", () => {
+describe("invincible rule add", () => {
   test("--halt or --refuse with its globs, and --contains: exactly that is sent, and what it now does is said", async () => {
     const node = api({ setRule: { rule: view("no-locks", { on: "command", does: "halt", words: ["*.lock", "package-lock.json"] }) } });
     await ruleCommand(node, "add", ["no-locks", "*.lock", "package-lock.json"], { halt: true });
@@ -110,7 +110,7 @@ describe("galahad rule add", () => {
 
   test("what isn't a rule is refused before anything is sent: no name, no --halt or --refuse, both, nothing to match", async () => {
     const node = api({});
-    await expect(ruleCommand(node, "add", [], { halt: true })).rejects.toThrow('usage: galahad rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text]');
+    await expect(ruleCommand(node, "add", [], { halt: true })).rejects.toThrow('usage: invincible rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text]');
     await expect(ruleCommand(node, "add", ["no-locks", "*.lock"], {})).rejects.toThrow('say what it does: --halt (the work stops), --refuse (that command isn\'t run), --check "command" (yours runs after it) or --tell (you are told it ran)');
     await expect(ruleCommand(node, "add", ["no-locks", "*.lock"], { halt: true, refuse: true })).rejects.toThrow("--halt or --refuse, not both");
     await expect(ruleCommand(node, "add", ["types", "*.ts"], { refuse: true, check: "tsc" })).rejects.toThrow("--refuse or --check, not both");
@@ -121,16 +121,16 @@ describe("galahad rule add", () => {
   });
 });
 
-describe("galahad rule rm", () => {
+describe("invincible rule rm", () => {
   test("removes it by name", async () => {
     const node = api({ removeRule: { removed: "no-locks" } });
     await ruleCommand(node, "rm", ["no-locks"], {});
     expect(node.calls).toEqual([{ name: "removeRule", input: { name: "no-locks" } }]);
     expect(printed[0]).toBe("Removed no-locks: no command is held to it any more.");
-    await expect(ruleCommand(api({}), "rm", [], {})).rejects.toThrow("usage: galahad rule rm <name>");
+    await expect(ruleCommand(api({}), "rm", [], {})).rejects.toThrow("usage: invincible rule rm <name>");
   });
 
   test("anything else says how it is used", async () => {
-    await expect(ruleCommand(api({}), "frobnicate", [], {})).rejects.toThrow('usage: galahad rule ls | rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text] | rule rm <name>');
+    await expect(ruleCommand(api({}), "frobnicate", [], {})).rejects.toThrow('usage: invincible rule ls | rule add <name> --halt|--refuse|--check "command"|--tell <glob>… [--contains text] | rule rm <name>');
   });
 });

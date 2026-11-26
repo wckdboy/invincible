@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { TerminalEvent } from "@galahad/core";
-import { type LedgerEntryInput, spawnTerminal, type TerminalProcess } from "@galahad/sandbox";
+import type { TerminalEvent } from "@invincible/core";
+import { type LedgerEntryInput, spawnTerminal, type TerminalProcess } from "@invincible/sandbox";
 import { Terminals, type TerminalsOptions } from "../src/terminals.ts";
 
 /*

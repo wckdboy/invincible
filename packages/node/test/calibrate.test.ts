@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bodyFingerprint, Calibration, calibrationDue, type ComputeBody, deriveCapacity, KERNEL } from "@galahad/core";
+import { bodyFingerprint, Calibration, calibrationDue, type ComputeBody, deriveCapacity, KERNEL } from "@invincible/core";
 import { type BenchOptions, type BenchResult, kernelDigest } from "../src/compute/bench.ts";
 import { calibrate, spawnBench } from "../src/compute/calibrate.ts";
 
@@ -21,7 +21,7 @@ function harness(over: { load?: number; limit?: { cores?: number } | null; bench
     calibrate(reason, {
       body: ultra,
       limit: over.limit ?? null,
-      dir: "/home/galahad/.galahad",
+      dir: "/home/galahad/.invincible",
       load: () => over.load ?? 0.4,
       now: () => (now += 1_500),
       bench:
@@ -40,7 +40,7 @@ describe("a calibration", () => {
     const { run, asked } = harness();
     const c = await run("joined");
     expect(asked).toHaveLength(1);
-    expect(asked[0]).toMatchObject({ threads: 16, dir: "/home/galahad/.galahad" });
+    expect(asked[0]).toMatchObject({ threads: 16, dir: "/home/galahad/.invincible" });
     expect(Calibration.parse(c)).toEqual(c);
     expect(c).toMatchObject({ reason: "joined", cpu: { single: 70_000, threads: 16, kernel: KERNEL }, memoryGbps: 9.5, disk: { writeMbps: 1200 }, body: bodyFingerprint(ultra, null) });
     // It says which kernel measured it, so it isn't taken again until the body, the ceiling or the kernel changes.
@@ -105,7 +105,7 @@ describe("the benchmark itself", () => {
     expect(kernelDigest(8)).not.toBe(kernelDigest(9));
   });
   test("runs as its own short process, on the threads asked for, and leaves nothing behind", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-bench-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-bench-"));
     try {
       const result = await spawnBench({ threads: 2, windowMs: 40, dir });
       expect(result.single).toBeGreaterThan(0);

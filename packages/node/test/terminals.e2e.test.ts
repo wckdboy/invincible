@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bodyFingerprint, ceilingThreads, KERNEL, type LedgerEntry, REFERENCE_SINGLE, type RouteName, routes, type SandboxView, type TerminalEvent, type TerminalView } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
-import { containerName, spawnTerminal } from "@galahad/sandbox";
+import { bodyFingerprint, ceilingThreads, KERNEL, type LedgerEntry, REFERENCE_SINGLE, type RouteName, routes, type SandboxView, type TerminalEvent, type TerminalView } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
+import { containerName, spawnTerminal } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -12,7 +12,7 @@ import { fakeDocker } from "./fake-docker.ts";
 import { freePort } from "./ports.ts";
 
 // The real node over HTTP; Docker is a stand-in, and the terminal's process a local shell where `docker exec` would run.
-const root = mkdtempSync(join(tmpdir(), "galahad-terminals-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-terminals-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "terminals-test", cores: 8, cpu: "test", memoryGb: 16, hasBattery: false, gpu: [], docker: true, vm: { kvm: false, tools: [] }, tools: ["docker"], localModels: [], tailscale: null, sandbox: { image: true, networks: true } };
@@ -76,7 +76,7 @@ async function until(what: () => boolean, ms = 5000): Promise<void> {
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const mind = new MindStore(home.mindPath);
+  const mind = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(mind, identity, { fleetName: "camelot", nodeName: "keep" });
   mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -114,7 +114,7 @@ describe("a terminal in a sandbox, over the node's routes", () => {
   test("you open one, watch it and type into it; it is `docker exec --tty` into that sandbox; closing it ends the watching", async () => {
     const { terminal } = await api<{ terminal: TerminalView }>("openTerminal", { sandbox: sandbox.id, size: { cols: 90, rows: 25 } });
     expect(terminal).toMatchObject({ sandbox: sandbox.id, name: sandbox.name, cols: 90, rows: 25, exitCode: null });
-    expect(started.at(-1)).toEqual(["docker", "exec", "--interactive", "--tty", "--workdir", "/work", "--env", "TERM=xterm-256color", "--env", expect.stringMatching(/^GALAHAD_TERMINAL=[0-9a-f]{16}$/), containerName(sandbox.id), "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l"]);
+    expect(started.at(-1)).toEqual(["docker", "exec", "--interactive", "--tty", "--workdir", "/work", "--env", "TERM=xterm-256color", "--env", expect.stringMatching(/^INVINCIBLE_TERMINAL=[0-9a-f]{16}$/), containerName(sandbox.id), "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l"]);
     const tag = started.at(-1)![9]!.split("=")[1]!;
 
     const response = await call("watchTerminal", { terminal: terminal.id });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { QAMP_ARM_PREFIX, qampArm } from "@galahad/core";
+import { QAMP_ARM_PREFIX, qampArm } from "@invincible/core";
 import { grantEnds, isGrantArm, shortDid } from "./grants.ts";
 
 describe("a Q-AMP grant in the app", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatStreamEvent, QuestView, TurnView } from "@galahad/core";
+import type { ChatStreamEvent, QuestView, TurnView } from "@invincible/core";
 import { type Io, printTurn, questLines, queueLines, turnLine } from "../src/turn-cli.ts";
 
 const now = 10_000_000;

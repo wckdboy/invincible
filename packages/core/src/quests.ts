@@ -38,7 +38,7 @@ export interface GateView {
 }
 
 /*
- * Where a quest in hand stands. Whoever runs a quest (a terminal's `galahad do`, a loop on a node)
+ * Where a quest in hand stands. Whoever runs a quest (a terminal's `invincible do`, a loop on a node)
  * tells its node as it goes: the plan, the step he's on, each gate's last result. Node-local and in
  * memory: it's a view of work under way, not a record (the ledger and the quest's memory are those).
  */

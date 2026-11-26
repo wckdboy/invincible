@@ -1,4 +1,4 @@
-import { addUsage, type Usage, type UsageLine } from "@galahad/core";
+import { addUsage, type Usage, type UsageLine } from "@invincible/core";
 
 /*
  * What tools' calls through this node's gateway cost lately, by who called (a gateway token's label: a knight's VM is

@@ -64,7 +64,7 @@ describe("connector manifests", () => {
   });
 
   test("origins are https, or plain http on this machine and private networks", () => {
-    for (const origin of ["https://api.github.com", "http://127.0.0.1:8123", "http://homeassistant.local:8123", "http://192.168.1.20", "http://100.101.102.103:7777"]) {
+    for (const origin of ["https://api.github.com", "http://127.0.0.1:8123", "http://homeassistant.local:8123", "http://192.168.1.20", "http://100.101.102.103:7400"]) {
       expect(withTool({ method: "GET", path: "/x", class: "read" }, { origin }).success).toBe(true);
     }
     for (const origin of ["http://api.github.com", "https://api.github.com/v3", "ftp://x.test", "https://a.test?x=1", "javascript:alert(1)"]) {
@@ -78,11 +78,11 @@ describe("connector manifests", () => {
 
 describe("building a request", () => {
   test("arguments fill the path, the query or the JSON body", () => {
-    expect(buildRequest(forge, "repo", { owner: "amiriteorg", repo: "galahad" })).toMatchObject({
+    expect(buildRequest(forge, "repo", { owner: "amiriteorg", repo: "invincible" })).toMatchObject({
       method: "GET",
-      url: "https://api.forge.test/repos/amiriteorg/galahad",
+      url: "https://api.forge.test/repos/amiriteorg/invincible",
       class: "read",
-      target: "GET /repos/amiriteorg/galahad",
+      target: "GET /repos/amiriteorg/invincible",
     });
     expect(buildRequest(forge, "issues", { state: "open", per_page: 5 }).url).toBe("https://api.forge.test/issues?state=open&per_page=5");
     const open = buildRequest(forge, "open", { owner: "amiriteorg", title: "Hello", draft: true });
@@ -145,13 +145,13 @@ describe("MCP connectors", () => {
   });
 
   test("a call is one tools/call with checked arguments; nested values are fine", () => {
-    const call = buildCall(tracker, "create_issue", { repo: "amiriteorg/galahad", labels: ["a", "b"] });
+    const call = buildCall(tracker, "create_issue", { repo: "amiriteorg/invincible", labels: ["a", "b"] });
     expect(call).toEqual({
       kind: "mcp",
       remote: "createIssue",
-      args: { repo: "amiriteorg/galahad", labels: ["a", "b"] },
+      args: { repo: "amiriteorg/invincible", labels: ["a", "b"] },
       class: "outward",
-      target: 'mcp createIssue {"labels":["a","b"],"repo":"amiriteorg/galahad"}',
+      target: 'mcp createIssue {"labels":["a","b"],"repo":"amiriteorg/invincible"}',
     });
     expect(() => buildCall(tracker, "create_issue", {})).toThrow(/needs repo/);
     expect(() => buildCall(tracker, "create_issue", { repo: "x", labels: "a" })).toThrow(/labels must be array/);
@@ -189,13 +189,13 @@ describe("native tools", () => {
       owner: { type: "string" as const, pattern: "[A-Za-z0-9_.-]{1,100}", required: true },
       repo: { type: "string" as const, pattern: "[A-Za-z0-9_.-]{1,100}", required: true },
       artifact: { type: "string" as const, pattern: "art_[A-Za-z0-9_-]{22}", required: true },
-      branch: { type: "string" as const, pattern: "galahad/[A-Za-z0-9._-]{1,80}", required: true },
+      branch: { type: "string" as const, pattern: "invincible/[A-Za-z0-9._-]{1,80}", required: true },
       title: { type: "string" as const, required: true },
     },
     class: "outward" as const,
   };
   const github = ConnectorManifest.parse({ ...base, id: "github", origin: "https://api.github.com", tools: { ship } });
-  const args = { owner: "amiriteorg", repo: "galahad", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", branch: "galahad/units", title: "Units" };
+  const args = { owner: "amiriteorg", repo: "invincible", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", branch: "invincible/units", title: "Units" };
 
   test("a manifest can name one, only on the origin it's bound to", () => {
     const elsewhere = ConnectorManifest.safeParse({ ...base, tools: { ship } });
@@ -205,7 +205,7 @@ describe("native tools", () => {
   });
 
   test("its arguments are checked like any tool's; it's never a single request", () => {
-    expect(buildCall(github, "ship", args)).toEqual({ kind: "native", native: "github.ship", args, class: "outward", target: "POST /repos/amiriteorg/galahad/pulls (ship)" });
+    expect(buildCall(github, "ship", args)).toEqual({ kind: "native", native: "github.ship", args, class: "outward", target: "POST /repos/amiriteorg/invincible/pulls (ship)" });
     expect(() => buildCall(github, "ship", { ...args, branch: "main" })).toThrow(/branch doesn't match/);
     expect(() => buildCall(github, "ship", { ...args, force: true })).toThrow(/takes no "force"/);
     expect(() => buildRequest(github, "ship", args)).toThrow(/carried out by Galahad/);

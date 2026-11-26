@@ -1,5 +1,5 @@
-import { redact, type TrialAnswer, type TrialRecord } from "@galahad/core";
-import { parseVerdict, poseReview, reviewDomain, type ReviewerCase } from "@galahad/brain";
+import { redact, type TrialAnswer, type TrialRecord } from "@invincible/core";
+import { parseVerdict, poseReview, reviewDomain, type ReviewerCase } from "@invincible/models";
 import type { TrialUnit } from "./trial-cli.ts";
 
 /*

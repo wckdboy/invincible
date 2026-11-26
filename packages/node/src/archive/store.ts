@@ -10,7 +10,7 @@ import {
   type ArchiveUnderstanding,
   archiveId,
   type Trust,
-} from "@galahad/core";
+} from "@invincible/core";
 import { type BlobBackend, fileSize } from "./blobs.ts";
 import { asText, chunkEntry, fileTextKind } from "./chunk.ts";
 import { type Redaction, refuseFile, scrub } from "./guard.ts";

@@ -1,5 +1,5 @@
-import type { QuestEvent, QuestOutcome } from "@galahad/brain";
-import type { QuestEvidence, RouteName, SkillLearned } from "@galahad/core";
+import type { QuestEvent, QuestOutcome } from "@invincible/models";
+import type { QuestEvidence, RouteName, SkillLearned } from "@invincible/core";
 
 /*
  * What a quest's runner does for his skills (skills.ts), in two small pieces so the

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readKeep, writeKeep } from "@galahad/brain";
-import { ConnectorManifest, newNodeIdentity } from "@galahad/core";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
+import { readKeep, writeKeep } from "@invincible/models";
+import { ConnectorManifest, newNodeIdentity } from "@invincible/core";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { callbackOf, emailFrom, SignInError, SignIns } from "../src/sign-ins.ts";
 
 /*
@@ -43,7 +43,7 @@ const idToken = (claims: Record<string, unknown>) => `e30.${Buffer.from(JSON.str
 
 function rig(answer: (url: string, form: URLSearchParams) => Response) {
   const identity = newNodeIdentity();
-  const store = new MindStore(":memory:");
+  const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   const manifests = { gmail: manifest("gmail", "google"), outlook: manifest("outlook", "microsoft"), drive };
@@ -106,7 +106,7 @@ describe("Google: its consent page, and its return", () => {
     for (const wrong of ["http://keep.example.test/oauth/callback", "https://keep.example.test/elsewhere", "https://keep.example.test/oauth/callback?x=1", "not a url"]) {
       expect(() => callbackOf(wrong)).toThrow(SignInError);
     }
-    expect(callbackOf("http://localhost:7778/oauth/callback")).toBe("http://localhost:7778/oauth/callback");
+    expect(callbackOf("http://localhost:7401/oauth/callback")).toBe("http://localhost:7401/oauth/callback");
     const started = await r.signIns.start("gmail", "https://keep.example.test/oauth/callback");
     expect(started.flow).toBe("code");
     const url = new URL((started as { url: string }).url);

@@ -1,4 +1,4 @@
-import { b64u, concat, fromB64u, type NotifyPayload, readNotifyPayload, readVapidToken, utf8 } from "@galahad/core";
+import { b64u, concat, fromB64u, type NotifyPayload, readNotifyPayload, readVapidToken, utf8 } from "@invincible/core";
 
 /*
  * Stand-ins for the two things a node's notifications reach, for tests that must never

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatStreamEvent, StoredMessage } from "@galahad/core";
+import type { ChatStreamEvent, StoredMessage } from "@invincible/core";
 import { applyEvent, asideOf, beginTurn, composerAction, composerHint, connectorsAskedIn, endTurn, failTurn, keptDiffers, keysAskedIn, shownAgain, stateBadge, type Step, stopsIn, type Thread, type Turn, turnOf } from "./turns.ts";
 
 const fresh = (): Thread => ({ turns: [], nextId: 1, target: null, base: null });

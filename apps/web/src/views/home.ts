@@ -1,4 +1,4 @@
-import { findSecrets } from "@galahad/core/secret-scan";
+import { findSecrets } from "@invincible/core/secret-scan";
 import type { View } from "../context.ts";
 import { galahadState } from "../lib/knight-state.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
@@ -126,7 +126,7 @@ export const homeView: View = (root, ctx, { scope }) => {
     if (look !== shownFace) {
       shownFace = look;
       // The one orb that moves here: his (the knights' in their rows are still).
-      replace(face, orb({ size: 48, tone: now.tone, mood: orbMoodOfState(state), key: "galahad:home", label: `Galahad: ${now.text}` }));
+      replace(face, orb({ size: 48, tone: now.tone, mood: orbMoodOfState(state), key: "invincible:home", label: `Galahad: ${now.text}` }));
     }
     const glance = work ? atAGlance(work, waiting, now.text) : { text: now.text, needs: false };
     if (line.textContent !== glance.text) line.textContent = glance.text;

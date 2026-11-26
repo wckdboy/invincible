@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decide, retriedRuns, SELF_ACTION_KINDS, SELF_ACTION_QUEST, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget } from "@galahad/core";
+import { decide, retriedRuns, SELF_ACTION_KINDS, SELF_ACTION_QUEST, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget } from "@invincible/core";
 import { OFFLINE_AFTER_MS } from "../src/heartbeat.ts";
 import { type LedgerWrite, MAX_SELF_ACTIONS, planSelfActions, RETRY_WITHIN_MS, runSelfAction, selfAct, SelfActionRefused, type SelfActionHands, type SelfSnapshot } from "../src/self-action.ts";
 

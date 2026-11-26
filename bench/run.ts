@@ -1,6 +1,6 @@
 // The Scorecard: `bun run bench [suite…] [--full] [--json] [--all] [--ci] [--seed n] [--update-baseline]`
 //
-// Runs the benchmark suites (deterministic, offline, in temp directories; nothing touches ~/.galahad), prints
+// Runs the benchmark suites (deterministic, offline, in temp directories; nothing touches ~/.invincible), prints
 // what each measured against its recorded baseline, writes bench/out/<suite>.json, and exits non-zero when a
 // quality metric regressed, a metric the baseline had is gone, a suite broke, or a speed metric is past the
 // wide threshold. What the numbers mean and the rules they follow: docs/BENCHMARKS.md.
@@ -46,7 +46,7 @@ function revision(root: string): string {
 }
 
 /** What ran: the processor's own name (a hostname says who, not what). */
-const machineName = (): string => (process.env.GALAHAD_BENCH_MACHINE ?? os.cpus()[0]?.model ?? "unknown").replace(/\s+/g, " ").trim().slice(0, 120);
+const machineName = (): string => (process.env.INVINCIBLE_BENCH_MACHINE ?? os.cpus()[0]?.model ?? "unknown").replace(/\s+/g, " ").trim().slice(0, 120);
 
 interface Result {
   suite: string;

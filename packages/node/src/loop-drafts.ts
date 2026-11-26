@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
-import type { LoopTask, LoopWake } from "@galahad/core";
+import type { LoopTask, LoopWake } from "@invincible/core";
 
 /*
  * Loops Galahad drafted when you asked for one in chat (core api.ts, LoopDraftInput). A draft is only a suggestion

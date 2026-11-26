@@ -1,5 +1,5 @@
-import type { QuestView } from "@galahad/core";
-import type { TurnLimits, TurnView } from "@galahad/core/turns";
+import type { QuestView } from "@invincible/core";
+import type { TurnLimits, TurnView } from "@invincible/core/turns";
 import { type Ctx, errorMessage } from "../context.ts";
 import { needsYou } from "../lib/now.ts";
 import { gateOwner, gateResult, questBadge, questInHand, questWhere } from "../lib/quests.ts";

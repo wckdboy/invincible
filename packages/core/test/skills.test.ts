@@ -196,8 +196,8 @@ describe("the trust a quest's evidence earns", () => {
   });
 
   test("a sandbox's network is read from the ledger's own line", () => {
-    expect(ledgerNetwork("container · isolated · 4 cpu · 8 GB · 20 GB disk · galahad/workshop:1")).toBe("isolated");
-    expect(ledgerNetwork("microVM · online · 4 cpu · 8 GB · unlimited disk · galahad/workshop:1 · web search")).toBe("online");
+    expect(ledgerNetwork("container · isolated · 4 cpu · 8 GB · 20 GB disk · invincible/workshop:1")).toBe("isolated");
+    expect(ledgerNetwork("microVM · online · 4 cpu · 8 GB · unlimited disk · invincible/workshop:1 · web search")).toBe("online");
     expect(ledgerNetwork("container · gateway · 2 cpu")).toBe("gateway");
     for (const none of [null, undefined, "", "isolated", "container · elsewhere · 1 cpu", "bash -c echo · isolated → exit 0 · x".replace("· isolated", "isolated")]) expect(ledgerNetwork(none)).toBeNull();
   });

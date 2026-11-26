@@ -8,8 +8,8 @@
 //       them, a plausible wrong one doesn't. The same as the test suite runs, for more seeds.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { AGENTIC_SUITE, agenticProblem, LEVELS, poseTask, problemId } from "../packages/brain/src/index.ts";
-import { asGiven, scoreOf } from "../packages/brain/test/agentic-harness.ts";
+import { AGENTIC_SUITE, agenticProblem, LEVELS, poseTask, problemId } from "../packages/models/src/index.ts";
+import { asGiven, scoreOf } from "../packages/models/test/agentic-harness.ts";
 
 const [command, ...args] = process.argv.slice(2);
 

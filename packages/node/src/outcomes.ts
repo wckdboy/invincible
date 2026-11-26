@@ -1,8 +1,8 @@
-import { addUsage, costOf, dueRun, northStar, parseSchedule, type Prices, redact, type TeamOutcome, type TeamOutcomeControlInput, type TeamOutcomeInput, type TeamTask, type Usage, type UsageLine, usdLabel } from "@galahad/core";
-import type { ChatTools, ToolCall } from "@galahad/brain";
-import { chat } from "@galahad/brain";
-import type { MindStore } from "@galahad/mind";
-import type { NodeIdentity } from "@galahad/core";
+import { addUsage, costOf, dueRun, northStar, parseSchedule, type Prices, redact, type TeamOutcome, type TeamOutcomeControlInput, type TeamOutcomeInput, type TeamTask, type Usage, type UsageLine, usdLabel } from "@invincible/core";
+import type { ChatTools, ToolCall } from "@invincible/models";
+import { chat } from "@invincible/models";
+import type { LedgerStore } from "@invincible/ledger";
+import type { NodeIdentity } from "@invincible/core";
 import { TeamError, type StoredOutcome, type TeamStore } from "./team-store.ts";
 import type { TeamService } from "./team.ts";
 
@@ -26,15 +26,15 @@ const SPENT_BELOW_USD = 0.25;
 const PASSED_GATES = 4;
 const ENDED = new Set<TeamTask["status"]>(["done", "failed", "stopped", "interrupted"]);
 
-export type BrainContext = Parameters<typeof chat>[0];
+export type ModelsContext = Parameters<typeof chat>[0];
 
 export interface OutcomeOptions {
   store: TeamStore;
   service: () => TeamService;
-  mind: MindStore;
+  mind: LedgerStore;
   identity: NodeIdentity;
   /** The brain, as the node counts its calls (server's brainFor). */
-  brain: () => BrainContext;
+  brain: () => ModelsContext;
   prices: () => Prices;
   log: (message: string) => void;
   now?: () => number;
@@ -261,7 +261,7 @@ export class OutcomeRunner {
       }
       const lines: UsageLine[] = [];
       const brain = this.o.brain();
-      const counted: BrainContext = {
+      const counted: ModelsContext = {
         ...brain,
         spent: (call: { role: string; ref: string; usage: Usage | null }) => {
           addUsage(lines, call.role, call.ref, call.usage);

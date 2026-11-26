@@ -508,7 +508,7 @@ export function whatMoreBuys(nodes: readonly { name: string; body: ComputeBody; 
   const hosts = nodes.filter((n) => n.body.sandboxHost);
   for (const n of hosts) {
     if (!n.capacity.measured) {
-      lines.push(`${n.name} isn't measured yet, so he counts one slot on it: galahad compute calibrate ${n.name}.`);
+      lines.push(`${n.name} isn't measured yet, so he counts one slot on it: invincible compute calibrate ${n.name}.`);
       continue;
     }
     if (n.limit?.cores !== undefined) continue;
@@ -522,7 +522,7 @@ export function whatMoreBuys(nodes: readonly { name: string; body: ComputeBody; 
     const slots = Math.min(Math.floor(Math.round(delivered * more) / SLOT_CPUS), Math.floor(n.capacity.memoryGb / SLOT_MEMORY_GB));
     if (more > now && slots > n.capacity.sandboxes) {
       lines.push(
-        `${n.name}: a ceiling of ${more} threads instead of ${now} could carry up to ${plural(slots, "sandbox slot")} instead of ${n.capacity.sandboxes}, if nothing else there needs them: galahad compute limit ${n.name} --cores ${more}. ` +
+        `${n.name}: a ceiling of ${more} threads instead of ${now} could carry up to ${plural(slots, "sandbox slot")} instead of ${n.capacity.sandboxes}, if nothing else there needs them: invincible compute limit ${n.name} --cores ${more}. ` +
           "Up to, because threads that share a core add less than a core each: he measures again on the new ceiling and counts what that shows.",
       );
     }
@@ -538,15 +538,15 @@ export function whatMoreBuys(nodes: readonly { name: string; body: ComputeBody; 
         : together > Math.floor(slots / MAX_EFFORT)
           ? `, and ${plural(together, "quest")} could run at effort ${MAX_EFFORT} together instead of ${Math.floor(slots / MAX_EFFORT)}`
           : "";
-    lines.push(`Another machine like ${strongest.name} would carry ${plural(after, "slot")} instead of ${slots}: the Trials would run ${fixed1(after / Math.max(1, slots))}× as many problems at once${also}. Enroll it with galahad invite; he calibrates it and adapts.`);
+    lines.push(`Another machine like ${strongest.name} would carry ${plural(after, "slot")} instead of ${slots}: the Trials would run ${fixed1(after / Math.max(1, slots))}× as many problems at once${also}. Enroll it with invincible invite; he calibrates it and adapts.`);
     // More slots only help while the model calls keep up: a quest's calls each take one on the node that's asked, and wait
     // their turn beyond its ceiling (measured: bun run bench compute, where a ninth machine bought 1 % at eight calls).
     const asked = nodes[0]!;
     const calls = asked.capacity.modelCalls;
     if (after > calls) {
-      lines.push(`A quest's model calls go through the node that's asked, ${calls} at once on ${asked.name}: with ${plural(after, "slot")}, model calls ${slots > calls ? "are already" : "would be"} what limits him, not sandboxes. galahad compute limit ${asked.name} --model-calls n raises it.`);
+      lines.push(`A quest's model calls go through the node that's asked, ${calls} at once on ${asked.name}: with ${plural(after, "slot")}, model calls ${slots > calls ? "are already" : "would be"} what limits him, not sandboxes. invincible compute limit ${asked.name} --model-calls n raises it.`);
     }
-  } else lines.push("A machine with Docker would give him sandboxes: quests and trials need one. Enroll it with galahad invite.");
+  } else lines.push("A machine with Docker would give him sandboxes: quests and trials need one. Enroll it with invincible invite.");
   if (!nodes.some((n) => n.body.gpu.length)) lines.push("A node with a GPU would let a local model answer for the swift role (and the Lab's GPU work run), with nothing leaving the fleet.");
   return lines;
 }
@@ -589,7 +589,7 @@ export function computeSuggestions(
       out.push({
         key: `compute-suggest:hire-local:${node.id}`,
         title: `Galahad suggests: hire ${ref} for the swift role`.slice(0, 200),
-        body: `${ref} wrote ${fixed1(best.tps)} tokens a second on ${node.name}, and nobody has hired it. Changing the roster is yours: galahad roster set swift ${[ref, ...swift].join(" ")}`.slice(0, 2000),
+        body: `${ref} wrote ${fixed1(best.tps)} tokens a second on ${node.name}, and nobody has hired it. Changing the roster is yours: invincible roster set swift ${[ref, ...swift].join(" ")}`.slice(0, 2000),
       });
     }
   }

@@ -1,5 +1,5 @@
-import { randomId, type TerminalEvent, type TerminalView } from "@galahad/core";
-import { type LedgerEntryInput, SandboxError, type TerminalProcess } from "@galahad/sandbox";
+import { randomId, type TerminalEvent, type TerminalView } from "@invincible/core";
+import { type LedgerEntryInput, SandboxError, type TerminalProcess } from "@invincible/sandbox";
 
 /*
  * Terminals in this node's sandboxes, for you: each a login shell on a real terminal (SandboxHost.terminal), held

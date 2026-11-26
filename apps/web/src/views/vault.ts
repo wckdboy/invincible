@@ -1,4 +1,4 @@
-import type { ProviderView, SecretRequestView, SecretView } from "@galahad/core";
+import type { ProviderView, SecretRequestView, SecretView } from "@invincible/core";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { detectProvider, detectSignIn, planLine, providerSetup, type SignInForm } from "../lib/text.ts";
 import { hlcMs, relativeTime } from "../lib/time.ts";

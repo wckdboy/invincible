@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { randomId } from "@galahad/core";
+import { randomId } from "@invincible/core";
 
 /*
  * Where the archive's files live: content-addressed by SHA-256, stored once whatever

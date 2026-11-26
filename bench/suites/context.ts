@@ -1,5 +1,5 @@
 import type { ChatMessage, ExecResult } from "../../packages/core/src/index.ts";
-import { type QuestRole, runQuest } from "../../packages/brain/src/quest.ts";
+import { type QuestRole, runQuest } from "../../packages/models/src/quest.ts";
 import type { Suite } from "../lib.ts";
 
 /*

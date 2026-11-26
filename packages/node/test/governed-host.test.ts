@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, MAC_VM_OVERHEAD, type NodeCapacity, newNodeIdentity, SELF_ACTION_QUEST, VM_OVERHEAD } from "@galahad/core";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
-import type { CreateInput, LedgerEntryInput, SpawnTerminal } from "@galahad/sandbox";
+import { b64u, MAC_VM_OVERHEAD, type NodeCapacity, newNodeIdentity, SELF_ACTION_QUEST, VM_OVERHEAD } from "@invincible/core";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
+import type { CreateInput, LedgerEntryInput, SpawnTerminal } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
 import { GovernedSandboxHost } from "../src/compute/governed-host.ts";
 import { Governor, KEPT_WORK_MS } from "../src/compute/governor.ts";
@@ -9,7 +9,7 @@ import { modelSpeed, sandboxStart } from "../src/compute/measure.ts";
 import { fakeDocker } from "./fake-docker.ts";
 // (The sandbox package's stand-in for Apple's container: a Mac's host, behind the same governor.)
 import { fakeContainer } from "../../sandbox/test/fake-container.ts";
-import { ContainerVolumes, KEEPERS } from "@galahad/sandbox";
+import { ContainerVolumes, KEEPERS } from "@invincible/sandbox";
 
 /*
  * The governed sandbox host: the real host's own logic above a stand-in Docker, behind
@@ -226,7 +226,7 @@ describe("what a calibration measures of this node, through the same door", () =
 
   test("a local model's speed: only a runtime on this machine, never one that was repointed elsewhere", async () => {
     const identity = newNodeIdentity();
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
     void b64u;
     const vault = new Vault(store, identity);
@@ -332,7 +332,7 @@ describe("on a Mac (Apple's container), behind the same governor", () => {
     const { sandbox, governor, fake, ledger } = mac();
     const starts = await sandboxStart(sandbox, governor, () => capacity({ cores: 12, memoryGb: 24, sandboxes: 2 }));
     expect(starts.map((s) => s.kind)).toEqual(["vm"]);
-    expect(ledger.filter((e) => e.class === "create" && e.resource === "docker.container" && e.target.startsWith("galahad-sbx-")).map((e) => e.detail)).toEqual(["microVM · gateway · 1 cpu · 1 GB · 20 GB disk · galahad/sandbox:1"]);
+    expect(ledger.filter((e) => e.class === "create" && e.resource === "docker.container" && e.target.startsWith("invincible-sbx-")).map((e) => e.detail)).toEqual(["microVM · gateway · 1 cpu · 1 GB · 20 GB disk · invincible/sandbox:1"]);
     // Nothing of it is left: only the networks' keepers, which are no sandboxes.
     expect([...fake.vms.keys()]).toEqual([KEEPERS.gateway, KEEPERS.online]);
     expect(fake.volumes.size).toBe(0);

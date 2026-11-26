@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type ActionView, type RouteName, routes, type TeamSnapshot } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type ActionView, type RouteName, routes, type TeamSnapshot } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -64,7 +64,7 @@ function fakeGitHub(options: { branchExists?: boolean; prFails?: boolean; heads?
     if (path.endsWith("/git/refs")) return { status: 201, json: {} };
     if (path.endsWith("/pulls"))
       return options.prFails
-        ? { status: 422, json: { message: "Validation Failed", errors: [{ message: "No commits between main and galahad/units" }] } }
+        ? { status: 422, json: { message: "Validation Failed", errors: [{ message: "No commits between main and invincible/units" }] } }
         : { status: 201, json: { number: 7, html_url: "https://github.com/amiriteorg/shipyard/pull/7" } };
     return { status: 404, json: {} };
   };
@@ -76,7 +76,7 @@ const kept = (files: Record<string, Uint8Array>): ShipDeps["artifact"] => (id) =
     ? { files: Object.entries(files).map(([path, bytes]) => ({ path, size: bytes.length })), read: (path) => files[path]! }
     : null;
 
-const ARGS = { owner: "amiriteorg", repo: "shipyard", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", branch: "galahad/units", title: "Parse SI units", body: "40 tests pass." };
+const ARGS = { owner: "amiriteorg", repo: "shipyard", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", branch: "invincible/units", title: "Parse SI units", body: "40 tests pass." };
 
 describe("shipping to GitHub", () => {
   test("blobs, one tree on the starting commit (deletions included), one commit, a new branch, the pull request", async () => {
@@ -85,7 +85,7 @@ describe("shipping to GitHub", () => {
     expect(result).toMatchObject({ ok: true, status: 201, url: "https://github.com/amiriteorg/shipyard/pull/7" });
     expect(result.receipt).toContain("pull request #7");
     expect(gh.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      "GET /repos/amiriteorg/shipyard/git/ref/heads/galahad/units",
+      "GET /repos/amiriteorg/shipyard/git/ref/heads/invincible/units",
       "GET /repos/amiriteorg/shipyard",
       `GET /repos/amiriteorg/shipyard/git/commits/${BASE}`,
       "POST /repos/amiriteorg/shipyard/git/blobs",
@@ -105,8 +105,8 @@ describe("shipping to GitHub", () => {
       { path: "old.txt", mode: "100644", type: "blob", sha: null },
     ]);
     expect(gh.posts().find((c) => c.path.endsWith("/git/commits"))!.body).toEqual({ message: "Parse SI units\n\n40 tests pass.", tree: "e".repeat(40), parents: [BASE] });
-    expect(gh.posts().find((c) => c.path.endsWith("/git/refs"))!.body).toEqual({ ref: "refs/heads/galahad/units", sha: "c".repeat(40) });
-    expect(gh.posts().at(-1)!.body).toEqual({ title: "Parse SI units", head: "galahad/units", base: "main", body: "40 tests pass." });
+    expect(gh.posts().find((c) => c.path.endsWith("/git/refs"))!.body).toEqual({ ref: "refs/heads/invincible/units", sha: "c".repeat(40) });
+    expect(gh.posts().at(-1)!.body).toEqual({ title: "Parse SI units", head: "invincible/units", base: "main", body: "40 tests pass." });
   });
 
   test("an existing branch is never touched", async () => {
@@ -133,36 +133,36 @@ describe("shipping to GitHub", () => {
   test("a pull request GitHub refuses says what was done and what wasn't", async () => {
     const result = await shipToGitHub({ github: fakeGitHub({ prFails: true }).github, artifact: kept(SHIPMENT) }, ARGS);
     expect(result.ok).toBe(false);
-    expect(result.receipt).toContain("committed 3 files on galahad/units");
-    expect(result.receipt).toContain("No commits between main and galahad/units");
+    expect(result.receipt).toContain("committed 3 files on invincible/units");
+    expect(result.receipt).toContain("No commits between main and invincible/units");
   });
 
-  const UPDATE = { owner: "amiriteorg", repo: "shipyard", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", branch: "galahad/units", title: "Fix the failing checks", body: "Made by @kay." };
+  const UPDATE = { owner: "amiriteorg", repo: "shipyard", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", branch: "invincible/units", title: "Fix the failing checks", body: "Made by @kay." };
 
   test("a fix goes on top of the branch it began on: one commit on where the branch stands, the branch moved forward (never forced), the pull request on it named", async () => {
-    const gh = fakeGitHub({ heads: { "galahad/units": BASE } });
+    const gh = fakeGitHub({ heads: { "invincible/units": BASE } });
     const result = await shipToGitHub({ github: gh.github, artifact: kept(SHIPMENT) }, UPDATE, true);
     expect(result).toMatchObject({ ok: true, status: 200, url: "https://github.com/amiriteorg/shipyard/pull/7" });
-    expect(result.receipt).toBe(`3 files pushed onto galahad/units, commit ${"c".repeat(12)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
+    expect(result.receipt).toBe(`3 files pushed onto invincible/units, commit ${"c".repeat(12)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
     expect(gh.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      "GET /repos/amiriteorg/shipyard/git/ref/heads/galahad/units",
+      "GET /repos/amiriteorg/shipyard/git/ref/heads/invincible/units",
       `GET /repos/amiriteorg/shipyard/git/commits/${BASE}`,
       "POST /repos/amiriteorg/shipyard/git/blobs",
       "POST /repos/amiriteorg/shipyard/git/blobs",
       "POST /repos/amiriteorg/shipyard/git/trees",
       "POST /repos/amiriteorg/shipyard/git/commits",
-      "PATCH /repos/amiriteorg/shipyard/git/refs/heads/galahad/units",
-      "GET /repos/amiriteorg/shipyard/pulls?head=amiriteorg:galahad%2Funits&state=open&per_page=1",
+      "PATCH /repos/amiriteorg/shipyard/git/refs/heads/invincible/units",
+      "GET /repos/amiriteorg/shipyard/pulls?head=amiriteorg:invincible%2Funits&state=open&per_page=1",
     ]);
     expect(gh.posts().find((c) => c.path.endsWith("/git/commits"))!.body).toEqual({ message: "Fix the failing checks\n\nMade by @kay.", tree: "e".repeat(40), parents: [BASE] });
     expect(gh.calls.find((c) => c.method === "PATCH")!.body).toEqual({ sha: "c".repeat(40), force: false });
   });
 
   test("a branch that moved since the fix began, or that isn't there, is never pushed onto", async () => {
-    const moved = fakeGitHub({ heads: { "galahad/units": "d".repeat(40) } });
+    const moved = fakeGitHub({ heads: { "invincible/units": "d".repeat(40) } });
     const result = await shipToGitHub({ github: moved.github, artifact: kept(SHIPMENT) }, UPDATE, true);
     expect(result).toMatchObject({ ok: false, status: 409 });
-    expect(result.receipt).toBe(`galahad/units has moved since the work began (from ${BASE.slice(0, 12)} to ${"d".repeat(12)}): nothing was pushed`);
+    expect(result.receipt).toBe(`invincible/units has moved since the work began (from ${BASE.slice(0, 12)} to ${"d".repeat(12)}): nothing was pushed`);
     expect(moved.calls.filter((c) => c.method !== "GET")).toEqual([]);
     const gone = fakeGitHub();
     expect(await shipToGitHub({ github: gone.github, artifact: kept(SHIPMENT) }, UPDATE, true)).toMatchObject({ ok: false, status: 404 });
@@ -170,9 +170,9 @@ describe("shipping to GitHub", () => {
   });
 
   test("a move GitHub refuses (it wasn't forward) says what was committed, and that the branch stayed where it was", async () => {
-    const result = await shipToGitHub({ github: fakeGitHub({ heads: { "galahad/units": BASE }, moveFails: true }).github, artifact: kept(SHIPMENT) }, UPDATE, true);
+    const result = await shipToGitHub({ github: fakeGitHub({ heads: { "invincible/units": BASE }, moveFails: true }).github, artifact: kept(SHIPMENT) }, UPDATE, true);
     expect(result.ok).toBe(false);
-    expect(result.receipt).toBe(`committed 3 files (${"c".repeat(12)}), but galahad/units wasn't moved onto it: Update is not a fast forward`);
+    expect(result.receipt).toBe(`committed 3 files (${"c".repeat(12)}), but invincible/units wasn't moved onto it: Update is not a fast forward`);
   });
 
   test("a file that fails its check stops the shipment", async () => {
@@ -195,9 +195,9 @@ describe("shipping to GitHub", () => {
     expect(sameRepository("git@github.com:amiriteorg/shipyard.git", "amiriteorg", "shipyard")).toBe(true);
     expect(sameRepository("https://github.com/amiriteorg/shipyard-evil", "amiriteorg", "shipyard")).toBe(false);
     expect(sameRepository("https://gitlab.com/amiriteorg/shipyard", "amiriteorg", "shipyard")).toBe(false);
-    expect(githubRepo("https://github.com/amiriteorg/galahad.git")).toEqual({ owner: "amiriteorg", repo: "galahad" });
+    expect(githubRepo("https://github.com/amiriteorg/invincible.git")).toEqual({ owner: "amiriteorg", repo: "invincible" });
     expect(githubRepo("https://example.com/a/b")).toBeNull();
-    expect(shipBranch("Parse SI units, with tests!", "q-mwafrqc4")).toBe("galahad/parse-si-units-with-tests-mwafrqc4");
+    expect(shipBranch("Parse SI units, with tests!", "q-mwafrqc4")).toBe("invincible/parse-si-units-with-tests-mwafrqc4");
   });
 });
 
@@ -212,7 +212,7 @@ describe("the shipment the sandbox leaves", () => {
   const python = have(["python3", "--version"]) && have(["git", "--version"]);
 
   test.skipIf(!python)("every change since the clone: new, changed, executable and deleted files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-ship-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-ship-"));
     try {
       const repo = join(dir, "repo");
       const git = (...a: string[]) => Bun.spawnSync(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
@@ -252,7 +252,7 @@ describe("the shipment the sandbox leaves", () => {
   });
 
   test.skipIf(!python)("told where the work began, it ships what was committed since as well as what wasn't: a knight in its own worktree may commit", () => {
-    const dir = mkdtempSync(join(tmpdir(), "galahad-ship-"));
+    const dir = mkdtempSync(join(tmpdir(), "invincible-ship-"));
     try {
       const repo = join(dir, "repo");
       const git = (...a: string[]) => Bun.spawnSync(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", ...a]);
@@ -294,12 +294,12 @@ describe("the shipment the sandbox leaves", () => {
 
 describe("the gate, end to end", () => {
   const caps: Capabilities = { os: "linux", arch: "x64", hostname: "ship", cores: 4, cpu: "t", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
-  const root = mkdtempSync(join(tmpdir(), "galahad-shipgate-"));
+  const root = mkdtempSync(join(tmpdir(), "invincible-shipgate-"));
   const home = new Home(join(root, "node"));
   const port = freePort();
   const TOKEN = "github_pat_FAKEFAKEFAKEFAKE0000_fakefakefakefakefakefakefakefakefakefakefakefake";
   const seen: { method: string; url: string; auth: string | null }[] = [];
-  const gh = fakeGitHub({ heads: { "galahad/fixing": BASE } });
+  const gh = fakeGitHub({ heads: { "invincible/fixing": BASE } });
   let daemon: Daemon;
   let armToken: string;
   let artifact: string;
@@ -312,7 +312,7 @@ describe("the gate, end to end", () => {
 
   beforeAll(async () => {
     const { identity, keystore } = await home.createIdentity("file");
-    const store = new MindStore(home.mindPath);
+    const store = new LedgerStore(home.ledgerPath);
     const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
     store.close();
     home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -369,7 +369,7 @@ describe("the gate, end to end", () => {
   });
 
   test("you can ask to be asked: your own call, filed for approval", async () => {
-    const filed = await send(home.adminToken(), "callConnector", { connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "galahad/second" }, ask: {} });
+    const filed = await send(home.adminToken(), "callConnector", { connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/second" }, ask: {} });
     expect(filed.body).toMatchObject({ status: "asked" });
   });
 
@@ -401,7 +401,7 @@ describe("the gate, end to end", () => {
     const filed = actions.find((a) => a.tool === "ship" && a.state === "done" && a.by.endsWith(".kay"));
     // Your tap is your approval, recorded as yours, though the repository is one you gave a knight.
     expect(filed?.self).toBe(false);
-    expect(filed?.args).toMatchObject({ owner: "amiriteorg", repo: "shipyard", artifact, title: "Parse SI units", branch: `galahad/parse-si-units-${id.slice(-8)}` });
+    expect(filed?.args).toMatchObject({ owner: "amiriteorg", repo: "shipyard", artifact, title: "Parse SI units", branch: `invincible/parse-si-units-${id.slice(-8)}` });
     expect(String(filed?.args.body)).toStartWith("Units parse, kilo to giga.");
     // Said on the task, and not offered again.
     const task = ((await send(home.adminToken(), "team")).body as TeamSnapshot).tasks.find((t) => t.id === id);
@@ -412,16 +412,16 @@ describe("the gate, end to end", () => {
   });
 
   test("a fix onto its pull request's branch goes through the same gate: it waits for you; approved, the branch moves forward once and no new pull request opens", async () => {
-    const fix = { owner: "amiriteorg", repo: "shipyard", artifact, branch: "galahad/fixing", title: "Fix the failing checks" };
+    const fix = { owner: "amiriteorg", repo: "shipyard", artifact, branch: "invincible/fixing", title: "Fix the failing checks" };
     const asked = await send(armToken, "callConnector", { connector: "github", tool: "ship.update", args: fix, why: "its checks failed" });
-    expect(asked.body).toMatchObject({ status: "asked", class: "outward", target: "PATCH /repos/amiriteorg/shipyard/git/refs/heads/galahad%2Ffixing (ship.update)" });
+    expect(asked.body).toMatchObject({ status: "asked", class: "outward", target: "PATCH /repos/amiriteorg/shipyard/git/refs/heads/invincible%2Ffixing (ship.update)" });
     const before = seen.length;
     expect((await send(home.adminToken(), "decideAction", { id: asked.body.action, approve: true })).status).toBe(200);
     const action = ((await send(home.adminToken(), "actions")).body.actions as ActionView[]).find((a) => a.id === asked.body.action)!;
     expect(action.state).toBe("done");
-    expect(action.receipt).toBe(`200 3 files pushed onto galahad/fixing, commit ${"c".repeat(12)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
+    expect(action.receipt).toBe(`200 3 files pushed onto invincible/fixing, commit ${"c".repeat(12)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
     const sent = seen.slice(before);
-    expect(sent.filter((s) => s.method === "PATCH").map((s) => s.url)).toEqual(["https://api.github.com/repos/amiriteorg/shipyard/git/refs/heads/galahad/fixing"]);
+    expect(sent.filter((s) => s.method === "PATCH").map((s) => s.url)).toEqual(["https://api.github.com/repos/amiriteorg/shipyard/git/refs/heads/invincible/fixing"]);
     expect(sent.some((s) => s.method === "POST" && (s.url.endsWith("/pulls") || s.url.endsWith("/git/refs")))).toBe(false);
     expect(sent.every((s) => s.url.startsWith("https://api.github.com/") && s.auth === `Bearer ${TOKEN}`)).toBe(true);
     // Never onto a branch that isn't Galahad's own.
@@ -441,9 +441,9 @@ describe("the gate, end to end", () => {
     }
     const knight = { kind: "agent" as const, by: "team.0123456789.lynette" };
     const actions = async () => (await send(home.adminToken(), "actions")).body.actions as ActionView[];
-    const why = "a pull request of the work, on a galahad/… branch, in amiriteorg/shipyard, a repository you gave a knight";
+    const why = "a pull request of the work, on a invincible/… branch, in amiriteorg/shipyard, a repository you gave a knight";
     let before = seen.length;
-    const shipped = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "galahad/his-own" }, why: "its gates and its reviewer passed" }, knight);
+    const shipped = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/his-own" }, why: "its gates and its reviewer passed" }, knight);
     expect(shipped.status).toBe("done");
     expect(shipped.status === "done" && shipped.own).toBe(why);
     expect(seen.slice(before).filter((s) => s.method === "POST" && s.url.endsWith("/pulls"))).toHaveLength(1);
@@ -451,21 +451,21 @@ describe("the gate, end to end", () => {
     expect([filed.state, filed.self, filed.note]).toEqual(["done", true, `Galahad approved it himself: ${why}`]);
     // A fix pushed onto its branch, likewise.
     before = seen.length;
-    const pushed = await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact, branch: "galahad/fixing", title: "Fix the failing checks" }, why: "its checks failed" }, knight);
-    expect(pushed.status === "done" && pushed.own).toBe("a fix pushed onto its galahad/… branch, in amiriteorg/shipyard, a repository you gave a knight");
+    const pushed = await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact, branch: "invincible/fixing", title: "Fix the failing checks" }, why: "its checks failed" }, knight);
+    expect(pushed.status === "done" && pushed.own).toBe("a fix pushed onto its invincible/… branch, in amiriteorg/shipyard, a repository you gave a knight");
     expect(seen.slice(before).filter((s) => s.method === "PATCH")).toHaveLength(1);
     // His own tools in chat, in a repository you gave a knight.
-    const opened = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "galahad/his-own", base: "main", title: "Parse SI units" } }, { kind: "agent", by: "arm:galahad" });
+    const opened = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/his-own", base: "main", title: "Parse SI units" } }, { kind: "agent", by: "arm:galahad" });
     expect(opened.status === "done" && opened.own).toBe("a pull request in amiriteorg/shipyard, a repository you gave a knight");
   });
 
   test("what isn't his still waits for you: another repository, a tool you run with a token of its own, your own tap", async () => {
     const before = seen.length;
-    const elsewhere = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "oven-sh", repo: "bun", head: "galahad/x", base: "main", title: "A fix" } }, { kind: "agent", by: "arm:galahad" });
+    const elsewhere = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "oven-sh", repo: "bun", head: "invincible/x", base: "main", title: "A fix" } }, { kind: "agent", by: "arm:galahad" });
     expect(elsewhere.status).toBe("asked");
-    const tool = await send(armToken, "callConnector", { connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "galahad/x", base: "main", title: "A fix" } });
+    const tool = await send(armToken, "callConnector", { connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/x", base: "main", title: "A fix" } });
     expect(tool.body.status).toBe("asked");
-    const tapped = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "galahad/y", base: "main", title: "Another" } }, { kind: "agent", by: "team.0123456789.lynette", yours: true });
+    const tapped = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/y", base: "main", title: "Another" } }, { kind: "agent", by: "team.0123456789.lynette", yours: true });
     expect(tapped.status).toBe("asked");
     expect(seen.length).toBe(before);
   });

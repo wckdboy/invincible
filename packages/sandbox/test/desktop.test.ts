@@ -21,7 +21,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 /** A machine with stand-ins for the display's tools: each writes its name and arguments to `trace`, one line a call. */
 function machine(options: { running?: boolean; env?: Record<string, string> } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "galahad-desktop-")); dirs.push(dir);
+  const dir = mkdtempSync(join(tmpdir(), "invincible-desktop-")); dirs.push(dir);
   const bin = join(dir, "bin"), home = join(dir, "home"), run = join(dir, "run"), trace = join(dir, "trace");
   mkdirSync(bin); mkdirSync(home); mkdirSync(run);
   // (One write a call: tools started in the background write at the same time as those that wait for them.)
@@ -33,7 +33,7 @@ function machine(options: { running?: boolean; env?: Record<string, string> } = 
   tool("pgrep", options.running ? "exit 0" : 'grep -q "^chromium" "$TRACE" && exit 0 || exit 1');
   tool("python3", 'echo "Example Domain"; echo "https://example.com/"; echo "This domain is for use in documentation examples."');
   const ask = (...args: string[]) => {
-    const proc = Bun.spawnSync(["sh", script, ...args], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, TRACE: trace, GALAHAD_DESKTOP_RUN: run, TMPDIR: run, GALAHAD_DESKTOP_WAIT: "3", ...options.env } });
+    const proc = Bun.spawnSync(["sh", script, ...args], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, TRACE: trace, INVINCIBLE_DESKTOP_RUN: run, TMPDIR: run, INVINCIBLE_DESKTOP_WAIT: "3", ...options.env } });
     return { code: proc.exitCode, out: proc.stdout.toString().trim(), err: proc.stderr.toString().trim() };
   };
   const traced = () => (existsSync(trace) ? readFileSync(trace, "utf8").trim().split("\n").filter(Boolean) : []);
@@ -107,7 +107,7 @@ describe("the desktop command", () => {
 
 describe("looking at the screen", () => {
   test("look takes a screenshot and puts the question to the model that was named for this VM, through the gateway it was given", () => {
-    const m = machine({ running: true, env: { GALAHAD_EYES: "opencode-go/gpt-6-luna", GALAHAD_GATEWAY: "http://gateway.test/gw", GALAHAD_TOKEN: "gw_test-only" } });
+    const m = machine({ running: true, env: { INVINCIBLE_EYES: "opencode-go/gpt-6-luna", INVINCIBLE_GATEWAY: "http://gateway.test/gw", INVINCIBLE_TOKEN: "gw_test-only" } });
     expect(m.ask("look", "Where is the Sign in button?")).toMatchObject({ code: 0 });
     const asked = m.traced().filter((line) => /^(scrot|python3) /.test(line));
     // A fresh picture of the screen (a JPEG: a tenth of the size), then the question with it.
@@ -123,7 +123,7 @@ describe("looking at the screen", () => {
     expect(none.code).toBe(3);
     expect(none.err).toContain("no model that can see is set for this VM");
     expect(blind.traced().filter((line) => /^(scrot|python3) /.test(line))).toEqual([]);
-    const m = machine({ running: true, env: { GALAHAD_EYES: "opencode-go/gpt-6-luna", GALAHAD_GATEWAY: "http://gateway.test/gw", GALAHAD_TOKEN: "gw_test-only" } });
+    const m = machine({ running: true, env: { INVINCIBLE_EYES: "opencode-go/gpt-6-luna", INVINCIBLE_GATEWAY: "http://gateway.test/gw", INVINCIBLE_TOKEN: "gw_test-only" } });
     expect(m.ask("look").code).toBe(2);
     expect(m.ask("help").out).toContain('desktop look "<question>"');
   }, 30_000);
@@ -131,15 +131,15 @@ describe("looking at the screen", () => {
 
 describe("the desktop image", () => {
   test("is the knights' image with a display, a window manager, a browser and the tools that operate them, and ends as the knight", () => {
-    expect(dockerfile).toMatch(/^FROM galahad\/sandbox:1$/m);
+    expect(dockerfile).toMatch(/^FROM invincible\/sandbox:1$/m);
     const installed = dockerfile.replace(/\\\n/g, " ");
     for (const pkg of ["xvfb", "openbox", "chromium", "xdotool", "scrot", "x11-utils", "python3-websocket", "fonts-noto-cjk"]) expect(installed).toMatch(new RegExp(`apt-get install[^\\n]* ${pkg}( |$)`, "m"));
     expect(dockerfile).toContain("COPY desktop /usr/local/bin/desktop\n");
     expect(dockerfile).toContain("RUN chmod 0755 /usr/local/bin/desktop\n");
     // Root only to install: the image is left as the knight's user, like the one it is made from.
     expect(dockerfile.trimEnd().split("\n").filter((line) => line.startsWith("USER ")).at(-1)).toBe("USER 1000:1000");
-    expect(DESKTOP_IMAGE).toBe("galahad/desktop:1");
+    expect(DESKTOP_IMAGE).toBe("invincible/desktop:1");
     // (Made from the knights' image, which is in no registry: never pulled, and made first when it's gone. own-images.test.ts)
-    expect(OWN_IMAGES[DESKTOP_IMAGE]).toEqual({ context: "desktop", keeper: "galahad-desktop-image", base: "galahad/sandbox:1" });
+    expect(OWN_IMAGES[DESKTOP_IMAGE]).toEqual({ context: "desktop", keeper: "invincible-desktop-image", base: "invincible/sandbox:1" });
   });
 });

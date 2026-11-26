@@ -1,6 +1,6 @@
-import type { ChatStreamEvent } from "@galahad/core";
-import { utf8 } from "@galahad/core/bytes";
-import { signRequest, ZONE_HEADER } from "@galahad/core/request-auth";
+import type { ChatStreamEvent } from "@invincible/core";
+import { utf8 } from "@invincible/core/bytes";
+import { signRequest, ZONE_HEADER } from "@invincible/core/request-auth";
 import { type BrowserIdentity, signerFor } from "./identity.ts";
 
 /*

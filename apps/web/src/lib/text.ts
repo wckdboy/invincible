@@ -103,8 +103,8 @@ export function planLine(preset: KeyPreset | undefined): string | null {
   const plan = preset?.plan;
   if (!plan) return null;
   if (plan.allows.native) return `${plan.name} is a coding plan: Galahad and the other knights code on it, and their coding tools use it. His talk with you never does.`;
-  if (plan.allows.tools === "unattended") return `${plan.name} is a coding plan its terms allow only inside the coding tools they name: a knight's coding tool runs on it, and so does one you run yourself (galahad run). Galahad never calls it himself.`;
-  return `${plan.name} is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (galahad run), and never to Galahad or a knight's work.`;
+  if (plan.allows.tools === "unattended") return `${plan.name} is a coding plan its terms allow only inside the coding tools they name: a knight's coding tool runs on it, and so does one you run yourself (invincible run). Galahad never calls it himself.`;
+  return `${plan.name} is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (invincible run), and never to Galahad or a knight's work.`;
 }
 
 /** A role's models as he uses them: his own in the roster's order (the first answers), and the coding plans' models, which do coding and answer nothing else. */

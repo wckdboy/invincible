@@ -2,14 +2,14 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { release, tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomId } from "@galahad/core";
+import { randomId } from "@invincible/core";
 import { type LedgerEntryInput, microVMsAvailable, SandboxHost, vmResolvConf, WORKSPACE_SOCKET, WorkspaceHelper } from "../src/index.ts";
 
 /*
- * Real Docker, real containers. Opt-in (GALAHAD_DOCKER_TESTS=1) and meant for a
- * sandbox host such as ultra, after `galahad sandbox build` has built the image.
+ * Real Docker, real containers. Opt-in (INVINCIBLE_DOCKER_TESTS=1) and meant for a
+ * sandbox host such as ultra, after `invincible sandbox build` has built the image.
  */
-const enabled = process.env.GALAHAD_DOCKER_TESTS === "1";
+const enabled = process.env.INVINCIBLE_DOCKER_TESTS === "1";
 
 describe.if(enabled)("sandbox host on real Docker", () => {
   const node = `n_it_${randomId(6)}`;
@@ -51,7 +51,7 @@ describe.if(enabled)("sandbox host on real Docker", () => {
   test("gateway mode has no internet; online mode does", async () => {
     const gw = await host.create({ ...base, network: "gateway", quest: "it-2", providers: ["deepseek"] });
     const env = (await host.exec(gw.id, ["sh", "-c", "echo $OPENAI_BASE_URL; echo ${OPENAI_API_KEY%%_*}"])).stdout.split("\n");
-    expect(env[0]).toBe("http://172.31.250.1:7779/gw/deepseek");
+    expect(env[0]).toBe("http://172.31.250.1:7402/gw/deepseek");
     expect(env[1]).toBe("gw"); // a scoped gateway token, never a provider key
     expect((await host.exec(gw.id, ["sh", "-c", "curl -s -m 4 https://example.com >/dev/null"])).exitCode).not.toBe(0);
     const online = await host.create({ ...base, network: "online", quest: "it-2" });
@@ -127,8 +127,8 @@ describe.if(enabled && existsSync(WORKSPACE_SOCKET))("size-limited workspaces on
   test("the image stays in use (a stopped keeper container), so `docker image prune -a` leaves it alone", async () => {
     expect(await host.keepImage()).toBe(true);
     const inspect = (args: string[]) => new TextDecoder().decode(Bun.spawnSync(["docker", ...args]).stdout).trim();
-    const image = inspect(["image", "inspect", "galahad/sandbox:1", "--format", "{{.Id}}"]);
-    expect(inspect(["container", "inspect", "galahad-sandbox-image", "--format", "{{.Image}} {{.State.Status}}"])).toBe(`${image} created`);
+    const image = inspect(["image", "inspect", "invincible/sandbox:1", "--format", "{{.Id}}"]);
+    expect(inspect(["container", "inspect", "invincible-sandbox-image", "--format", "{{.Image}} {{.State.Status}}"])).toBe(`${image} created`);
   }, 60_000);
 });
 
@@ -139,7 +139,7 @@ describe.if(microVMs)("KVM microVMs on real Docker", () => {
   if (!microVMs) return;
   const node = `n_it_${randomId(6)}`;
   const tokens = { mint: () => ({ token: `gw_${randomId(32)}`, info: { hash: randomId(16) } }), revoke: () => true };
-  const dir = mkdtempSync(join(tmpdir(), "galahad-vm-it-"));
+  const dir = mkdtempSync(join(tmpdir(), "invincible-vm-it-"));
   const resolvConf = join(dir, "resolv.conf");
   const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : null);
   writeFileSync(resolvConf, vmResolvConf(read("/run/systemd/resolve/resolv.conf"), read("/etc/resolv.conf")), { mode: 0o644 });
@@ -170,8 +170,8 @@ describe.if(microVMs)("KVM microVMs on real Docker", () => {
     const sb = await host.create({ ...base, network: "online", quest: "it-vm" });
     expect(sb.isolation).toBe("vm");
     expect(await sh(sb.id, "curl -s -m 10 -o /dev/null -w '%{http_code}' https://example.com")).toBe("200");
-    expect(await sh(sb.id, "curl -s -m 4 -o /dev/null -w '%{http_code}' http://172.31.250.1:7779/ || true")).not.toBe("000");
-    expect((await host.exec(sb.id, ["sh", "-c", "curl -s -m 3 http://172.31.249.1:7777/ >/dev/null"])).exitCode).not.toBe(0);
+    expect(await sh(sb.id, "curl -s -m 4 -o /dev/null -w '%{http_code}' http://172.31.250.1:7402/ || true")).not.toBe("000");
+    expect((await host.exec(sb.id, ["sh", "-c", "curl -s -m 3 http://172.31.249.1:7400/ >/dev/null"])).exitCode).not.toBe(0);
     await host.destroy(sb.id, { quest: "it-vm" });
   }, 180_000);
 
@@ -186,7 +186,7 @@ describe.if(microVMs)("KVM microVMs on real Docker", () => {
     for (const isolation of ["container", "vm"] as const) {
       const sb = await host.create({ ...base, network: "isolated", isolation, quest: "it-vm" });
       await sh(sb.id, "mkdir -p /work/out/plots && printf '# report\\n' > /work/out/report.md && head -c 4096 /dev/urandom > /work/out/plots/a.bin && ln -s /etc/passwd /work/out/passwd");
-      const dest = mkdtempSync(join(tmpdir(), "galahad-collect-"));
+      const dest = mkdtempSync(join(tmpdir(), "invincible-collect-"));
       try {
         const result = await host.collect(sb.id, "/work/out", dest, { maxBytes: 1 << 20, maxFiles: 100 });
         expect(result!.files.map((f) => f.path).sort()).toEqual(["plots/a.bin", "report.md"]);

@@ -2,20 +2,20 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type RouteName, routes } from "@galahad/core";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { type RouteName, routes } from "@invincible/core";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * Galahad as an ACP agent, end to end: `galahad acp install` mints a credential that may only chat, and `galahad acp`,
+ * Galahad as an ACP agent, end to end: `invincible acp install` mints a credential that may only chat, and `invincible acp`,
  * as an ACP client starts it, answers a prompt through the node. A real daemon; a stand-in model.
  */
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "acp-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
-const root = mkdtempSync(join(tmpdir(), "galahad-acp-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-acp-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
@@ -35,11 +35,11 @@ const TURN = "How do we deploy?";
 
 const call = (name: RouteName, input: unknown) =>
   fetch(`http://127.0.0.1:${port}${routes[name].path}`, { method: routes[name].method, headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify(input) });
-const env = () => ({ ...process.env, GALAHAD_KEYSTORE: "file" });
+const env = () => ({ ...process.env, INVINCIBLE_KEYSTORE: "file" });
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "acp-node" });
   store.close();
   home.writeConfig({ v: 1, name: "acp-node", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -88,7 +88,7 @@ test("installed for an ACP client, he answers a prompt through his node, with no
     return out.find((m) => m.id === id);
   };
   send(1, "initialize", { protocolVersion: 2, clientCapabilities: {} });
-  expect((await answer(1)).result.agentInfo.name).toBe("galahad");
+  expect((await answer(1)).result.agentInfo.name).toBe("invincible");
   send(2, "session/new", { cwd: root, mcpServers: [] });
   const { sessionId } = (await answer(2)).result;
   send(3, "session/prompt", { sessionId, prompt: [{ type: "text", text: TURN }] });

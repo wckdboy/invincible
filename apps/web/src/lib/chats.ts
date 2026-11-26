@@ -1,4 +1,4 @@
-import type { ConversationSummary, StoredMessage } from "@galahad/core";
+import type { ConversationSummary, StoredMessage } from "@invincible/core";
 
 /*
  * Chat history and projects as the app shows them. Pure functions (no DOM), unit-tested.

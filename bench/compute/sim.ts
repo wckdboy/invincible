@@ -18,7 +18,7 @@ import {
   SLOT_CPUS,
   SLOT_MEMORY_GB,
 } from "../../packages/core/src/index.ts";
-import { enrollDevice, foundFleet, MindStore } from "../../packages/mind/src/index.ts";
+import { enrollDevice, foundFleet, LedgerStore } from "../../packages/ledger/src/index.ts";
 import type { Capabilities } from "../../packages/node/src/capabilities.ts";
 import { Governor } from "../../packages/node/src/compute/governor.ts";
 import { ComputeService } from "../../packages/node/src/compute/service.ts";
@@ -28,7 +28,7 @@ import { intBelow, rng, subSeed } from "../lib.ts";
 
 /*
  * A fleet's compute in one process and in virtual time: a queue of independent
- * quests (the Trials' shape), run the way `galahad trial run` runs them, on fleets
+ * quests (the Trials' shape), run the way `invincible trial run` runs them, on fleets
  * of machines of different measured strengths. What decides is the real code: a
  * real mind holds each node's profile, its calibration and the owner's ceilings;
  * the real census (ComputeService) derives what each carries; the real placement
@@ -86,7 +86,7 @@ export interface ComputeSimOptions {
   machines?: readonly Machine[];
   quests: number;
   effort: 1 | 2 | 3;
-  /** Trials at once: "auto" (what `galahad trial run` does by default), or as many as the slots carry. */
+  /** Trials at once: "auto" (what `invincible trial run` does by default), or as many as the slots carry. */
   parallel: "auto" | "slots";
   /**
    * What the asking node knows of the other hosts' slots: "synced" (as old as their last sync, the real thing),
@@ -210,7 +210,7 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
 
   const epoch = 1_800_000_000_000;
   let tick = 0;
-  const store = new MindStore(":memory:", new HlcClock(() => epoch + tick++));
+  const store = new LedgerStore(":memory:", new HlcClock(() => epoch + tick++));
   const hosts: Host[] = [];
   try {
     const identities = machines.map(() => nodeIdentity(bytes32(keys), bytes32(keys)));

@@ -39,7 +39,7 @@ const base: SandboxSpec = {
   id: "0123456789",
   quest: "q1",
   node: "n_test",
-  image: "galahad/sandbox:1",
+  image: "invincible/sandbox:1",
   network: "gateway",
   cpus: 4,
   memoryGb: 8,
@@ -50,7 +50,7 @@ const base: SandboxSpec = {
   createdAt: 1_000,
   env: {},
   isolation: "vm",
-  workspace: "galahad-sbx-0123456789-work",
+  workspace: "invincible-sbx-0123456789-work",
   diskGb: 20,
 };
 
@@ -62,7 +62,7 @@ describe("a sandbox on a Mac: the hardening flags", () => {
 
   test("it runs unprivileged, every capability dropped, its root read-only, under an init", () => {
     expect(args.slice(0, 2)).toEqual(["run", "--detach"]);
-    expect(pair(args, "--name")).toBe("galahad-sbx-0123456789");
+    expect(pair(args, "--name")).toBe("invincible-sbx-0123456789");
     expect(pair(args, "--user")).toBe("1000:1000");
     expect(pair(args, "--cap-drop")).toBe("ALL");
     expect(args).not.toContain("--cap-add");
@@ -82,28 +82,28 @@ describe("a sandbox on a Mac: the hardening flags", () => {
   });
 
   test("its /work is its own volume of a fixed size, the one thing of the host's it is given", () => {
-    expect(all(args, "--mount")).toEqual(["type=volume,source=galahad-sbx-0123456789-work,target=/work"]);
+    expect(all(args, "--mount")).toEqual(["type=volume,source=invincible-sbx-0123456789-work,target=/work"]);
     for (const flag of ["--volume", "-v", "--ssh", "--virtualization", "--rosetta", "--publish", "-p", "--publish-socket", "--kernel", "--init-image"]) expect(args).not.toContain(flag);
     expect(args.join(" ")).not.toMatch(/type=bind|docker\.sock/);
-    expect(all(args, "--label")).toContain("dev.galahad.disk=20");
+    expect(all(args, "--label")).toContain("dev.invincible.disk=20");
   });
 
   test("it is labelled as Docker's are, and with its image, which a VM made again is made from", () => {
     const labels = all(args, "--label");
-    for (const label of ["dev.galahad=1", "dev.galahad.id=0123456789", "dev.galahad.quest=q1", "dev.galahad.node=n_test", "dev.galahad.ephemeral=true", "dev.galahad.isolation=vm", "dev.galahad.image=galahad/sandbox:1", `dev.galahad.expires=${1_000 + 120 * 60_000}`]) {
+    for (const label of ["dev.invincible=1", "dev.invincible.id=0123456789", "dev.invincible.quest=q1", "dev.invincible.node=n_test", "dev.invincible.ephemeral=true", "dev.invincible.isolation=vm", "dev.invincible.image=invincible/sandbox:1", `dev.invincible.expires=${1_000 + 120 * 60_000}`]) {
       expect(labels).toContain(label);
     }
-    expect(args.slice(-3)).toEqual(["galahad/sandbox:1", "sleep", "infinity"]);
+    expect(args.slice(-3)).toEqual(["invincible/sandbox:1", "sleep", "infinity"]);
   });
 
   test("a gateway token goes in as the environment, as on Docker, and never as a label", () => {
-    const withToken = containerRunArgs({ ...base, env: { GALAHAD_TOKEN: "test-only-token" }, tokenHash: "test-only-hash" });
-    expect(all(withToken, "--env")).toContain("GALAHAD_TOKEN=test-only-token");
+    const withToken = containerRunArgs({ ...base, env: { INVINCIBLE_TOKEN: "test-only-token" }, tokenHash: "test-only-hash" });
+    expect(all(withToken, "--env")).toContain("INVINCIBLE_TOKEN=test-only-token");
     expect(all(withToken, "--label").join(" ")).not.toMatch(/test-only/);
   });
 
   test("every flag Docker's run and network commands set is accounted for on a Mac: used, replaced, or why its promise holds without it", () => {
-    const docker = [...runArgs({ ...base, isolation: "vm", network: "online", resolvConf: "/x/resolv.conf", workspace: "/var/lib/w/0123456789", env: { GALAHAD_TOKEN: "t" } }), ...networkCreateArgs("gateway")];
+    const docker = [...runArgs({ ...base, isolation: "vm", network: "online", resolvConf: "/x/resolv.conf", workspace: "/var/lib/w/0123456789", env: { INVINCIBLE_TOKEN: "t" } }), ...networkCreateArgs("gateway")];
     const flags = new Set(docker.filter((a) => /^-/.test(a)));
     for (const flag of flags) expect(Object.keys(DOCKER_ON_A_MAC)).toContain(flag);
     // Each says what it becomes, and in a sentence whether its promise holds.
@@ -128,8 +128,8 @@ describe("a sandbox on a Mac: its networks", () => {
 
   test("every VM boots without IPv6, which would reach the host and the sandboxes beside it past rules written for IPv4", () => {
     for (const network of ["online", "gateway"] as const) expect(all(containerRunArgs({ ...base, network }), "--kernel-arg")).toEqual(["ipv6.disable=1"]);
-    expect(all(containerKeeperArgs("galahad/sandbox:1", "online"), "--kernel-arg")).toEqual(["ipv6.disable=1"]);
-    expect(all(containerVolumeOwnArgs("0123456789", "galahad/sandbox:1"), "--kernel-arg")).toEqual(["ipv6.disable=1"]);
+    expect(all(containerKeeperArgs("invincible/sandbox:1", "online"), "--kernel-arg")).toEqual(["ipv6.disable=1"]);
+    expect(all(containerVolumeOwnArgs("0123456789", "invincible/sandbox:1"), "--kernel-arg")).toEqual(["ipv6.disable=1"]);
   });
 
   test("gateway is the internal network alone, with no resolver: it reaches the gateway by its address", () => {
@@ -144,12 +144,12 @@ describe("a sandbox on a Mac: its networks", () => {
   });
 
   test("the networks are made on Docker's subnets, so the gateways' addresses are the same: the gateway's host-only (--internal), online's with vmnet's NAT", () => {
-    expect(containerNetworkCreateArgs("gateway")).toEqual(["network", "create", "--internal", "--subnet", NETWORKS.gateway.subnet, "--label", "dev.galahad=1", NETWORKS.gateway.name]);
-    expect(containerNetworkCreateArgs("online")).toEqual(["network", "create", "--subnet", NETWORKS.online.subnet, "--label", "dev.galahad=1", NETWORKS.online.name]);
+    expect(containerNetworkCreateArgs("gateway")).toEqual(["network", "create", "--internal", "--subnet", NETWORKS.gateway.subnet, "--label", "dev.invincible=1", NETWORKS.gateway.name]);
+    expect(containerNetworkCreateArgs("online")).toEqual(["network", "create", "--subnet", NETWORKS.online.subnet, "--label", "dev.invincible=1", NETWORKS.online.name]);
   });
 
   test("a network's helper is restarted by its launchd label, in the domain given (apple/container#2051)", () => {
-    expect(helperRestartArgs("gui/501", NETWORKS.online.name)).toEqual(["kickstart", "-k", "gui/501/com.apple.container.container-network-vmnet.galahad-net"]);
+    expect(helperRestartArgs("gui/501", NETWORKS.online.name)).toEqual(["kickstart", "-k", "gui/501/com.apple.container.container-network-vmnet.invincible-net"]);
   });
 });
 
@@ -165,37 +165,37 @@ describe("what a Mac doesn't make yet", () => {
 
 describe("the other commands", () => {
   test("a command runs as uid 1000 in /work, under a deadline inside the VM", () => {
-    expect(containerExecArgs("0123456789", ["bun", "test"], 30)).toEqual(["exec", "--interactive", "--user", "1000:1000", "--workdir", "/work", "galahad-sbx-0123456789", "timeout", "--signal=KILL", "30s", "bun", "test"]);
+    expect(containerExecArgs("0123456789", ["bun", "test"], 30)).toEqual(["exec", "--interactive", "--user", "1000:1000", "--workdir", "/work", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "30s", "bun", "test"]);
   });
 
   test("a terminal is a login shell as uid 1000 on a TTY, tagged so its hang-up finds what it started", () => {
     expect(containerTerminalArgs("0123456789", "abcd")).toEqual([
-      "exec", "--interactive", "--tty", "--user", "1000:1000", "--workdir", "/work", "--env", "TERM=xterm-256color", "--env", "GALAHAD_TERMINAL=abcd",
-      "galahad-sbx-0123456789", "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l",
+      "exec", "--interactive", "--tty", "--user", "1000:1000", "--workdir", "/work", "--env", "TERM=xterm-256color", "--env", "INVINCIBLE_TERMINAL=abcd",
+      "invincible-sbx-0123456789", "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l",
     ]);
   });
 
   test("list, inspect, stop, start, delete and stats", () => {
     expect(containerListArgs()).toEqual(["list", "--all", "--format", "json"]);
-    expect(containerInspectArgs(["galahad-sbx-0123456789"])).toEqual(["inspect", "galahad-sbx-0123456789"]);
-    expect(containerStopArgs("galahad-sbx-0123456789")).toEqual(["stop", "--time", "10", "galahad-sbx-0123456789"]);
-    expect(containerStartArgs("galahad-sbx-0123456789")).toEqual(["start", "galahad-sbx-0123456789"]);
-    expect(containerDeleteArgs("galahad-sbx-0123456789")).toEqual(["delete", "--force", "galahad-sbx-0123456789"]);
-    expect(containerStatsArgs(["galahad-sbx-0123456789"])).toEqual(["stats", "--format", "json", "--no-stream", "galahad-sbx-0123456789"]);
+    expect(containerInspectArgs(["invincible-sbx-0123456789"])).toEqual(["inspect", "invincible-sbx-0123456789"]);
+    expect(containerStopArgs("invincible-sbx-0123456789")).toEqual(["stop", "--time", "10", "invincible-sbx-0123456789"]);
+    expect(containerStartArgs("invincible-sbx-0123456789")).toEqual(["start", "invincible-sbx-0123456789"]);
+    expect(containerDeleteArgs("invincible-sbx-0123456789")).toEqual(["delete", "--force", "invincible-sbx-0123456789"]);
+    expect(containerStatsArgs(["invincible-sbx-0123456789"])).toEqual(["stats", "--format", "json", "--no-stream", "invincible-sbx-0123456789"]);
   });
 
   test("an image is built for linux/arm64, its base pulled afresh", () => {
-    expect(containerBuildArgs("galahad/sandbox:1", "/opt/galahad/sandbox")).toEqual(["build", "--pull", "--platform", "linux/arm64", "--tag", "galahad/sandbox:1", "/opt/galahad/sandbox"]);
+    expect(containerBuildArgs("invincible/sandbox:1", "/opt/invincible/sandbox")).toEqual(["build", "--pull", "--platform", "linux/arm64", "--tag", "invincible/sandbox:1", "/opt/invincible/sandbox"]);
   });
 
   test("a workspace is a volume of a fixed size, labelled as its sandbox's; a knight's is marked to be kept", () => {
-    expect(containerVolumeCreateArgs("0123456789", 20, false)).toEqual(["volume", "create", "-s", "20G", "--label", "dev.galahad=1", "--label", "dev.galahad.id=0123456789", "galahad-sbx-0123456789-work"]);
-    expect(containerVolumeCreateArgs("0123456789", 40, true)).toContain("dev.galahad.retained=1");
+    expect(containerVolumeCreateArgs("0123456789", 20, false)).toEqual(["volume", "create", "-s", "20G", "--label", "dev.invincible=1", "--label", "dev.invincible.id=0123456789", "invincible-sbx-0123456789-work"]);
+    expect(containerVolumeCreateArgs("0123456789", 40, true)).toContain("dev.invincible.retained=1");
   });
 
   test("what is kept is copied out as a tar from inside the VM, as uid 1000, under a deadline", () => {
-    expect(containerCollectArgs("0123456789", "/work/out")).toEqual(["exec", "--user", "1000:1000", "galahad-sbx-0123456789", "timeout", "--signal=KILL", "900s", "tar", "-C", "/work", "-cf", "-", "out"]);
-    expect(containerCollectArgs("0123456789", "/work")).toEqual(["exec", "--user", "1000:1000", "galahad-sbx-0123456789", "timeout", "--signal=KILL", "900s", "tar", "-C", "/", "-cf", "-", "work"]);
+    expect(containerCollectArgs("0123456789", "/work/out")).toEqual(["exec", "--user", "1000:1000", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "900s", "tar", "-C", "/work", "-cf", "-", "out"]);
+    expect(containerCollectArgs("0123456789", "/work")).toEqual(["exec", "--user", "1000:1000", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "900s", "tar", "-C", "/", "-cf", "-", "work"]);
   });
 });
 
@@ -230,22 +230,22 @@ describe("what container prints, read", () => {
       {
         configuration: {
           mounts: [],
-          id: "galahad-sbx-0123456789",
-          labels: { "dev.galahad": "1", "dev.galahad.id": "0123456789", "dev.galahad.image": "galahad/sandbox:1" },
-          image: { reference: "docker.io/galahad/sandbox:1" },
+          id: "invincible-sbx-0123456789",
+          labels: { "dev.invincible": "1", "dev.invincible.id": "0123456789", "dev.invincible.image": "invincible/sandbox:1" },
+          image: { reference: "docker.io/invincible/sandbox:1" },
           resources: { cpus: 4, memoryInBytes: 1073741824 },
         },
-        status: { state: "running", networks: [{ ipv4Address: "192.168.64.3/24", ipv4Gateway: "192.168.64.1", hostname: "galahad-sbx-0123456789.test.", network: "default" }] },
+        status: { state: "running", networks: [{ ipv4Address: "192.168.64.3/24", ipv4Gateway: "192.168.64.1", hostname: "invincible-sbx-0123456789.test.", network: "default" }] },
       },
       { configuration: { id: "buildkit", resources: { cpus: 2, memoryInBytes: 2147483648 } }, status: { state: "stopped", networks: [] } },
       "not a container",
     ]);
     expect(parseContainers(listed)).toEqual([
-      { id: "galahad-sbx-0123456789", labels: { "dev.galahad": "1", "dev.galahad.id": "0123456789", "dev.galahad.image": "galahad/sandbox:1" }, image: "galahad/sandbox:1", status: "running", cpus: 4, memoryBytes: 1073741824, networks: ["default"] },
+      { id: "invincible-sbx-0123456789", labels: { "dev.invincible": "1", "dev.invincible.id": "0123456789", "dev.invincible.image": "invincible/sandbox:1" }, image: "invincible/sandbox:1", status: "running", cpus: 4, memoryBytes: 1073741824, networks: ["default"] },
       { id: "buildkit", labels: {}, image: "", status: "exited", cpus: 2, memoryBytes: 2147483648, networks: [] },
     ]);
     // Without the label, the image is container's own reference to it.
-    expect(parseContainers(JSON.stringify([{ configuration: { id: "x", image: { reference: "galahad/sandbox:1" } }, status: { state: "running" } }]))?.[0]?.image).toBe("galahad/sandbox:1");
+    expect(parseContainers(JSON.stringify([{ configuration: { id: "x", image: { reference: "invincible/sandbox:1" } }, status: { state: "running" } }]))?.[0]?.image).toBe("invincible/sandbox:1");
     // A list that isn't one is not "none".
     expect(parseContainers("{}")).toBeNull();
     expect(parseContainers("")).toBeNull();
@@ -278,26 +278,26 @@ describe("what container prints, read", () => {
       "driver" : "local",
       "format" : "ext4",
       "labels" : {
-        "dev.galahad" : "1",
-        "dev.galahad.id" : "0123456789",
-        "dev.galahad.retained" : "1"
+        "dev.invincible" : "1",
+        "dev.invincible.id" : "0123456789",
+        "dev.invincible.retained" : "1"
       },
-      "name" : "galahad-sbx-0123456789-work",
+      "name" : "invincible-sbx-0123456789-work",
       "options" : {
 
       },
       "sizeInBytes" : 21474836480,
-      "source" : "\\/Users\\/fido\\/Library\\/Application Support\\/com.apple.container\\/volumes\\/galahad-sbx-0123456789-work\\/volume.img"
+      "source" : "\\/Users\\/fido\\/Library\\/Application Support\\/com.apple.container\\/volumes\\/invincible-sbx-0123456789-work\\/volume.img"
     },
-    "id" : "galahad-sbx-0123456789-work"
+    "id" : "invincible-sbx-0123456789-work"
   }
 ]`;
     expect(parseContainerVolumes(sample)).toEqual([
       {
-        name: "galahad-sbx-0123456789-work",
-        labels: { "dev.galahad": "1", "dev.galahad.id": "0123456789", "dev.galahad.retained": "1" },
+        name: "invincible-sbx-0123456789-work",
+        labels: { "dev.invincible": "1", "dev.invincible.id": "0123456789", "dev.invincible.retained": "1" },
         sizeBytes: 21474836480,
-        source: "/Users/fido/Library/Application Support/com.apple.container/volumes/galahad-sbx-0123456789-work/volume.img",
+        source: "/Users/fido/Library/Application Support/com.apple.container/volumes/invincible-sbx-0123456789-work/volume.img",
         createdAt: Date.parse("2026-08-10T21:39:10Z"),
       },
     ]);

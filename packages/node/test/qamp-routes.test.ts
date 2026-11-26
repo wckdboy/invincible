@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { b64u, clientIdFromKey, newNodeIdentity, type QampGrantMade, type QampGrantView, type RouteName, routes, type Scope, signRequest, utf8 } from "@galahad/core";
-import { requestPairing, signedFetch, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { b64u, clientIdFromKey, newNodeIdentity, type QampGrantMade, type QampGrantView, type RouteName, routes, type Scope, signRequest, utf8 } from "@invincible/core";
+import { requestPairing, signedFetch, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -58,7 +58,7 @@ class FakeQamp implements QampRunner {
   }
 }
 
-const root = mkdtempSync(join(tmpdir(), "galahad-qamp-routes-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-qamp-routes-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const qampPort = freePort();
@@ -102,7 +102,7 @@ const lines = () => daemon.store.ledger(200).map((e) => e.body).filter((b) => b.
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
-  const store = new MindStore(home.mindPath);
+  const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
@@ -175,7 +175,7 @@ describe("refused at the door", () => {
 
   test("a grant's arm is made by a grant alone, and never widened by hand", async () => {
     const minted = await admin<{ error: string }>("mintArm", { label: "qamp.0a1b2c3d4e" });
-    expect([minted.status, minted.body.error]).toEqual([400, "names beginning qamp. are grants to agents on other machines (galahad qamp grant); choose another"]);
+    expect([minted.status, minted.body.error]).toEqual([400, "names beginning qamp. are grants to agents on other machines (invincible qamp grant); choose another"]);
     const { grant } = (await admin<QampGrantMade>("qampGrant", { agent: AGENT, tools: ["fleet"] })).body;
     const widened = await admin<{ error: string }>("grantArm", { label: grant.label, add: ["bank:read"] });
     expect(widened.status).toBe(400);
@@ -215,7 +215,7 @@ describe("its arm at the door", () => {
     }
   }, 30_000);
 
-  test("revoked where arms are listed (galahad arms revoke, the app's Revoke): the grant ends with it, its bridge stopped", async () => {
+  test("revoked where arms are listed (invincible arms revoke, the app's Revoke): the grant ends with it, its bridge stopped", async () => {
     const { grant } = (await admin<QampGrantMade>("qampGrant", { agent: AGENT, tools: ["compute"] })).body;
     const bridge = qamp.bridges.at(-1)!;
     expect((await admin("revokeArm", { label: grant.label })).body).toEqual({ revoked: true });

@@ -1,6 +1,6 @@
 /*
  * Hosted MCP servers worth having at hand: each the service's own, as the official MCP Registry lists it under the
- * service's own namespace (checked 17 November 2026), added with one tap or `galahad connector add <id>`. Every one that
+ * service's own namespace (checked 17 November 2026), added with one tap or `invincible connector add <id>`. Every one that
  * signs in was found to take Galahad's own sign-in as it is: a 401 that names its authorization server, which lets a
  * client register itself, with PKCE (S256).
  */

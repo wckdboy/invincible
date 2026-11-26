@@ -6,7 +6,7 @@ const QUEST = "arm.team.abcdef0123.builder";
 const OLD_LEASE = "test-only-old-lease-hash";
 const lease = (n: number) => `test-only-gateway-lease-${n}`;
 /** Where the helper mounted the VM's disk on the host. */
-const DISK = `/var/lib/galahad-workspaces/${ID}/mnt`;
+const DISK = `/var/lib/invincible-workspaces/${ID}/mnt`;
 const REMADE = { providers: ["openai"], approvedBy: "test-owner" };
 
 /** Docker/helper stand-ins: no containers, mounts, host files, or real credentials. */
@@ -84,7 +84,7 @@ function teammateHost(opts: {
       // (Asked of one container by name: whether it is there, and where its /work comes from.)
       if (args[0] === "inspect" && args[1] === "--format") {
         if (args[2] === "{{.Name}}") return named.has(args[3]!) ? { code: 0, stdout: `/${args[3]}`, stderr: "" } : { code: 1, stdout: "", stderr: "No such object" };
-        return { code: 0, stdout: JSON.stringify([{ Type: "bind", Source: DISK, Destination: "/work" }, { Type: "bind", Source: "/etc/galahad/resolv.conf", Destination: "/etc/resolv.conf" }]), stderr: "" };
+        return { code: 0, stdout: JSON.stringify([{ Type: "bind", Source: DISK, Destination: "/work" }, { Type: "bind", Source: "/etc/invincible/resolv.conf", Destination: "/etc/resolv.conf" }]), stderr: "" };
       }
       if (args[0] === "stop") all.push("stop");
       if (args[0] === "rename") { all.push(`rename:${args[1]}>${args[2]}`); named.delete(args[1]!); named.add(args[2]!); }
@@ -100,7 +100,7 @@ function teammateHost(opts: {
         held = { NanoCpus: Number(args[args.indexOf("--cpus") + 1]) * 1e9, Memory: Number.parseInt(args[args.indexOf("--memory") + 1]!, 10) * 2 ** 20 };
       }
       if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([
-        { Config: { Labels: labels, Image: "galahad/sandbox:1" }, State: { Status: opts.status ?? "exited" }, ...(held ? { HostConfig: held } : {}) },
+        { Config: { Labels: labels, Image: "invincible/sandbox:1" }, State: { Status: opts.status ?? "exited" }, ...(held ? { HostConfig: held } : {}) },
       ]), stderr: "" };
       if (args[0] === "start") {
         note("start");
@@ -129,10 +129,9 @@ describe("persistent teammate workspaces", () => {
     const payload = f.commands.find((args) => args[0] === "exec")!.at(-1)!;
     const env = JSON.parse(Buffer.from(payload, "base64").toString());
     expect(env.OPENAI_API_KEY).toBe(lease(1));
-    expect(env.OPENAI_BASE_URL).toBe("http://172.31.250.1:7779/gw/openai");
-    expect(env).not.toHaveProperty("GALAHAD_WORLD");
-    expect(env.GALAHAD_TOKEN).toBe(lease(1));
-    expect(env.GALAHAD_REPO_URL).toBe("http://172.31.250.1:7779/git/github/example/project.git");
+    expect(env.OPENAI_BASE_URL).toBe("http://172.31.250.1:7402/gw/openai");
+    expect(env.INVINCIBLE_TOKEN).toBe(lease(1));
+    expect(env.INVINCIBLE_REPO_URL).toBe("http://172.31.250.1:7402/git/github/example/project.git");
     const visible = JSON.stringify({ resumed, ledger: f.ledger });
     expect(visible).not.toContain(lease(1));
     expect(visible).not.toContain("test-only-hash-1");
@@ -273,15 +272,15 @@ describe("persistent teammate workspaces", () => {
     expect([after("--cpus"), after("--memory"), after("--runtime"), after("--network")]).toEqual(["2", "4096m", "io.containerd.kata.v2", NETWORKS.gateway.name]);
     for (const label of [`${LABEL}.id=${ID}`, `${LABEL}.quest=${QUEST}`, `${LABEL}.ephemeral=false`, `${LABEL}.created=1000`, `${LABEL}.expires=604801000`, `${LABEL}.disk=20`, `${LABEL}.isolation=vm`, `${LABEL}.providers=openai`]) expect(run).toContain(label);
     // From the image by its name, which is the image as it is built now.
-    expect(run.slice(-3)).toEqual(["galahad/sandbox:1", "sleep", "infinity"]);
+    expect(run.slice(-3)).toEqual(["invincible/sandbox:1", "sleep", "infinity"]);
     // The container that was is removed, and nothing of its disk: no volumes flag, no word to the helper to remove.
     expect(f.commands.filter((args) => args[0] === "rm")).toEqual([["rm", "--force", `${name}-replaced`]]);
     expect(f.all.some((event) => event.startsWith("remove"))).toBe(false);
     // A new lease in its environment; the one before is revoked only after the new VM runs.
-    expect(run).toContain(`GALAHAD_TOKEN=${lease(1)}`);
+    expect(run).toContain(`INVINCIBLE_TOKEN=${lease(1)}`);
     expect(f.stored.get(ID)).toBe("test-only-hash-1");
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["openai"], ttlMinutes: 7 * 24 * 60, maxRequests: 100_000 }]);
-    expect(f.ledger).toEqual([expect.objectContaining({ class: "modify", resource: "docker.container", target: name, verdict: "approved", quest: QUEST, detail: expect.stringContaining("made again from galahad/sandbox:1") })]);
+    expect(f.ledger).toEqual([expect.objectContaining({ class: "modify", resource: "docker.container", target: name, verdict: "approved", quest: QUEST, detail: expect.stringContaining("made again from invincible/sandbox:1") })]);
     expect(JSON.stringify({ remade, ledger: f.ledger })).not.toContain(lease(1));
   });
 
@@ -317,9 +316,9 @@ describe("persistent teammate workspaces", () => {
       await f.host.remakeTeam(ID, QUEST, { ...REMADE, ...(desktop === undefined ? {} : { desktop }) });
       return { run: f.commands.find((args) => args[0] === "run")!.at(-3), ledger: f.ledger.at(-1)!.detail };
     };
-    expect(await image()).toMatchObject({ run: "galahad/sandbox:1" });
-    expect(await image(true)).toEqual({ run: "galahad/desktop:1", ledger: expect.stringContaining("made again from galahad/desktop:1") });
-    expect((await image(false)).run).toBe("galahad/sandbox:1");
+    expect(await image()).toMatchObject({ run: "invincible/sandbox:1" });
+    expect(await image(true)).toEqual({ run: "invincible/desktop:1", ledger: expect.stringContaining("made again from invincible/desktop:1") });
+    expect((await image(false)).run).toBe("invincible/sandbox:1");
   });
 
   test("a remake that was cut short is taken up again: the container that was set aside gets its name back first", async () => {

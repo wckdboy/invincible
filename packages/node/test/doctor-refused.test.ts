@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { newNodeIdentity } from "@galahad/core";
-import { foundFleet, MindStore, Vault } from "@galahad/mind";
-import { refusedKeysOf, refusalsStillSaid } from "@galahad/brain";
+import { newNodeIdentity } from "@invincible/core";
+import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
+import { refusedKeysOf, refusalsStillSaid } from "@invincible/models";
 import { type Diagnosis, type DoctorFacts, diagnose } from "../src/doctor.ts";
 
 /*
@@ -31,7 +31,7 @@ function base(): DoctorFacts {
     compute: null,
     loops: [],
     connectors: [],
-    app: { missing: [], published: null, local: "http://127.0.0.1:7778" },
+    app: { missing: [], published: null, local: "http://127.0.0.1:7401" },
     disk: null,
     service: { restarts: 0, warnings: [] },
   };
@@ -59,7 +59,7 @@ describe("a provider that refused its key", () => {
     expect(refused.area).toBe("models");
     expect(refused.state).toBe("needs-you");
     expect(refused.line).toBe("mimo-token refused its key at 01:28 UTC: 401: Invalid API Key");
-    expect(refused.fix).toContain("galahad key add --provider mimo-token");
+    expect(refused.fix).toContain("invincible key add --provider mimo-token");
     expect(refused.fix).toContain("--base-url");
     expect(refused.finding).toMatchObject({ severity: "warn", title: "mimo-token refused its key" });
     expect(refused.finding!.body).toContain("mimo-token refused its key at 01:28 UTC: 401: Invalid API Key");
@@ -72,7 +72,7 @@ describe("a provider that refused its key", () => {
     const refused = byId(diagnose(facts), "models.key.deepseek");
     expect(refused.state).toBe("needs-you");
     expect(refused.line).toBe("deepseek refused its key at 01:28 UTC: 403: Forbidden");
-    expect(refused.fix).toBe("Replace the key: galahad key add --provider deepseek.");
+    expect(refused.fix).toBe("Replace the key: invincible key add --provider deepseek.");
     expect(refused.fix).not.toContain("--base-url");
     expect(hasId(diagnose(facts), "models.key.mimo-token")).toBe(false);
   });
@@ -135,15 +135,15 @@ describe("a role whose model's provider refused its key", () => {
     expect(byId(checks, "role.planner")).toMatchObject({ state: "broken", line: "no model can play planner: deepseek/deepseek-chat (its provider refused its key)" });
     expect(byId(checks, "role.plan-coder")).toMatchObject({ state: "needs-you", line: "no model can play plan-coder: mimo-token/mimo-v2.6-pro (its provider refused its key)" });
     // What to do is the key's (said above), or another model.
-    expect(byId(checks, "role.planner").fix).toBe("Replace its key (said above), or hire a model that works here: galahad roster set planner <provider/model>.");
+    expect(byId(checks, "role.planner").fix).toBe("Replace its key (said above), or hire a model that works here: invincible roster set planner <provider/model>.");
   });
 });
 
 describe("a refusal from before the key was last set", () => {
-  function keyedBrain() {
+  function keyedModels() {
     const id = "mimo-token";
     const identity = newNodeIdentity();
-    const store = new MindStore(":memory:");
+    const store = new LedgerStore(":memory:");
     foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
     const vault = new Vault(store, identity);
     const baseUrl = "https://plan.invalid/v1";
@@ -153,7 +153,7 @@ describe("a refusal from before the key was last set", () => {
   }
 
   test("is not said: the key was replaced since", () => {
-    const { store, vault } = keyedBrain();
+    const { store, vault } = keyedModels();
     const refusals = refusedKeysOf(store);
     refusals.now = () => Date.now() - 60_000;
     refusals.note("mimo-token", '401 {"error":{"message":"Invalid API Key"}}');
@@ -163,7 +163,7 @@ describe("a refusal from before the key was last set", () => {
   });
 
   test("is said while the key that was refused is still the one set; setting it again leaves it out", async () => {
-    const { store, vault, baseUrl } = keyedBrain();
+    const { store, vault, baseUrl } = keyedModels();
     const refusals = refusedKeysOf(store);
     refusals.now = () => Date.now();
     refusals.note("mimo-token", '401 {"error":{"message":"Invalid API Key"}}');

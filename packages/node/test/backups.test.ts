@@ -11,7 +11,7 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 function home() {
-  const root = mkdtempSync(join(tmpdir(), "galahad-backups-"));
+  const root = mkdtempSync(join(tmpdir(), "invincible-backups-"));
   dirs.push(root);
   const dir = join(root, "home");
   mkdirSync(dir);
@@ -59,7 +59,7 @@ test("seven days are kept and a Sunday's for four weeks; a copy you made by hand
 
 test("where they are kept: where you said, else beside the home where a backups folder is, else in it", () => {
   const h = home();
-  expect(backupDirFor(h.dir, "/srv/galahad-backups")).toBe("/srv/galahad-backups");
+  expect(backupDirFor(h.dir, "/srv/invincible-backups")).toBe("/srv/invincible-backups");
   expect(backupDirFor(h.dir)).toBe(join(h.dir, "backups"));
   mkdirSync(join(h.root, "backups"));
   expect(backupDirFor(h.dir)).toBe(join(h.root, "backups"));

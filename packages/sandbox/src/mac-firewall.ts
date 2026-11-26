@@ -2,7 +2,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { NETWORKS, SANDBOX_GATEWAY_PORT } from "./spec.ts";
 
 /*
- * The Mac's sandbox firewall: what galahad-firewall is on Ultra (scripts/remote-setup.sh), for Apple's `container`.
+ * The Mac's sandbox firewall: what invincible-firewall is on Ultra (scripts/remote-setup.sh), for Apple's `container`.
  * A gateway sandbox reaches the gateway's one port and nothing else. An online one reaches the internet and the
  * resolver at its network's gateway, never the Mac itself, your network or your tailnet (stricter than Ultra, whose
  * online sandboxes reach past their host). No sandbox reaches another. Two things give it:
@@ -13,17 +13,17 @@ import { NETWORKS, SANDBOX_GATEWAY_PORT } from "./spec.ts";
  *    passes between a bridge's VMs, which never reaches the IP stack and which no ifconfig option turns on.
  *
  * Both need root, so a helper does them: root's own file in /Library/PrivilegedHelperTools, the rules inside it,
- * which launchd runs every ten seconds once `galahad firewall install` has put it there with the owner's password.
+ * which launchd runs every ten seconds once `invincible firewall install` has put it there with the owner's password.
  * What it did it writes to /var/run, root's. The node reads that, and the bridges for itself (a bridge's filter can
  * be read without root), and makes no sandbox on a Mac while either says the firewall isn't on. Each way out of both
  * kinds of sandbox was tried on the Mac mini, 17 November 2026, open without it and shut with it (docs/MAC.md).
  */
 
 export const MAC_FIREWALL = {
-  label: "sh.galahad.firewall",
-  helper: "/Library/PrivilegedHelperTools/sh.galahad.firewall",
-  plist: "/Library/LaunchDaemons/sh.galahad.firewall.plist",
-  status: "/var/run/sh.galahad.firewall.json",
+  label: "sh.invincible.firewall",
+  helper: "/Library/PrivilegedHelperTools/sh.invincible.firewall",
+  plist: "/Library/LaunchDaemons/sh.invincible.firewall.plist",
+  status: "/var/run/sh.invincible.firewall.json",
   anchor: "com.apple/galahad",
   /** Seconds between its runs. */
   every: 10,
@@ -62,7 +62,7 @@ export function macFirewallHelper(): string {
 # Galahad's firewall for its sandboxes on this Mac (docs/MAC.md), run as root by launchd every ${MAC_FIREWALL.every} seconds
 # (${MAC_FIREWALL.label}). It loads the rules below into pf's anchor ${MAC_FIREWALL.anchor}, has pf see what passes between the
 # VMs on each Galahad bridge (the bridge's member filter), and writes what it did to ${MAC_FIREWALL.status}.
-# Written by \`galahad firewall install\`: change Galahad's source, not this file.
+# Written by \`invincible firewall install\`: change Galahad's source, not this file.
 use strict;
 use warnings;
 use IPC::Open3 qw(open3);
@@ -207,7 +207,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 export async function macFirewall(deps: MacFirewallDeps = SYSTEM): Promise<MacFirewallState> {
   const off = (why: string, soon = false) => ({ on: false as const, installed: true, soon, why });
   const file = deps.status();
-  if (!file) return { on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `galahad firewall install` (it asks for your password once)" };
+  if (!file) return { on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)" };
   if (file.uid !== 0 || (file.mode & 0o022) !== 0) return off(`${MAC_FIREWALL.status} isn't root's alone, so what it says can't be trusted`);
   let said: unknown;
   try {
@@ -215,7 +215,7 @@ export async function macFirewall(deps: MacFirewallDeps = SYSTEM): Promise<MacFi
   } catch {
     said = null;
   }
-  if (!isObj(said) || said.v !== 1 || typeof said.at !== "number") return off(`${MAC_FIREWALL.status} can't be read: reinstall it with \`galahad firewall install\``);
+  if (!isObj(said) || said.v !== 1 || typeof said.at !== "number") return off(`${MAC_FIREWALL.status} can't be read: reinstall it with \`invincible firewall install\``);
   if (typeof said.error === "string") return off(`the sandbox firewall's helper says: ${said.error.slice(0, 300)}`);
   const age = deps.now() - said.at * 1000;
   if (age > 3 * MAC_FIREWALL.every * 1000) return off(`the sandbox firewall's helper last ran ${Math.round(age / 1000)} s ago: is it loaded? (sudo launchctl print system/${MAC_FIREWALL.label})`);

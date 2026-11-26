@@ -2,9 +2,9 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { b64u, routes, type RouteName } from "@galahad/core";
-import { requestPairing, signedFetch, signedPost, type SyncPage, waitForApproval } from "@galahad/link";
-import { foundFleet, MindStore } from "@galahad/mind";
+import { b64u, routes, type RouteName } from "@invincible/core";
+import { requestPairing, signedFetch, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
+import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -21,7 +21,7 @@ const caps = (hostname: string, localModels: Capabilities["localModels"] = []): 
   os: "linux", arch: "x64", hostname, cores: 8, cpu: "test", memoryGb: 16, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: ["git"], localModels, tailscale: null,
 });
 
-const root = mkdtempSync(join(tmpdir(), "galahad-local-models-"));
+const root = mkdtempSync(join(tmpdir(), "invincible-local-models-"));
 const homeA = new Home(join(root, "ultra"));
 const homeB = new Home(join(root, "mini"));
 const portA = freePort();
@@ -47,7 +47,7 @@ async function until(check: () => boolean, timeoutMs = 8000): Promise<void> {
 
 beforeAll(async () => {
   const { identity, keystore } = await homeA.createIdentity("file");
-  const store = new MindStore(homeA.mindPath);
+  const store = new LedgerStore(homeA.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   homeA.writeConfig({ v: 1, name: "ultra", fleet, port: portA, keystore, advertise: "127.0.0.1" });
@@ -62,7 +62,7 @@ beforeAll(async () => {
   const { pairings } = (await (await admin(homeA, portA)("pairings")).json()) as { pairings: { invite: string; device: string }[] };
   await admin(homeA, portA)("approvePairing", { invite: pairings[0]!.invite, device: pairings[0]!.device });
   const { fleet: joinedFleet } = await waitForApproval(join, { intervalMs: 20 });
-  const storeB = new MindStore(homeB.mindPath);
+  const storeB = new LedgerStore(homeB.ledgerPath);
   storeB.expectFleet(joinedFleet);
   storeB.ingest((await signedPost<SyncPage>(joined.identity, ultra.endpoint, "/link/sync", { have: {} })).events);
   storeB.close();

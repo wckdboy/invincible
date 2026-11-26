@@ -1,4 +1,4 @@
-import type { ActionView, PairingView } from "@galahad/core";
+import type { ActionView, PairingView } from "@invincible/core";
 import { type Api, nodeReachable, setNetworkHandler } from "./api.ts";
 import type { Ctx, NavigateOptions, Route, View } from "./context.ts";
 import type { BrowserIdentity } from "./identity.ts";
@@ -22,7 +22,7 @@ import { chatActivityPill, chatsForPalette, chatView, lookAtWork, startNewChat }
 import { filterConversations } from "./lib/chats.ts";
 import { goToOf, hashOf, homeOf, keyedOf, landingOf, placesFor, routeOf, taskOf } from "./lib/nav.ts";
 import { closesKeyboard, keyboardOpen } from "./lib/viewport.ts";
-import { conversationFromHash } from "@galahad/core/notify-payload";
+import { conversationFromHash } from "@invincible/core/notify-payload";
 import { readOpenMessage } from "./lib/push.ts";
 import { badgeMessage, type Badging, showBadge } from "./lib/badge.ts";
 import { readsFor } from "./lib/prefetch.ts";
@@ -363,7 +363,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       (event: MessageEvent) => {
         const open = readOpenMessage(event.data);
         if (open) ctx.navigate(open.route, open.conversation ? { conversation: open.conversation } : {});
-        else if ((event.data as { type?: string } | null)?.type === "galahad:push-changed") void syncPush(base.api);
+        else if ((event.data as { type?: string } | null)?.type === "invincible:push-changed") void syncPush(base.api);
       },
       { signal: lifetime.signal },
     );

@@ -1,5 +1,5 @@
-import type { TerminalEvent, TerminalView } from "@galahad/core";
-import { type InputQueue, inputQueue } from "@galahad/core/terminal-input";
+import type { TerminalEvent, TerminalView } from "@invincible/core";
+import { type InputQueue, inputQueue } from "@invincible/core/terminal-input";
 import { ApiError, isAbort } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import type { Emulator } from "../term.ts";

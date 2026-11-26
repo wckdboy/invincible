@@ -2,7 +2,7 @@
  * What the recorded trials say, as reports: which model is best in which role (and
  * best for its cost), whether a variant of the harness helps, and how well the
  * reviewer tells right work from wrong. No dependencies (no zod): the PWA imports this
- * directly (@galahad/core/trial-reports), so the CLI, the PWA and every node say the
+ * directly (@invincible/core/trial-reports), so the CLI, the PWA and every node say the
  * same thing from the same records.
  *
  * One rule decides every comparison here, the Trials' own: a change "wins" only if its
@@ -135,7 +135,7 @@ export function modelReport(trials: readonly ReportTrial[], runs: Readonly<Recor
 
 function bestOf(role: string, rows: readonly ModelRow[]): string {
   const measured = rows.filter((r) => r.quality.n >= 2);
-  if (measured.length < 2) return `Not enough to compare ${role}s yet: at least two candidates with two trials each (galahad trial sweep ${role} <provider/model> <provider/model> …).`;
+  if (measured.length < 2) return `Not enough to compare ${role}s yet: at least two candidates with two trials each (invincible trial sweep ${role} <provider/model> <provider/model> …).`;
   const top = measured[0]!;
   const unclear = measured.slice(1).filter((r) => compareIntervals(r.quality, top.quality) !== "helps");
   if (!unclear.length) return `Best ${role}: ${label(top)}, ${said(top.quality)}. Its interval clears every other candidate's: that is measured.`;
@@ -146,7 +146,7 @@ function bestForCostOf(role: string, rows: readonly ModelRow[]): string {
   const money = rows.filter((r) => r.perUsd && r.perUsd.n >= 2);
   const tokens = rows.filter((r) => r.perMTok && r.perMTok.n >= 2);
   const by = money.length >= 2 ? { rows: money, of: (r: ModelRow) => r.perUsd!, unit: "points a dollar" } : tokens.length >= 2 ? { rows: tokens, of: (r: ModelRow) => r.perMTok!, unit: "points a million tokens" } : null;
-  if (!by) return `What each ${role} costs isn't known for two candidates yet (their calls counted, and for money: a price stated with galahad price set).`;
+  if (!by) return `What each ${role} costs isn't known for two candidates yet (their calls counted, and for money: a price stated with invincible price set).`;
   const ranked = [...by.rows].sort((a, b) => by.of(b).mean - by.of(a).mean);
   const top = ranked[0]!;
   const fig = (r: ModelRow): string => `${fix(by.of(r).mean)} ${by.unit} (${fix(by.of(r).low)}–${fix(by.of(r).high)})`;

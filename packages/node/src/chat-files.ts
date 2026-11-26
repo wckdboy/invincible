@@ -1,4 +1,4 @@
-import { ATTACHMENT_LIMITS, type AttachmentRef, type ClientIdentity, pictureType, signRequest } from "@galahad/core";
+import { ATTACHMENT_LIMITS, type AttachmentRef, type ClientIdentity, pictureType, signRequest } from "@invincible/core";
 
 /*
  * A file you sent Galahad through a chat app (a photo, a screenshot, a log), kept on your node as an attachment of your

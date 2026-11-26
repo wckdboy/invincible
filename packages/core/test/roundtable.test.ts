@@ -9,7 +9,7 @@ import { chooseKnight, type KnightFacts } from "../src/roundtable.ts";
 
 const knight = (id: string, over: Partial<KnightFacts> = {}): KnightFacts => ({
   id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "Make small, verifiable changes.", role: "engineer", enabled: true,
-  dailyTurns: 40, turnsToday: 0, repository: null, vm: { image: "galahad/sandbox:1", status: "running" }, tasks: [], ...over,
+  dailyTurns: 40, turnsToday: 0, repository: null, vm: { image: "invincible/sandbox:1", status: "running" }, tasks: [], ...over,
 });
 const verified = (n: number) => Array.from({ length: n }, () => ({ status: "done" as const, verified: true }));
 const failed = (n: number) => Array.from({ length: n }, () => ({ status: "failed" as const, verified: false }));
@@ -17,11 +17,11 @@ const failed = (n: number) => Array.from({ length: n }, () => ({ status: "failed
 describe("who takes a task", () => {
   test("a knight that can't take it is never chosen, and the reason is said: paused, its day's turns spent, no desktop, another repository", () => {
     const { choice, considered } = chooseKnight("Open the dashboard in the browser and click Export.", { desktop: true, repository: "https://github.com/you/app" }, [
-      knight("gawain", { enabled: false, repository: "https://github.com/you/app", vm: { image: "galahad/desktop:1", status: "running" } }),
-      knight("bedivere", { turnsToday: 40, repository: "https://github.com/you/app", vm: { image: "galahad/desktop:1", status: "running" } }),
+      knight("gawain", { enabled: false, repository: "https://github.com/you/app", vm: { image: "invincible/desktop:1", status: "running" } }),
+      knight("bedivere", { turnsToday: 40, repository: "https://github.com/you/app", vm: { image: "invincible/desktop:1", status: "running" } }),
       knight("percival", { repository: "https://github.com/you/app" }),
-      knight("gareth", { repository: "https://github.com/you/other", vm: { image: "galahad/desktop:1", status: "running" } }),
-      knight("kay", { vm: { image: "galahad/desktop:1", status: "running" } }),
+      knight("gareth", { repository: "https://github.com/you/other", vm: { image: "invincible/desktop:1", status: "running" } }),
+      knight("kay", { vm: { image: "invincible/desktop:1", status: "running" } }),
     ]);
     expect(choice).toBeNull();
     const why = Object.fromEntries(considered.map((c) => [c.id, c.why.join("; ")]));
@@ -62,7 +62,7 @@ describe("who takes a task", () => {
   });
 
   test("a task that speaks of a browser or a screen prefers a knight with a desktop, without requiring one", () => {
-    const facts = [knight("gawain"), knight("bedivere", { vm: { image: "galahad/desktop:1", status: "running" } })];
+    const facts = [knight("gawain"), knight("bedivere", { vm: { image: "invincible/desktop:1", status: "running" } })];
     const { choice } = chooseKnight("Open https://example.com and read the page title.", {}, facts);
     expect(choice).toMatchObject({ id: "bedivere", reasons: expect.arrayContaining(["has a desktop, which the task looks to need"]) });
     // Asked for nothing of a screen, the desktop counts for nothing.

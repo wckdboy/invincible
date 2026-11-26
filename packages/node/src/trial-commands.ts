@@ -28,14 +28,14 @@ import {
   type UsageView,
   type UsageWindow,
   usdLabel,
-} from "@galahad/core";
-import { AGENTS, clockUtc, spanWords } from "@galahad/brain";
+} from "@invincible/core";
+import { AGENTS, clockUtc, spanWords } from "@invincible/models";
 import type { NodeClient } from "./quest-cli.ts";
 import { budgetLabel, describeCost, describeDone, describeEffort, describeIndex, describeTrial, estimateLabel, estimateRun, type RunResult, type TrialBudget, trialRunFromCli } from "./trial-cli.ts";
 import { loadSuite, suiteNamed, TRIAL_SUITES } from "./trial-suites.ts";
 
 /*
- * `galahad trial …`, `galahad trials`, `galahad price …` and `galahad usage`: the
+ * `invincible trial …`, `invincible trials`, `invincible price …` and `invincible usage`: the
  * terminal's side of the Trials and of what model calls cost. Everything here reads
  * the node or starts a run through it; nothing is decided here that a replica
  * couldn't check.
@@ -135,7 +135,7 @@ async function runOptions(args: TrialArgs, names: readonly string[]) {
   const chosen = suite.choose(names, level);
   // The hardest few of every problem when none is named, or as many as --hardest says of those named.
   const problems = suite.hardest !== undefined && (hardestRaw !== undefined || !names.length) ? chosen.slice(0, whole(flags, "hardest", suite.hardest, 100)) : chosen;
-  if (!problems.length) bad(`the ${suite.id} suite has nothing to run yet (galahad trial problems --suite ${suite.id} says why)`);
+  if (!problems.length) bad(`the ${suite.id} suite has nothing to run yet (invincible trial problems --suite ${suite.id} says why)`);
   // A run is measured at one level: auto would mix them.
   const effortRaw = str(flags, "effort");
   if (effortRaw !== undefined && !["1", "2", "3"].includes(effortRaw)) bad("--effort must be 1, 2 or 3 for a trial run (a run is measured at one level; auto would mix them)");
@@ -211,7 +211,7 @@ const share = (budget: TrialBudget, runs: number): TrialBudget => ({
 /** A fresh seed for runs that must pose the same tasks, and the group they share. */
 const freshGroup = (): { seed: number; group: string } => ({ seed: crypto.getRandomValues(new Uint32Array(1))[0]! >>> 1, group: `g-${Date.now().toString(36)}` });
 
-/** `galahad trial …` and `galahad trials`. Returns the process's exit code. */
+/** `invincible trial …` and `invincible trials`. Returns the process's exit code. */
 export async function trialCommand(args: TrialArgs): Promise<number> {
   const { command, sub, rest, flags } = args;
   // The suites are part of Galahad, not of a node: listing one needs no node. Your own work is your node's: it is
@@ -222,7 +222,7 @@ export async function trialCommand(args: TrialArgs): Promise<number> {
       const suite = only ? await loadSuite(known, args.node) : known;
       console.log(`${bold(suite.id)} ${dim(`· ${suite.about}${suite.levels ? ` · --level ${suite.levels.min} to ${suite.levels.max} (usually ${suite.levels.usual})` : ""}${suite.hardest !== undefined ? " · hardest first" : ""}`)}`);
       if (suite.load) {
-        console.log(dim(`  your node's own: galahad trial problems --suite ${suite.id}`));
+        console.log(dim(`  your node's own: invincible trial problems --suite ${suite.id}`));
         continue;
       }
       const levelRaw = str(flags, "level");
@@ -239,7 +239,7 @@ export async function trialCommand(args: TrialArgs): Promise<number> {
   // One run a candidate, each with the role held to it, on the same seeded tasks: then the role's table.
   if (command === "trial" && sub === "sweep") {
     const [role, ...candidates] = rest;
-    if (!role || !(TRIAL_ROLES as readonly string[]).includes(role) || !candidates.length) bad(`usage: galahad trial sweep <${TRIAL_ROLES.join("|")}> <provider/model> [<provider/model> …] [--suite s] [--only problem,…] [--repeat n] [--seed n] [--budget 2M]`);
+    if (!role || !(TRIAL_ROLES as readonly string[]).includes(role) || !candidates.length) bad(`usage: invincible trial sweep <${TRIAL_ROLES.join("|")}> <provider/model> [<provider/model> …] [--suite s] [--only problem,…] [--repeat n] [--seed n] [--budget 2M]`);
     for (const ref of candidates) if (!/^[A-Za-z0-9._:-]+\/\S+$/.test(ref)) bad(`a candidate is <provider>/<model>, not "${ref}"`);
     const { node, suite, options } = await runOptions(args, (str(flags, "only") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
     if (options.pins?.[role as keyof TrialPins]) bad(`--pin ${role}=… and a sweep of ${role} disagree: the sweep holds that role to each candidate in turn`);
@@ -259,13 +259,13 @@ export async function trialCommand(args: TrialArgs): Promise<number> {
     const mine = new Set(made.map((m) => m.run));
     const report = modelReport(trials.filter((t) => mine.has(t.run)), runs, options.prices, suite.id);
     if (report.length) console.log(describeModels(report));
-    console.log(dim(`\nspent in all: ${spendLabel(mergeSpend(spent), options.prices)} · every run of this suite: galahad trials --suite ${suite.id}`));
+    console.log(dim(`\nspent in all: ${spendLabel(mergeSpend(spent), options.prices)} · every run of this suite: invincible trials --suite ${suite.id}`));
     return made.some((m) => m.trials.length) ? 0 : 1;
   }
   // The same seeded tasks under two variants of the harness: then whether the second measurably helps, and what it cost.
   if (command === "trial" && sub === "ab") {
     const [first, second, ...names] = rest;
-    if (!first || !second) bad("usage: galahad trial ab <variant> <variant> [problem …] [--suite s] [--repeat n] [--seed n] [--budget 2M]   (variants: galahad trial variants)");
+    if (!first || !second) bad("usage: invincible trial ab <variant> <variant> [problem …] [--suite s] [--repeat n] [--seed n] [--budget 2M]   (variants: invincible trial variants)");
     let variants: TrialVariant[] = [];
     try {
       variants = [parseVariant(first!), parseVariant(second!)];
@@ -316,7 +316,7 @@ export async function trialCommand(args: TrialArgs): Promise<number> {
   if (command === "trial" && sub === "compare") {
     const [a, b] = rest;
     const of = (run: string | undefined): TrialView[] => trials.filter((t) => t.run === run);
-    if (!a || !b || !of(a).length || !of(b).length) bad("usage: galahad trial compare <run> <run>   (two runs that have trials: galahad trials lists them)");
+    if (!a || !b || !of(a).length || !of(b).length) bad("usage: invincible trial compare <run> <run>   (two runs that have trials: invincible trials lists them)");
     // A run is called by what set it apart (its variant, the role it held to a model), else by its id.
     const said = (run: string): string => settings[run]?.variant?.name ?? Object.entries(settings[run]?.pins ?? {}).map(([role, model]) => `${role}=${model}`).join(" ");
     const names = said(a!) && said(b!) && said(a!) !== said(b!) ? [said(a!), said(b!)] : [a!, b!];
@@ -325,7 +325,7 @@ export async function trialCommand(args: TrialArgs): Promise<number> {
   }
   if (command === "trials" || !sub || sub === "models" || sub === "variants") {
     if (!trials.length) {
-      console.log("No trials yet: galahad trial run (or galahad trial run cantilever-beam for one)");
+      console.log("No trials yet: invincible trial run (or invincible trial run cantilever-beam for one)");
       return 0;
     }
     const only = str(flags, "suite");
@@ -384,7 +384,7 @@ export async function trialCommand(args: TrialArgs): Promise<number> {
         `run ${one.run} on ${one.nodeName} · revision ${one.version} · ${new Date(one.recordedAt).toLocaleString()}` +
           (one.quest ? ` · quest ${one.quest.status}, ${one.quest.steps} commands, ${one.quest.revisions} revisions` : "") +
           (one.models.length ? `\nmodels: ${one.models.join(", ")}` : "") +
-          (one.artifact ? `\nthe work: galahad artifact ${one.artifact}` : ""),
+          (one.artifact ? `\nthe work: invincible artifact ${one.artifact}` : ""),
       ),
     );
     return 0;
@@ -402,24 +402,24 @@ export async function trialCommand(args: TrialArgs): Promise<number> {
 
 const perMillion = (x: number): string => `$${x.toFixed(x < 1 && x > 0 ? 3 : 2)}`;
 
-/** `galahad price` · `price set <provider/model> <in> <out> [--cached x]` · `price rm <provider/model>`. */
+/** `invincible price` · `price set <provider/model> <in> <out> [--cached x]` · `price rm <provider/model>`. */
 export async function priceCommand(node: NodeClient, sub: string | undefined, rest: readonly string[], flags: Readonly<Record<string, unknown>>): Promise<number> {
   if (sub === "set") {
     const [model, input, output] = rest;
     const cachedRaw = str(flags, "cached");
     const numbers = [input, output, cachedRaw].map((x) => (x === undefined ? undefined : Number(String(x).replace(/^\$/, ""))));
     if (!model || numbers[0] === undefined || numbers[1] === undefined || numbers.some((n) => n !== undefined && (!Number.isFinite(n) || n < 0))) {
-      bad("usage: galahad price set <provider/model | provider/*> <$ per million tokens in> <$ per million out> [--cached <$ per million cached in>]");
+      bad("usage: invincible price set <provider/model | provider/*> <$ per million tokens in> <$ per million out> [--cached <$ per million cached in>]");
     }
     await node.call("setPrice", { model, input: numbers[0], output: numbers[1], ...(numbers[2] !== undefined ? { cached: numbers[2] } : {}) });
   } else if (sub === "rm" || sub === "remove") {
-    if (!rest[0]) bad("usage: galahad price rm <provider/model>");
+    if (!rest[0]) bad("usage: invincible price rm <provider/model>");
     await node.call("removePrice", { model: rest[0] });
-  } else if (sub) bad("usage: galahad price | price set <provider/model> <in> <out> [--cached x] | price rm <provider/model>");
+  } else if (sub) bad("usage: invincible price | price set <provider/model> <in> <out> [--cached x] | price rm <provider/model>");
   const [{ prices }, { roster }] = await Promise.all([node.call<{ prices: Record<string, Price> }>("prices"), node.call<{ roster: Record<string, { models: string[] }> }>("roster")]);
   const hired = [...new Set(Object.values(roster).flatMap((r) => r.models))];
   const rows = [...new Set([...Object.keys(prices), ...hired])].sort();
-  console.log(dim("US dollars per million tokens: yours to state (galahad price set <provider/model> <in> <out>). Tokens are always counted; money only where a price is."));
+  console.log(dim("US dollars per million tokens: yours to state (invincible price set <provider/model> <in> <out>). Tokens are always counted; money only where a price is."));
   for (const model of rows) {
     const own = prices[model];
     const slash = model.indexOf("/");
@@ -435,7 +435,7 @@ export async function priceCommand(node: NodeClient, sub: string | undefined, re
   return 0;
 }
 
-/** A provider whose allowance is spent now, in the words `galahad usage` says it, as SpentWindows.why puts it. */
+/** A provider whose allowance is spent now, in the words `invincible usage` says it, as SpentWindows.why puts it. */
 export function spentWindowLine(window: UsageWindow, now: number): string {
   return `${window.provider}: its allowance is spent until ${clockUtc(window.until)} UTC (${spanWords(window.until - now)} from now), as its provider said`;
 }
@@ -444,18 +444,18 @@ export function spentWindowLine(window: UsageWindow, now: number): string {
 export function meterLine(m: UsageMeter): string {
   const period = m.per === "day" ? "Today" : "This month";
   const spent = `${m.complete || m.spentUsd === 0 ? "" : "at least "}${usdLabel(m.spentUsd)}`;
-  const against = m.budgetUsd === null ? "no budget (galahad usage budget <usd> sets one)" : `of ${usdLabel(m.budgetUsd)}, ${m.leftUsd ? `${usdLabel(m.leftUsd)} left` : "spent"}`;
+  const against = m.budgetUsd === null ? "no budget (invincible usage budget <usd> sets one)" : `of ${usdLabel(m.budgetUsd)}, ${m.leftUsd ? `${usdLabel(m.leftUsd)} left` : "spent"}`;
   return `${period}: ${spent} ${against} · ${tokensLabel(m.tokens)} tokens in ${m.calls} call${m.calls === 1 ? "" : "s"}${m.unpriced.length ? ` · no price for ${m.unpriced.join(", ")}` : ""}`;
 }
 
-/** `galahad usage [--days 30]`: this node's own count of its model calls, the meter first; `galahad usage budget`: your budget. */
+/** `invincible usage [--days 30]`: this node's own count of its model calls, the meter first; `invincible usage budget`: your budget. */
 export async function usageCommand(node: NodeClient, flags: Readonly<Record<string, unknown>>, sub?: string, args: readonly string[] = []): Promise<number> {
   if (sub === "budget") {
     // Your budget for this node's calls: a month's (or --per day), or off.
     const raw = args[0];
     const per = str(flags, "per") ?? "month";
     if (per !== "day" && per !== "month") bad("--per is day or month");
-    if (!raw) return bad("usage: galahad usage budget <usd|off> [--per day|month]");
+    if (!raw) return bad("usage: invincible usage budget <usd|off> [--per day|month]");
     const usd = raw === "off" ? null : Number(raw.replace(/^\$/, ""));
     if (usd !== null && !(Number.isFinite(usd) && usd > 0 && usd <= 100_000)) bad("a budget is an amount in US dollars above 0, like 25, or off");
     console.log(meterLine(await node.call<UsageMeter>("setUsageBudget", { usd, per })));
