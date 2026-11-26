@@ -63,22 +63,25 @@ fun AgentMarkView(id: String, profile: Json?, size: Dp, state: AgentMark.State =
     val allowed = motionAllowed()
     val time = if (live && allowed && (moves || (lasts > 0 && arrived.since() < lasts))) markTime(moves, lasts, arrived) else null
     val still = remember(mark, state, size) { AgentMark.geometry(mark, seed, state, size.value.toDouble(), null, null) }
+    // (A still mark's bands, made once: a list of rows draws them as it scrolls, never building them again.)
+    val stillBands = remember(still) { still.slats.map { band(still.radius.toFloat(), it.from.toFloat(), it.to.toFloat()) } }
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     Canvas(Modifier.size(size).then(named)) {
-        val geometry = time?.let { t ->
+        val moving = time?.let { t ->
             val since = arrived.since().takeIf { it < lasts || moves }
             AgentMark.geometry(mark, seed, state, size.value.toDouble(), if (moves) t.doubleValue else null, since)
-        } ?: still
+        }
+        val geometry = moving ?: still
         val (body, key) = colors
         scale(this.size.minDimension / 100f, this.size.minDimension / 100f, pivot = Offset.Zero) {
-            for (slat in geometry.slats) {
+            for ((n, slat) in geometry.slats.withIndex()) {
                 val loose = slat.drop != 0.0 || slat.turn != 0.0
                 translate(0f, if (loose) slat.drop.toFloat() else 0f) {
                     rotate(if (loose) slat.turn.toFloat() else 0f, pivot = Offset(slat.pivotX.toFloat(), slat.pivotY.toFloat())) {
                         translate(50f, 50f) {
                             rotate(geometry.angle.toFloat(), pivot = Offset.Zero) {
                                 translate(slat.slide.toFloat(), 0f) {
-                                    drawPath(band(geometry.radius.toFloat(), slat.from.toFloat(), slat.to.toFloat()), if (slat.key) key else body)
+                                    drawPath(if (moving == null) stillBands[n] else band(geometry.radius.toFloat(), slat.from.toFloat(), slat.to.toFloat()), if (slat.key) key else body)
                                 }
                             }
                         }

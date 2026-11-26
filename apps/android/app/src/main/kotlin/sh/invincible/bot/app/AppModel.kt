@@ -195,6 +195,8 @@ class AppModel(context: Context) {
     val fleet: StateFlow<FleetLook?> = _fleet.asStateFlow()
     /** The primary's name has been asked for this session (whoami). */
     private var primaryAsked = false
+    /** Your prices have been asked for this session. */
+    private var pricesAsked = false
 
     /** What needs you, the one count every place says (Work.needsCount): decisions only, each once. */
     private val _needsYou = MutableStateFlow(0)
@@ -343,6 +345,7 @@ class AppModel(context: Context) {
         // (What each route last answered is the forgotten node's: none of it is drawn for the next.)
         answers.clear()
         primaryAsked = false
+        pricesAsked = false
         chat.reset()
     }
 
@@ -545,7 +548,9 @@ class AppModel(context: Context) {
         if (path == TEAM) _problem.value = got.exceptionOrNull() as? NodeError
         rebuild()
         if (path == "/api/turns") chat.follow(_table.value.chats)
-        lookAround(c)
+        // (Once a batch, with the agents' read: never after each route's, which asked a node that wouldn't give its prices
+        // again after every read.)
+        if (path == TEAM) lookAround(c)
     }
 
     /** Everything the screens show, read at once (after an answer of yours), the asks in parallel. */
@@ -601,7 +606,11 @@ class AppModel(context: Context) {
                 _projects.value = j["projects"].list.mapNotNull { p -> p["name"].string?.let { ProjectName(it, p["repo"].string) } }
             }.onFailure { projectsAsked = false }
         }
-        if (_prices.value == null) attempt { c.get("/api/prices") }.onSuccess { _prices.value = Spend.pricesOf(it) }
+        // Your prices: once a session (a node that won't give them isn't asked again until the app pairs afresh).
+        if (!pricesAsked) {
+            pricesAsked = true
+            attempt { c.get("/api/prices") }.onSuccess { _prices.value = Spend.pricesOf(it) }
+        }
         // What the primary is called, where the node names it (core's Primary): once a session (the fleet's chip follows
         // the stream's `fleet`).
         if (!primaryAsked) {
