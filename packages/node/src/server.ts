@@ -94,6 +94,8 @@ import {
   type EvalView,
   EvalSpent,
   EVAL_ARCHIVE_KIND,
+  FABRIC,
+  FABRIC_SCOPES,
   type Usage,
   type UsageLine,
   type UsageMeter,
@@ -4842,6 +4844,9 @@ export function createApp(ctx: AppContext) {
     if (req.method === "POST" && (path === "/link/sync" || path === "/link/push")) {
       const principal = authenticate(req, body, pathAndQuery, listener);
       if (!principal || principal.kind !== "node") throw new HttpError(401, "link requests must come from an enrolled node");
+      // The scope its link tool needs over Q-AMP, the same here (core's FABRIC_SCOPES): a limited node holds what it was given.
+      const scope = FABRIC_SCOPES[path === "/link/sync" ? FABRIC.sync : FABRIC.push];
+      if (scope && !principal.scopes.includes(scope)) throw new HttpError(403, `${path} needs ${scope}, which this node doesn't hold`);
       const payload = JSON.parse(new TextDecoder().decode(body));
       if (path === "/link/sync") {
         return json({ ...answerSync(ctx.store, SyncRequest.parse(payload)), presence: await ctx.presence() });
