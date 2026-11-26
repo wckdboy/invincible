@@ -1,0 +1,14 @@
+---
+/*
+ * The lockup: the mark beside INVINCIBLE, set heavy and wide (the owner's, 26 November 2026). The mark's height is the
+ * words' line, so the two sit as one.
+ */
+import Mark from "./Mark.astro";
+
+interface Props {
+  size?: "s" | "l";
+}
+const { size = "s" } = Astro.props;
+---
+
+<span class:list={["lockup", `lockup-${size}`]}><Mark size={size === "l" ? 30 : 22} /><span class="wordmark">INVINCIBLE</span></span>

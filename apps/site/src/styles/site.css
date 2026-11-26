@@ -1,0 +1,1362 @@
+/*
+ * invincible.sh, in Invincible's look (the owner's word, 26 November 2026): monochrome, black, white and greys, bold type,
+ * calm. Your agent is the I-beam, in one ink; the agents' orbs are the only colour, each its own, so they are told apart
+ * at a glance; red is kept for a real failure. The app's tokens (docs/DESIGN.md) and its typeface, Geist. Nothing moves:
+ * a press and a hover change only colour, at once.
+ */
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: optional;
+  src: url("../../../web/src/fonts/geist.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --sunken: #f3f3f4;
+  --border: #e6e6e8;
+  --border-strong: #d4d4d8;
+  --line: #c9c9cf;
+  --text: #0a0a0b;
+  --text-2: #52525a;
+  --text-3: #696971;
+  --ink: #0a0a0b;
+  --ink-top: #3a3a3f;
+  --ink-fill: #0c0c0e;
+  --ink-hover: #26262a;
+  --on-ink: #ffffff;
+  --failed: #c4141b;
+  --glow: rgb(10 10 11 / 0.05);
+  --shadow-1: 0 1px 2px rgb(16 16 24 / 0.05);
+  --shadow-2: 0 1px 3px rgb(16 16 24 / 0.06), 0 8px 24px rgb(16 16 24 / 0.07);
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  --gutter: 16px;
+  --max: 1120px;
+  --d-1: 120ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #08080a;
+    --surface: #111113;
+    --surface-2: #17171a;
+    --sunken: #0b0b0d;
+    --border: #212125;
+    --border-strong: #2e2e33;
+    --line: #3a3a40;
+    --text: #ededef;
+    --text-2: #a1a1a9;
+    --text-3: #8b8b94;
+    --ink: #ffffff;
+    --ink-top: #ffffff;
+    --ink-fill: #e4e4e8;
+    --ink-hover: #f4f4f6;
+    --on-ink: #0a0a0b;
+    --failed: #ff6b6b;
+    --glow: rgb(255 255 255 / 0.055);
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-2: 0 1px 3px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+@media (min-width: 640px) {
+  :root {
+    --gutter: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --gutter: 40px;
+  }
+}
+
+/* ---------- the page ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scrollbar-color: var(--border-strong) var(--bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis-weight: none;
+}
+
+main {
+  flex: 1;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+a {
+  color: inherit;
+  text-decoration-line: underline;
+  text-decoration-color: var(--border-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  transition: text-decoration-color var(--d-1);
+}
+
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  font-variant-ligatures: none;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+.wrap {
+  width: 100%;
+  max-width: calc(var(--max) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip {
+  position: absolute;
+  left: 16px;
+  top: -100px;
+  z-index: 2;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--on-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip:focus {
+  top: 12px;
+}
+
+/* ---------- the lockup and the bar ---------- */
+
+.lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.lockup .mark {
+  color: var(--ink);
+  flex: none;
+}
+
+.wordmark {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  line-height: 1;
+  /* (The tracking after the last letter, given back, so the lockup's edge is the E's.) */
+  margin-right: -0.22em;
+}
+
+.lockup-l {
+  gap: 12px;
+}
+
+.lockup-l .wordmark {
+  font-size: 18px;
+}
+
+.bar {
+  border-bottom: 1px solid var(--border);
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 60px;
+}
+
+.home {
+  display: inline-flex;
+  padding: 10px 0;
+  text-decoration: none;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -10px;
+}
+
+.nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--d-1), background-color var(--d-1);
+}
+
+.nav a:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+@media (pointer: coarse) {
+  .nav a {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 719px) {
+  .nav-wide {
+    display: none !important;
+  }
+}
+
+/* ---------- the first screen ---------- */
+
+.hero {
+  position: relative;
+  padding: 40px 0 64px;
+  overflow: hidden;
+}
+
+/* The one flourish, barely there: a faint light behind your agent and its agents (the app's starlight). */
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(42rem 26rem at 78% 34%, var(--glow), transparent 70%);
+  pointer-events: none;
+}
+
+.hero-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 56px;
+  align-items: center;
+}
+
+@media (min-width: 960px) {
+  .hero {
+    padding: 96px 0 112px;
+  }
+
+  .hero::before {
+    background: radial-gradient(46rem 30rem at 80% 46%, var(--glow), transparent 70%);
+  }
+
+  .hero-grid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: 48px;
+  }
+}
+
+.eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 28px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding: 0 13px 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  font-weight: 550;
+  text-decoration: none;
+  transition: border-color var(--d-1);
+}
+
+.pill:hover {
+  border-color: var(--border-strong);
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 3px var(--surface-2);
+}
+
+h1 {
+  margin: 0 0 24px;
+  font-size: clamp(40px, 3.4vw + 26px, 74px);
+  font-weight: 720;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+}
+
+.lede {
+  max-width: 34em;
+  margin: 0 0 36px;
+  color: var(--text-2);
+  font-size: clamp(17px, 0.3vw + 16px, 19px);
+  line-height: 1.55;
+}
+
+/* The install line: a field of its own, as a composer is, its action at its end. */
+.install {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 580px;
+  padding: 7px 7px 7px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.install-line {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: pre;
+  font-size: 15px;
+  line-height: 42px;
+  color: var(--text);
+}
+
+.install-line::-webkit-scrollbar {
+  display: none;
+}
+
+.install-prompt {
+  color: var(--text-3);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.install-command {
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+.install-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(var(--ink-top), var(--ink-fill));
+  color: var(--on-ink);
+  font: 600 14px/1 var(--sans);
+  cursor: pointer;
+}
+
+.install-copy[hidden] {
+  display: none;
+}
+
+.install-copy:hover {
+  background: var(--ink-hover);
+}
+
+.install-copy:active {
+  transform: scale(0.97);
+}
+
+.install-copy svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.install-copy[data-done] svg {
+  opacity: 0.5;
+}
+
+@media (pointer: coarse) {
+  .install-copy {
+    height: 44px;
+  }
+
+  .install-line {
+    line-height: 44px;
+  }
+}
+
+/* A phone: the line keeps to one line, its type as large as the screen leaves room for (its 39 characters at 0.6 em
+   each, beside the button), with no prompt; Copy is its icon (its words are its name, and say what it did). */
+@media (max-width: 479px) {
+  .install {
+    gap: 6px;
+    padding-left: 12px;
+  }
+
+  .install-line {
+    font-size: clamp(11px, calc((100vw - 2 * var(--gutter) - 76px) / 23.4), 13px);
+  }
+
+  .install-prompt {
+    display: none;
+  }
+
+  .install-copy {
+    width: 44px;
+    padding: 0;
+  }
+
+  .install-copy-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+.install-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 14px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.install-meta code {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-apps {
+  margin: 22px 0 0;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.hero-apps a {
+  color: var(--text);
+}
+
+/* Your agent and the agents it gives work to: the I-beam above them, each by its job. */
+.team {
+  display: grid;
+  justify-items: center;
+  margin: 0;
+}
+
+.team-primary {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding-bottom: 40px;
+}
+
+.team-mark {
+  width: 104px;
+  height: 104px;
+  margin: -12px 0 -8px;
+  color: var(--ink);
+}
+
+@media (min-width: 960px) {
+  .team-mark {
+    width: 128px;
+    height: 128px;
+    margin: -14px 0 -10px;
+  }
+}
+
+.team-primary b {
+  margin-top: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.team-primary > span {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.team-primary::after,
+.team-agents::before,
+.team-agents li::before {
+  content: "";
+  position: absolute;
+  border: 0 solid var(--line);
+}
+
+.team-primary::after {
+  bottom: 0;
+  left: 50%;
+  height: 28px;
+  border-left-width: 1px;
+}
+
+.team-agents {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+  max-width: 520px;
+  margin: 0;
+  padding: 28px 0 0;
+  list-style: none;
+}
+
+.team-agents::before {
+  top: 0;
+  left: 12.5%;
+  right: 12.5%;
+  border-top-width: 1px;
+}
+
+.team-agents li {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.team-agents li::before {
+  top: -28px;
+  left: 50%;
+  height: 28px;
+  border-left-width: 1px;
+}
+
+.team-agents li > span {
+  color: var(--text-2);
+  font: 500 12.5px/1.2 var(--mono);
+}
+
+.orb {
+  display: block;
+  flex: none;
+}
+
+.orb img {
+  display: block;
+  width: 72px;
+  height: 72px;
+}
+
+/* ---------- sections ---------- */
+
+.section {
+  padding: 64px 0;
+  border-top: 1px solid var(--border);
+}
+
+@media (min-width: 960px) {
+  .section {
+    padding: 96px 0;
+  }
+}
+
+.section-head {
+  max-width: 760px;
+  margin-bottom: 40px;
+}
+
+.label {
+  margin: 0 0 14px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+h2 {
+  margin: 0;
+  font-size: clamp(30px, 1.9vw + 22px, 46px);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
+.section-lede {
+  max-width: 40em;
+  margin: 18px 0 0;
+  color: var(--text-2);
+  font-size: 17px;
+}
+
+.n {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text-2);
+  font: 600 11.5px/1 var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* How it works: four trays, each a glimpse of the app above its words. */
+.steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .steps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.step {
+  padding: 8px 8px 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.step-art {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  height: 164px;
+  margin-bottom: 20px;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--sunken);
+}
+
+.step h3 {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 16px 8px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  text-wrap: wrap;
+}
+
+.step h3 .n {
+  margin-top: 0.5px;
+}
+
+.step p {
+  margin: 0 16px;
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.step p code {
+  color: var(--text);
+}
+
+.ask {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 6px 6px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  font-size: 13.5px;
+}
+
+.ask > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.ask-send svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 100%;
+}
+
+.who .mark {
+  flex: none;
+  color: var(--ink);
+}
+
+.who b {
+  display: block;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.who b + span {
+  display: block;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.who .mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.proof {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  font-size: 12.5px;
+}
+
+.proof p {
+  margin: 0;
+}
+
+.proof-seal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.proof-seal svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.proof-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.proof-row code {
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* Yours: four plain claims, each under a short bar of ink. */
+.tenets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px 40px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .tenets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .tenets {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.tenets li::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 3px;
+  margin-bottom: 18px;
+  background: var(--ink);
+}
+
+.tenets h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.tenets p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+/* Install: the line again, then what it does, step by step, beside what to check before running it. */
+#install .install {
+  max-width: 640px;
+}
+
+.install-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+  margin-top: 40px;
+}
+
+@media (min-width: 960px) {
+  .install-body {
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+    gap: 56px;
+    align-items: start;
+  }
+}
+
+.install-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.install-steps li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 16px;
+  padding: 18px 0;
+  border-top: 1px solid var(--border);
+}
+
+.install-steps li:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.install-steps h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.install-steps p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.install-steps code,
+.install-facts code,
+.app code,
+.section-lede code {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.install-facts {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.install-facts dl {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+}
+
+.install-facts dt {
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.install-facts dd {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* A command that may wrap breaks only between its words, never inside a flag. */
+.install-facts code.nowrap-words {
+  overflow-wrap: normal;
+}
+
+.hash {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.options {
+  margin-top: 20px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.options summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+.options summary::-webkit-details-marker {
+  display: none;
+}
+
+.options summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin: -3px 4px 0 auto;
+  border-right: 1.5px solid var(--text-2);
+  border-bottom: 1.5px solid var(--text-2);
+  transform: rotate(45deg);
+}
+
+.options[open] summary::after {
+  margin-top: 3px;
+  transform: rotate(-135deg);
+}
+
+.options dl {
+  gap: 12px;
+  padding-bottom: 8px;
+}
+
+.options dt {
+  margin: 0;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.options dd {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.options p {
+  margin: 12px 0 8px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* Download: a card for each kind of screen. */
+.apps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 720px) {
+  .apps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .apps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.app-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: center;
+}
+
+.app-glyph {
+  grid-row: span 2;
+  width: 44px;
+  height: 44px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--sunken);
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.app-req {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.app-what {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+
+.app-note {
+  margin: auto 0 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: linear-gradient(var(--ink-top), var(--ink-fill));
+  color: var(--on-ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color var(--d-1), border-color var(--d-1);
+}
+
+.button:hover {
+  background: var(--ink-hover);
+}
+
+.button:active {
+  transform: scale(0.97);
+}
+
+.button-quiet,
+.button-quiet:hover {
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--text);
+}
+
+.button-quiet:hover {
+  border-color: var(--text-3);
+}
+
+@media (pointer: coarse) {
+  .button {
+    min-height: 44px;
+  }
+}
+
+.more {
+  margin: 28px 0 0;
+  font-size: 15px;
+}
+
+/* Where it stands: the plan's phases, in ink where done or being built, grey where next. */
+.phases {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.phase {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.phase-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.phase-mark {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--text-3);
+  border-radius: 50%;
+}
+
+.phase[data-state="done"] .phase-mark {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.phase[data-state="building"] .phase-mark {
+  border-color: var(--ink);
+  background: linear-gradient(90deg, var(--ink) 50%, transparent 50%);
+}
+
+.phase-n {
+  color: var(--text-3);
+  font: 500 12.5px/1 var(--mono);
+}
+
+.phase-title {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.phase-state {
+  color: var(--text-3);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.phase[data-state="building"] .phase-state,
+.phase[data-state="done"] .phase-state {
+  color: var(--text);
+  font-weight: 600;
+}
+
+@media (min-width: 1100px) {
+  .phases {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0 20px;
+    border-top: 0;
+  }
+
+  .phase {
+    grid-template-columns: none;
+    align-content: start;
+    gap: 8px;
+    padding: 16px 0 0;
+    border-top: 2px solid var(--border-strong);
+    border-bottom: 0;
+  }
+
+  .phase-state {
+    grid-column: auto;
+    grid-row: 1;
+    margin-bottom: 6px;
+  }
+
+  .phase[data-state="done"],
+  .phase[data-state="building"] {
+    border-top-color: var(--ink);
+  }
+}
+
+/* ---------- the foot ---------- */
+
+.foot {
+  padding: 56px 0 36px;
+  border-top: 1px solid var(--border);
+}
+
+.foot-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 36px;
+}
+
+@media (min-width: 960px) {
+  .foot-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  }
+}
+
+.foot-brand p {
+  max-width: 24em;
+  margin: 16px 0 0;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.foot-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 20px 32px;
+  margin: 0;
+}
+
+.foot-facts dt {
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.foot-facts dd {
+  margin: 0;
+  font-size: 14px;
+}
+
+.foot-note {
+  margin-top: 36px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+/* ---------- not found ---------- */
+
+.lost {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  max-width: 680px;
+  padding: 120px 0;
+}
+
+.lost .mark {
+  color: var(--ink);
+}
+
+.lost h1 {
+  margin: 12px 0 0;
+}
+
+.lost p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 17px;
+}
+
+/* Where motion is reduced, not even a press moves. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+
+  .button:active,
+  .install-copy:active {
+    transform: none;
+  }
+}

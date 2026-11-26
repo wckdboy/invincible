@@ -222,7 +222,8 @@ The models layer, carried (§10):
 | `packages/node` | The daemon, the server, the CLI (`invincible`, and `inv` in `src/inv/`: a client of a node, [CLI.md](CLI.md)), the primary, approvals, notifications, projects, placement |
 | `apps/web` | The web client (the PWA the node serves) |
 | `apps/apple` | The iPhone, iPad and Mac apps (SwiftUI), the parity vectors' script and fixture, the dev node they run against, their brand assets and release scripts |
-| `apps/android` | The Android app (Kotlin and Compose), held to the same vectors; `apps/site` (invincible.sh) comes back later |
+| `apps/android` | The Android app (Kotlin and Compose), held to the same vectors |
+| `apps/site` | invincible.sh: the page, the installer (`curl -fsSL https://invincible.sh \| bash`), the apps' update feeds and downloads; Astro and one Cloudflare Worker, its own project and lockfile, everything on it read from this repository when it is built |
 | `bench/` | The scorecard: every suite against its recorded baseline; the vocabulary check |
 
 **Coexisting with the system it succeeds on one host** (§10) until the cutover:

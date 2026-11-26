@@ -14,6 +14,6 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "scripts/**/*.ts", "bench/**/*.ts"],
-  "exclude": ["bench/scratch", "apps/site"]
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "apps/site/test/**/*.ts", "apps/site/scripts/**/*.ts", "scripts/**/*.ts", "bench/**/*.ts"],
+  "exclude": ["bench/scratch", "apps/site/node_modules", "apps/site/dist", "apps/site/.astro"]
 }

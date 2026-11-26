@@ -1,0 +1,82 @@
+---
+/*
+ * Every page of invincible.sh: its head, the bar with the lockup, and the foot with where everything comes from.
+ */
+import "../styles/site.css";
+import geist from "../../../web/src/fonts/geist.woff2?url";
+import Lockup from "../components/Lockup.astro";
+import { COMMIT, doc, LICENSE, REPO, SITE, TAGLINE } from "../lib/facts.ts";
+
+interface Props {
+  title: string;
+  description: string;
+  /** The page's path on the site, for its canonical address. */
+  path: string;
+}
+const { title, description, path } = Astro.props;
+const canonical = new URL(path, SITE).href;
+const home = path === "/" ? "" : "/";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#08080a" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content={new URL("/og.png", SITE).href} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Invincible's mark, the I-beam, in white on black." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/icon-64.png" type="image/png" sizes="64x64" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href={geist} as="font" type="font/woff2" crossorigin />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="bar">
+      <div class="wrap bar-row">
+        <a class="home" href="/" aria-label="Invincible, home"><Lockup /></a>
+        <nav class="nav" aria-label="Site">
+          <a class="nav-wide" href={`${home}#how`}>How it works</a>
+          <a class="nav-wide" href={`${home}#install`}>Install</a>
+          <a href={`${home}#download`}>Download</a>
+          <a href={REPO}>GitHub</a>
+        </nav>
+      </div>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="foot">
+      <div class="wrap foot-row">
+        <div class="foot-brand">
+          <Lockup size="l" />
+          <p>{TAGLINE}</p>
+        </div>
+        <dl class="foot-facts">
+          <div><dt>Source</dt><dd><a href={REPO}>{REPO.replace(/^https:\/\//, "")}</a></dd></div>
+          <div><dt>Licence</dt><dd><a href={doc("LICENSE")}>{LICENSE}</a></dd></div>
+          <div><dt>Read</dt><dd><a href={doc("docs/MANDATE.md")}>The mandate</a>, <a href={doc("docs/ARCHITECTURE.md")}>the architecture</a>, <a href={doc("docs/PLAN.md")}>the plan</a></dd></div>
+          <div><dt>Security</dt><dd><a href={doc("SECURITY.md")}>Report a flaw privately</a></dd></div>
+          {COMMIT && <div><dt>Built from</dt><dd><a href={`${REPO}/commit/${COMMIT}`}><code>{COMMIT}</code></a></dd></div>}
+        </dl>
+      </div>
+      <p class="wrap foot-note">Set in Geist, under the <a href={doc("apps/web/src/fonts/OFL.txt")}>SIL Open Font License</a>.</p>
+    </footer>
+    <script>
+      import "../scripts/site.ts";
+    </script>
+  </body>
+</html>

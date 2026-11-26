@@ -1,0 +1,15 @@
+---
+/*
+ * The install line, the page's one primary action: as a composer is, a field of its own with its action at its end.
+ * Without script the command is selected whole with one tap (user-select: all); with script, Copy appears.
+ */
+import { INSTALL } from "../lib/facts.ts";
+---
+
+<div class="install">
+  <code class="install-line"><span class="install-prompt" aria-hidden="true">$&nbsp;</span><span class="install-command">{INSTALL.command}</span></code>
+  <button class="install-copy" type="button" data-copy={INSTALL.command} aria-label="Copy the install command" hidden>
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.25" y="5.25" width="8" height="8" rx="1.75" /><path d="M10.75 5.25V3.75a1.5 1.5 0 0 0-1.5-1.5h-5.5a1.5 1.5 0 0 0-1.5 1.5v5.5a1.5 1.5 0 0 0 1.5 1.5h1.5" /></svg>
+    <span class="install-copy-label" data-copy-label>Copy</span>
+  </button>
+</div>

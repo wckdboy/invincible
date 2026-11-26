@@ -1,0 +1,296 @@
+---
+/*
+ * invincible.sh: what Invincible is, the one line that installs it, and the apps. Monochrome (the owner's word, 26
+ * November 2026): black, white and greys, your agent as the I-beam in one ink, and colour for the agents alone, each in
+ * its own so they are told apart at a glance. Nothing on it moves. Every fact on it is read from the repository when it
+ * is built (src/lib/facts.ts).
+ */
+import Base from "../layouts/Base.astro";
+import Install from "../components/Install.astro";
+import Mark from "../components/Mark.astro";
+import Orb from "../components/Orb.astro";
+import { AGENTS } from "../lib/orbs.ts";
+import { installSteps, parts } from "../lib/install-steps.ts";
+import { ANDROID, BUN_VERSION, doc, INSTALL, INSTALLER_SHA256, IPHONE, LICENSE, MAC, PHASES, RELEASES, TAGLINE } from "../lib/facts.ts";
+
+const steps = installSteps(INSTALL, BUN_VERSION);
+const title = `Invincible: ${TAGLINE.charAt(0).toLowerCase()}${TAGLINE.slice(1).replace(/\.$/, "")}`;
+const LEDE = "You talk to one agent: yours, named as you like. It gives the work to agents that each run in a sandbox of their own, checks it with real commands and a reviewer that didn't write it, and ships only what passes.";
+const STATE = { done: "Done", building: "Being built", next: "Next" } as const;
+const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+const plan = `${INSTALL.command} -s -- --plan`;
+---
+
+<Base title={title} description={LEDE} path="/">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap hero-grid">
+      <div class="hero-text">
+        <p class="eyebrow"><a class="pill" href="#plan"><span class="pill-dot" aria-hidden="true"></span>Open source, being built</a><span class="eyebrow-more">{LICENSE} · macOS and Linux</span></p>
+        <h1 id="hero-title">{TAGLINE}</h1>
+        <p class="lede">{LEDE}</p>
+        <Install />
+        <p class="install-meta">
+          <span>Nothing runs as root.</span>
+          <a href="/install">Read the script first</a>
+          <span>SHA-256 <code>{INSTALLER_SHA256.slice(0, 12)}…</code></span>
+        </p>
+        <p class="hero-apps">Or the app: <a href="#download">Mac, iPhone and iPad, Android</a>, and the web app every node serves.</p>
+      </div>
+      <figure class="team">
+        <div class="team-primary">
+          <Mark size={128} class="team-mark" />
+          <b>Invincible</b>
+          <span>your agent</span>
+        </div>
+        <ul class="team-agents" role="list">
+          {
+            AGENTS.map((job) => (
+              <li>
+                <Orb job={job} eager />
+                <span>{job}</span>
+              </li>
+            ))
+          }
+        </ul>
+        <figcaption class="sr-only">Invincible, your agent, above the agents it gives work to, each named by its job: a coder, a researcher, a reviewer and an operator.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="label">How it works</p>
+        <h2 id="how-title">You talk to one agent. It runs the rest, and proves it.</h2>
+      </header>
+      <ol class="steps" role="list">
+        <li class="step">
+          <div class="step-art" aria-hidden="true">
+            <div class="ask">
+              <span>Make the sync survive a dropped connection</span>
+              <span class="ask-send"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 13V3.5M3.75 7.75 8 3.5l4.25 4.25" /></svg></span>
+            </div>
+          </div>
+          <h3><span class="n">1</span><span>You ask</span></h3>
+          <p>In plain words, from your phone, your Mac, a browser or a terminal: <code>inv ask "…"</code></p>
+        </li>
+        <li class="step">
+          <div class="step-art" aria-hidden="true">
+            <div class="who">
+              <Mark size={40} />
+              <span><b>Invincible</b><span>Gives it to the coder</span></span>
+            </div>
+          </div>
+          <h3><span class="n">2</span><span>Your agent decides</span></h3>
+          <p>Named by you, and “Invincible” until you do. It remembers, plans and does small work itself; work in a repository goes to a coding agent.</p>
+        </li>
+        <li class="step">
+          <div class="step-art" aria-hidden="true">
+            <div class="who">
+              <Orb job="coder" />
+              <span><b>coder</b><span class="mono">Running bun test</span></span>
+            </div>
+          </div>
+          <h3><span class="n">3</span><span>An agent does the work</span></h3>
+          <p>Each agent is named by its job and works in a microVM of its own, with only the tools and keys it was given.</p>
+        </li>
+        <li class="step">
+          <div class="step-art" aria-hidden="true">
+            <div class="proof">
+              <p class="proof-seal"><svg viewBox="0 0 16 16" focusable="false"><path d="m3.5 8.5 3 3 6-7" /></svg>Verified</p>
+              <p class="proof-row"><code>bun test</code><span>exit 0</span></p>
+              <p class="proof-row"><code>bun run typecheck</code><span>exit 0</span></p>
+              <p class="proof-row"><span>reviewer</span><span>passed it</span></p>
+            </div>
+          </div>
+          <h3><span class="n">4</span><span>Done means proven</span></h3>
+          <p>A task is done when its gates pass and a reviewer on another model agrees. The proof is shown apart from what the agent says of its work.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" id="yours" aria-labelledby="yours-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="label">Yours</p>
+        <h2 id="yours-title">On your machines, with your models and your keys.</h2>
+      </header>
+      <ul class="tenets" role="list">
+        <li>
+          <h3>Your machines</h3>
+          <p>Every node is a computer of yours: a server, a desktop, a Mac mini. An agent's sandbox is a microVM on one of them.</p>
+        </li>
+        <li>
+          <h3>Your models</h3>
+          <p>The providers and coding plans you choose, local models too, each role with its fallbacks, metered at your prices.</p>
+        </li>
+        <li>
+          <h3>Your keys</h3>
+          <p>Sealed in your vault. Agents use them through a gateway that never shows them a key.</p>
+        </li>
+        <li>
+          <h3>Your word</h3>
+          <p>What moves money, signs something legal or destroys data waits for you, and the asking is never quiet.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="label">Install</p>
+        <h2 id="install-title">One line, on a Mac or a Linux machine of yours.</h2>
+        <p class="section-lede">It installs a node, the program that runs your agent and serves the app, and keeps it running. Nothing runs as root and nothing is written outside your home. Run it again to update.</p>
+      </header>
+      <Install />
+      <div class="install-body">
+        <ol class="install-steps" role="list">
+          {
+            steps.map((step, i) => (
+              <li>
+                <span class="n">{i + 1}</span>
+                <div>
+                  <h3>{step.heading}</h3>
+                  <p>{parts(step.line).map((part) => (part.code ? <code>{part.text}</code> : part.text))}</p>
+                </div>
+              </li>
+            ))
+          }
+        </ol>
+        <aside class="install-facts" aria-label="The script">
+          <dl>
+            <div><dt>Read it first</dt><dd><a href="/install">invincible.sh/install</a></dd></div>
+            <div><dt>Its SHA-256</dt><dd><code class="hash">{INSTALLER_SHA256}</code></dd></div>
+            <div><dt>What it would do, changing nothing</dt><dd><code class="nowrap-words">{plan}</code></dd></div>
+            <div><dt>Agents' sandboxes</dt><dd>MicroVMs: on Linux with Docker and KVM; on a Mac, <code>invincible sandbox setup</code> gives it Apple's container.</dd></div>
+          </dl>
+          <details class="options">
+            <summary>Its options</summary>
+            <dl>
+              {
+                INSTALL.options.map((option) => (
+                  <div>
+                    <dt><code>{option.flag}</code></dt>
+                    <dd>{option.what}</dd>
+                  </div>
+                ))
+              }
+            </dl>
+            <p>Where things go: {INSTALL.places.map((place, i) => <>{i > 0 && ", "}<code>{place.path}</code> (<code>{place.variable}</code>)</>)}.</p>
+          </details>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="download" aria-labelledby="download-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="label">Download</p>
+        <h2 id="download-title">Your agent, on every screen.</h2>
+        <p class="section-lede">Each app pairs with a node of yours: on the node, <code>invincible invite --client</code>, then check that the six digits match on both screens.</p>
+      </header>
+      <div class="apps">
+        <article class="app" aria-labelledby="app-mac">
+          <div class="app-head">
+            <svg class="app-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="5" width="16" height="11" rx="1.5" /><path d="M2 19h20" /></svg>
+            <h3 id="app-mac">Mac</h3>
+            <span class="app-req">macOS {MAC.macOS} or later</span>
+          </div>
+          {
+            MAC.release ? (
+              <>
+                <p class="app-what">Version {MAC.release.version} ({MAC.release.build}), {MAC.release.day}. {MAC.release.size}.</p>
+                <a class="button" href={MAC.release.url}>Download for Mac</a>
+                <p class="app-note">Notarized by Apple, it keeps itself up to date from <a href="/mac/appcast.xml">its feed</a>, and can make the Mac a node too.</p>
+              </>
+            ) : (
+              <>
+                <p class="app-what">Its first build is on its way.</p>
+                <a class="button button-quiet" href={RELEASES}>Releases on GitHub</a>
+                <p class="app-note">Notarized by Apple, it will keep itself up to date from <a href="/mac/appcast.xml">its feed</a>, and can make the Mac a node too.</p>
+              </>
+            )
+          }
+        </article>
+        <article class="app" aria-labelledby="app-iphone">
+          <div class="app-head">
+            <svg class="app-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" /><path d="M10.5 18.5h3" /></svg>
+            <h3 id="app-iphone">iPhone and iPad</h3>
+            <span class="app-req">iOS {IPHONE.iOS} or later</span>
+          </div>
+          {
+            IPHONE.testflight ? (
+              <>
+                <p class="app-what">In TestFlight, Apple's beta.</p>
+                <a class="button" href={IPHONE.testflight}>Join the beta</a>
+                <p class="app-note">Open the link on your iPhone or iPad: TestFlight installs it, and each new build after it.</p>
+              </>
+            ) : (
+              <>
+                <p class="app-what">In TestFlight, Apple's beta, by invitation.</p>
+                <a class="button button-quiet" href={IPHONE.ask}>Ask for an invitation</a>
+                <p class="app-note">TestFlight invites a tester by their Apple ID. Its public link comes here once Apple has reviewed the beta.</p>
+              </>
+            )
+          }
+        </article>
+        <article class="app" aria-labelledby="app-android">
+          <div class="app-head">
+            <svg class="app-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6" y="2.5" width="12" height="19" rx="2" /><path d="M6 5.5h12M6 18.5h12" /></svg>
+            <h3 id="app-android">Android</h3>
+            <span class="app-req">Android {ANDROID.android} or later</span>
+          </div>
+          {
+            ANDROID.release ? (
+              <>
+                <p class="app-what">Version {ANDROID.release.version} ({ANDROID.release.build}), {ANDROID.release.day}. {ANDROID.release.size}.</p>
+                <a class="button" href={ANDROID.release.url}>Download the APK</a>
+                <p class="app-note">Signed with Invincible's own key, the same for every build (its certificate's SHA-256 begins <code>{ANDROID.release.certificate.slice(0, 16)}</code>). It says when a newer build is out.</p>
+              </>
+            ) : (
+              <>
+                <p class="app-what">Its first build is on its way.</p>
+                <a class="button button-quiet" href={RELEASES}>Releases on GitHub</a>
+                <p class="app-note">Signed with Invincible's own key, the same for every build, it will say when a newer one is out, from <a href="/android/latest.json">its record</a>.</p>
+              </>
+            )
+          }
+        </article>
+        <article class="app" aria-labelledby="app-web">
+          <div class="app-head">
+            <svg class="app-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="4" width="19" height="16" rx="2" /><path d="M2.5 8.5h19M5.5 6.25h.01M8 6.25h.01" /></svg>
+            <h3 id="app-web">Any browser</h3>
+            <span class="app-req">Served by every node</span>
+          </div>
+          <p class="app-what">The web app, on any phone or computer.</p>
+          <p class="app-note">Open your node's address and pair. On an iPhone, add it to the Home Screen and it opens as an app.</p>
+        </article>
+      </div>
+      <p class="more"><a href={RELEASES}>Every release, with what changed</a></p>
+    </div>
+  </section>
+
+  <section class="section" id="plan" aria-labelledby="plan-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="label">Where it stands</p>
+        <h2 id="plan-title">Being built, in the open.</h2>
+        <p class="section-lede">Each phase ends when its exit checks pass, all of them, measured. <a href={doc("docs/PLAN.md")}>The plan</a> says what each one holds.</p>
+      </header>
+      <ol class="phases" role="list">
+        {
+          PHASES.map((phase) => (
+            <li class="phase" data-state={phase.state}>
+              <span class="phase-state"><span class="phase-mark" aria-hidden="true" />{STATE[phase.state]}</span>
+              <span class="phase-n">Phase {phase.n}</span>
+              <span class="phase-title">{sentence(phase.title)}</span>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+</Base>

@@ -66,6 +66,8 @@ Q-AMP between the nodes and the agents.
   Invincible's: its words, its API, its vectors and dev node, its icon and wordmark (`apps/apple/README.md`,
   `apps/android/README.md`). Their tests, the Mac build and the vectors run in CI; the Apple job waits for the owner's
   Mac runner (label `macos-xcode`).
+- 🔨 invincible.sh (`apps/site`): the installer, the apps' update feeds and their downloads, in Invincible's look. It
+  replaces the site there today on the owner's word, by the CLOUDFLARE_API_TOKEN secret that CI's deploy job waits for.
 - New identities in the stores: `sh.invincible.bot` (iPhone and iPad; App Store Connect's "Invincible Bot", push on),
   `sh.invincible.bot.mac` (Developer ID), and Android's `sh.invincible.bot`. TestFlight has the first build
   (202611261105, 26 November 2026); the Android release key and the Mac's Sparkle key are made (26 November), in the

@@ -21,6 +21,7 @@ bun invincible help                    # the CLI
 bun run inv help                       # inv, a client of a node (docs/CLI.md): its exit code is the verdict
 bun run bench                          # the scorecard against its baselines
 bun apps/apple/scripts/vectors.ts --check   # the parity vectors the Apple and Android apps test against
+(cd apps/site && bun install && bun run check)   # invincible.sh: built, checked and tested (apps/site/README.md)
 ```
 
 The apps build with Xcode 27 and XcodeGen (`apps/apple/README.md`) and with JDK 17 and the Android SDK

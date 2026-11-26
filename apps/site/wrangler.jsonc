@@ -1,0 +1,25 @@
+{
+  // invincible.sh, the project's site: Astro's static pages (dist/) and one small Worker that hands the installer to
+  // `curl -fsSL https://invincible.sh | bash`. Only the root and /install run it; every other path is a static file.
+  //
+  // Nothing deploys from a checkout: CI's deploy job does, on GitHub, on a push to main, and only with the
+  // CLOUDFLARE_API_TOKEN secret set (.github/workflows/ci.yml). Its account comes from the CLOUDFLARE_ACCOUNT_ID secret
+  // beside it, so no account id is written here.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "invincible-site",
+  "compatibility_date": "2026-10-01",
+  "main": "./src/worker.ts",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash",
+    "run_worker_first": ["/", "/install"]
+  },
+  "routes": [
+    { "pattern": "invincible.sh", "custom_domain": true },
+    { "pattern": "www.invincible.sh", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false
+}

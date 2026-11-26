@@ -1,0 +1,18 @@
+---
+/*
+ * The mark (src/lib/mark.ts, its one place): the I-beam in the ink of the words around it, black on a light page and
+ * white on a dark one.
+ */
+import { MARK } from "../lib/mark.ts";
+
+interface Props {
+  size: number;
+  class?: string;
+  /** Its name for a screen reader; left out, it is decorative (named by what it is in). */
+  label?: string;
+}
+const { size, class: className, label } = Astro.props;
+const named = label ? { role: "img", "aria-label": label } : { "aria-hidden": "true" };
+---
+
+<svg class:list={["mark", className]} viewBox={`0 0 ${MARK.box} ${MARK.box}`} width={size} height={size} focusable="false" {...named}><polygon points={MARK.points} fill="currentColor" /></svg>

@@ -1,0 +1,22 @@
+---
+/*
+ * An agent's orb: its field in its own colours, drawn by the app's code when the site was built (src/lib/orbs.ts), as
+ * light on a dark page and as ink on a light one. A page downloads only its theme's. Decorative: its job is written
+ * beside it.
+ */
+import { agentOrb, type Job, type OrbSize } from "../lib/orbs.ts";
+
+interface Props {
+  job: Job;
+  size?: OrbSize;
+  /** Shown in the first screen: fetched at once rather than when scrolled to. */
+  eager?: boolean;
+}
+const { job, size = 72, eager = false } = Astro.props;
+const orb = agentOrb(job, size);
+---
+
+<picture class="orb" data-job={job}>
+  <source srcset={orb.dark.href} media="(prefers-color-scheme: dark)" />
+  <img src={orb.light.href} width={size} height={size} alt="" decoding="async" loading={eager ? "eager" : "lazy"} />
+</picture>
