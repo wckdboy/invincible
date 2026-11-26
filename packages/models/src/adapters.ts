@@ -93,9 +93,13 @@ export const COMPUTER: ToolSpec = {
  */
 const TAKES_COMPUTER_TOOLSET = /^claude-(opus-5|opus-5-5|sonnet-5-5|haiku-5-5|fable-5-1|fable-5-2|mythos-5-2)(-\d{8})?$/;
 
-/** Whether a model takes Claude's computer toolset (COMPUTER): Claude's own, on an endpoint that speaks Anthropic's API. */
+/**
+ * Whether a model takes Claude's computer toolset (COMPUTER): Claude's own, on an endpoint that speaks Anthropic's API.
+ * A router's name for it is the same model (orcarouter's anthropic/claude-opus-5.5 is claude-opus-5-5).
+ */
 export function nativeComputer(kind: string, model: string): boolean {
-  return kind === "anthropic" && TAKES_COMPUTER_TOOLSET.test(model);
+  const routed = /^anthropic\/(claude-[a-z]+-\d+)(?:\.(\d))?$/.exec(model);
+  return kind === "anthropic" && TAKES_COMPUTER_TOOLSET.test(routed ? `${routed[1]}${routed[2] ? `-${routed[2]}` : ""}` : model);
 }
 
 /** A call the model made. The input is the model's, unchecked: validate it before running anything. */
@@ -135,7 +139,7 @@ interface Carried {
 }
 
 export function carryOf(provider: string, model: string, kept: Omit<Carried, "v" | "provider" | "model">): string | undefined {
-  return kept.reasoning || kept.blocks?.length ? JSON.stringify({ v: 1, provider, model, ...kept } satisfies Carried) : undefined;
+  return kept.reasoning || kept.blocks?.length || kept.computer?.length ? JSON.stringify({ v: 1, provider, model, ...kept } satisfies Carried) : undefined;
 }
 
 /** A carry, if it is this provider's and this model's and reads as one. */
@@ -260,20 +264,22 @@ export function anthropicConversation(input: CompletionInput): Conversation {
   let level = effort;
   // An answer that called the caller's tools goes back with its thinking and signatures, to this model alone (Claude
   // refuses a tool turn without the thinking it began with). One without them (another model's, or none) goes as words,
-  // and so do its results: a call and what it came to, said.
+  // and so do its results: a call and what it came to, said. A turn of the computer toolset's is this model's whether
+  // it thought or not (its carry says so), and goes back as it came: Opus 5.5 often clicks without thinking.
   const inWords = new Set<string>();
   // A call of the computer toolset's goes back as its, and so does what it came to: the API refuses either without.
   const toolset = new Set<string>();
   const asToolset = (id: string) => (toolset.has(id) ? { toolset_name: "computer" } : {});
   const toolTurn = (m: ModelMessage): Anthropic.Beta.BetaContentBlockParam[] | string => {
     const carried = carriedFor(m.carry, input.provider.id, input.model);
-    if (!carried?.blocks?.length) {
+    // (A turn of the computer toolset's with no thinking in it is this model's too, and goes back as it came.)
+    if (!carried?.blocks?.length && !carried?.computer?.length) {
       for (const c of m.calls!) inWords.add(c.id);
       return [m.content, ...m.calls!.map(callInWords)].filter(Boolean).join("\n");
     }
     for (const id of carried.computer ?? []) toolset.add(id);
     return [
-      ...(carried.blocks as Anthropic.Beta.BetaContentBlockParam[]),
+      ...((carried.blocks ?? []) as Anthropic.Beta.BetaContentBlockParam[]),
       ...words(m.content),
       ...m.calls!.map((c) => ({ type: "tool_use" as const, id: c.id, name: c.name, input: c.input, ...asToolset(c.id) })),
     ];

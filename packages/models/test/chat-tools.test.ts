@@ -414,6 +414,39 @@ describe("the caller's own tools (a run's engineer)", () => {
     expect(results.content[0]).toMatchObject({ type: "tool_result", tool_use_id: "toolu_1", toolset_name: "computer" });
   });
 
+  test("a toolset turn with no thinking in it still goes back as the toolset's: Claude's own turn, as it came (orcarouter took one so, 27 November 2026)", async () => {
+    const model = scripted([
+      anthropicStream([{ type: "tool_use", id: "toolu_1", name: "screenshot", input: {}, toolset_name: "computer" }], [[{ type: "input_json_delta", partial_json: "{}" }]], "tool_use"),
+      anthropicStream([{ type: "text", text: "" }], [[{ type: "text_delta", text: "DONE" }]], "end_turn"),
+    ]);
+    const events = await collect(chat({ ...brain(["claude/claude-opus-5-5"], true), fetch: model.fetch }, { messages: ask("Look at the screen."), clientTools: [...SHELL, COMPUTER] }));
+    const called = events.find((e) => e.type === "calls") as Extract<ChatStreamEvent, { type: "calls" }>;
+    expect(carriedFor(called.carry, "claude", "claude-opus-5-5")).toMatchObject({ computer: ["toolu_1"] });
+    const screen = { mediaType: "image/png" as const, data: "iVBORw0KGgo=", alt: "the screen" };
+    await collect(
+      chat(
+        { ...brain(["claude/claude-opus-5-5"], true), fetch: model.fetch },
+        {
+          messages: [
+            { role: "user", content: "Look at the screen." },
+            { role: "assistant", content: "", calls: called.calls, carry: called.carry! },
+            { role: "user", content: "", results: [{ id: "toolu_1", content: "The screen as it is now.", images: [screen] }] },
+          ],
+          clientTools: [...SHELL, COMPUTER],
+        },
+      ),
+    );
+    const [, turn, results] = model.bodies[1].messages;
+    expect(turn.content).toEqual([{ type: "tool_use", id: "toolu_1", name: "screenshot", input: {}, toolset_name: "computer" }]);
+    expect(results.content[0]).toMatchObject({ type: "tool_result", tool_use_id: "toolu_1", toolset_name: "computer" });
+  });
+
+  test("a turn of the caller's own tools with no thinking in it goes back in words, as ever: there is nothing to carry", async () => {
+    const model = scripted([anthropicStream([{ type: "tool_use", id: "toolu_1", name: "bash", input: {} }], [[{ type: "input_json_delta", partial_json: '{"command":"ls"}' }]], "tool_use")]);
+    const events = await collect(chat({ ...brain(["claude/claude-opus-5-5"], true), fetch: model.fetch }, { messages: ask("List it."), clientTools: [...SHELL, COMPUTER] }));
+    expect((events.find((e) => e.type === "calls") as Extract<ChatStreamEvent, { type: "calls" }>).carry).toBeUndefined();
+  });
+
   test("the toolset is offered to the Claude models documented as taking it; any other model is offered none, and works the desktop by its command", async () => {
     const takes = ["claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1", "claude-fable-5-2", "claude-mythos-5-2", "claude-opus-5-5-20261015"];
     expect(takes.filter((m) => !nativeComputer("anthropic", m))).toEqual([]);
@@ -421,6 +454,9 @@ describe("the caller's own tools (a run's engineer)", () => {
     const not = ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7", "claude-sonnet-5", "claude-opus-5-55", "claude-opus-5-5-preview"];
     expect(not.filter((m) => nativeComputer("anthropic", m))).toEqual([]);
     expect([nativeComputer("openai", "claude-opus-5-5"), nativeComputer("openai", "gpt-5")]).toEqual([false, false]);
+    // A router's name for the same model, on an endpoint that speaks Anthropic's API, is that model (orcarouter's, 27 November 2026).
+    expect(["anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5"].filter((m) => !nativeComputer("anthropic", m))).toEqual([]);
+    expect(["anthropic/claude-haiku-4.5", "anthropic/claude-opus-5.55", "openai/claude-opus-5.5", "anthropic/gpt-6"].filter((m) => nativeComputer("anthropic", m))).toEqual([]);
     const model = scripted([say("DONE"), anthropicStream([{ type: "text", text: "" }], [[{ type: "text_delta", text: "DONE" }]], "end_turn")]);
     await collect(chat({ ...brain(["local/m"]), fetch: model.fetch }, { messages: ask("Send the form."), clientTools: [...SHELL, COMPUTER] }));
     expect(model.bodies[0].tools.map((t: { function: { name: string } }) => t.function.name)).toEqual(["read", "bash"]);
