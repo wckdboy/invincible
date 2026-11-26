@@ -9,7 +9,7 @@ import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { agentOfCaller } from "../lib/roster.ts";
-import { costWords, type GateRow, judgedWith, liveStep, type Proof, proofOf, type StepGroup, stepGroups, summaryWords, workedFor, workSummary } from "../lib/steps.ts";
+import { costWords, factsOfProof, factsOfRecord, type GateRow, judgedWith, liveStep, type Proof, proofOf, proofSeal, type StepGroup, stepGroups, summaryWords, workedLine, workSummary } from "../lib/steps.ts";
 import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../lib/steer.ts";
 import { sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
 import { teamSpeaker } from "../lib/team.ts";
@@ -353,6 +353,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     if (task.status !== "done" && task.status !== "failed") return null;
     const verified = task.status === "done" && task.verified;
     const end = taskEnd(task);
+    const seal = proofSeal(task, factsOfRecord(task.record) ?? factsOfProof(proof), end?.why ?? "") ?? { word: verified ? "Reviewed" : "Not verified", by: end?.why ?? "", passed: verified };
     const files = task.changes?.files ?? changes?.files.length ?? 0;
     const added = changes ? changes.files.reduce((sum, file) => sum + (file.added ?? 0), 0) : null;
     const removed = changes ? changes.files.reduce((sum, file) => sum + (file.removed ?? 0), 0) : null;
@@ -368,12 +369,13 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const judged = judgedLine(judgedWith(trail.entries), task.steers ?? []);
     return h(
       "section",
-      { class: "proof", "data-verdict": verified ? "verified" : "failed", "aria-label": verified ? "Verified: by its gates and a reviewer that didn't write it" : `Not verified: ${end?.why ?? ""}` },
+      { class: "proof", "data-verdict": verified ? "verified" : "failed", "aria-label": `${seal.word}: ${seal.by}` },
       h(
         "header",
         { class: "proof-seal" },
-        h("span", { class: "proof-mark", "aria-hidden": "true" }, icon(verified ? "check" : "x", { size: 14 })),
-        h("div", {}, h("strong", {}, verified ? "Verified" : "Not verified"), h("span", { class: "proof-by" }, verified ? " · by its gates and a reviewer that didn't write it" : ` · ${end?.why ?? "its gates or the review did not pass"}`)),
+        h("span", { class: "proof-mark", "aria-hidden": "true" }, icon(seal.passed ? "check" : "x", { size: 14 })),
+        // The verdict that follows the proof (the iPhone's words): never "Verified" above a warning that its gates proved nothing.
+        h("div", {}, h("strong", {}, seal.word), h("span", { class: "proof-by" }, ` · ${seal.by}`)),
       ),
       ...caveats.map((line) => h("p", { class: "proof-caveat" }, icon("alert", { size: 13 }), h("span", {}, line))),
       proof.gates.length
@@ -458,7 +460,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
           h(
             "details",
             { class: "thread-worked" },
-            h("summary", { "data-key": `worked:${task.id}` }, icon("chevron-right", { size: 14, class: "chev" }), h("span", {}, `${n.name} worked for ${workedFor(summary.ms)}`), summaryWords(summary) ? h("span", { class: "subtle" }, ` · ${summaryWords(summary)}`) : null),
+            h("summary", { "data-key": `worked:${task.id}` }, icon("chevron-right", { size: 14, class: "chev" }), h("span", {}, workedLine(n.name, summary.ms)), summaryWords(summary) ? h("span", { class: "subtle" }, ` · ${summaryWords(summary)}`) : null),
             list,
           ),
         );

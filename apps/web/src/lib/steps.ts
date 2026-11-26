@@ -313,6 +313,9 @@ export function workedFor(ms: number): string {
 }
 
 /** The folded line's figures after its time, as words: "ran 14 commands · edited 5 files". */
+/** A task's folded line, its head: who worked and for how long; under half a second only that it worked, never "0s". */
+export const workedLine = (name: string, ms: number): string => (ms >= 500 ? `${name} worked for ${workedFor(ms)}` : `${name} worked`);
+
 export function summaryWords(summary: WorkSummary): string {
   return [summary.commands ? `ran ${plural(summary.commands, "command")}` : null, summary.edited ? `edited ${plural(summary.edited, "file")}` : summary.read ? `read ${plural(summary.read, "file")}` : null].filter(Boolean).join(" · ");
 }
@@ -462,6 +465,20 @@ export function verdictOf(task: Pick<TeamTask, "status" | "verified" | "record" 
   if (facts?.review === "revise") return { word: "Sent back", verdict: "rejected" };
   if (how === "gave-up") return { word: "Gave up", verdict: "gave-up" };
   return task.status === "failed" ? { word: "Failed", verdict: "failed" } : { word: "Not verified", verdict: "unverified" };
+}
+
+/**
+ * A task's seal in its thread, once it has ended: its verdict (verdictOf), what that rests on, and whether it passed. The
+ * iPhone's words (TaskView's): Proven rests on a gate that failed before the work and passes now, and a reviewer that
+ * didn't write it; Reviewed, not proven on its reviewer alone (what its gates can't show is said under it); a task that
+ * didn't pass says why (`why`: taskEnd's, or the general word). Null while it is in hand.
+ */
+export function proofSeal(task: Pick<TeamTask, "status" | "verified" | "record" | "error">, facts: ProofFacts | null, why: string): { word: string; by: string; passed: boolean } | null {
+  const verdict = verdictOf(task, facts);
+  if (!verdict) return null;
+  if (verdict.verdict === "proven") return { word: verdict.word, by: "a gate that failed before the work passes now, and a reviewer that didn't write it passed it", passed: true };
+  if (verdict.verdict === "reviewed") return { word: verdict.word, by: "its reviewer passed it; what its gates can't show is said below", passed: true };
+  return { word: verdict.word, by: why || "its gates or the review did not pass", passed: false };
 }
 
 /**

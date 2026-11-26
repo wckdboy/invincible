@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTrailEntry } from "@invincible/core/team";
-import { commandKind, costWords, factsOfProof, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, readTrailLine, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
+import { commandKind, costWords, factsOfProof, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, proofSeal, readTrailLine, workedLine, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
 
 /* A task's trail as the node writes it (team-runtime.ts progress()), its lines in the order they happened. */
 const T0 = 1_764_000_000_000;
@@ -9,6 +9,12 @@ const EDIT = "edit 'packages/link/sync.ts' <<'END'\n-  retry()\n+  resume()\nEND
 const WRITE = "cat > 'packages/link/resume.ts' <<'END'\nexport const resume = 1;\nEND";
 
 describe("a task's work, folded", () => {
+  test("its folded line says how long its agent worked, and never \"0s\": under half a second, only that it worked", () => {
+    expect(workedLine("Ada", 372_000)).toBe("Ada worked for 6m 12s");
+    expect(workedLine("Ada", 900)).toBe("Ada worked for 1s");
+    expect([workedLine("Ada", 0), workedLine("Ada", 499)]).toEqual(["Ada worked", "Ada worked"]);
+  });
+
   test("an ended task's work says nothing of its end: no bare 'finished' step (its verdict says how it ended)", () => {
     // (Trails written before 26 November 2026 end with the runner's bare "finished": every ended task's thread showed it.)
     expect(stepGroups(trail("Running · bun test", "Exit 0 · 4 pass", "finished")).map((g) => g.text)).toEqual(["Ran bun test"]);
@@ -192,6 +198,19 @@ describe("the verdict, in words that follow the proof", () => {
     }
     // Nothing says what its gates showed (a record from before they were kept): reviewed, and no more.
     expect(verdictOf(done(), factsOfRecord(done().record))).toEqual({ word: "Reviewed", verdict: "reviewed" });
+  });
+
+  test("a thread's seal says the verdict and what it rests on: never \"Verified\" above a warning that its gates proved nothing", () => {
+    const proven = done({ before: [1, 0], after: [0, 0], review: "pass", sameModel: false });
+    expect(proofSeal(proven, factsOfRecord(proven.record), "")).toEqual({ word: "Proven", by: "a gate that failed before the work passes now, and a reviewer that didn't write it passed it", passed: true });
+    const before = done({ before: [0], after: [0], review: "pass", sameModel: false });
+    expect(proofSeal(before, factsOfRecord(before.record), "")).toEqual({ word: "Reviewed, not proven", by: "its reviewer passed it; what its gates can't show is said below", passed: true });
+    const failed = { status: "failed" as const, verified: false, error: "unverified", record: record({ before: [1, 1], after: [0, 1], review: null, sameModel: false }, "unverified") };
+    expect(proofSeal(failed, factsOfRecord(failed.record), "Its gate failed at the end")).toEqual({ word: "Failed · gate 2", by: "Its gate failed at the end", passed: false });
+    const gave = { status: "failed" as const, verified: false, error: "gave-up", record: record({ before: [1], after: [], review: null, sameModel: false }, "gave-up") };
+    expect(proofSeal(gave, factsOfRecord(gave.record), "")).toEqual({ word: "Gave up", by: "its gates or the review did not pass", passed: false });
+    // In hand, there is no seal.
+    expect(proofSeal({ status: "running", verified: false, error: null, record: undefined }, null, "")).toBeNull();
   });
 
   test("failed at a gate names the first that failed at the end; sent back, gave up, stopped say so", () => {
