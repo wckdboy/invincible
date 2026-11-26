@@ -1,3 +1,4 @@
+import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { svg } from "./dom.ts";
 
 /*
@@ -11,8 +12,8 @@ const rect = (x: number, y: number, w: number, hgt: number, r: number): string =
   `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${hgt - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${-(w - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${-r}v${-(hgt - 2 * r)}a${r} ${r} 0 0 1 ${r} ${-r}z`;
 
 const ICONS = {
-  // The mark until the new identity's (Phase 1): your agent as an orb seen from afar, a ring round a lit core.
-  mark: [circle(12, 12, 7.25), `!${circle(12, 12, 2.75)}`],
+  // Your agent: the I-beam, filled, as the app's mark is (scripts/mark.ts' polygon, its 100 box scaled to this grid).
+  mark: [`!M${MARK_POLYGON.split(" ").map((pair) => pair.split(",").map((n) => Math.round(Number(n) * 0.24 * 100) / 100).join(" ")).join("L")}z`],
   // The agents: three of them, apart.
   agents: [circle(12, 6.75, 2.75), circle(6, 17, 2.75), circle(18, 17, 2.75)],
   overview: [rect(3.5, 3.5, 7, 7, 1.75), rect(13.5, 3.5, 7, 7, 1.75), rect(3.5, 13.5, 7, 7, 1.75), circle(17, 17, 3.5)],
