@@ -6,15 +6,15 @@ import {
 import type { FieldColours } from "../lib/field.ts";
 import { orbTone, type OrbTone } from "../lib/orb.ts";
 import { orbSeed, type OrbMood } from "../lib/orb-motion.ts";
-import { h } from "./dom.ts";
+import { MARK_POLYGON } from "../../../../scripts/mark.ts";
+import { h, svg } from "./dom.ts";
 import { motionAllowed, move } from "./motion.ts";
 
 /*
- * The orbs (26 November 2026): every orb is the primary's field (lib/field.ts, lib/field-orb.ts). Its is in gold, with its
- * beam of light through it along its axis (your word, 23 November 2026: it is the one you talk to, "a Jarvis … like
- * visual, the orb graphic"; and 26 November, of the heads-up ring it wore until then: "remove the old mark around [the primary].
- * make the primary agent distinct in some other cool way"); an agent's is in its own colours, with no beam (agentFace).
- * The app's own mark is its field alone (appMark). Each point of a field is a dot of light added to the others on a dark
+ * Your agent and the app are the I-beam (orb, appMark), in one ink and still: never the gold field (the owner's word, 26
+ * November 2026: the I-beam as the mark, monochrome, colour kept for the agents; as the iPhone's UI/Mark.swift draws it).
+ * Its shape has one place, scripts/mark.ts. Every agent's orb is a field (lib/field.ts, lib/field-orb.ts) in its own
+ * colours, with no beam (agentFace). Each point of a field is a dot of light added to the others on a dark
  * page (a canvas's "lighter"), with a close, faint glow of its own and no fog; on a light page it is ink. Where it is one
  * of many (a row, a conversation's history) an orb is still, and drawn once; where it is the one you are looking at, it
  * moves as its mood does (lib/field-orb.ts' FIELD_MOTION: slowly; your words of 25 and 26 November 2026, "slow and
@@ -40,27 +40,28 @@ export interface OrbOptions {
   key?: string;
 }
 
-/** The primary's orb: its field in gold, its beam through it. */
+/** The I-beam in a 100-unit box, in the page's ink (`.ibeam polygon` in index.html): its shape from scripts/mark.ts. */
+const ibeam = (): SVGSVGElement => svg("svg", { class: "ibeam", viewBox: "0 0 100 100", "aria-hidden": "true", focusable: "false" }, svg("polygon", { points: MARK_POLYGON }));
+
+/**
+ * Your agent's mark, wherever it is (Home's header, its row, its seat, a speaker in a conversation): the I-beam in one
+ * ink, still, in the box an orb takes (`size`). Where it stands is said beside it in words, and kept on it as `data-tone`;
+ * what it is doing doesn't move it (`mood` is taken for the call's sake, and moves nothing).
+ */
 export function orb(options: OrbOptions = {}): HTMLElement {
   const size = Number.isFinite(options.size) ? Math.round(Math.max(16, Math.min(320, options.size!))) : 36;
-  const tone = orbTone(options.tone);
   const named = options.label ? { role: "img", "aria-label": options.label } : { "aria-hidden": "true" };
-  const canvas = fieldCanvas(size, { identity: PRIMARY_FIELD, beam: true, agent: false, mood: options.mood, key: options.key ?? "primary" });
-  const box = { class: options.mood && canvas ? "orb orb-live" : "orb", "data-tone": tone, ...(options.mood ? { "data-mood": options.mood } : {}), style: `--orb-size:${size}px`, ...named };
-  // (Where there is no canvas to draw on, its box alone, as an agent's.)
-  return h("span", box, canvas);
+  return h("span", { class: "orb orb-mark", "data-tone": orbTone(options.tone), style: `--orb-size:${size}px`, ...named }, ibeam());
 }
 
 /**
- * The app's mark where a page shows it (the sidebar's head, a phone's way Home, Settings' About): the app icon's field,
- * its in gold, alone (no beam: that is its as the one you talk to), still, and on nothing, so it sits on a light page as
- * on a dark one (your word, 26 November 2026: "make sure the app icon is transparent so it works in dark and white mode"):
- * light added to light on a dark page, ink on a light one, as every orb is. Decorative: what it is in is named.
+ * The app's mark where a page shows it (the sidebar's head, a phone's way Home, Settings' About, the welcome): the
+ * I-beam alone, on nothing, in the page's ink, so it sits on a light page as on a dark one (your word, 26 November 2026:
+ * "make sure the app icon is transparent so it works in dark and white mode"). Decorative: what it is in is named.
  */
 export function appMark(size: number): HTMLElement {
   const px = Number.isFinite(size) ? Math.round(Math.max(16, Math.min(320, size))) : 20;
-  const canvas = fieldCanvas(px, { identity: PRIMARY_FIELD, beam: false, agent: false, mood: undefined, key: "invincible:mark" });
-  return h("span", { class: "orb app-mark", style: `--orb-size:${px}px`, "aria-hidden": "true" }, canvas);
+  return h("span", { class: "orb app-mark", style: `--orb-size:${px}px`, "aria-hidden": "true" }, ibeam());
 }
 
 /** An agent's face options: whose (its handle), its saved avatar (a colour you chose for it, core's agentColors), its

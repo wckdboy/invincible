@@ -1796,6 +1796,8 @@
          it is the one you look at (lib/field-orb.ts). */
       .orb { display: inline-grid; place-items: center; flex: none; width: var(--orb-size); height: var(--orb-size); }
       .orb > svg, .orb > canvas { display: block; width: 100%; height: 100%; }
+      /* The I-beam (ui/orb.ts' orb and appMark): your agent and the app, in the page's ink, light or dark, and still. */
+      .ibeam polygon { fill: var(--accent); }
       /* What it asks you, under its orb (views/primary-asks.ts): the Inbox's own cards, read left to right. */
       .primary-asks { width: 100%; max-width: 640px; text-align: left; margin-top: var(--sp-2); }
       .chat-hero p { color: var(--text-2); max-width: 46ch; }

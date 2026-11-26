@@ -30,12 +30,12 @@ const walk = (node: Node_): Node_[] => [node, ...node.children.flatMap(walk)];
 
 // Your word, 23 November 2026: the primary, the one you talk to, as a Jarvis-like orb; since 26 November 2026 its field, and
 // since the same evening its beam in place of the heads-up ring ("remove the old mark around [the primary]").
-describe("Your agent's orb, where there is no canvas", () => {
-  test("its box alone (no ring, no seat), its tone and its size, at any size and in any state", () => {
+describe("Your agent's mark: the I-beam, with or without a canvas", () => {
+  test("its box, its tone and its size, at any size and in any state, holding the I-beam alone", () => {
     for (const tone of ["neutral", "accent", "warn", "ok", "danger"] as OrbTone[]) {
       const node = draw(() => orb({ tone, size: 168 }) as unknown as Node_);
-      expect([node.attrs.class, node.attrs["data-tone"], node.attrs.style]).toEqual(["orb", tone, "--orb-size:168px"]);
-      expect(node.children).toEqual([]);
+      expect([node.attrs.class, node.attrs["data-tone"], node.attrs.style]).toEqual(["orb orb-mark", tone, "--orb-size:168px"]);
+      expect(node.children.map((child) => [child.tag, child.attrs.class])).toEqual([["svg", "ibeam"]]);
       for (const child of walk(node)) for (const key of Object.keys(child.attrs)) expect(key).not.toMatch(/^(on|href|xlink)/i);
     }
     // A tone it doesn't know is its rest; a size past its bounds is held to them.
@@ -43,19 +43,19 @@ describe("Your agent's orb, where there is no canvas", () => {
     expect([odd!.attrs["data-tone"], tiny!.attrs.style, huge!.attrs.style]).toEqual(["neutral", "--orb-size:16px", "--orb-size:320px"]);
   });
 
-  test("named when it stands alone, decorative beside its name; in a mood it says so", () => {
+  test("named when it stands alone, decorative beside its name; whatever it is doing, it doesn't move", () => {
     const [named, plain, moving] = draw(() => [orb({ label: "Your agent: at work" }), orb({}), orb({ mood: "working" })] as unknown as Node_[]);
     expect([named!.attrs.role, named!.attrs["aria-label"], named!.attrs["aria-hidden"]]).toEqual(["img", "Your agent: at work", undefined]);
     expect([plain!.attrs.role, plain!.attrs["aria-hidden"]]).toEqual([undefined, "true"]);
-    // (With nothing to draw on, nothing moves: no "orb-live".)
-    expect([moving!.attrs.class, moving!.attrs["data-mood"]]).toEqual(["orb", "working"]);
+    expect([moving!.attrs.class, moving!.attrs["data-mood"]]).toEqual(["orb orb-mark", undefined]);
   });
 });
 
-describe("the app's mark, where there is no canvas", () => {
-  test("its box alone, its size held to the orbs' bounds, and never read aloud (what it is in is named)", () => {
+describe("the app's mark", () => {
+  test("the I-beam alone, its size held to the orbs' bounds, and never read aloud (what it is in is named)", () => {
     const [mark, tiny] = draw(() => [appMark(20), appMark(4)] as unknown as Node_[]);
-    expect([mark!.attrs.class, mark!.attrs.style, mark!.attrs["aria-hidden"], mark!.children]).toEqual(["orb app-mark", "--orb-size:20px", "true", []]);
+    expect([mark!.attrs.class, mark!.attrs.style, mark!.attrs["aria-hidden"]]).toEqual(["orb app-mark", "--orb-size:20px", "true"]);
+    expect(mark!.children.map((child) => [child.tag, child.attrs.class])).toEqual([["svg", "ibeam"]]);
     expect(tiny!.attrs.style).toBe("--orb-size:16px");
   });
 });

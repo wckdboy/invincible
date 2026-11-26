@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { AVATAR_EXPRESSIONS, AGENT_TINTS, agentColors } from "@invincible/core/avatar";
+import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { avatarEditor, AGENT_CSS, seat, stateChip, workerAvatar, type WorkerAvatarOptions } from "./avatar.ts";
+import { appMark, orb } from "./orb.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with
  * no canvas, so an agent's orb is its box alone and the primary's its ring and seat in SVG). */
@@ -104,7 +106,7 @@ describe("an agent in its seat", () => {
     expect(working!.attrs.style).toBeUndefined();
   });
 
-  test("Your agent's seat is its orb, in the room a face and its seat take; where it stands is kept on it", () => {
+  test("Your agent's seat is its mark, in the room a face and its seat take; where it stands is kept on it", () => {
     const [needs, resting, card] = withDocument(() => [
       seat({ id: "primary", name: "Your agent", state: "needs", expression: "asking", size: 32 }),
       seat({ id: "primary", name: "Your agent", size: 32 }),
@@ -112,12 +114,12 @@ describe("an agent in its seat", () => {
     ] as unknown as Node_[]);
     expect([needs!.attrs.class, needs!.attrs["data-state"]]).toEqual(["seat seat-s seat-orb", "needs"]);
     const shown = (node: Node_) => node.children[0]!.attrs;
-    expect([shown(needs!).class, shown(needs!)["data-tone"], shown(needs!).style]).toEqual(["orb", "warn", "--orb-size:40px"]);
+    expect([shown(needs!).class, shown(needs!)["data-tone"], shown(needs!).style]).toEqual(["orb orb-mark", "warn", "--orb-size:40px"]);
     expect([shown(resting!)["data-tone"], shown(card!)["data-tone"], shown(card!).style]).toEqual(["neutral", "accent", "--orb-size:102px"]);
     expect(shown(needs!)["aria-label"]).toBe("Your agent");
-    // Still in a seat: no mood. (No canvas here: its orb's box alone; no ring round it, nor a seat drawn on one.)
+    // Still in a seat: no mood. Its mark alone: no ring round it, nor a seat drawn on one.
     expect(shown(card!)["data-mood"]).toBeUndefined();
-    expect(walk(card!).map((child) => child.attrs.class).filter(Boolean)).toEqual(["seat seat-m seat-orb", "orb"]);
+    expect(walk(card!).map((child) => child.attrs.class).filter(Boolean)).toEqual(["seat seat-m seat-orb", "orb orb-mark", "ibeam"]);
   });
 
   test("its state is said in words beside its name, in its tone; working with a live dot, so it isn't read as a quiet one", () => {
@@ -127,6 +129,30 @@ describe("an agent in its seat", () => {
     expect(failed!.attrs["data-tone"]).toBe("failed");
     // At rest there is nothing to say beyond its line.
     expect(resting).toBeNull();
+  });
+});
+
+describe("your agent's mark", () => {
+  test("is the I-beam in one ink, still, wherever it is drawn: never the gold field (the owner's word, 26 November 2026)", () => {
+    const drawn = withDocument(() => [
+      workerAvatar({ id: "primary", name: "Your agent", size: 48, expression: "working" }),
+      seat({ id: "primary", name: "Your agent", state: "working", size: 88 }),
+      orb({ size: 48, mood: "working", label: "Your agent: 3 at work" }),
+      appMark(20),
+    ] as unknown as Node_[]);
+    for (const node of drawn) {
+      const all = walk(node);
+      // Its shape has one place, scripts/mark.ts: the polygon is drawn from it, in the page's ink (its class says so).
+      const polygons = all.filter((child) => child.tag === "polygon");
+      expect(polygons.map((p) => p.attrs.points)).toEqual([MARK_POLYGON]);
+      expect(all.some((child) => child.tag === "svg" && child.attrs.viewBox === "0 0 100 100" && child.attrs.class === "ibeam")).toBe(true);
+      // No field: no canvas to paint gold on, and nothing that moves.
+      expect(all.some((child) => child.tag === "canvas")).toBe(false);
+      expect(all.some((child) => child.attrs["data-mood"] !== undefined)).toBe(false);
+    }
+    // Named where it stands alone; beside its name, decorative.
+    expect(walk(drawn[2]!).find((child) => child.attrs.role === "img")?.attrs["aria-label"]).toBe("Your agent: 3 at work");
+    expect(walk(drawn[3]!)[0]!.attrs["aria-hidden"]).toBe("true");
   });
 });
 
