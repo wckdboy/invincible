@@ -1069,6 +1069,26 @@ class Tree:
             self.refs = {i + 1: n for i, (n, _) in enumerate(found)}
             return [(i + 1, n, box) for i, (n, box) in enumerate(found)]
 
+    def caret_text(self, pid=None, title=None, before=400):
+        """What is before the caret in the field with the keyboard's focus, as its app's tree shows it, or None when the
+        tree can't say (no app of that process on the bus, no focused field in its tree, a password field)."""
+        rule = ((_bits([STATE["focused"]], 2), ALL, {}, ALL, _bits([ROLES.index(r) for r in ("entry", "text")], 5), ANY, [], ALL, False), 1, 0, True)
+        with self.lock:
+            for a in [a for a in self.apps() if pid and a["pid"] == pid]:
+                windows = [w for w in self.windows(a) if self.has(w, "showing")]
+                for w in [w for w in windows if title and w["name"] == title] or [w for w in windows if self.has(w, "active")] or windows:
+                    try:
+                        (refs,) = self.call(w["bus"], w["path"], "org.a11y.atspi.Collection", "GetMatches", "((aiia{ss}iaiiasib)uib)", rule)
+                    except Failed:
+                        continue
+                    for b, p in refs:
+                        try:
+                            caret = self.call(b or w["bus"], p, PROPS, "Get", "(ss)", ("org.a11y.atspi.Text", "CaretOffset"))[0]
+                            return self.call(b or w["bus"], p, "org.a11y.atspi.Text", "GetText", "(ii)", (max(0, caret - before), caret))[0]
+                        except Failed:
+                            continue
+        return None
+
     def find(self, role, name, pid=None):
         """The first node on the screen with that role and a name like that (any case), the app with the focus searched
         first: it, its box and a ref."""
@@ -1403,7 +1423,7 @@ class Desk:
     def _the_tree(self):
         with self.lock:
             if self._tree is None:
-                self._tree = Tree(address=self.pieces.a11y_bus, window_origin=self.window_origin)
+                self._tree = Tree(address=getattr(self.pieces, "a11y_bus", None), window_origin=self.window_origin)
             return self._tree
 
     def _listen(self):
@@ -1634,6 +1654,7 @@ class Desk:
                     self.d.key(code, False)
                     if level:
                         self.d.key(shift, False)
+                self.landed(text, target)
                 return "typed %d character%s" % (n, plural)
             self._watch.own(text)
             for code in self._keys("shift+Insert" if target == "terminal" else "ctrl+v"):
@@ -1646,8 +1667,34 @@ class Desk:
             self.d.sync()
             if not self._watch.taken(PASTE_BOUND):
                 raise Failed("nothing took the pasted text within %g s: is a text field focused?" % PASTE_BOUND)
+            self.landed(text, target)
             return "pasted %d character%s" % (n, plural)
         return do
+
+    def landed(self, text, target, bound=0.5):
+        """What was typed into an app (or the browser's own bar) checked where its accessibility tree can say what landed,
+        as the page's is by its DOM: before the caret of the field with the focus, spacing aside (an editor may indent).
+        An error when it says otherwise; nothing when it can't say (a terminal shows no tree)."""
+        if target not in ("app", "bar"):
+            return
+        self.d.sync()  # (the keys sent before the tree is asked what they did)
+        try:
+            tree = self._the_tree()
+            pid, title = self.focused_app()
+        except Exception:
+            return
+        want = re.sub(r"\s+", " ", text).strip()
+        deadline = self.now() + bound
+        while True:
+            try:
+                held = tree.caret_text(pid=pid, title=title)
+            except Failed:
+                return
+            if held is None or re.sub(r"\s+", " ", held).strip().endswith(want):
+                return
+            if self.now() >= deadline:
+                raise Failed("the text didn't land as typed: the field holds %s" % json.dumps(held[-80:], ensure_ascii=False))
+            self.sleep(0.02)
 
     def scroll(self, direction, amount, x=None, y=None, mods=""):
         button = {"up": 4, "down": 5, "left": 6, "right": 7}.get(direction)

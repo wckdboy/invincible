@@ -11,6 +11,8 @@ file, a JSON line a call, and the tests read it. Nothing here is deskd's own log
                             mousepad, none
   DESKD_DIALOG=confirm      the page puts up a JavaScript confirm once it has been clicked
   DESKD_PASTE_TAKES=…       how long the app with the focus takes to take a paste, in seconds, or never (0.01)
+  DESKD_LANDED=…            what the accessibility tree reads before the caret of the field with the focus, once
+                            anything was typed or pasted (unset: the tree says nothing)
 """
 import importlib.util, json, os, sys, threading, time
 
@@ -226,6 +228,15 @@ class FakeDisplay:
         self._deliver()
         return self.windows.get(hex(w), {"id": hex(w), "title": "", "app": "", "dialog": False, "box": None})
 
+    def prop(self, w, name, kind, as_ulongs=False):
+        # (A window's process, as the window manager's list says it: the browser's 300, the terminal's 500, the editor's 600.)
+        if name == "_NET_WM_PID":
+            return [{"0x400001": 300, "0x500001": 500, "0x600001": 600}.get(hex(w), 0)]
+        return None
+
+    def name(self, w):
+        return self.windows.get(hex(w), {}).get("title", "")
+
     def clients(self):
         self._deliver()
         return [int(k, 16) for k in self.windows]
@@ -294,6 +305,13 @@ if sys.argv[1:2] == ["help"]:
     print(deskd.HELP)
     sys.exit(0)
 screen = Screen()
-desk = deskd.Desk(pieces=FakePieces(), display=FakeDisplay(screen), watch=screen, browser=FakeBrowser())
+class FakeTree:
+    """The accessibility tree, as far as typing asks it: what is before the caret of the field with the focus."""
+    def caret_text(self, pid=None, title=None):
+        trace(call="caret_text")
+        return os.environ.get("DESKD_LANDED")
+
+
+desk = deskd.Desk(pieces=FakePieces(), display=FakeDisplay(screen), watch=screen, browser=FakeBrowser(), tree=FakeTree() if "DESKD_LANDED" in os.environ else None)
 trace(call="serving", pid=os.getpid())
 sys.exit(deskd.serve(desk, run=os.environ["INVINCIBLE_DESKTOP_RUN"]))

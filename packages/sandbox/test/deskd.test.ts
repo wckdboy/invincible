@@ -780,6 +780,7 @@ NODES = {
     "/g1": (":1.9", "/g0", "push button", "Save", ON, (10, 10, 60, 30)),
 }
 COLLECTION = True  # (an app without it is walked)
+TEXTS = {"/n1": "Søren Ærø", "/n2": "soren@example.test"}  # (what a field holds, its caret at its end)
 calls, spaces = [], []
 def kids(bus, path):
     return [(bus, p) for p, n in NODES.items() if n[0] == bus and n[1] == path]
@@ -801,6 +802,8 @@ def call(bus, path, iface, method, signature, args):
     if path not in NODES:
         raise d.Failed("gone")
     n = NODES[path]
+    if method == "Get" and args[0] == "org.a11y.atspi.Text":
+        return (len(TEXTS.get(path, "")),)
     if method == "Get":
         return (n[3],)
     if method == "GetRole":
@@ -813,6 +816,8 @@ def call(bus, path, iface, method, signature, args):
         (st, stm, _, _, ro, rom, _, _, _), _, _, _ = args
         want, roles = unbits(st), unbits(ro)
         return ([r for r in under(bus, path) if all(NODES[r[1]][4] >> s & 1 for s in want) and ROLE[NODES[r[1]][2]] in roles],)
+    if method == "GetText":
+        return (TEXTS.get(path, "")[args[0]:args[1]],)
     if method == "GetExtents":
         spaces.append([path, args[0]])
         own = APPS[bus]["toolkit"] == "GTK"
@@ -905,6 +910,33 @@ try:
 except d.Failed as e:
     said = str(e)
 print(json.dumps(said))`)).toBe("no app named like kicad is on the accessibility bus (on it: Chromium, notes)");
+  });
+
+  test("the tree reads what is before the caret of the field with the focus, in the window with the focus; a password field, or an app not on the bus, it can't say", () => {
+    expect(py(`${BUS}
+got = t.caret_text(pid=300, title="Form - Chromium")
+NODES["/n1"] = NODES["/n1"][:2] + ("password text",) + NODES["/n1"][3:]
+hidden = t.caret_text(pid=300, title="Form - Chromium")
+print(json.dumps({"got": got, "hidden": hidden, "elsewhere": t.caret_text(pid=999)}))`)).toEqual({ got: "Søren Ærø", hidden: null, elsewhere: null });
+  });
+
+  test("what is typed into an app is checked where its accessibility tree can say what landed, as the page's is by its DOM (step 4's last line)", async () => {
+    const right = await deskd({ DESKD_FOCUS: "mousepad", DESKD_LANDED: "Dear Søren,\n  Hello" });
+    const [ok] = await session(right, [{ id: 1, name: "type", input: { text: "Hello" } }]);
+    expect(ok).toMatchObject({ ok: true, did: "typed 5 characters" });
+    expect(calls(right.trace(), "caret_text").length).toBeGreaterThan(0);
+    const wrong = await deskd({ DESKD_FOCUS: "mousepad", DESKD_LANDED: "Dear Søren,\n  Hel" });
+    const [lost] = await session(wrong, [{ id: 1, name: "type", input: { text: "Hello" } }]);
+    expect(lost).toMatchObject({ ok: false, error: 'the text didn\'t land as typed: the field holds "Dear Søren,\\n  Hel"' });
+    // A field whose text the tree reads differently only in its spacing (an editor's indent) landed.
+    const spaced = await deskd({ DESKD_FOCUS: "mousepad", DESKD_LANDED: "def f():\n        return 1" });
+    const [indented] = await session(spaced, [{ id: 1, name: "type", input: { text: "def f():\n    return 1" } }]);
+    expect(indented).toMatchObject({ ok: true });
+    // Where the tree can't say (a terminal shows none), nothing is asked of it.
+    const term = await deskd({ DESKD_FOCUS: "xterm", DESKD_LANDED: "nothing like it" });
+    const [termed] = await session(term, [{ id: 1, name: "type", input: { text: "ls" } }]);
+    expect(termed).toMatchObject({ ok: true });
+    expect(calls(term.trace(), "caret_text")).toEqual([]);
   });
 
   test("the bus's resident listener starts with the first lookup, once, off the answer's path: not at the desktop's start, where it slowed the browser's first page", () => {
