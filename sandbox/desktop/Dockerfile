@@ -9,7 +9,7 @@ USER root
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       xvfb openbox chromium xdotool scrot x11-utils xauth dbus-x11 python3-websocket \
-      xterm mousepad xclip at-spi2-core python3-pyatspi python3-xlib \
+      xterm mousepad xclip at-spi2-core python3-pyatspi python3-xlib libturbojpeg0 \
       fonts-dejavu-core fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
  && rm -rf /var/lib/apt/lists/*
 
@@ -25,8 +25,12 @@ COPY seed/90_invincible-desktop.gschema.override /usr/share/glib-2.0/schemas/
 RUN "$(ls /usr/lib/*/glib-2.0/glib-compile-schemas)" /usr/share/glib-2.0/schemas \
  && GSETTINGS_BACKEND=memory python3 -c "from gi.repository import Gio; v = Gio.Settings.new('org.xfce.mousepad.preferences.file').get_string('session-restore'); assert v == 'never', v"
 
-# One command for the agent (and for you, from the console): desktop help.
-COPY desktop /usr/local/bin/desktop
-RUN chmod 0755 /usr/local/bin/desktop
+# One process holds the desktop (deskd: its input, its pictures, its windows, its browser), and one command for the
+# agent (and for you, from the console) is its client, a millisecond a command, built here with the workshop's own
+# compiler: desktop help.
+COPY deskd.py /usr/local/lib/invincible/deskd.py
+COPY desktop.c /tmp/desktop.c
+RUN cc -O2 -Wall -Wextra -Werror -o /usr/local/bin/desktop /tmp/desktop.c && rm /tmp/desktop.c \
+ && chmod 0755 /usr/local/bin/desktop && chmod 0644 /usr/local/lib/invincible/deskd.py
 
 USER 1000:1000

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { desktopArgv } from "./desktop-command.ts";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
@@ -40,6 +41,11 @@ export interface TeamRuntimeDeps {
   enter(signal: AbortSignal): Promise<() => void>;
   /** Fixed identity and exact workspace binding are enforced by the server. */
   exec(agent: Agent, command: string, timeout: number, signal: AbortSignal): Promise<ExecResult>;
+  /**
+   * A command run in its VM as its words alone, no shell around them (the same binding): a plain `desktop …`, which its
+   * VM's held desktop session runs in milliseconds (desktop-command.ts). Absent: every command is a shell's.
+   */
+  execArgv?(agent: Agent, argv: string[], timeout: number, signal: AbortSignal): Promise<ExecResult>;
   /** The address a key of yours is pinned to (PLAN #17), for telling an agent where it may use it; null: none. */
   keyAddress?(secret: string): string | null;
   /** A step of a task's work, kept as a commit in its agent's VM as it ended (PLAN #15): told once each. */
@@ -641,6 +647,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       };
       const exec = async (command: string, timeout = 120) => {
         await keeping;
+        // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms.
+        const direct = deps.execArgv ? desktopArgv(command, sees) : null;
+        if (direct) return deps.execArgv!(agent, ["desktop", ...direct], Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
         return deps.exec(agent, withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
       };
       let coding;

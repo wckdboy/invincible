@@ -70,8 +70,8 @@ const desktopDockerfile = readFileSync(new URL("desktop/Dockerfile", context), "
 
 test("the desktop image adds no PATH of its own: a login shell there has every tool the workshop's has, in the same order", () => {
   expect(desktopDockerfile).not.toMatch(/^ENV PATH=/m);
-  // Its tools are where every login shell looks already.
-  expect(desktopDockerfile).toContain("COPY desktop /usr/local/bin/desktop\n");
+  // Its command is where every login shell looks already (deskd beside it is run by it, by its whole path).
+  expect(desktopDockerfile).toMatch(/-o \/usr\/local\/bin\/desktop /);
   expect(PROFILE_PATH.split(":")).toContain("/usr/local/bin");
 });
 

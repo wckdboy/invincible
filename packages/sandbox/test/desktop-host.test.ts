@@ -100,3 +100,100 @@ describe("an agent's desktop, from outside its VM", () => {
     expect(broken.ledger).toEqual([]);
   });
 });
+
+/** A held session's stand-in: answers each JSON line as deskd would, and writes down what it was asked. */
+function held(options: { neverAnswers?: number } = {}) {
+  const asked: Record<string, unknown>[] = [];
+  const started: string[][] = [];
+  let ended: ((code: number) => void) | null = null;
+  const spawnSession = (args: string[]) => {
+    started.push(args);
+    let take: ((line: string) => void) | null = null;
+    const exited = new Promise<number>((resolve) => (ended = resolve));
+    // (An image older than deskd: its `desktop` takes no --session and ends at once.)
+    if (options.neverAnswers !== undefined) queueMicrotask(() => ended!(options.neverAnswers!));
+    return {
+      write: (text: string) => {
+        if (options.neverAnswers !== undefined) return;
+        for (const line of text.trim().split("\n")) {
+          const q = JSON.parse(line) as Record<string, unknown>;
+          asked.push(q);
+          const answer = q.argv ? { id: q.id, ok: true, code: 0, stdout: `did ${(q.argv as string[]).join(" ")}\n`, stderr: "" } : { id: q.id, ok: true, action: q.name, image: { media_type: "image/jpeg", data: PICTURE, width: 1280, height: 800, settled: null } };
+          queueMicrotask(() => take?.(JSON.stringify(answer)));
+        }
+      },
+      onLine: (fn: (line: string) => void) => void (take = fn),
+      kill: () => ended?.(-15),
+      exited,
+    };
+  };
+  return { spawnSession, asked, started };
+}
+
+describe("an agent's desktop through its held session (deskd)", () => {
+  const sessioned = (s: ReturnType<typeof held>, options: Parameters<typeof desk>[0] = {}) => {
+    const d = desk(options);
+    const docker: string[][] = [];
+    // The same host as desk()'s, with the session's stand-in, every engine call written down.
+    const runner = (d.host as unknown as { opts: { runner: DockerRunner } }).opts.runner;
+    const host = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true }, ledger: (entry) => { d.ledger.push(entry); }, runner: (args, ms) => { docker.push(args); return runner(args, ms); }, spawnSession: s.spawnSession });
+    return { ...d, host, docker };
+  };
+
+  test("a look is one request on the held session, the picture as it is now; while the session is open, no listing comes first", async () => {
+    const s = held();
+    const d = sessioned(s);
+    expect(await d.host.desktop(ID, RUN, { do: "look" })).toEqual({ shot: { mediaType: "image/jpeg", data: PICTURE }, width: 1280, height: 800 });
+    expect(s.started).toEqual([["exec", "--interactive", "--workdir", "/work", containerName(ID), "desktop", "--session"]]);
+    expect(s.asked).toEqual([{ id: 1, name: "screenshot", input: { format: "jpeg", settle: false } }]);
+    const listed = d.docker.length;
+    await d.host.desktop(ID, RUN, { do: "look" });
+    expect(d.docker.length).toBe(listed);
+    expect(s.started).toHaveLength(1);
+    expect(d.ledger).toEqual([]);
+  });
+
+  test("a thing done is the command's own words on the session, then a picture of the settled screen, and a line in the ledger; typed text is never written down", async () => {
+    const s = held();
+    const d = sessioned(s);
+    await d.host.desktop(ID, RUN, { do: "click", x: 640, y: 330, button: "double" });
+    await d.host.desktop(ID, RUN, { do: "type", text: "a secret you typed" });
+    expect(s.asked).toEqual([
+      { id: 1, argv: ["click", "640", "330", "double"] },
+      { id: 2, name: "screenshot", input: { format: "jpeg", settle: true } },
+      { id: 3, argv: ["type", "a secret you typed"] },
+      { id: 4, name: "screenshot", input: { format: "jpeg", settle: true } },
+    ]);
+    expect(d.ledger.map((e) => e.detail)).toEqual(["click 640 330 double", "type (18 characters, not recorded)"]);
+    expect(JSON.stringify(d.ledger)).not.toContain("secret");
+  });
+
+  test("the VM's own desktop command alone goes to the session, its answer as an exec's; anything else is an exec as ever", async () => {
+    const s = held();
+    const d = sessioned(s);
+    expect(await d.host.exec(ID, ["desktop", "click", "1", "2"], 30)).toMatchObject({ exitCode: 0, stdout: "did click 1 2\n", stderr: "" });
+    expect(s.asked).toEqual([{ id: 1, argv: ["click", "1", "2"] }]);
+    expect(d.execs).toEqual([]);
+    await d.host.exec(ID, ["bash", "-lc", "desktop click 1 2"], 30);
+    expect(d.execs).toEqual([["bash", "-lc", "desktop click 1 2"]]);
+    expect(d.ledger.filter((e) => e.resource === "sandbox.exec").map((e) => e.detail)).toEqual(["desktop click 1 2 → exit 0", "bash -lc desktop click 1 2 → exit 0"]);
+  });
+
+  test("a VM whose image is older than deskd ends the session before it answers: it is asked the old way, and not asked again", async () => {
+    const s = held({ neverAnswers: 2 });
+    const d = sessioned(s);
+    expect(await d.host.desktop(ID, RUN, { do: "look" })).toEqual({ shot: { mediaType: "image/jpeg", data: PICTURE }, width: 1280, height: 800 });
+    expect(d.execs.at(-1)!.join(" ")).toContain("desktop shot");
+    await d.host.desktop(ID, RUN, { do: "look" });
+    expect(s.started).toHaveLength(1);
+  });
+
+  test("removing the VM ends its session", async () => {
+    const s = held();
+    const d = sessioned(s);
+    await d.host.desktop(ID, RUN, { do: "look" });
+    await d.host.destroy(ID, { approvedBy: "owner" });
+    await d.host.desktop(ID, RUN, { do: "look" });
+    expect(s.started).toHaveLength(2);
+  });
+});

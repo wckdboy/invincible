@@ -342,6 +342,21 @@ test("an agent on the roster's models works with tools of its own, several calls
   expect(f.bodies[2].tools).toBeUndefined();
 });
 
+test("a task's plain desktop command goes to its VM as its words alone (the held desktop session); anything a shell reads stays a shell's", async () => {
+  const argvs: string[][] = [];
+  const f = fixture([call("bash", { command: "desktop click 640 450" }), call("bash", { command: "desktop click 1 2 && desktop key Return" }), say("DONE\nClicked."), say("PASS\nThe evidence supports it.")], {
+    toolsLoop: true,
+    execArgv: async (m, argv) => { expect(m.id).toBe("ada"); argvs.push(argv); return result({ stdout: "clicked at 640,450 · the screen changed (9 ms)\n" }); },
+  });
+  expect((await f.runtime.executeTask(member, task, f.context)).verified).toBe(true);
+  expect(argvs).toEqual([["desktop", "click", "640", "450"]]);
+  // (Besides the task's own look for a desktop as it starts, `command -v desktop`.)
+  expect(f.commands.filter((command) => command.includes("desktop click"))).toHaveLength(1);
+  expect(f.commands.find((command) => command.includes("desktop click"))).toContain("desktop click 1 2 && desktop key Return");
+  // What the session answered is what the agent reads back.
+  expect(JSON.stringify(f.bodies[1].messages)).toContain("the screen changed (9 ms)");
+});
+
 test("an agent held to models of its own keeps the loop it had, with its plan", async () => {
   const own: Agent = { ...member, models: ["local/fake"] };
   const f = fixture([say("1. Make the change."), say("```sh\necho built\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], { toolsLoop: true, agent: () => own });

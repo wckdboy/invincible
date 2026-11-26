@@ -140,6 +140,8 @@ export async function core(vm: BenchVm): Promise<Core> {
 /* ---------- through the node's paths ---------- */
 
 export interface Paths {
+  /** The other way an action could go from the host: an exec of the VM's command each, with no lookup or shell. */
+  execClick: Samples;
   agentTrue: Samples;
   agentClick: Samples;
   agentKey: Samples;
@@ -154,6 +156,7 @@ export interface Paths {
 export async function paths(vm: BenchVm): Promise<Paths> {
   const agent = (command: string) => timed(10, async () => must(await vm.agent(command), command).ms);
   must(await vm.raw(["desktop", "open", PAGE("long.html")]), "open long.html");
+  const execClick = await timed(10, async () => must(await vm.raw(["desktop", "click", "640", "450"]), "desktop click").ms);
   const agentTrue = await agent("true");
   const agentClick = await agent("desktop click 640 450");
   const agentKey = await agent("desktop key space");
@@ -169,7 +172,7 @@ export async function paths(vm: BenchVm): Promise<Paths> {
   must(await vm.raw(["desktop", "open", PAGE("color.html")]), "open color.html");
   const ownerClick = await timed(10, async () => (await vm.owner({ do: "click", x: 640, y: 450 })).ms);
   const ownerKey = await timed(10, async () => (await vm.owner({ do: "key", keys: ["space"] })).ms);
-  return { agentTrue, agentClick, agentKey, agentShot, ownerLook, ownerClick, ownerKey, lookBytes };
+  return { execClick, agentTrue, agentClick, agentKey, agentShot, ownerLook, ownerClick, ownerKey, lookBytes };
 }
 
 /** 2.4: a look, a click and a look, through the agent's path, with the stand-in eyes answering at once. */

@@ -248,6 +248,25 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
 - **A pinned supply chain.** Kata is a fixed release, verified against the SHA-256 GitHub records for it, and installed without touching Docker's configuration.
 - **Residual risk:** gateway and isolated sandboxes stay containers unless you ask (`--vm`), because they run model-written code with no internet; Docker group membership is still root-equivalent on the host (#6 below).
 
+## An agent's desktop (tested)
+
+- **Nothing listens outside the VM.** The display takes no network connections, the browser's debugging port listens
+  on the VM's loopback alone (`packages/sandbox/test/desktop.test.ts`), and deskd, the one process that holds the
+  desktop, is reached only through a socket in the VM's own `/tmp`, in a directory of its own (mode 0700), the socket
+  itself 0600, put in place only once it listens (`packages/sandbox/test/deskd.test.ts`). The host reaches it as it
+  reaches any command there: an exec into the VM as its unprivileged user, kept open as a session (`desktop --session`),
+  never a port.
+- **The same reach as a command.** An agent's plain `desktop …` command is its words alone over that session: what a
+  shell would read differently (an operator, an expansion, a redirect, a second command) stays a shell command
+  (`packages/agents/test/desktop-command.test.ts`), and it goes through `execSandbox` with its scope and its run's
+  binding, and its line in the ledger, as before. The owner's watching and taking over go through the same session,
+  under the same checks (`teamDesktopOn`: yours alone; an agent is refused).
+- **What is typed is never written down.** An action's text reaches deskd as one argument no shell reads; the ledger
+  says how many characters (`packages/sandbox/test/desktop-host.test.ts`). The eyes' token goes with a look from the
+  command's environment, never as an argument.
+- **Residual risk:** anything in the VM running as the agent's user can speak to deskd, as it could run the desktop's
+  tools before; the VM is the boundary.
+
 ## Terminals (tested)
 
 - **Yours alone.** A terminal is a login shell in a running sandbox on the node you ask (`docker exec --tty`, as the sandbox's own unprivileged user, under a pseudo-terminal on the host): the same reach `execSandbox` already gives, made interactive, so a vendor's sign-in or a coding tool's screen can run there. Its five routes need `sandbox` and an owner's device or the admin token; an agent or a node is refused whatever its scopes (`packages/node/test/terminals.e2e.test.ts`). Invincible and the agents have no tool for one.

@@ -2129,11 +2129,15 @@ export function createApp(ctx: AppContext) {
     try { return await work; } finally { vmProvisioning.delete(id); }
   }
   async function execTeam(member: Seat, command: string, timeout: number, signal: AbortSignal) {
+    return execTeamArgv(member, ["bash", "-lc", command], timeout, signal);
+  }
+  /** A command in an agent's own VM as its words (a plain `desktop …` goes to the VM's held desktop session there). */
+  async function execTeamArgv(member: Seat, cmd: string[], timeout: number, signal: AbortSignal) {
     if (signal.aborted) throw new HttpError(409, "agent stopped");
     const current = seatOf(member.id);
     if (!current.enabled) throw new HttpError(409, "agent paused");
     if (!current.workspace) throw new HttpError(424, "this agent has no VM yet");
-    return inProcess(agentPrincipal(member.id), signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: current.workspace.node, id: current.workspace.id, cmd: ["bash", "-lc", command], timeoutSec: timeout });
+    return inProcess(agentPrincipal(member.id), signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: current.workspace.node, id: current.workspace.id, cmd, timeoutSec: timeout });
   }
   /** The providers with a key now: what an agent's task lease covers when the task starts, and a VM made (again) with. */
   const keyedProviders = (): string[] => providerViews(ctx.store, ctx.vault).filter((v) => v.hasKey).map((v) => v.id).slice(0, 16);
@@ -2338,7 +2342,7 @@ export function createApp(ctx: AppContext) {
     const runtime = teamRuntime({
       brain: (member) => ({ ...brainFor(agentPrincipal(member.id)), ...(ctx.fetch ? { fetch: overFleet(ctx.fetch) } : {}) }),
       enter: (signal) => ctx.governor.enterModel({ wait: true }, signal),
-      exec: execTeam, prepare: prepareTeam, renew: renewTeam, agent: teamMember,
+      exec: execTeam, execArgv: execTeamArgv, prepare: prepareTeam, renew: renewTeam, agent: teamMember,
       // An agent on the roster's engineer models works with its own tools, as was measured (team-runtime toolsLoop).
       toolsLoop: true,
       files: (refs) => filesFor(refs, ctx.uploads),

@@ -22,7 +22,7 @@ import { sig, type Suite, type SuiteContext } from "../lib.ts";
 const NOTE = {
   boot: "a fresh VM (docker run as the node makes an agent's) to the desktop started, a page painted and a picture taken",
   vm: "inside the VM, no exec around it",
-  agent: "through the agent's path: SandboxHost.exec of bash -lc withGateway(…), as team-runtime runs each command of a task",
+  agent: "through the agent's path, as team-runtime runs each command of a task: a plain desktop command to the VM's held desktop session where it has one, else SandboxHost.exec of bash -lc withGateway(…)",
   owner: "through the owner's path: SandboxHost.desktop (POST /api/team/desktop), the action and a fresh picture",
 };
 
@@ -111,6 +111,7 @@ export const suite: Suite = {
       speed(ctx, "desktop.vm.key-returns", c.keyReturns, `desktop key to its return, ${NOTE.vm}`);
 
       const p = await paths(vm);
+      speed(ctx, "desktop.agent.exec-click", p.execClick, "desktop click as an exec of its own, straight into the VM (no lookup, no shell): the other way the host could act");
       speed(ctx, "desktop.agent.true", p.agentTrue, `true, ${NOTE.agent}`);
       speed(ctx, "desktop.agent.click", p.agentClick, `desktop click, ${NOTE.agent}`);
       speed(ctx, "desktop.agent.key", p.agentKey, `desktop key, ${NOTE.agent}`);

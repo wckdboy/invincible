@@ -33,6 +33,7 @@ import {
   type Unmade,
 } from "./container.ts";
 import { ContainerVolumes } from "./container-volumes.ts";
+import { DesktopSession, SessionEnded, type SpawnSession, spawnSession } from "./desktop-session.ts";
 import { macFirewall, type MacFirewallState } from "./mac-firewall.ts";
 import {
   chooseIsolation,
@@ -142,6 +143,8 @@ export interface SandboxHostOptions {
   launchctl?: DockerRunner;
   /** On a Mac: whether its sandbox firewall is on (mac-firewall.ts; tests pass their own). No sandbox is made while it isn't. */
   firewall?: () => Promise<MacFirewallState>;
+  /** How a VM's held desktop session is started (desktop-session.ts; tests pass a stand-in): an engine exec kept open. */
+  spawnSession?: SpawnSession;
 }
 
 /**
@@ -413,6 +416,12 @@ export class SandboxHost {
   private keeping: Promise<void> | null = null;
   /** On a Mac: why a network's keeper couldn't be started the last time it was tried, or null. */
   private unkept: string | null = null;
+  /**
+   * Each desktop VM's held session (deskd's), with the VM as it was when it began: while the session is open the VM is
+   * running, so an action through it isn't preceded by a listing. Ended with the VM; a VM whose image has no deskd
+   * (exit 127) is asked again only once it is made again.
+   */
+  private readonly sessions = new Map<string, { session: DesktopSession; view: SandboxView }>();
 
   constructor(opts: SandboxHostOptions) {
     this.apple = opts.engine === "container";
@@ -1031,6 +1040,7 @@ export class SandboxHost {
     }
     await this.ensureNetworks();
 
+    this.endSession(id);
     await this.docker(["stop", "-t", "10", name], 60_000);
     let moved = await this.docker(["rename", name, aside]);
     if (moved.code !== 0) {
@@ -1171,8 +1181,11 @@ export class SandboxHost {
   }
 
   /**
-   * An agent's desktop, from outside its VM (the owner watching, or taking over to sign in): do one thing there
-   * with the VM's own `desktop` command, then bring back a picture of the screen. No port is opened into the VM.
+   * An agent's desktop, from outside its VM (the owner watching, or taking over to sign in): do one thing there, then
+   * bring back a picture of the screen. Through the VM's held desktop session (deskd) where its image has one: the
+   * action and the picture in one exchange, the picture taken once the screen has settled after an action (and the
+   * page a click opened has loaded), never before; a look takes the screen as it is. Where the image is older, with
+   * the VM's own `desktop` command, an exec each. No port is opened into the VM.
    * Each thing done is a line in the ledger; looking is not (whoever watches asks again every second or two);
    * what is typed is carried to the VM as one argument no shell reads, and the ledger says only how much.
    */
@@ -1205,36 +1218,96 @@ export class SandboxHost {
         break;
       case "type":
         if (!action.text.length || action.text.length > 2000) refuse("type takes some text, at most 2,000 characters");
-        // (As base64 to a line of Python there, which hands it to the command as one argument.)
-        argv = ["python3", "-c", "import base64,subprocess,sys; sys.exit(subprocess.run(['desktop','type',base64.b64decode(sys.argv[1]).decode()]).returncode)", Buffer.from(action.text, "utf8").toString("base64")];
+        argv = ["desktop", "type", action.text];
         did = `type (${action.text.length} characters, not recorded)`;
         break;
     }
-    const sandbox = await this.get(id);
+    const held = this.sessions.get(id);
+    const sandbox = held?.session.open ? held.view : await this.get(id);
     if (!sandbox) throw new SandboxError("the agent's VM is missing", 404);
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") throw new SandboxError("that is not this agent's persistent VM", 403);
     if (sandbox.status !== "running") throw new SandboxError(`the agent's VM is ${sandbox.status}`, 409);
+    const ledger = () => this.opts.ledger({ class: "modify", resource: "sandbox.desktop", target: sandbox.name, verdict: "allow", run, detail: did || redact(argv!.slice(1).join(" ")).slice(0, 300) });
+    const session = this.desktopSession(sandbox);
+    if (session) {
+      try {
+        if (argv) {
+          const done = await session.call({ argv: argv.slice(1) }, 75_000);
+          if (done.code !== 0) throw new SandboxError(`the desktop could not do that: ${redact(String(done.stderr ?? "").trim().split("\n").at(-1) ?? "").replace(/^desktop: /, "").slice(0, 300) || `exit ${done.code}`}`, done.code === 2 ? 400 : 424);
+          ledger();
+        }
+        const shot = await session.call({ name: "screenshot", input: { format: "jpeg", settle: argv !== null } }, 75_000);
+        const image = shot.image as { media_type: string; data: string; width: number; height: number } | undefined;
+        if (!shot.ok || !image) throw new SandboxError(`the desktop could not show its screen: ${String(shot.error ?? "no picture").slice(0, 300)}`, 424);
+        return { shot: { mediaType: image.media_type === "image/png" ? "image/png" : "image/jpeg", data: image.data }, width: image.width, height: image.height } as DesktopView;
+      } catch (error) {
+        // A session that ended before it ever answered was none (an image older than deskd): asked the old way.
+        if (!(error instanceof SessionEnded) || session.answered) throw error;
+      }
+    }
     /** Why the VM's command failed, as the owner should read it. */
     const failed = (ran: Run): never => {
       if (ran.code === 127 || /desktop: (command )?not found/.test(ran.stderr)) throw new SandboxError("this agent's VM has no desktop: have it made again with one (invincible agents provision <id> --remake --desktop)", 424);
       throw new SandboxError(`the desktop could not do that: ${redact(ran.stderr.trim().split("\n").at(-1) ?? "").slice(0, 300) || `exit ${ran.code}`}`, 424);
     };
     if (argv) {
-      const ran = await this.docker(this.commandArgs(id, argv, 60), 75_000);
+      // (Typed text as base64 to a line of Python there, which hands it to the command as one argument.)
+      const asRun = action.do === "type" ? ["python3", "-c", "import base64,subprocess,sys; sys.exit(subprocess.run(['desktop','type',base64.b64decode(sys.argv[1]).decode()]).returncode)", Buffer.from(action.text, "utf8").toString("base64")] : argv;
+      const ran = await this.docker(this.commandArgs(id, asRun, 60), 75_000);
       if (ran.code !== 0) failed(ran);
-      this.opts.ledger({ class: "modify", resource: "sandbox.desktop", target: sandbox.name, verdict: "allow", run, detail: did || redact(argv.slice(1).join(" ")).slice(0, 300) });
+      ledger();
     }
     const shot = await this.docker(this.commandArgs(id, ["sh", "-c", 'f="${TMPDIR:-/tmp}/watch-$$.jpg"; desktop shot "$f" >/dev/null && base64 -w0 "$f"; code=$?; rm -f "$f"; exit $code'], 60), 75_000);
     if (shot.code !== 0 || !shot.stdout.trim()) failed(shot);
     return { shot: { mediaType: "image/jpeg", data: shot.stdout.trim() }, width: 1280, height: 800 };
   }
 
+  /**
+   * The VM's held desktop session, begun with the VM as it is now (null on a Mac, which makes no desktop, and for a
+   * VM whose image was found to have no deskd).
+   */
+  private desktopSession(sandbox: SandboxView): DesktopSession | null {
+    // (An engine run by tests has a session only where they give one.)
+    if (this.apple || (this.opts.runner && !this.opts.spawnSession)) return null;
+    const held = this.sessions.get(sandbox.id);
+    if (held) {
+      // An image older than deskd (no `desktop`, or the one that takes no --session) is asked the old way until it is made again.
+      if (!held.session.answered && (held.session.ended === 127 || held.session.ended === 2)) return null;
+      held.view = sandbox;
+      return held.session;
+    }
+    const spawn = this.opts.spawnSession ?? spawnSession(this.bin);
+    const session = new DesktopSession(() => spawn(["exec", "--interactive", "--workdir", "/work", containerName(sandbox.id), "desktop", "--session"]));
+    this.sessions.set(sandbox.id, { session, view: sandbox });
+    return session;
+  }
+
+  /** A VM's held desktop session ended, as the VM did (removed, stopped, made again). */
+  private endSession(id: string): void {
+    this.sessions.get(id)?.session.close();
+    this.sessions.delete(id);
+  }
+
   async exec(id: string, cmd: string[], timeoutSec = 600): Promise<ExecResult> {
-    const sandbox = await this.get(id);
+    // The VM's own `desktop` command alone goes to its held session where it has one: the same command, its answer
+    // the same, in milliseconds; while the session is open the VM is running, so no listing comes first.
+    const held = cmd[0] === "desktop" && cmd.length > 1 ? this.sessions.get(id) : undefined;
+    const sandbox = held?.session.open ? held.view : await this.get(id);
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
     const started = performance.now();
-    const result = await this.docker(this.commandArgs(id, cmd, timeoutSec), (timeoutSec + 15) * 1000);
+    let result: Run | null = null;
+    if (cmd[0] === "desktop" && cmd.length > 1 && sandbox.image.includes("desktop")) {
+      const session = this.desktopSession(sandbox);
+      try {
+        const done = session ? await session.call({ argv: cmd.slice(1) }, timeoutSec * 1000) : null;
+        if (done) result = { code: Number(done.code ?? 1), stdout: String(done.stdout ?? ""), stderr: String(done.stderr ?? done.error ?? ""), truncated: false };
+      } catch (error) {
+        // (One that ended before it answered was no session: the command is run as any other.)
+        if (!(error instanceof SessionEnded) || session?.answered) result = { code: 1, stdout: "", stderr: `desktop: ${(error as Error).message}\n`, truncated: false };
+      }
+    }
+    result ??= await this.docker(this.commandArgs(id, cmd, timeoutSec), (timeoutSec + 15) * 1000);
     this.opts.ledger({
       class: "modify",
       resource: "sandbox.exec",
@@ -1400,6 +1473,7 @@ export class SandboxHost {
       });
       return decision;
     }
+    this.endSession(id);
     await this.docker(this.apple ? containerDeleteArgs(containerName(id)) : ["rm", "--force", "--volumes", containerName(id)]);
     if (sandbox.disk) {
       const ws = this.opts.workspaces;

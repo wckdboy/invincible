@@ -2,11 +2,13 @@ import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { desktopArgv } from "../../packages/agents/src/desktop-command.ts";
 import { withGateway } from "../../packages/agents/src/team-runtime.ts";
+import { spawnSession } from "../../packages/sandbox/src/desktop-session.ts";
 import { type DesktopAction, type DesktopView, microVMsAvailable, SandboxHost } from "../../packages/sandbox/src/host.ts";
 import type { SandboxView } from "../../packages/core/src/index.ts";
 import { pick, rng, subSeed } from "../lib.ts";
-import { scratchNames, scratchRunner, spawnDocker } from "./scratch.ts";
+import { scratchArgs, scratchNames, scratchRunner, spawnDocker } from "./scratch.ts";
 
 /*
  * A VM of the desktop bench's: made by the node's own SandboxHost, as an agent's VM is made (its run arguments: Kata, a
@@ -52,6 +54,8 @@ export function bench(prefix: string, log: (line: string) => void): Bench {
     microVMs: true,
     workspaces: null,
     runner: scratchRunner(prefix),
+    // Its held desktop sessions under the bench's names too.
+    spawnSession: (args) => spawnSession("docker")(scratchArgs(args, prefix)),
   });
   return { prefix, names, host, log };
 }
@@ -145,13 +149,15 @@ export class BenchVm {
   }
 
   /**
-   * One command the way an agent's task runs it: SandboxHost.exec of `bash -lc withGateway(…)`, with the task's
-   * temporary directory and its eyes named, as team-runtime's exec does.
+   * One command the way an agent's task runs it, as team-runtime's exec does: a plain `desktop …` as its words alone
+   * (to the VM's held desktop session, where its image has one: desktop-command.ts), anything else SandboxHost.exec of
+   * `bash -lc withGateway(…)`, with the task's temporary directory and its eyes named.
    */
   async agent(command: string, timeoutSec = 120): Promise<Ran> {
     const temp = "/work/.tmp/bench";
     const t0 = performance.now();
-    const r = await this.bench.host.exec(this.id, ["bash", "-lc", withGateway(`mkdir -p '${temp}' && export TMPDIR='${temp}' && export INVINCIBLE_EYES=stub/eyes && cd /work && ${command}`)], timeoutSec);
+    const direct = desktopArgv(command, "stub/eyes");
+    const r = await this.bench.host.exec(this.id, direct ? ["desktop", ...direct] : ["bash", "-lc", withGateway(`mkdir -p '${temp}' && export TMPDIR='${temp}' && export INVINCIBLE_EYES=stub/eyes && cd /work && ${command}`)], timeoutSec);
     return { code: r.exitCode, stdout: r.stdout, stderr: r.stderr, ms: performance.now() - t0 };
   }
 
