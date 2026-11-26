@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, writeSync, closeSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync, writeSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import { b64u, didKeyOfEd25519, fromB64u, signingPublicKey } from "@invincible/core";
 import { SidecarClient } from "./socket.ts";
@@ -55,6 +55,17 @@ export const spawnSidecar: SpawnSidecar = (binary, args, env, line) => {
   return { ready, exited: proc.exited.then(() => proc.signalCode ?? proc.exitCode), kill: (signal) => proc.kill(signal), pid: proc.pid };
 };
 
+/**
+ * Whether a `qamp` binary has a sidecar at all (Q-AMP 0.1.0, the first release, has none), and its version: asked of
+ * the binary itself, `qamp sidecar --help` and `qamp --version`.
+ */
+export function probeSidecar(binary: string): { sidecar: boolean; version: string | null } {
+  const version = Bun.spawnSync([binary, "--version"], { stdout: "pipe", stderr: "ignore", timeout: 5_000 });
+  const help = Bun.spawnSync([binary, "sidecar", "--help"], { stdout: "ignore", stderr: "ignore", timeout: 5_000 });
+  const said = version.exitCode === 0 ? version.stdout.toString().trim().replace(/^qamp\s+/, "").slice(0, 40) : null;
+  return { sidecar: help.exitCode === 0, version: said };
+}
+
 export interface SidecarOptions {
   /** The node's home: the key goes to <home>/qamp/node.qamp-key, the socket to <home>/run/qamp.sock. */
   home: string;
@@ -76,6 +87,8 @@ export interface SidecarOptions {
   /** How long it may take to say its address and open its socket. */
   startMs?: number;
   stopGraceMs?: number;
+  /** How a binary is asked whether it has a sidecar (tests: a stand-in): asked again only when the binary changes. */
+  probe?: (binary: string) => { sidecar: boolean; version: string | null };
   /** Each time the node holds a connection to a sidecar that is up: serve its tools there. */
   up?(client: SidecarClient): Promise<void> | void;
   /** Each time it went down (or never came up), and why. */
@@ -124,6 +137,8 @@ export class Sidecar {
   private upSince: number | null = null;
   private tail: string[] = [];
   private starting: Promise<void> | null = null;
+  /** What the binary said of itself, as it was when it was asked (its path, size and time). */
+  private probed: { key: string; sidecar: boolean; version: string | null } | null = null;
   state: SidecarState = "off";
   why: string | null = "not started";
   client: SidecarClient | null = null;
@@ -163,6 +178,11 @@ export class Sidecar {
       return;
     }
     if (!existsSync(binary)) return this.off("Q-AMP isn't installed on this node: its pinned binary goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)");
+    // A binary from before the sidecar (0.1.0) runs grants' bridges and no sidecar: asked once, again when it changes.
+    const stat = statSync(binary);
+    const made = `${binary}:${stat.size}:${stat.mtimeMs}`;
+    if (this.probed?.key !== made) this.probed = { key: made, ...(this.opts.probe ?? probeSidecar)(binary) };
+    if (!this.probed.sidecar) return this.off(`the qamp here (${this.probed.version ?? binary}) has no sidecar: Q-AMP's release with one goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)`);
     if (this.socketPath.length > SOCKET_PATH_MAX) return this.off(`the sidecar's socket path is too long for a Unix socket (${this.socketPath.length} bytes): set INVINCIBLE_QAMP_SOCKET to a shorter one`);
     let key: { path: string; did: string };
     try {

@@ -677,6 +677,14 @@ describe("the fabric, as the doctor says it (docs/ARCHITECTURE.md §3)", () => {
     expect(byId(diagnose(none), "node.qamp")).toMatchObject({ state: "ok", line: "this node runs no sidecar, so every link to another node goes over HTTPS with signed requests" });
   });
 
+  test("a binary from before the sidecar (0.1.0) is yours to replace: the line says so, and how", () => {
+    const old = fault((f) => (f.fabric = sidecar({ state: "off", why: "the qamp here (0.1.0) has no sidecar: Q-AMP's release with one goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)", address: null, version: null })), "node.qamp");
+    expect(old.state).toBe("needs-you");
+    expect(old.line).toStartWith("the qamp here (0.1.0) has no sidecar");
+    expect(old.line).toEndWith("every link to another node goes over HTTPS with signed requests meanwhile");
+    expect(old.fix).toContain("deploy.sh --qamp");
+  });
+
   test("a sidecar that is down is yours to know: why, that HTTPS carries the links meanwhile, and what to check", () => {
     const down = fault((f) => (f.fabric = sidecar({ state: "down", why: "it stopped (9)" })), "node.qamp");
     expect(down.state).toBe("needs-you");

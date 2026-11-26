@@ -252,6 +252,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     const q = f.fabric;
     const where = q.address ? `on ${q.address.split("@")[1]}` : "dialling out only";
     if (q.state === "up") add("node", "node.qamp", "ok", `its sidecar is up as ${q.did?.slice(0, 22)}… ${where} (qamp ${q.version ?? "?"}): its links to other nodes go over Q-AMP`);
+    else if (q.state === "off" && /has no sidecar/.test(q.why ?? "")) add("node", "node.qamp", "needs-you", `${q.why}; every link to another node goes over HTTPS with signed requests meanwhile`, "Put the pinned release in place: deploy.sh --qamp <its binary for this machine> (scripts/qamp-pin.sh checks its SHA-256). The node starts its sidecar by itself once it is there.");
     else if (q.state === "off") add("node", "node.qamp", "ok", /isn't installed/.test(q.why ?? "") ? "Q-AMP isn't installed here, so every link to another node goes over HTTPS with signed requests" : "this node runs no sidecar, so every link to another node goes over HTTPS with signed requests");
     else
       add("node", "node.qamp", "needs-you", `its sidecar is ${q.state === "starting" ? "starting" : "down"}${q.why ? `: ${q.why}` : ""}; its links to other nodes go over HTTPS meanwhile`, "It is started again by itself (its log says each try: qamp: …). If it keeps stopping, check its binary (<home>/bin/qamp, scripts/qamp-pin.sh) and that its UDP port (7410) is free on the node's address.");
