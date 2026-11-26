@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type ClientCall, type ExecResult, redact } from "@invincible/core";
-import type { ToolSpec } from "./adapters.ts";
+import type { ToolSpec } from "@invincible/models";
 
 /*
  * The engineer's own tools (RunOptions.tools): a shell, and a file's reading, editing and writing, called as tools and

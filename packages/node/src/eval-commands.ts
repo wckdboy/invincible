@@ -29,7 +29,8 @@ import {
   type UsageWindow,
   usdLabel,
 } from "@invincible/core";
-import { AGENTS, clockUtc, spanWords } from "@invincible/models";
+import { AGENTS } from "@invincible/agents";
+import { clockUtc, spanWords } from "@invincible/models";
 import type { NodeClient } from "./run-cli.ts";
 import { budgetLabel, describeCost, describeDone, describeEffort, describeIndex, describeEval, estimateLabel, estimateRun, type RunResult, type EvalBudget, evalRunFromCli } from "./eval-cli.ts";
 import { loadSuite, suiteNamed, EVAL_SUITES } from "./eval-suites.ts";

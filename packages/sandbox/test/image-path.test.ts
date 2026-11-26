@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 /*
  * The agents' image puts its tools on the PATH with ENV, and an agent's commands run in login shells
- * (packages/node/src/team-runtime.ts), where /etc/profile sets PATH afresh: Debian's does. Seen on ultra on
+ * (packages/agents/src/team-runtime.ts), where /etc/profile sets PATH afresh: Debian's does. Seen on ultra on
  * 14 November 2026, in the first task an agent ran in a real VM: its gate, `bun test`, exited 127, though bun
  * was in the image and the agent's tests passed when it called bun by its whole path. So the image carries a
  * script that every login shell reads, which puts the image's tools back, and this holds the two together.

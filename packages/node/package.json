@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@invincible/agents": "workspace:*",
     "@invincible/models": "workspace:*",
     "@invincible/core": "workspace:*",
     "@invincible/link": "workspace:*",

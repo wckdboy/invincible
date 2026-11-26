@@ -1,7 +1,7 @@
 /*
  * Makes the check card: card.html drawn by a headless Chrome at 1280 by 800, as card.jpg, and each target's box
  * and centre as the page itself measures them, in card.json. Run once, and again only when card.html changes:
- *   bun packages/models/assets/check-card/make.ts [path to Chrome]
+ *   bun packages/agents/assets/check-card/make.ts [path to Chrome]
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

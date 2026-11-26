@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { runLoop, type RunRole } from "@invincible/models";
+import { runLoop, type RunRole } from "@invincible/agents";
 
 const sh = (command: string) => `Next step.\n\`\`\`sh\n${command}\n\`\`\``;
 

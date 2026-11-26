@@ -1,4 +1,4 @@
-import type { AgentDriver } from "./agents.ts";
+import type { AgentDriver } from "./harnesses.ts";
 import { ACP_CLIENT, ACP_ENTRY, notesServer, readBridge, withNotes } from "./acp.ts";
 export { readBridge } from "./acp.ts";
 

@@ -1,4 +1,4 @@
-import type { RunEvent, RunOutcome } from "@invincible/models";
+import type { RunEvent, RunOutcome } from "./run.ts";
 import type { RunEvidence, RouteName, SkillLearned } from "@invincible/core";
 
 /*

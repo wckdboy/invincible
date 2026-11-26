@@ -1,7 +1,7 @@
 import { type ArgValue, TEAM_PRIMARY, type TeamOutcomeStatus, type TeamTask, type TeamTaskFix, usdLabel } from "@invincible/core";
 import type { CiFailure, CiReview, ShippedPull } from "./ci-watch.ts";
 import type { OutcomeRunner } from "./outcomes.ts";
-import { sameRepository } from "./ship.ts";
+import { sameRepository } from "@invincible/agents";
 import type { TeamStore } from "./team-store.ts";
 import type { TeamService } from "./team.ts";
 

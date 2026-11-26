@@ -3,7 +3,7 @@ import { DISTIL_MAX_TOKENS, HlcClock, newNodeIdentity, type NodeIdentity, type R
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
 import { DISTIL_MIN_TOKENS, listSkills, MAX_WAITING, SkillError, type SkillsDeps, SkillsService, usableSkills, WITHHELD } from "../src/skills.ts";
-import { learnedLines, runEvidence, runTrail } from "../src/skills-run.ts";
+import { learnedLines, runEvidence, runTrail } from "@invincible/agents";
 
 /*
  * Its skills on a node, without a daemon: the service over a real mind (in memory), a

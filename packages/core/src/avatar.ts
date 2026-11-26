@@ -91,7 +91,7 @@ export interface AvatarActivity {
 
 /**
  * What a running task is at, from the mark that starts the latest line its run reported (the runner's own, one for
- * each step: "Plan · ", "Thinking · ", "Running · ", "Exit N · ", "Gate i/n · " and so on; packages/node/src/team-runtime.ts
+ * each step: "Plan · ", "Thinking · ", "Running · ", "Exit N · ", "Gate i/n · " and so on; packages/agents/src/team-runtime.ts
  * writes them, and its tests hold the two together). Only the mark is read, never the words after it: a line without
  * one is work, whatever it says.
  */

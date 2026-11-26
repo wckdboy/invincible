@@ -191,3 +191,10 @@ export function pinnedEffort(store: LedgerStore, role: string): Effort | null {
   const pinned = store.lww<string>(`effort:${role}`)?.value;
   return pinned && pinned !== "auto" ? (pinned as Effort) : null;
 }
+
+/** A role's models, starting at another one for each attempt (the rest stay as fallbacks, in order). */
+export function rotated<T>(models: readonly T[], by: number): T[] {
+  if (models.length < 2) return [...models];
+  const k = ((Math.floor(by) % models.length) + models.length) % models.length;
+  return [...models.slice(k), ...models.slice(0, k)];
+}

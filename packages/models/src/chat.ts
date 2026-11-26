@@ -2,14 +2,13 @@ import { canonical, type ChatMessage, type ChatStreamEvent, type Json, priceFor,
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { type ModelMessage, RefusalError, refusalWords, type ToolCall, type ToolImage, type ToolSpec, ToolsUnsupportedError, type TurnEnd } from "./adapters.ts";
 import { conversationFor } from "./responses.ts";
-import { rotated } from "./effort.ts";
 import { isEmbeddingModel } from "./embeddings.ts";
 import { PRIMARY_SYSTEM, runtimeContext, SHOW_GUIDE, TOOL_GUIDE } from "./persona.ts";
 import { windowScope, windowsOf } from "./windows.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
 import { followsFormat, readModelCheck, readsScreens, type ModelCheck } from "@invincible/core";
 import { offeredModels, onPlan, planOf, providerRecords, QUIET_MS, quietly, resolveProvider, whyNoKey } from "./providers.ts";
-import { effortFor, parseRef, pinnedEffort, roleModels, sameModel } from "./roster.ts";
+import { effortFor, parseRef, pinnedEffort, roleModels, rotated, sameModel } from "./roster.ts";
 
 export interface ModelsContext {
   store: LedgerStore;

@@ -19,7 +19,7 @@ const root = mkdtempSync(join(tmpdir(), "invincible-checks-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 let daemon: Daemon;
-const card = JSON.parse(readFileSync(new URL("../../models/assets/check-card/card.json", import.meta.url), "utf8")) as { heading: string; targets: Record<string, { centre: [number, number] }> };
+const card = JSON.parse(readFileSync(new URL("../../agents/assets/check-card/card.json", import.meta.url), "utf8")) as { heading: string; targets: Record<string, { centre: [number, number] }> };
 const answer = (text: string) => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
 const model = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (request) => {
   const body = (await request.json()) as { messages: { role: string; content: unknown }[] };

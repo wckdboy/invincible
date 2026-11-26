@@ -87,7 +87,7 @@ describe("checking a model", () => {
   });
 });
 
-import { chat, type ChatTools } from "../src/index.ts";
+import { chat, type ChatTools } from "@invincible/models";
 
 describe("choosing by what a model was seen to do", () => {
   /** Two stand-in models on one roster: `odd` was checked and found not to follow the loop's format, `able` was not checked. */

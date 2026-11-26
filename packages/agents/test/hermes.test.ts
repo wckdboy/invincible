@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENTS, HERMES } from "../src/agents.ts";
+import { AGENTS } from "../src/harnesses.ts";
+import { HERMES } from "../src/hermes.ts";
 import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 import { HERMES_ACP_BRIDGE } from "../src/hermes.ts";
 

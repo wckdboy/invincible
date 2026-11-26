@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkpointCommand, quote, REPO_TASK_START } from "../src/team-runtime.ts";
+import { checkpointCommand, quote, REPO_TASK_START } from "@invincible/agents";
 
 /*
  * An agent's steps, kept as they end, and a task started from one (PLAN #15), with real git in a scratch directory:

@@ -2,7 +2,8 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { chat, chooseAgentModels, decide, detectProvider, embed, eyesOf, GatewayTokens, handleGateway, offersModel, originOf, planOf, preset, PRESETS, resolveProvider, signIn } from "../src/index.ts";
+import { chat, decide, detectProvider, embed, GatewayTokens, handleGateway, offersModel, originOf, planOf, preset, PRESETS, resolveProvider, signIn } from "@invincible/models";
+import { chooseAgentModels, eyesOf } from "../src/index.ts";
 
 /*
  * Coding plans and sign-ins. A coding plan is a subscription whose key is for coding (its terms

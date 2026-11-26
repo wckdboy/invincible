@@ -26,7 +26,7 @@ import { computeCommand, parseEffort } from "./compute-cli.ts";
 import { checkGates, githubConnector, githubRepo, investigateFromCli, runFromCli, shipBranch } from "./run-cli.ts";
 import { askCommand, runsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
 import { ABOUT_YOU_TAG, chatStateWords, checkFacts, type MemoryView, type ModelCheck, THINKING_EFFORTS } from "@invincible/core";
-import { ShipManifest } from "./ship.ts";
+import { ShipManifest } from "@invincible/agents";
 import type { ConversationSummary, ConversationView, ProjectGitView, ProjectView, ProviderView, TeamChangesView } from "@invincible/core";
 import { runWithToken } from "./run-tool.ts";
 import { streamedError } from "./server.ts";

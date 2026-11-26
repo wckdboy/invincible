@@ -1,5 +1,6 @@
 import type { Prices, SandboxNetwork } from "@invincible/core";
-import { AGENTIC_SUITE, agenticProblem, agenticProblems, ENGINEERING_SUITE, LEVELS, reviewDomain, REVIEWER_CASES, USUAL_LEVEL } from "@invincible/models";
+import { AGENTIC_SUITE, agenticProblem, agenticProblems, ENGINEERING_SUITE, LEVELS, USUAL_LEVEL } from "@invincible/models";
+import { reviewDomain, REVIEWER_CASES } from "@invincible/agents";
 import type { NodeClient } from "./run-cli.ts";
 import { agenticUnit } from "./eval-agentic.ts";
 import { reviewerUnit } from "./eval-reviewer.ts";

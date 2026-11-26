@@ -1,5 +1,6 @@
 import { type ChatStreamEvent, type NodeIdentity, redact, retriedRuns, type RouteName, routes, SELF_ACTION_RESOURCE, spendLabel, type Usage } from "@invincible/core";
-import { chat, commandsRun, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sseData } from "@invincible/models";
+import { chat, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sseData } from "@invincible/models";
+import { commandsRun } from "@invincible/agents";
 import type { SyncEngine } from "@invincible/link";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { SandboxHost } from "@invincible/sandbox";
@@ -12,7 +13,7 @@ import { assess, checklistPrompt, diskOf, type Finding, type HeartbeatSnapshot, 
 import { hlcMs, loopRecords, type RunContext, type RunnableLoop, type RunResult, selfActionOn } from "./loops.ts";
 import { selfAct, type SelfActionOutcome, type SelfSnapshot } from "./self-action.ts";
 import { type NodeClient, runOnNode } from "./run-cli.ts";
-import { learnedLines } from "./skills-run.ts";
+import { learnedLines } from "@invincible/agents";
 import { streamedError } from "./server.ts";
 import { wokenData } from "./wakes.ts";
 

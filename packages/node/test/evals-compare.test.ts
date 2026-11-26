@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, type RouteName, routes, EvalRecord, evalProblem, type EvalRunsView, EvalRunSettings, type EvalView } from "@invincible/core";
-import { ENGINEERING_SUITE, pose, REVIEWER_CASES } from "@invincible/models";
+import { ENGINEERING_SUITE, pose } from "@invincible/models";
+import { REVIEWER_CASES } from "@invincible/agents";
 import { runEvals } from "../src/eval-cli.ts";
 import { evalCommand, UsageError } from "../src/eval-commands.ts";
 import { suiteNamed } from "../src/eval-suites.ts";

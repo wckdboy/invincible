@@ -31,38 +31,9 @@ import {
   type UsageLine,
   type ClientCall,
 } from "@invincible/core";
-import { SHIPMENT_SCRIPT } from "./ship.ts";
-import { learnedLines, learnFromRun, type RunTrail, runTrail } from "./skills-run.ts";
-import {
-  AGENTS,
-  attemptInstructions,
-  chooseAgentModels,
-  commandsRun,
-  type EffortEvent,
-  type EffortPick,
-  type EffortResult,
-  ENGRAM_PROBE,
-  ENGRAM_VERSION,
-  engramFound,
-  engramShell,
-  evidenceCollector,
-  gateBy,
-  type GateResult,
-  investigate,
-  type InvestigationOutcome,
-  observation,
-  RUN_DEFAULTS,
-  type RunEvent,
-  type RunOptions,
-  type RunOutcome,
-  runStanding,
-  readResults,
-  runEffort,
-  runLoop,
-  standingAfter,
-  type Trip,
-  timingLine,
-} from "@invincible/models";
+import { SHIPMENT_SCRIPT } from "@invincible/agents";
+import { learnedLines, learnFromRun, type RunTrail, runTrail } from "@invincible/agents";
+import { AGENTS, attemptInstructions, chooseAgentModels, commandsRun, type EffortEvent, type EffortPick, type EffortResult, ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramShell, evidenceCollector, gateBy, type GateResult, investigate, type InvestigationOutcome, observation, RUN_DEFAULTS, type RunEvent, type RunOptions, type RunOutcome, runStanding, readResults, runEffort, runLoop, standingAfter, type Trip, timingLine } from "@invincible/agents";
 
 /*
  * `invincible do "<goal>"`: a run from the terminal. The loop itself is pure
@@ -157,7 +128,7 @@ export interface DoOptions {
    */
   workdir?: string;
   /**
-   * The engineer is given the sandbox's notes store (Engram: packages/models/src/engram.ts). An eval's variant
+   * The engineer is given the sandbox's notes store (Engram: packages/agents/src/engram.ts). An eval's variant
    * sets it, to measure what the store costs a task: its sandbox is fresh, so the store starts empty. A sandbox
    * whose image has no pinned Engram ends the run with that as its error; it is never run without and counted as with.
    */

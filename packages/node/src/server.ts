@@ -118,53 +118,8 @@ import {
   type LiveEvent,
   type LiveTopic,
 } from "@invincible/core";
-import {
-  AGENTS,
-  acpDriver,
-  CATALOG,
-  ENGRAM_PROBE,
-  ENGRAM_VERSION,
-  agentCleanupCommand,
-  chooseAgentModels,
-  engramFound,
-  isEmbeddingModel,
-  roleModels,
-  ROLES,
-  workRole,
-  chat,
-  decide,
-  DecisionError,
-  GatewayTokens,
-  installedConnector,
-  installedConnectors,
-  keyState,
-  type OAuthEndpoints,
-  handleGateway,
-  offeredModels,
-  originOf,
-  parseRef,
-  planOf,
-  PLAN_PROVIDERS,
-  PRESETS,
-  preset,
-  providerRecord,
-  providerViews,
-  resolveProvider,
-  roster,
-  SIGN_INS,
-  signIn,
-  windowsOf,
-  checkModel,
-  choreRole,
-  eyesOf,
-  Steering,
-  clip,
-  type Trip,
-  tellsAfter,
-  tripOf,
-  countable,
-  nowLine,
-} from "@invincible/models";
+import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
+import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, windowsOf, choreRole, Steering, countable, nowLine } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
 import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
@@ -208,7 +163,7 @@ import { TELEGRAM_SCOPES, TelegramError, type TelegramGateway } from "./telegram
 import { OutcomeError, OutcomeRunner } from "./outcomes.ts";
 import { BacklogRunner, issueLines } from "./backlog.ts";
 import { offerFix } from "./ci-back.ts";
-import { ShipManifest } from "./ship.ts";
+import { ShipManifest } from "@invincible/agents";
 import { randomBytes } from "node:crypto";
 import type { LoopDraft, LoopDrafts } from "./loop-drafts.ts";
 import type { ConnectorRequest, ConnectorRequests } from "./connector-requests.ts";
@@ -218,7 +173,7 @@ import type { DoctorOptions, DoctorRun } from "./doctor-facts.ts";
 import { NotifyError, type NotifyService } from "./notify.ts";
 import { TeamService, TeamError } from "./team.ts";
 import type { TeamAsker, TeamStore } from "./team-store.ts";
-import { primaryInRoom, harnessReadiness, newestFiles, quote, TEAM_COMMAND_SECONDS, teamRuntime, withGateway } from "./team-runtime.ts";
+import { primaryInRoom, harnessReadiness, newestFiles, quote, TEAM_COMMAND_SECONDS, teamRuntime, withGateway } from "@invincible/agents";
 import { APPLE_PUSH, APPLE_PUSH_SECRET, appleProviderToken, storedApplePushKey } from "./apns-send.ts";
 import { inputRefused, type MacScreen, ScreenError, screenDid } from "./mac-screen.ts";
 import { primaryRevision } from "./revision.ts";

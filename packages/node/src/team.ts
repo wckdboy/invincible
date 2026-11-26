@@ -8,27 +8,8 @@ import {
 import { TeamStore, TeamError, teamInput, teamOutput, teamText, type TeamAnswer, type TeamAsker, type TeamJob, type TeamSelection } from "./team-store.ts";
 
 export { TeamError } from "./team-store.ts";
+import type { TeamRunContext } from "@invincible/agents";
 
-export interface TeamRunContext {
-  signal: AbortSignal;
-  chainId: string;
-  /** The sender is this callback's agent, never a field supplied by a model. */
-  send(to: { room: string } | { agent: string }, text: string): TeamMessage;
-  /** Replaces only this agent's private working notes. */
-  remember(text: string): Agent;
-  /** Delegation stays in the current room and in the current causal budget. */
-  delegate(task: Omit<TeamTaskInput, "room">): TeamTask;
-  /** A new worker, made by this one (never a field a model supplies): it joins this room unless the room is a
-   * direct conversation, and what it then does here spends this same causal budget. */
-  recruit(worker: TeamRecruitInput): Agent;
-  emit(progress: string): void;
-  /**
-   * Before anything that changes something (a message, notes, a task proposed, an agent made, a command in its VM, a
-   * connector's action): a reply a planned restart cuts off after this waits for you, instead of being taken up again
-   * by itself and doing it twice (TeamStore.interruptForRestart).
-   */
-  acting?(): void;
-}
 
 export interface TeamServiceOptions {
   store: TeamStore;

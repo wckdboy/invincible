@@ -29,7 +29,8 @@ import {
   type UsageLine,
   usdLabel,
 } from "@invincible/core";
-import { grade, pose, type RunOutcome, SUITES, EVAL_EVIDENCE, EVAL_INSTRUCTIONS, type EvalProblem } from "@invincible/models";
+import { grade, pose, SUITES, EVAL_EVIDENCE, EVAL_INSTRUCTIONS, type EvalProblem } from "@invincible/models";
+import { type RunOutcome } from "@invincible/agents";
 import { CLAUDE_CODE_IMAGE } from "@invincible/sandbox";
 import { type DoOptions, type NodeClient, runOnNode } from "./run-cli.ts";
 

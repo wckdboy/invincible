@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ExecResult } from "@invincible/core";
-import { attemptInstructions, chooseAttempt, evidenceCollector, parsePick, pickPrompt, rotated, runEffort, type EffortAttempt, type EffortEvent } from "../src/effort.ts";
+import { attemptInstructions, chooseAttempt, evidenceCollector, parsePick, pickPrompt, runEffort, type EffortAttempt, type EffortEvent } from "../src/effort.ts";
+import { rotated } from "@invincible/models";
 import { type RunOutcome, type RunRole, runLoop } from "../src/run.ts";
 
 /*

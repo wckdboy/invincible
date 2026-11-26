@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type ChatMessage, type ExecResult, findSecrets } from "@invincible/core";
 import { evidenceCollector } from "../src/effort.ts";
-import type { AgentDriver, AgentEvent } from "../src/agents.ts";
+import type { AgentDriver, AgentEvent } from "../src/harnesses.ts";
 import { parseProposedGates, type RunEvent, type RunOptions, type RunRole, runLoop } from "../src/run.ts";
 
 /*

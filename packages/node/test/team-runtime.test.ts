@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { newNodeIdentity, type ExecResult, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { acpDriver, AGENTS, OWN_SIGN_IN, type RunEvent } from "@invincible/models";
-import { harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "../src/team-runtime.ts";
-import type { TeamRunContext } from "../src/team.ts";
+import { acpDriver, AGENTS, OWN_SIGN_IN, type RunEvent } from "@invincible/agents";
+import { harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
+import type { TeamRunContext } from "@invincible/agents";
 
 const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -811,7 +811,7 @@ test("a roster model this VM's gateway token doesn't cover is not run on, and th
   expect(commands.some((c) => c.includes("setsid"))).toBe(false);
 });
 
-/* The VM's notes store (Engram, packages/models/src/engram.ts): one switch for a node's agents, off unless its
+/* The VM's notes store (Engram, packages/agents/src/engram.ts): one switch for a node's agents, off unless its
  * owner turns it on. On, a task is given the store when its VM has the pinned binary, and says which it was. */
 const NATIVE_SCRIPT = () => [say("1. Make the change and test it."), say("```sh\necho built\n```"), say("DONE\nBuilt and checked."), say("PASS\nThe gate and command output support the result.")];
 /** A native agent's task in a VM that answers the store's version question as told. */

@@ -1,6 +1,6 @@
 import { type ChatStreamEvent, type ExecResult, nodeIdentity } from "../../packages/core/src/index.ts";
 import { chat, type ChatTools } from "../../packages/models/src/chat.ts";
-import { type RunRole, runLoop } from "../../packages/models/src/run.ts";
+import { type RunRole, runLoop } from "../../packages/agents/src/run.ts";
 import { foundFleet, LedgerStore, Vault } from "../../packages/ledger/src/index.ts";
 import { intBelow, rng, subSeed, type Suite } from "../lib.ts";
 

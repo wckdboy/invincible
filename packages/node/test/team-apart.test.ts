@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { newNodeIdentity, type Agent, type TeamRoom, type TeamTask } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { teamRuntime, type TeamRuntimeDeps } from "../src/team-runtime.ts";
-import type { TeamRunContext } from "../src/team.ts";
+import { teamRuntime, type TeamRuntimeDeps } from "@invincible/agents";
+import type { TeamRunContext } from "@invincible/agents";
 
 const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });

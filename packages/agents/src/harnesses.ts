@@ -1,4 +1,4 @@
-import { planOf } from "./providers.ts";
+import { planOf } from "@invincible/models";
 import { type ExecResult, randomId, redact } from "@invincible/core";
 import { agentCleanupCommand, agentProcessCommand, AGENT_PROCESS_PY } from "./agent-process.ts";
 import { ENGRAM_ENV, engramArgv } from "./engram.ts";

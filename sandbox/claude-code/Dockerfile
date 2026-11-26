@@ -2,7 +2,7 @@
 # pinned and checked, so that a run can put Anthropic's own harness and Invincible's to the same tasks on the same model.
 # It runs on a roster model through the gateway, by Claude Code's documented way to another endpoint, on the
 # sandbox's scoped token: no sign-in, no subscription, no key. An agent's VM never gets it from Invincible
-# (packages/models/src/vendor-cli.ts): there, its owner installs and signs in the tool. Built on a sandbox host the
+# (packages/agents/src/vendor-cli.ts): there, its owner installs and signs in the tool. Built on a sandbox host the
 # first time an eval needs it, after the workshop image it is made from. Same rules: unprivileged uid 1000, read-only
 # at runtime, no capabilities.
 FROM invincible/sandbox:1

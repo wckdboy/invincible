@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ExecResult, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { AGENTS, CLAUDE, CODEX, OWN_SIGN_IN, agentModelName, chooseAgentModels, type AgentDriver } from "../src/agents.ts";
+import { AGENTS, OWN_SIGN_IN, agentModelName, chooseAgentModels, type AgentDriver } from "../src/harnesses.ts";
+import { CLAUDE, CODEX } from "../src/vendor-cli.ts";
 import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
-import { GatewayTokens, handleGateway } from "../src/gateway.ts";
+import { GatewayTokens, handleGateway } from "@invincible/models";
 import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 import { CLAUDE_BRIDGE, CODEX_BRIDGE } from "../src/vendor-cli.ts";
 

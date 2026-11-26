@@ -9,7 +9,7 @@ import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import { githubRepo, shipBranch } from "../src/run-cli.ts";
-import { sameRepository, SHIPMENT_SCRIPT, type ShipDeps, shipToGitHub } from "../src/ship.ts";
+import { sameRepository, SHIPMENT_SCRIPT, type ShipDeps, shipToGitHub } from "@invincible/agents";
 import { TeamStore } from "../src/team-store.ts";
 import { freePort } from "./ports.ts";
 

@@ -1,9 +1,34 @@
 import { z } from "zod";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK } from "@invincible/core";
-import { driverFor, ENGRAM_PROBE, ENGRAM_VERSION, OWN_SIGN_IN, agentModelName, chat, choreRole, commandsRun, engramFound, engramProjectFor, engramShell, runLoop, sameModel, workRole, type AgentDriver, type AgentModel, type ModelsContext, type ChatTools, type RunEvent, type ToolImage, type ToolSpec, type Trip } from "@invincible/models";
+import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel } from "./harnesses.ts";
+import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
+import { chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
+import { commandsRun, runLoop, type RunEvent } from "./run.ts";
+import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
-import type { TeamRunContext } from "./team.ts";
+
+/** What one run of an agent is given by the team service (node/team.ts) that starts it. */
+export interface TeamRunContext {
+  signal: AbortSignal;
+  chainId: string;
+  /** The sender is this callback's agent, never a field supplied by a model. */
+  send(to: { room: string } | { agent: string }, text: string): TeamMessage;
+  /** Replaces only this agent's private working notes. */
+  remember(text: string): Agent;
+  /** Delegation stays in the current room and in the current causal budget. */
+  delegate(task: Omit<TeamTaskInput, "room">): TeamTask;
+  /** A new worker, made by this one (never a field a model supplies): it joins this room unless the room is a
+   * direct conversation, and what it then does here spends this same causal budget. */
+  recruit(worker: TeamRecruitInput): Agent;
+  emit(progress: string): void;
+  /**
+   * Before anything that changes something (a message, notes, a task proposed, an agent made, a command in its VM, a
+   * connector's action): a reply a planned restart cuts off after this waits for you, instead of being taken up again
+   * by itself and doing it twice (TeamStore.interruptForRestart).
+   */
+  acting?(): void;
+}
 
 export interface TeamRuntimeDeps {
   brain(agent: Agent): ModelsContext;

@@ -1,5 +1,5 @@
 import type { ExecResult, SandboxView, EvalRecord } from "@invincible/core";
-import { type RunTiming, span, timingLine } from "@invincible/models";
+import { type RunTiming, span, timingLine } from "@invincible/agents";
 import {
   AGENTIC_DIFF,
   AGENTIC_EVIDENCE,

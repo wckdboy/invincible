@@ -1,10 +1,10 @@
 import { type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type RuleDoes } from "@invincible/core";
-import type { ToolSpec } from "./adapters.ts";
-import { type AgentDriver, type AgentModel, agentModelName, runAgent } from "./agents.ts";
+import type { ToolSpec } from "@invincible/models";
+import { type AgentDriver, type AgentModel, agentModelName, runAgent } from "./harnesses.ts";
 import { ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput } from "./engineer-tools.ts";
 import { engramBriefing, engramProject } from "./engram.ts";
 import { changesOf, checkOf, contentsOf, readOf, readsOf, testFilesOf, writesOf } from "./shell-paths.ts";
-import { STEP_EFFORT } from "./roster.ts";
+import { STEP_EFFORT } from "@invincible/models";
 import { checksAfter, tellsAfter, type Trip, tripOf } from "./tripwires.ts";
 
 /*
@@ -93,7 +93,7 @@ export interface RunOptions {
   /** A different review: its prompt, and how to read the answer. */
   review?: RunReview;
   /**
-   * A coding agent does the engineer's part (agents.ts): one long run instead of one
+   * A coding agent does the engineer's part (harnesses.ts): one long run instead of one
    * command per turn, bounded by time rather than a command count (`minutes`; absent: no limit of time, an audited
    * run's). The reviewer's notes continue the agent's own session.
    */

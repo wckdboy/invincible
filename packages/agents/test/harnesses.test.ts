@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ExecResult } from "@invincible/core";
-import { AGENT_DIR, AGENTS, type AgentEvent, chooseAgentModels, OPENCODE, OWN_SIGN_IN, runAgent } from "../src/agents.ts";
+import { AGENT_DIR, AGENTS, type AgentEvent, chooseAgentModels, OPENCODE, OWN_SIGN_IN, runAgent } from "../src/harnesses.ts";
 import { ENGRAM_ENV, engramArgv, engramBriefing } from "../src/engram.ts";
 import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 
@@ -157,7 +157,7 @@ describe("a driver and the notes store", () => {
   });
 
   test("no driver names a file a vendor's tool keeps its own configuration in: nothing of the store is written there", () => {
-    for (const file of ["agents.ts", "acp.ts", "hermes.ts", "vendor-cli.ts", "engram.ts", "run.ts", "agent-process.ts"]) {
+    for (const file of ["harnesses.ts", "acp.ts", "hermes.ts", "vendor-cli.ts", "engram.ts", "run.ts", "agent-process.ts"]) {
       const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
       expect([file, /\.claude\.json|config\.toml|\.codex\/|settings\.json|claude mcp add|plugin (install|add|marketplace)/.test(source)]).toEqual([file, false]);
     }

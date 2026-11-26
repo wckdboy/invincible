@@ -1,7 +1,7 @@
 import { costOf, type ExecResult, type Prices, type SandboxView, spendTotal, type TeamSnapshot, type TeamTaskRecord, type EvalAnswer, type EvalRecord, evalScore, tokensLabel, usdLabel } from "@invincible/core";
-import { RUN_DEFAULTS, testFilesOf } from "@invincible/models";
+import { RUN_DEFAULTS, testFilesOf } from "@invincible/agents";
 import { inWorkdir, type NodeClient, runId, runOnNode } from "./run-cli.ts";
-import { quote } from "./team-runtime.ts";
+import { quote } from "@invincible/agents";
 import { harnessOptions, heldToEffort, nothingAnswered, tellPassedOver, type EvalJob, type EvalUnit } from "./eval-cli.ts";
 
 /**

@@ -173,12 +173,6 @@ export function attemptInstructions(index: number, of: number): string {
   return `Other engineers are attempting this same run independently, and an independent reviewer will take the attempt whose evidence is strongest. Where there is a real choice of method, prefer a sound one that isn't the most obvious, and verify your result independently before you finish. (You are attempt ${index} of ${of}.)`;
 }
 
-/** A role's models, starting at another one for each attempt (the rest stay as fallbacks, in order). */
-export function rotated<T>(models: readonly T[], by: number): T[] {
-  if (models.length < 2) return [...models];
-  const k = ((Math.floor(by) % models.length) + models.length) % models.length;
-  return [...models.slice(k), ...models.slice(0, k)];
-}
 
 /** How much of each command's output the comparison keeps. */
 const STEP_HEAD = 500;

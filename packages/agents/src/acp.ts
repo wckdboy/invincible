@@ -1,5 +1,5 @@
 import { redact, TeamAcpCommand } from "@invincible/core";
-import type { AgentDriver, AgentEvent } from "./agents.ts";
+import type { AgentDriver, AgentEvent } from "./harnesses.ts";
 import { ENGRAM_ENV, engramArgv } from "./engram.ts";
 
 /*

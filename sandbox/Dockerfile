@@ -48,7 +48,7 @@ ENV PATH=/opt/opencode/bin:$PATH
 # Engram, the notes store an agent's harness may be given (invincible agents engram on). Pinned, and
 # checked against its SHA-256. A newer one migrates a store when it first opens it, so a bump says what
 # becomes of the stores there are. Its store is on the agent's own disk and its update check is off;
-# nothing here starts it (a harness does, for the length of a run: packages/models/src/engram.ts).
+# nothing here starts it (a harness does, for the length of a run: packages/agents/src/engram.ts).
 ARG ENGRAM_VERSION=3.7.2
 ARG ENGRAM_SHA256=8db9d5db1c1574b8b830aac4ffbe86c024014aed6b9a3f0406ac3361a152cdf0
 ARG ENGRAM_SHA256_ARM64=cdbbcb68d3e842d3e52e27edccef55e6fe98ce3cdbc90cd79894323b029efb50

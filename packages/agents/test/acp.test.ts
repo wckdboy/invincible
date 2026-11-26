@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ACP_BRIDGE, ACP_PROBE, acpDriver, driverFor, OWN_SIGN_IN } from "../src/agents.ts";
+import { ACP_BRIDGE, ACP_PROBE, acpDriver } from "../src/acp.ts";
+import { driverFor, OWN_SIGN_IN } from "../src/harnesses.ts";
 import { HERMES } from "../src/hermes.ts";
 
 /*

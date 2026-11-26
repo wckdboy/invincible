@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bodyFingerprint, type Calibration, ceilingThreads, type LedgerEntry, type LoopView, type RunView, REFERENCE_SINGLE, routes, type RouteName } from "@invincible/core";
-import type { RunEvent } from "@invincible/models";
+import type { RunEvent } from "@invincible/agents";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import type { Measure } from "../src/compute/service.ts";

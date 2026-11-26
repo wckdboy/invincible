@@ -1,5 +1,5 @@
 import { redact, type EvalAnswer, type EvalRecord } from "@invincible/core";
-import { parseVerdict, poseReview, reviewDomain, type ReviewerCase } from "@invincible/models";
+import { parseVerdict, poseReview, reviewDomain, type ReviewerCase } from "@invincible/agents";
 import type { EvalUnit } from "./eval-cli.ts";
 
 /*

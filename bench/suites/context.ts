@@ -1,5 +1,5 @@
 import type { ChatMessage, ExecResult } from "../../packages/core/src/index.ts";
-import { type RunRole, runLoop } from "../../packages/models/src/run.ts";
+import { type RunRole, runLoop } from "../../packages/agents/src/run.ts";
 import type { Suite } from "../lib.ts";
 
 /*

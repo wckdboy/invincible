@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { type ChatMessage, chooseEyes, type ModelCheck } from "@invincible/core";
-import type { ToolImage } from "./adapters.ts";
-import { conversationFor } from "./responses.ts";
-import { type ModelsContext, chat } from "./chat.ts";
-import { offersModel, onPlan, resolveProvider, whyNoKey } from "./providers.ts";
-import { parseRef } from "./roster.ts";
+import type { ToolImage } from "@invincible/models";
+import { conversationFor } from "@invincible/models";
+import { type ModelsContext, chat } from "@invincible/models";
+import { offersModel, onPlan, resolveProvider, whyNoKey } from "@invincible/models";
+import { parseRef } from "@invincible/models";
 import { parseAction, runLoop } from "./run.ts";
 
 /*

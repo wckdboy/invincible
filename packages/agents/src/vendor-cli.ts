@@ -1,4 +1,4 @@
-import type { AgentDriver, AgentEvent, AgentModel } from "./agents.ts";
+import type { AgentDriver, AgentEvent, AgentModel } from "./harnesses.ts";
 import { ENGRAM_ENV, engramArgv } from "./engram.ts";
 import { readBridge } from "./hermes.ts";
 
