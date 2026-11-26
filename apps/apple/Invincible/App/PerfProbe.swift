@@ -28,6 +28,8 @@ final class PerfProbe {
 
     /// From the process starting to Home's first frame with its content (ms; nil: not yet).
     private(set) var launchMs: Double?
+    /// From the process starting to the app's first line (its App's init): what the platform takes before the app runs.
+    private var startMs: Double?
     /// When the app last took its link to the node for lost, and when it was back (ms since 1970; nil: not yet).
     private var lostAt: Double?
     private var backAt: Double?
@@ -71,6 +73,14 @@ final class PerfProbe {
         }
     }
 
+    /// A moment of the launch, said in the log with how long since the process started (only when measured).
+    func mark(_ what: StaticString) {
+        guard on, launchMs == nil else { return }
+        let ms = Date().timeIntervalSince(Self.processStart) * 1000
+        if startMs == nil { startMs = ms }
+        log.info("launch mark \(what, privacy: .public): \(Int(ms)) ms")
+    }
+
     /// Home's first frame with its content: how long the launch took to be usable, once a launch.
     func usable() {
         guard on, launchMs == nil else { return }
@@ -104,7 +114,7 @@ final class PerfProbe {
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
         let read = withUnsafeMutablePointer(to: &vm) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) } }
         let mem = read == KERN_SUCCESS ? Double(vm.phys_footprint) / 1_048_576 : -1
-        return "launch=\(launchMs.map { String(Int($0)) } ?? "-");cpu=\(Int(cpu));mem=\(Int(mem));frames=\(frames);late=\(late);lateMs=\(Int(lateMs));lostAt=\(lostAt.map { String(Int64($0)) } ?? "-");backAt=\(backAt.map { String(Int64($0)) } ?? "-")"
+        return "launch=\(launchMs.map { String(Int($0)) } ?? "-");start=\(startMs.map { String(Int($0)) } ?? "-");cpu=\(Int(cpu));mem=\(Int(mem));frames=\(frames);late=\(late);lateMs=\(Int(lateMs));lostAt=\(lostAt.map { String(Int64($0)) } ?? "-");backAt=\(backAt.map { String(Int64($0)) } ?? "-")"
     }
 
     /// The display link's target: it holds its target strongly, so it holds this instead. (On the main run loop.)

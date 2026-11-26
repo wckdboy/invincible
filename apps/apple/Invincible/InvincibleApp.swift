@@ -16,7 +16,7 @@ struct InvincibleApp: App {
         // A count of what needs you is in the primary's red, as everything that needs you is.
         UITabBarItem.appearance().badgeColor = UIColor(named: "Danger")
         // (Measured by the performance suite only when it asks: it starts its clock here.)
-        _ = PerfProbe.shared
+        PerfProbe.shared.mark("app init")
     }
 
     var body: some Scene {

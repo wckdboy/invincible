@@ -10,7 +10,8 @@
 #  bench       │ the scorecard's quality gates (bun run bench --ci)
 #  vectors     │ the parity vectors the Apple and Android apps test against are what this repository's code makes now
 #  android     │ the Android app's JVM tests (held to the same vectors)
-#  apple       │ the iPhone's tests and the Mac build, on the owner's Mac runner (label macos-xcode; sovware.io alone)
+#  apple       │ the iPhone's tests (its UI and performance budgets against a dev node) and the Mac build, on the owner's
+#              │ Mac runner (label macos-xcode; sovware.io alone)
 #  site        │ invincible.sh (apps/site) built, and what it would serve checked (its own project and lockfile)
 #  secrets     │ gitleaks over what the push (or the pull request) adds
 #  sweep       ┘ the owner's private details, by the forge's secret list, in what it adds (sovware.io alone)
@@ -204,9 +205,21 @@ jobs:
             "${{ github.server_url }}/${{ github.repository }}.git" "${{ github.ref }}"
           git checkout -q FETCH_HEAD
           git log --oneline -1
+      # Bun for the dev node the iPhone's UI tests run against (the host runner has none, and nothing is installed on it):
+      # 1.4.4, as the other jobs use, its zip checked against the SHA-256 its release publishes, kept in the job's folder.
+      - name: Bun, in the job's own folder
+        run: |
+          set -euo pipefail
+          zip="$RUNNER_TEMP/bun-darwin-aarch64.zip"
+          curl -fsSLo "$zip" https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-darwin-aarch64.zip
+          echo "c240d7f0ccb90c263a849fcdb09b7ee62630d921348ed6aafda86b9d577bc510  $zip" | shasum -a 256 -c -
+          unzip -q -o "$zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/bun-darwin-aarch64" >> "$GITHUB_PATH"
+      - run: bun install --frozen-lockfile
       # Swift packages (Sparkle) are fetched anonymously (-packageAuthorizationProvider netrc, and no .netrc): by default
       # Xcode looks for a github.com password in the login keychain, and a Mac that holds one asks whether xcodebuild may
-      # use it, a prompt no one answers.
+      # use it, a prompt no one answers. The UI tests (InvincibleUITests: getting around in taps, and the performance
+      # budgets of Budgets.json) run against a dev node with a busy fleet, on loopback, stopped with the simulator.
       - name: iPhone tests, on a simulator of their own
         working-directory: apps/apple
         run: |
@@ -221,10 +234,17 @@ jobs:
           # The newest iOS runtime the Mac has.
           runtime=$(xcrun simctl list runtimes iOS -j | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x.get("isAvailable")]; print(max(r, key=lambda x: [int(n) for n in x["version"].split(".")])["identifier"])')
           udid=$(xcrun simctl create "Invincible CI ${GITHUB_RUN_NUMBER:-0}" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$runtime")
-          trap 'xcrun simctl delete "$udid"' EXIT
+          dev="$RUNNER_TEMP/dev-node"
+          mkdir -p "$dev"
+          bun scripts/dev-node.ts --dir "$dev" --heavy --auto-approve > "$dev/log" 2>&1 &
+          devnode=$!
+          trap 'kill -INT "$devnode" 2>/dev/null || true; xcrun simctl delete "$udid"' EXIT
           xcrun simctl bootstatus "$udid" -b > /dev/null
-          xcodebuild -project Invincible.xcodeproj -scheme Invincible -destination "platform=iOS Simulator,id=$udid" \
-            -derivedDataPath build -packageAuthorizationProvider netrc test -skip-testing:InvincibleTests/MacShotsTests -quiet
+          for _ in $(seq 1 300); do [ -s "$dev/front.txt" ] && break; kill -0 "$devnode" 2>/dev/null || break; sleep 1; done
+          [ -s "$dev/front.txt" ] || { echo "::error::the dev node never came up"; cat "$dev/log"; exit 1; }
+          TEST_RUNNER_INVINCIBLE_DEV_NODE=$(cat "$dev/front.txt") xcodebuild -project Invincible.xcodeproj -scheme Invincible \
+            -destination "platform=iOS Simulator,id=$udid" -derivedDataPath build -packageAuthorizationProvider netrc \
+            test -skip-testing:InvincibleTests/MacShotsTests -quiet
       - name: Mac build (never launched)
         working-directory: apps/apple
         run: |

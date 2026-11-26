@@ -6,6 +6,7 @@ struct RootView: View {
     let app: AppModel
 
     var body: some View {
+        let _ = PerfProbe.shared.mark("root body")
         Group {
             switch app.phase {
             case .loading:

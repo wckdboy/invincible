@@ -62,7 +62,13 @@ struct HomeView: View {
     private var chat: ChatModel { session.chat }
 
     var body: some View {
+        #if os(iOS)
+        let _ = PerfProbe.shared.mark("home body")
+        #endif
         let work = session.attended
+        #if os(iOS)
+        let _ = PerfProbe.shared.mark("home attended")
+        #endif
         List {
             if session.reconnecting {
                 ReconnectingLine(session: session).listRowSeparator(.hidden)

@@ -517,6 +517,7 @@ const askToJoin = async (name: string): Promise<number> => {
   return response.status;
 };
 let invite: { url: string; invite: string };
+const appInvites = new Set<string>();
 const front = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
@@ -525,7 +526,12 @@ const front = Bun.serve({
     const url = new URL(req.url);
     if (url.pathname.startsWith("/__dev/")) {
       const control = url.pathname.slice("/__dev/".length);
-      if (control === "invite") return new Response(invite.url);
+      // A fresh invite each time, each let in by itself with --auto-approve: a run's simulators each pair with their own.
+      if (control === "invite") {
+        const fresh = (await admin("createInvite", { kind: "client", origin: `http://127.0.0.1:${front.port}`, scopes: core.CLIENT_DEFAULT_SCOPES })) as { url: string; invite: string };
+        appInvites.add(core.decodeInvite(fresh.invite).i);
+        return new Response(fresh.url);
+      }
       if (control === "requests") {
         const since = Number(url.searchParams.get("since") ?? 0);
         return Response.json({ now: Date.now(), requests: requests.filter((r) => r.at >= since) });
@@ -577,8 +583,8 @@ servers.push(front);
 // ---------- pairing ----------
 const origin = `http://127.0.0.1:${front.port}`;
 invite = await admin("createInvite", { kind: "client", origin, scopes: core.CLIENT_DEFAULT_SCOPES });
-/** The app's own invite, by its id: the request made with it is the app's. */
-const appInvite = core.decodeInvite(invite.invite).i;
+/** The app's own invites, by their ids (invite.txt's, and each /__dev/invite gave): a request made with one is an app's. */
+appInvites.add(core.decodeInvite(invite.invite).i);
 writeFileSync(join(dir, "invite.txt"), `${invite.url}\n`);
 writeFileSync(join(dir, "front.txt"), `${origin}\n`);
 say(`node keep (fleet homelab) at ${origin}`);
@@ -599,18 +605,20 @@ for (;;) {
     }
   }
   const asked = existsSync(approveFile);
-  if (!appPaired && (asked || (autoApprove && pairings.some((pending) => pending.invite === appInvite)))) {
-    const code = asked ? readFileSync(approveFile, "utf8").replace(/\D/g, "") : null;
-    if (asked) unlinkSync(approveFile);
-    // (Let in by itself: the request made with the app's invite, whatever its code.)
-    const match = code === null ? pairings.find((pending) => pending.invite === appInvite) : pairings.find((pending) => pending.sas.replace(/\s/g, "") === code);
+  const letIn = autoApprove ? pairings.find((pending) => appInvites.has(pending.invite)) : undefined;
+  if ((!appPaired && asked) || letIn) {
+    const code = !letIn && asked ? readFileSync(approveFile, "utf8").replace(/\D/g, "") : null;
+    if (!letIn && asked) unlinkSync(approveFile);
+    // (Let in by itself: a request made with one of the apps' invites, whatever its code.)
+    const match = letIn ?? pairings.find((pending) => pending.sas.replace(/\s/g, "") === code);
     if (!match) say(`no request shows ${code}: nothing approved`);
     else {
       await admin("approvePairing", { invite: match.invite, device: match.device });
-      appPaired = true;
+      appInvites.delete(match.invite);
       rmSync(join(dir, "pairing.txt"), { force: true });
-      say(`approved "${match.name}" (${match.device.slice(0, 10)}…)${code === null ? " by itself (--auto-approve)" : ""}`);
-      say(`a second device asks to join: ${await askToJoin("Invincible app on iPad")}`);
+      say(`approved "${match.name}" (${match.device.slice(0, 10)}…)${letIn ? " by itself (--auto-approve)" : ""}`);
+      if (!appPaired) say(`a second device asks to join: ${await askToJoin("Invincible app on iPad")}`);
+      appPaired = true;
     }
   }
   await sleep(500);
