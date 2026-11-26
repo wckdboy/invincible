@@ -52,8 +52,31 @@ struct DevNode {
     /// Something that needs you, at once: a device asking to join, by the label it returns.
     func poke() throws -> Poked { try JSONDecoder().decode(Poked.self, from: fetch("poke", method: "POST")) }
 
-    private func fetch(_ control: String, method: String = "GET") throws -> Data {
-        var request = URLRequest(url: URL(string: "/__dev/\(control)", relativeTo: front)!.absoluteURL, timeoutInterval: 20)
+    /// The fixture's tasks by what they show: one at work (it never ends), one that failed, one proven (--heavy's).
+    struct Tasks: Decodable {
+        let working: String
+        let failed: String
+        let proven: String?
+    }
+
+    func tasks() throws -> Tasks { try JSONDecoder().decode(Tasks.self, from: fetch("tasks")) }
+
+    struct Demo: Decodable { let task: String }
+
+    /// A task to step through (the Live Activity's pictures): held at its start and at its review until `demoUntil`.
+    func demo() throws -> Demo { try JSONDecoder().decode(Demo.self, from: fetch("demo", method: "POST")) }
+
+    /// A task whose second gate fails at the end, however often it's worked: held at its start until `demoUntil`.
+    func demoFailing() throws -> Demo { try JSONDecoder().decode(Demo.self, from: fetch("demo/fail", method: "POST")) }
+
+    /// A demo task let go step by step until it is `state`: running, review (its reviewer held, reading it), done or
+    /// failed. Returns once it is; throws when it wasn't within the dev node's four minutes.
+    func demoUntil(_ task: String, _ state: String) throws {
+        _ = try fetch("demo/until?task=\(task)&state=\(state)", method: "POST", timeout: 270)
+    }
+
+    private func fetch(_ control: String, method: String = "GET", timeout: TimeInterval = 20) throws -> Data {
+        var request = URLRequest(url: URL(string: "/__dev/\(control)", relativeTo: front)!.absoluteURL, timeoutInterval: timeout)
         request.httpMethod = method
         let done = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var result: Result<Data, any Error> = .failure(URLError(.timedOut))

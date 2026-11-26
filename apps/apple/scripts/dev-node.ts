@@ -26,6 +26,14 @@
  *   GET  /__dev/requests?since=ms  the app's requests since then: { now, requests: [{ at, method, path, status, ms }] }
  *   POST /__dev/blackhole?on=1|0   a dead link while on: nothing goes through either way, as a half-open connection
  *   POST /__dev/poke               something that needs you, at once (a device asking to join): { label, at }
+ *   GET  /__dev/tasks              the fixture's tasks by what they show: { working, failed, proven } (proven: --heavy's)
+ *   POST /__dev/demo               a task to step through, for the Live Activity's pictures: held at its start and at its
+ *                                  review until /__dev/demo/until lets it go; it ends proven: { task }
+ *   POST /__dev/demo/fail          a task whose second gate fails at the end, however often it's worked, held at its
+ *                                  start until /__dev/demo/until lets it go: { task }
+ *   POST /__dev/demo/until?task=<id>&state=running|review|done|failed
+ *                                  a demo let go step by step until it is there (review: its reviewer held, reading it),
+ *                                  answered once it is: { status, held }; 504 after four minutes
  *
  *   bun apps/apple/scripts/dev-node.ts [--dir <dir>] [--heavy] [--auto-approve]   (SIGINT or SIGTERM stops it, deleting its home)
  *
@@ -127,6 +135,8 @@ docker.onExec = async (_container: string, command: string[]) => {
     await hold;
   }
   if (text.includes("gate-fail")) return { code: 1, stdout: "", stderr: "error: connect ECONNREFUSED 127.0.0.1:5432" };
+  // The demo's second gate fails whatever is done (the Live Activity's "Failed · gate 2").
+  if (text.includes("gate-demo-fail")) return { code: 1, stdout: "", stderr: "1 fail: the type of `pull` doesn't match" };
   // A task whose gate fails until its work is done (--heavy's proven ones): before the work it shows what is missing.
   const wrote = /write-prove-([a-z0-9]+)/.exec(text)?.[1];
   if (wrote) proven.add(wrote);
@@ -136,6 +146,11 @@ docker.onExec = async (_container: string, command: string[]) => {
 };
 /** The proven tasks whose work has been done (their gates pass from then on). */
 const proven = new Set<string>();
+/** The stepped demos' held steps (each one's first call, and its review), oldest first, until /__dev/demo/until lets them
+ * go: by demo, so asking ahead of a step never loses it. */
+const demoHeld: { demo: string; at: "start" | "review"; go: () => void }[] = [];
+/** Each demo task's own key (its goal says it), by the task's id. */
+const demoOf = new Map<string, string>();
 
 // ---------- stand-in models ----------
 const PRIMARY = "Good evening. This is a stand-in model on a throwaway node, so the words are canned, but they stream to you as a real model's would: a word at a time, into this bubble, until the answer is done.";
@@ -236,6 +251,10 @@ const model = Bun.serve({
     const turns = body.messages.filter((message) => message.role !== "system");
     if (JSON.stringify(turns).includes("Take your time")) await hold;
     const goal = JSON.stringify(turns[0] ?? "");
+    // A stepped demo waits at its start (its first call) and at its review, each until /__dev/demo/until lets it go.
+    const demo = /TASK_DEMO_STEPS (demo-\d+)/.exec(goal)?.[1];
+    const demoAt = demo ? (body.model === "reviewer" ? "review" : turns.some((message) => message.role === "assistant") ? null : "start") : null;
+    if (demo && demoAt) await new Promise<void>((go) => demoHeld.push({ demo, at: demoAt, go }));
     if (goal.includes("TASK_")) {
       let text = "1. Make the change.\n2. Run the required gate.\nDone when: the gate and independent review pass.";
       const proves = /TASK_PROVE_([a-z0-9]+)/.exec(goal)?.[1];
@@ -399,7 +418,7 @@ await admin("setComputeLimit", { node: started.identity.id, cores: caps.cores, m
 const ended = (id: string) => async () => !["queued", "running"].includes((await admin("team")).tasks.find((t: { id: string }) => t.id === id)?.status ?? "queued");
 const own: Record<string, string> = {};
 for (const id of ["builder", "writer", "researcher", "coder"]) own[id] = (await admin("directAgent", { id })).room.id;
-await admin("createTeamTask", { room: own.builder, assignee: "builder", title: "Sync survives a dropped connection", goal: "TASK_SYNC: make sync resume after a dropped connection, with a test that drops it.", dependsOn: [], gates: ["test -f result.txt # gate-sync"] });
+const syncing = (await admin("createTeamTask", { room: own.builder, assignee: "builder", title: "Sync survives a dropped connection", goal: "TASK_SYNC: make sync resume after a dropped connection, with a test that drops it.", dependsOn: [], gates: ["test -f result.txt # gate-sync"] })).task;
 await until("Builder's task to start", () => builderAtWork);
 const kept = (await admin("createTeamTask", { room: own.writer, assignee: "writer", title: "The importer reads ISO dates", goal: "TASK_KEEP: make the importer read ISO 8601 dates as well as the day-first form, with tests.", dependsOn: [], gates: ["bun test importer # gate-keep"] })).task;
 await until("Writer's task to end", ended(kept.id));
@@ -449,6 +468,8 @@ const chatOnce = async (input: Record<string, unknown>): Promise<string | null> 
   }
   return kept;
 };
+/** One of --heavy's tasks that ended proven, for the pictures. */
+let provenFixture: string | null = null;
 if (heavy) {
   const started = Date.now();
   const more = [
@@ -481,6 +502,7 @@ if (heavy) {
     const tasks = (await admin("team")).tasks as { id: string; assignee: string; status: string }[];
     return given.every((id) => { const t = tasks.find((task) => task.id === id); return !t || t.assignee === "builder" || !["queued", "running"].includes(t.status); });
   }, 600_000);
+  provenFixture = given[0] ?? null;
   // Long chats with the primary: three of twenty-five exchanges each, and one that shows what an answer can hold.
   for (const topic of ["the 0.4 release", "the sync engine", "the nodes' disks"]) {
     let conversation: string | null = null;
@@ -541,6 +563,39 @@ const front = Bun.serve({
         if (!blackhole) for (const go of unblocked.splice(0)) go();
         say(`the link is ${blackhole ? "dead (a black hole)" : "back"}`);
         return Response.json({ blackhole, at: Date.now() });
+      }
+      if (control === "tasks") return Response.json({ working: syncing.id, failed: failing.id, proven: provenFixture });
+      if (control === "demo" && req.method === "POST") {
+        const n = demoOf.size + 1;
+        const task = (await admin("createTeamTask", { room: own.writer, assignee: "writer", title: "Sync resumes after a dropped link", goal: `TASK_PROVE_d${n} TASK_DEMO_STEPS demo-${n}: make sync resume after a dropped connection, with the test that drops it.`, dependsOn: [], gates: [`bun test sync # gate-prove-d${n}`] })).task;
+        demoOf.set(task.id, `demo-${n}`);
+        return Response.json({ task: task.id });
+      }
+      if (control === "demo/fail" && req.method === "POST") {
+        const n = demoOf.size + 1;
+        const task = (await admin("createTeamTask", { room: own.writer, assignee: "writer", title: "The importer's types match", goal: `TASK_KEEP TASK_DEMO_STEPS demo-${n}: make the importer's types match its callers, with the typecheck.`, dependsOn: [], gates: ["bun test importer # gate-demo-pass", "bun run typecheck # gate-demo-fail"] })).task;
+        demoOf.set(task.id, `demo-${n}`);
+        return Response.json({ task: task.id });
+      }
+      if (control === "demo/until" && req.method === "POST") {
+        const task = url.searchParams.get("task") ?? "";
+        const want = url.searchParams.get("state") ?? "";
+        const demo = demoOf.get(task);
+        if (!demo || !["running", "review", "done", "failed"].includes(want)) return Response.json({ error: "no such demo task, or state" }, { status: 400 });
+        const deadline = Date.now() + 240_000;
+        while (Date.now() < deadline) {
+          const status = ((await admin("team")).tasks as { id: string; status: string }[]).find((t) => t.id === task)?.status;
+          const held = demoHeld.filter((step) => step.demo === demo);
+          if (want === "review" ? held.some((step) => step.at === "review") : status === want) return Response.json({ status, held: held.map((step) => step.at) });
+          // What holds it short of there is let go: nothing while it's asked to be at work, its review only when asked past it.
+          const next = want === "running" ? undefined : held.find((step) => want !== "review" || step.at !== "review");
+          if (next) {
+            demoHeld.splice(demoHeld.indexOf(next), 1);
+            next.go();
+          }
+          await Bun.sleep(250);
+        }
+        return Response.json({ error: `the demo didn't reach ${want} in four minutes` }, { status: 504 });
       }
       if (control === "poke" && req.method === "POST") {
         const label = `Poke ${++pokes} iPad`;
