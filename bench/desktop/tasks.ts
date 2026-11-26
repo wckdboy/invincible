@@ -14,15 +14,17 @@ import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
  *  - settings: Chromium's font size is Large on its page and in its Preferences file;
  *  - editor: the file saved through the Save As dialog holds the text.
  *
- * Two ways of going about each, as C0 had them:
- *  - naive: one thing after another, with a fixed pause where an app is started;
- *  - careful: text typed only once the window that should take it has the keyboard's focus, and the screen let settle
- *    (250 ms with no pixel changing) before a key that commits (Return).
+ * Three ways of going about each:
+ *  - naive (C0's): one thing after another, with a fixed pause where an app is started;
+ *  - settled: naive, and the VM's own `desktop settle` (150 ms with nothing drawn, 3 s at most) wherever careful lets
+ *    the screen settle, before a key that commits: what an agent is told to do, and no more (BRIEF-C1 step 5);
+ *  - careful (C0's): text typed only once the window that should take it has the keyboard's focus, and the screen let
+ *    settle (250 ms with no pixel changing, by pictures compared) before a key that commits (Return).
  */
 
 export const TASKS = ["form", "terminal", "settings", "editor"] as const;
 export type TaskName = (typeof TASKS)[number];
-export const POLICIES = ["naive", "careful"] as const;
+export const POLICIES = ["naive", "settled", "careful"] as const;
 export type Policy = (typeof POLICIES)[number];
 
 export interface TaskRun {
@@ -63,7 +65,7 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     if (r.code !== 0) throw new Error(`the click failed: ${r.stderr.slice(-200)}`);
   };
   const careful = policy === "careful";
-  const settle = () => (careful ? sh(`python3 ${IN_VM}/probe.py settle-full 3 250`) : Promise.resolve(null));
+  const settle = () => (careful ? sh(`python3 ${IN_VM}/probe.py settle-full 3 250`) : policy === "settled" ? sh("desktop settle") : Promise.resolve(null));
   const focusIs = async (rx: RegExp, tries = 20) => {
     for (let i = 0; i < tries; i++) {
       const f = await where("focus");
@@ -200,6 +202,7 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
           await Bun.sleep(300);
         }
         if (typeof d.x !== "number") throw new Error("the Save As dialog didn't appear");
+        await settle();
       }
       await sh(`desktop type '${file}'`);
       await settle();

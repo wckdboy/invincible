@@ -205,7 +205,7 @@ KEY_ALIASES = {"enter": "Return", "return": "Return", "esc": "Escape", "escape":
                "end": "End", "insert": "Insert", "ins": "Insert", "menu": "Menu", "print": "Print"}
 WM_NAMES = ("_NET_WM_NAME", "UTF8_STRING", "WM_NAME", "STRING", "WM_CLASS", "_NET_ACTIVE_WINDOW", "WINDOW", "_NET_CLIENT_LIST",
             "_NET_WM_WINDOW_TYPE", "ATOM", "_NET_WM_WINDOW_TYPE_DIALOG", "WM_TRANSIENT_FOR", "_NET_WM_PID", "CARDINAL",
-            "_NET_CLIENT_LIST_STACKING", "PRIMARY", "CLIPBOARD", "TARGETS", "TEXT", "text/plain;charset=utf-8", "text/plain", "DESKD_SELECTION")
+            "_NET_CLIENT_LIST_STACKING", "WM_PROTOCOLS", "WM_DELETE_WINDOW", "PRIMARY", "CLIPBOARD", "TARGETS", "TEXT", "text/plain;charset=utf-8", "text/plain", "DESKD_SELECTION")
 
 
 class Display:
@@ -349,6 +349,15 @@ class Display:
             if box and box[0] <= x < box[0] + box[2] and box[1] <= y < box[1] + box[3]:
                 return w
         return 0
+
+    def close(self, w):
+        """Ask a window to close, as its close button does (WM_DELETE_WINDOW): the app ends as it would for a person,
+        with nothing to restore next time."""
+        ev = XClientMessageEvent()
+        ev.type, ev.display, ev.window, ev.message_type, ev.format = 33, self.dpy, w, self.atoms["WM_PROTOCOLS"], 32
+        ev.l[0], ev.l[1] = self.atoms["WM_DELETE_WINDOW"], 0
+        self.x.XSendEvent(self.dpy, w, 0, 0, ctypes.byref(ev))
+        self.x.XFlush(self.dpy)
 
     def activate(self, w):
         """Ask the window manager to bring a window forward with the keyboard's focus, as a pager asks (EWMH)."""
@@ -642,7 +651,7 @@ class Browser:
     def call(self, method, params=None, session=None, bound=CDP_BOUND):
         if not self.ws:
             self.connect()
-        reply = {"done": threading.Event()}
+        reply = {"done": threading.Event(), "session": session, "method": method}
         message = {"method": method, "params": params or {}}
         if session:
             message["sessionId"] = session
@@ -651,6 +660,8 @@ class Browser:
             with self.lock:
                 self.waiting.pop(n, None)
             raise Failed("the browser didn't answer %s within %.0f s" % (method, bound))
+        if "dialog" in reply:
+            raise Failed(describe_dialog(reply["dialog"]))
         if "error" in reply:
             raise Failed("the browser refused %s: %s" % (method, reply["error"].get("message", reply["error"])))
         return reply.get("result", {})
@@ -711,6 +722,17 @@ class Browser:
                 page.update(loading=False, stopped=time.monotonic())
             elif method == "Page.frameRequestedNavigation" and p.get("frameId") == target:
                 page.update(requested=time.monotonic(), loading=True)
+            elif method == "Page.javascriptDialogOpening":
+                page["dialog"] = {"type": p.get("type", "alert"), "message": p.get("message", ""), "default": p.get("defaultPrompt", "")}
+                # What waits on the page's script is answered now, with the dialog: the page answers nothing while it is up.
+                with self.lock:
+                    held = [n for n, r in self.waiting.items() if r.get("session") == m.get("sessionId") and str(r.get("method", "")).startswith("Runtime.")]
+                    for n in held:
+                        r = self.waiting.pop(n)
+                        r["dialog"] = page["dialog"]
+                        r["done"].set()
+            elif method == "Page.javascriptDialogClosed":
+                page.pop("dialog", None)
 
     def front(self):
         """The page in front, read and navigated: the one whose title the browser's window shows (Chromium names its
@@ -719,6 +741,10 @@ class Browser:
         if not self.ws:
             self.connect()
         attached = [(t, p) for t, p in self.pages.items() if p.get("session")]
+        # A page with a JavaScript dialog up is the one in front: Chromium shows it in its tab.
+        asking = [(t, p) for t, p in attached if p.get("dialog")]
+        if asking:
+            return asking[-1]
         if not attached:
             # Its last tab closed (C0's F10): a page of its own, as the shell command made one.
             self.call("Target.createTarget", {"url": "about:blank"})
@@ -748,8 +774,28 @@ class Browser:
 
     def evaluate(self, expression, bound=CDP_BOUND):
         target, page = self.front()
+        # A page with a JavaScript dialog up answers nothing (C0's F4: 30 s, then a traceback): said at once instead.
+        if page.get("dialog"):
+            raise Failed(describe_dialog(page["dialog"]))
         got = self.call("Runtime.evaluate", {"expression": expression, "returnByValue": True}, page["session"], bound)
         return got.get("result", {}).get("value")
+
+    def dialog(self):
+        """The JavaScript dialog up on a page, or None."""
+        for t, p in self.pages.items():
+            if p.get("dialog"):
+                return dict(p["dialog"], page=t)
+        return None
+
+    def answer_dialog(self, accept, text=None):
+        """The dialog up answered, as its own buttons would: OK (accept) or Cancel (dismiss), a prompt's text with it."""
+        for t, p in self.pages.items():
+            if p.get("dialog"):
+                found = p["dialog"]
+                self.call("Page.handleJavaScriptDialog", {"accept": accept, **({"promptText": text} if text is not None else {})}, p["session"])
+                p.pop("dialog", None)  # (answered: closed, whenever its event says so)
+                return found
+        raise Failed("no JavaScript dialog is open")
 
     def loading_since(self, t):
         """A navigation that began, or was asked for, after `t` and hasn't ended."""
@@ -757,6 +803,15 @@ class Browser:
 
     def loading(self):
         return any(p.get("loading") for p in self.pages.values())
+
+
+BUTTONS = {"alert": ["OK"], "confirm": ["OK", "Cancel"], "prompt": ["OK", "Cancel"], "beforeunload": ["Leave", "Cancel"]}
+
+
+def describe_dialog(d):
+    return ('a JavaScript %s is open on the page: %s [%s]%s. desktop dialog accept answers it (or Return), desktop dialog dismiss '
+            'cancels it (or Escape)%s' % (d["type"], json.dumps(d["message"], ensure_ascii=False), "] [".join(BUTTONS.get(d["type"], ["OK"])),
+                                          ", with a text box" if d["type"] == "prompt" else "", "; desktop dialog accept <text> answers its text box" if d["type"] == "prompt" else ""))
 
 
 # ---------------------------------------------------------------- the desktop's processes
@@ -789,6 +844,7 @@ class Pieces:
         self.home = home or os.environ.get("HOME", "/work")
         self.profile = os.path.join(self.home, ".config/chromium")
         self.browser = None  # (its process id, when it was started)
+        self.lock = threading.Lock()  # (the keeper and a command may both find one gone: one of them starts it)
 
     def _spawn(self, argv, log):
         return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=open(os.path.join(RUN, log), "ab"), stderr=subprocess.STDOUT, start_new_session=True, env=dict(os.environ, DISPLAY=DISPLAY)).pid
@@ -808,6 +864,9 @@ class Pieces:
         except Exception:
             return False
 
+    def window_manager_running(self):
+        return bool(_own("openbox"))
+
     def browser_running(self):
         """Its port answers, or the browser started here is still starting. Never by a process's name: a killed browser's
         children linger after it (C1's first run: the next command found "chromium" and didn't start it again)."""
@@ -823,6 +882,10 @@ class Pieces:
             time.sleep(0.05)
 
     def start(self):
+        with self.lock:
+            self._start()
+
+    def _start(self):
         os.makedirs(self.profile, exist_ok=True)
         if not _own("Xvfb") or not self.display_up():
             self._spawn(["Xvfb", DISPLAY, "-screen", "0", "%dx%dx24" % (W, H), "-nolisten", "tcp"], "display.log")
@@ -863,6 +926,8 @@ class Desk:
         self.lock = threading.RLock()
         self.last_click = None  # (when, x, y): clicks at one place within the double-click time count as one burst
         self.navigating_since = None
+        self.stopping = False
+        self._supervising = False
 
     # -- what it holds, brought up on first use (once: the first commands may come together)
     def ready(self):
@@ -876,9 +941,42 @@ class Desk:
             self._watch = Watch()
             self._watch.start()
             self._watch.take()
+            self.supervise()
         if self._browser is None:
             self._browser = Browser(window_title=self.browser_title)
         return self._display
+
+    def supervise(self, interval=0.25):
+        """The window manager and the browser kept running: one that ends (killed, its last tab closed) is started again
+        within a beat, not at the next command (C0's F9: 0.76 s, after the next command came). The display is the
+        process's own: should it end, deskd ends with it, and the next command starts them all again."""
+        if self._supervising:
+            return
+        self._supervising = True
+
+        def keep():
+            while True:
+                time.sleep(interval)
+                if self.stopping:
+                    continue
+                try:
+                    if not self.pieces.window_manager_running() or not self.pieces.browser_running():
+                        self.pieces.start()
+                except Exception as error:  # (a start that failed is tried again a beat later)
+                    sys.stderr.write("deskd: couldn't start the desktop's pieces again: %s\n" % error)
+        threading.Thread(target=keep, daemon=True, name="supervise").start()
+
+    def close_all(self, wait=2.0):
+        """Every window asked to close as a person would (WM_DELETE_WINDOW), and given `wait` seconds to: an app that
+        ends this way asks nothing to restore next time."""
+        with self.lock:
+            if self._display is None:
+                return
+            for w in self.d.clients():
+                self.d.close(w)
+            deadline = self.now() + wait
+            while self.d.clients() and self.now() < deadline:
+                self.sleep(0.05)
 
     def bring(self, name):
         """The window whose title or app matches `name` (a regular expression, any case), brought forward with the
@@ -964,6 +1062,9 @@ class Desk:
                 if self._browser and self._browser.ws and self._browser.loading_since(t0):
                     self.navigating_since = t0
                     answer["navigating"] = True
+                dialog = self._browser.dialog() if self._browser and self._browser.ws else None
+                if dialog:
+                    answer["dialog"] = {**dialog, "buttons": BUTTONS.get(dialog["type"], ["OK"])}
             except Exception:
                 pass
             return answer
@@ -1256,6 +1357,7 @@ HELP = """desktop start                      bring up the display, the window ma
 desktop status | desktop stop
 desktop open <address>             open an address in the browser (http, https, file or about)
 desktop text                       the page in front, as text: its title, its address, what it says
+desktop dialog accept [text] | dismiss   answer a JavaScript dialog on the page (alert, confirm, prompt)
 desktop app <terminal|editor>      start a terminal (xterm) or an editor (mousepad) on the screen
 desktop shot [file.png|file.jpg]   a screenshot (the pointer drawn in), once the screen has settled; prints its path
 desktop zoom <x0> <y0> <x1> <y1> [file]   that part of the screen, larger
@@ -1297,6 +1399,8 @@ def describe(answer):
         parts.append("a %s appeared: \"%s\" (%s)" % ("dialog" if w.get("dialog") else "window", w.get("title", ""), w.get("app", "")))
     for w in answer.get("gone", []):
         parts.append("\"%s\" closed" % w.get("title", ""))
+    if answer.get("dialog"):
+        parts.append(describe_dialog(answer["dialog"]))
     return " · ".join(parts)
 
 
@@ -1316,9 +1420,23 @@ def cli(desk, argv, cwd="/work", env=None):
             up = desk.pieces.display_up()
             return 0, ("The desktop is up: %dx%d, display %s; the browser is %s.\n" % (W, H, DISPLAY, "running" if desk.pieces.browser_up() else "not running")) if up else "The desktop is not up: desktop start\n", ""
         if verb == "stop":
-            # Answered first; then its pieces stopped and this process ended with them (the next command starts both).
-            threading.Timer(0.2, lambda: (desk.pieces.stop(), os._exit(0))).start()
+            # Answered first; then each window closed as a person would, the pieces stopped, and this process ended with
+            # them (the next command starts both).
+            desk.stopping = True
+
+            def stop():
+                try:
+                    desk.close_all()
+                finally:
+                    desk.pieces.stop()
+                    os._exit(0)
+            threading.Timer(0.2, stop).start()
             return 0, "The desktop is stopped.\n", ""
+        if verb == "dialog":
+            if not args or args[0] not in ("accept", "dismiss"):
+                raise Refused("a dialog is accepted or dismissed: desktop dialog accept [text] | desktop dialog dismiss")
+            done = desk.browser_ready().answer_dialog(args[0] == "accept", " ".join(args[1:]) if len(args) > 1 else None)
+            return 0, "%s the %s %s\n" % ("accepted" if args[0] == "accept" else "dismissed", done["type"], json.dumps(done["message"], ensure_ascii=False)), ""
         if verb == "open":
             address = args[0] if args else ""
             if not re.match(r"^(https?://|file://|about:)", address):
@@ -1435,7 +1553,7 @@ def open_address(desk, address):
         if went.get("errorText"):
             raise Failed("the browser could not open that address (%s)" % went["errorText"])
         deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
+        while time.monotonic() < deadline and not page.get("dialog"):
             try:
                 if browser.evaluate("document.readyState") == "complete":
                     break
@@ -1444,6 +1562,9 @@ def open_address(desk, address):
             time.sleep(0.05)
         # Loaded, and painted: the screen let settle (a second at most), so the picture taken next is the page's at once.
         desk.settle(cap=1.0)
+        if page.get("dialog"):
+            # It put up a dialog as it loaded, and its load waits on that: opened, and the dialog said at once.
+            return "%s · %s · %s" % (page.get("title") or "", page.get("url") or address, describe_dialog(page["dialog"]))
         return browser.evaluate("document.title + ' · ' + location.href") or ""
 
 

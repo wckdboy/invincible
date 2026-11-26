@@ -17,6 +17,8 @@ test("a plain desktop command is its words, quoted as a shell quotes them", () =
   expect(desktopArgv("desktop shot /tmp/agent.jpg")).toEqual(["shot", "/tmp/agent.jpg"]);
   expect(desktopArgv("desktop screenshot")).toEqual(["screenshot"]);
   expect(desktopArgv("desktop zoom 0 0 100 100 /work/z.png")).toEqual(["zoom", "0", "0", "100", "100", "/work/z.png"]);
+  expect(desktopArgv("desktop dialog accept")).toEqual(["dialog", "accept"]);
+  expect(desktopArgv("desktop dialog accept 'Søren Ærø'")).toEqual(["dialog", "accept", "Søren Ærø"]);
 });
 
 test("whatever a shell would read differently stays a shell command", () => {

@@ -512,3 +512,162 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     expect(calls(r.trace(), "own")).toEqual([]);
   });
 });
+
+describe("nothing hangs, nothing is silent (step 5)", () => {
+  /** A page with a JavaScript alert up: Chromium answers nothing on that page while it is (C0's F4: 30 s, then a traceback). */
+  const ALERT = `
+import queue
+class WS:
+    def __init__(self): self.q = queue.Queue(); self.sent = []
+    def send(self, text):
+        m = json.loads(text); self.sent.append(m)
+        if m["method"] == "Target.setDiscoverTargets":
+            self.q.put({"method": "Target.targetCreated", "params": {"targetInfo": {"targetId": "T1", "type": "page", "title": "alert", "url": "http://127.0.0.1:8000/alert.html"}}})
+            self.q.put({"id": m["id"], "result": {}})
+        elif m["method"] == "Target.attachToTarget":
+            self.q.put({"method": "Target.attachedToTarget", "params": {"sessionId": "S1", "targetInfo": {"targetId": "T1", "type": "page"}}})
+            self.q.put({"id": m["id"], "result": {"sessionId": "S1"}})
+            self.q.put({"method": "Page.javascriptDialogOpening", "sessionId": "S1", "params": {"url": "http://127.0.0.1:8000/alert.html", "message": "Hello from the page", "type": "alert", "hasBrowserHandler": False}})
+        elif m["method"] == "Runtime.evaluate":
+            pass  # (no answer while the alert is up)
+        elif m["method"] == "Page.handleJavaScriptDialog":
+            self.q.put({"id": m["id"], "sessionId": "S1", "result": {}})
+            self.q.put({"method": "Page.javascriptDialogClosed", "sessionId": "S1", "params": {"result": m["params"]["accept"], "userInput": ""}})
+        elif "id" in m:
+            self.q.put({"id": m["id"], "result": {}})
+    def recv(self): return json.dumps(self.q.get())
+ws = WS()
+b = d.Browser(connect=lambda: ws)
+class P:
+    def browser_running(self): return True
+    def browser_up(self): return True
+    def start(self): pass
+desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=b)
+`;
+
+  test("a JavaScript alert is reported within a second, with its words and its buttons, never waited out (C0's F4)", () => {
+    const got = py(`${ALERT}
+t0 = time.monotonic(); code, out, err = d.cli(desk, ["text"])
+print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000}))`) as { code: number; err: string; ms: number };
+    expect(got.ms).toBeLessThan(1000);
+    expect(got.code).toBe(1);
+    expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
+    expect(got.err).toContain("desktop dialog accept");
+  });
+
+  test("a dialog the page puts up is in the answer of the action that brought it up, with its words and its buttons", async () => {
+    const r = await deskd({ DESKD_DIALOG: "confirm" });
+    const [click] = await session(r, [{ id: 1, name: "left_click", input: { coordinate: [640, 450] } }]);
+    expect(click.dialog).toMatchObject({ type: "confirm", message: "Delete the draft?", buttons: ["OK", "Cancel"] });
+    expect(click.text).toContain('a JavaScript confirm is open on the page: "Delete the draft?" [OK] [Cancel]. desktop dialog accept answers it (or Return), desktop dialog dismiss cancels it (or Escape)');
+  });
+
+  test("the dialog is answered by its own verb, as the page's own buttons would", () => {
+    const got = py(`${ALERT}
+d.cli(desk, ["text"])
+code, out, err = d.cli(desk, ["dialog", "accept"])
+time.sleep(0.1)
+print(json.dumps({"code": code, "out": out, "sent": [m for m in ws.sent if m["method"] == "Page.handleJavaScriptDialog"], "open": b.dialog()}))`) as { code: number; out: string; sent: unknown[]; open: unknown };
+    expect(got).toMatchObject({ code: 0, out: 'accepted the alert "Hello from the page"\n', open: null });
+    expect(got.sent).toEqual([{ id: expect.any(Number), method: "Page.handleJavaScriptDialog", params: { accept: true }, sessionId: "S1" }]);
+  });
+
+  /** A page that puts up its alert as it loads, 100 ms after the navigation, with a read of it already asked for. */
+  const ALERT_AS_IT_LOADS = `
+import queue, threading
+class WS:
+    def __init__(self): self.q = queue.Queue(); self.sent = []
+    def send(self, text):
+        m = json.loads(text); self.sent.append(m)
+        if m["method"] == "Target.setDiscoverTargets":
+            self.q.put({"method": "Target.targetCreated", "params": {"targetInfo": {"targetId": "T1", "type": "page", "title": "", "url": "about:blank"}}})
+            self.q.put({"id": m["id"], "result": {}})
+        elif m["method"] == "Target.attachToTarget":
+            self.q.put({"method": "Target.attachedToTarget", "params": {"sessionId": "S1", "targetInfo": {"targetId": "T1", "type": "page"}}})
+            self.q.put({"id": m["id"], "result": {"sessionId": "S1"}})
+        elif m["method"] == "Page.navigate":
+            self.q.put({"method": "Target.targetInfoChanged", "params": {"targetInfo": {"targetId": "T1", "type": "page", "title": "alert", "url": m["params"]["url"]}}})
+            self.q.put({"id": m["id"], "sessionId": "S1", "result": {"frameId": "T1", "loaderId": "L1"}})
+            threading.Timer(0.1, lambda: self.q.put({"method": "Page.javascriptDialogOpening", "sessionId": "S1", "params": {"url": m["params"]["url"], "message": "Hello from the page", "type": "alert", "hasBrowserHandler": False}})).start()
+        elif m["method"] == "Runtime.evaluate":
+            pass  # (the page is busy loading, then its alert holds it)
+        elif "id" in m:
+            self.q.put({"id": m["id"], "result": {}})
+    def recv(self): return json.dumps(self.q.get())
+ws = WS()
+b = d.Browser(connect=lambda: ws)
+class P:
+    def browser_running(self): return True
+    def browser_up(self): return True
+    def start(self): pass
+class Settled:
+    def take(self): return []
+    def since(self, t): return 0
+desk = d.Desk(pieces=P(), display=object(), watch=Settled(), browser=b)
+desk.settle = lambda cap=None, since=None: None
+`;
+
+  test("a page that puts up an alert as it loads: desktop open answers at once, the page opened and its alert said, never the 30 s of a load that waits on it", () => {
+    const got = py(`${ALERT_AS_IT_LOADS}
+t0 = time.monotonic(); code, out, err = d.cli(desk, ["open", "http://127.0.0.1:8000/alert.html"])
+print(json.dumps({"code": code, "out": out, "err": err, "ms": (time.monotonic() - t0) * 1000}))`) as { code: number; out: string; err: string; ms: number };
+    expect(got.ms).toBeLessThan(1000);
+    expect(got.code).toBe(0);
+    expect(got.out).toContain("http://127.0.0.1:8000/alert.html");
+    expect(got.out).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
+  });
+
+  test("a read already waiting when the alert goes up is answered then, with the alert: not at its 2 s bound", () => {
+    const got = py(`${ALERT_AS_IT_LOADS}
+b.connect()
+t0 = time.monotonic(); b.call("Page.navigate", {"url": "http://127.0.0.1:8000/alert.html"}, "S1")
+code, out, err = d.cli(desk, ["text"])
+print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000}))`) as { code: number; err: string; ms: number };
+    expect(got.ms).toBeLessThan(1000);
+    expect(got.code).toBe(1);
+    expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
+  });
+
+  test("deskd keeps the browser and the window manager running: one that ends is started again without waiting for a command (C0's F9)", () => {
+    expect(py(`
+class P:
+    running = True; starts = 0
+    def start(self): P.starts += 1; P.running = True
+    def browser_running(self): return P.running
+    def browser_up(self): return P.running
+    def window_manager_running(self): return True
+desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=d.Browser())
+desk.supervise(interval=0.05)
+time.sleep(0.2); P.running = False; time.sleep(0.3)
+desk.stopping = True; P.running = False; time.sleep(0.3)
+print(json.dumps({"starts": P.starts, "running": P.running}))`)).toEqual({ starts: 1, running: false });
+  });
+
+  test("the keeper and a command that both find the browser gone start one browser, not two", () => {
+    expect(py(`
+import tempfile, threading
+p = d.Pieces(home=tempfile.mkdtemp())
+spawned = []
+def spawn(argv, log):
+    spawned.append(argv[0]); time.sleep(0.05); return 4242
+p._spawn = spawn
+d._own = lambda comm: [1] if comm in ("Xvfb", "openbox") else []
+d._alive = lambda pid: True
+p.display_up = lambda: True
+p.browser_up = lambda: False
+both = [threading.Thread(target=p.start) for _ in range(2)]
+for t in both: t.start()
+for t in both: t.join()
+print(json.dumps(spawned))`)).toEqual(["chromium"]);
+  });
+
+  test("stopping the desktop closes each window as a person would (WM_DELETE_WINDOW) before any process is ended: no restore question next time", async () => {
+    if (!built) return;
+    const r = await deskd();
+    expect(desktop(r, ["stop"])).toMatchObject({ code: 0, out: "The desktop is stopped.\n" });
+    for (let i = 0; i < 50 && !calls(r.trace(), "stop").length; i++) await Bun.sleep(20);
+    const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? `close ${t.window}` : "stop"));
+    expect(order.at(-1)).toBe("stop");
+    expect(order.filter((o) => o.startsWith("close")).sort()).toEqual(["close 0x400001", "close 0x500001", "close 0x600001"]);
+  });
+});

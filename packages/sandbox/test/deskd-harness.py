@@ -9,6 +9,7 @@ file, a JSON line a call, and the tests read it. Nothing here is deskd's own log
   DESKD_FOCUS=…             what has the keyboard's focus: field (a text field of the browser's page, the default),
                             body (the page, with nothing in it that takes text), bar (the browser's own bar), xterm,
                             mousepad, none
+  DESKD_DIALOG=confirm      the page puts up a JavaScript confirm once it has been clicked
 """
 import importlib.util, json, os, sys, threading, time
 
@@ -22,6 +23,8 @@ TRACE = os.environ["DESKD_TRACE"]
 QUIET = os.environ.get("DESKD_QUIET") == "1"
 FOCUS = os.environ.get("DESKD_FOCUS", "field")
 BUSY = os.environ.get("DESKD_BUSY") == "1"
+DIALOG = os.environ.get("DESKD_DIALOG")
+clicked = threading.Event()
 lock = threading.Lock()
 
 
@@ -102,6 +105,10 @@ class FakeDisplay:
                 return int(w, 16)
         return 0
 
+    def close(self, w):
+        trace(call="close", window=hex(w))
+        self.windows.pop(hex(w), None)
+
     def activate(self, w):
         trace(call="activate", window=hex(w))
         # (The window manager takes its time: a few milliseconds later it is in front, with the focus.)
@@ -120,6 +127,8 @@ class FakeDisplay:
 
     def button(self, b, down):
         trace(call="button", button=b, down=down)
+        if not down:
+            clicked.set()
         if down:
             # Click to focus, as the window manager does, in its own time.
             under = self.client_at(*self.at)
@@ -199,6 +208,9 @@ class FakeBrowser:
             return "Example · https://example.test/"
         return "Example\nhttps://example.test/\nHello"
 
+    def dialog(self):
+        return {"type": DIALOG, "message": "Delete the draft?", "default": "", "page": "page-1"} if DIALOG and clicked.is_set() else None
+
     def call(self, method, params=None, session=None, bound=deskd.CDP_BOUND):
         trace(call="cdp", method=method, params=params)
         if method == "Input.insertText":
@@ -220,6 +232,9 @@ class FakePieces:
         return True
 
     def browser_running(self):
+        return True
+
+    def window_manager_running(self):
         return True
 
     def _spawn(self, argv, log):

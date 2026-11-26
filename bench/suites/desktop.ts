@@ -65,6 +65,7 @@ export const suite: Suite = {
     "desktop.task.settings.careful",
     "desktop.task.editor.careful",
     "desktop.task.editor.naive",
+    "desktop.task.editor.settled",
     "desktop.f.alert-ms",
     "desktop.f.blind-type-refused",
     "desktop.cost.idle.extra-mb",

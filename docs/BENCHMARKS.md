@@ -79,8 +79,9 @@ everything but the model.
   - the agent's path: `true`, a click, a key, a screenshot; the owner's: a look, a click, a key;
   - a look, a click and a look with the stand-in eyes;
   - typing the test string `Søren Ærø – blåbærgrød 25 °C ✓ € ü 日本語 🙂` (40 characters), exactly, and how long;
-  - the four tasks (a form, a terminal command, a browser setting, a file saved in an editor), five runs each, the naive
-    way and the careful way (focus checked, the screen let settle before a key that commits), each to its gate;
+  - the four tasks (a form, a terminal command, a browser setting, a file saved in an editor), five runs each, three
+    ways: naive, settled (naive with `desktop settle` before a key that commits) and careful (focus checked, the screen
+    let settle by pictures compared), each to its gate;
   - what breaks (the F tests): typing with nothing focused, a JavaScript alert, the tab in front, the picture after a
     click that navigates, double clicks, a killed browser, the last tab closed;
   - what each state costs the host (CPU and memory of the VM's QEMU, virtiofsd and shim): a VM without the desktop
