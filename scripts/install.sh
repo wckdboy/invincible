@@ -180,6 +180,9 @@ if ((SERVICE)); then
 </dict></plist>
 PLIST
       launchctl bootout "gui/$(id -u)/sh.invincible.node" 2>/dev/null || true
+      # bootout returns before launchd has let the old service go, and a bootstrap before then fails ("Bootstrap failed:
+      # 5: Input/output error", leaving the node down): wait for it to be gone, 30 s at most.
+      for _ in $(seq 1 60); do launchctl print "gui/$(id -u)/sh.invincible.node" >/dev/null 2>&1 || break; sleep 0.5; done
       launchctl bootstrap "gui/$(id -u)" "$PLIST"
       say "running as a login item (sh.invincible.node); its log: $NODE_HOME/logs/node.log"
     fi

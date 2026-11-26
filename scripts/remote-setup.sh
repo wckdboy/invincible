@@ -595,6 +595,9 @@ elif [[ $(uname) == Darwin ]]; then
 </dict></plist>
 PLIST
   launchctl bootout "gui/$(id -u)/dev.invincible.node" 2>/dev/null || true
+  # bootout returns before launchd has let the old service go, and a bootstrap before then fails ("Bootstrap failed:
+  # 5: Input/output error", leaving the node down; an update of the mini on 26 November 2026): wait for it to be gone.
+  for _ in $(seq 1 60); do launchctl print "gui/$(id -u)/dev.invincible.node" >/dev/null 2>&1 || break; sleep 0.5; done
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
 else
   echo "no service manager found; start it yourself: cd $APP && INVINCIBLE_KEYSTORE=file bun invincible serve" >&2

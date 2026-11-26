@@ -97,6 +97,22 @@ test("both installers make `inv` the command line client, run as the node's own 
   }
 });
 
+test("on a Mac, both installers load the node's service again only once launchd has let the old one go", () => {
+  // 26 November 2026: an update of the mini booted the service out and straight back in; launchd hadn't let the old one
+  // go, the bootstrap failed ("Bootstrap failed: 5: Input/output error"), and the node stayed down until it was started
+  // by hand. Every bootstrap now follows a wait for the label to be gone from launchd.
+  for (const installer of ["scripts/install.sh", "scripts/remote-setup.sh"]) {
+    const text = readFileSync(join(root, installer), "utf8");
+    const lines = text.split("\n");
+    const bootstraps = lines.flatMap((line, at) => (/launchctl bootstrap\b/.test(line) && !line.trim().startsWith("#") ? [at] : []));
+    expect(bootstraps.length).toBeGreaterThan(0);
+    for (const at of bootstraps) {
+      const before = lines.slice(Math.max(0, at - 6), at).join("\n");
+      expect(`${installer}:${at + 1}\n${before}`).toMatch(/launchctl print\b[\s\S]*(break|until)/);
+    }
+  }
+});
+
 test("it passes shellcheck, where shellcheck is installed", () => {
   const shellcheck = Bun.which("shellcheck");
   if (!shellcheck) return void console.warn("shellcheck isn't installed here: not checked");
