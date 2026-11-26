@@ -172,6 +172,7 @@ try {
     record("first answer, fresh connection · HTTP, signed request", https);
     const qamp: number[] = [];
     const cold: number[] = [];
+    const failures: string[] = [];
     const keyHome = join(root, "beta");
     const gammaAddress = nodes[2]!.fabric.sidecar.address!;
     for (let i = 0; i < N; i++) {
@@ -179,18 +180,32 @@ try {
       // first use (its crypto library, its runtime) as a long-running sidecar never does again; its first call to alpha
       // after that is what a node pays for a fresh connection to a peer: a Retry, the 1-RTT handshake, the call.
       const fresh = new Sidecar({ home: keyHome, binary: () => QAMP, listen: () => null, name: "bench", log: () => {}, socket: join(root, `f${i % 2}.sock`) });
-      await fresh.start();
-      if (fresh.state !== "up") throw new Error(`a fresh sidecar didn't start: ${fresh.why}`);
-      const c0 = performance.now();
-      await fresh.client!.call(gammaAddress, FABRIC.sync, { have }).result;
-      cold.push(performance.now() - c0);
-      const t0 = performance.now();
-      await fresh.client!.call(a.fabric.sidecar.address!, FABRIC.sync, { have }).result;
-      qamp.push(performance.now() - t0);
-      await fresh.stop();
+      // (A sample that fails is counted and said, never dropped in silence; its sidecar is stopped whatever happened.)
+      let stage = "start";
+      const s0 = performance.now();
+      try {
+        await fresh.start();
+        if (fresh.state !== "up") throw new Error(`a fresh sidecar didn't start: ${fresh.why}`);
+        stage = "its first call (gamma)";
+        const c0 = performance.now();
+        await fresh.client!.call(gammaAddress, FABRIC.sync, { have }).result;
+        cold.push(performance.now() - c0);
+        stage = "its call to alpha";
+        const t0 = performance.now();
+        await fresh.client!.call(a.fabric.sidecar.address!, FABRIC.sync, { have }).result;
+        qamp.push(performance.now() - t0);
+      } catch (error) {
+        failures.push(`sample ${i}, ${stage}, after ${Math.round(performance.now() - s0)} ms: ${(error as Error).message}`);
+      } finally {
+        await fresh.stop();
+      }
     }
     record("first answer, fresh connection · Q-AMP (Retry + 1-RTT + call)", qamp);
     record("  the same, the sidecar process's very first call", cold);
+    if (failures.length) {
+      results["first answer, fresh connection · Q-AMP: failed samples"] = { note: failures.join(" | ") };
+      console.log(`  failed samples: ${failures.length} of ${N}: ${failures.join(" | ")}`);
+    }
     const warmHttps: number[] = [];
     const warmQamp: number[] = [];
     for (let i = 0; i < N; i++) {
