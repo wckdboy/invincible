@@ -49,5 +49,5 @@
 6ec0b00140cc8240237ff78d7c846dad936d1acf:apps/apple/InvincibleTests/RequestAuthTests.swift:generic-api-key:92
 
 # The fabric's QDT test (packages/core/test/fabric.test.ts): the did:key of Q-AMP SPEC A.2's Ed25519 test seed 01..01,
-# a PUBLIC key, checked as a known answer against the spec. Reviewed 26 November 2026.
-1ad247d92747e625bc4b77f459f73ca534f78c6d:packages/core/test/fabric.test.ts:generic-api-key:125
+# a PUBLIC key, checked as a known answer against the spec. Reviewed 26 November 2026; named by its commit as main has it (the branch was rebased).
+e36a2fa7ed695592c667e3de8a2319f7f2ae6586:packages/core/test/fabric.test.ts:generic-api-key:125
