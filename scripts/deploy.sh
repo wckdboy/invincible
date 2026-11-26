@@ -22,7 +22,7 @@
 #   --qamp <file>       Q-AMP's binary for the host (fetched by you: its forge is sign-in only), checked
 #                       there against scripts/qamp-pin.sh and installed for the node (<home>/bin/qamp)
 #
-# Transport: plain ssh by default; INVINCIBLE_SSH="tailscale ssh" uses Tailscale SSH.
+# Transport: ssh with keepalives by default; INVINCIBLE_SSH="tailscale ssh" uses Tailscale SSH.
 set -euo pipefail
 
 if [[ $# -lt 1 || $1 == -* ]]; then
@@ -56,7 +56,9 @@ for value in "$NAME" "$FLEET" "$INVITE" "$PORT" "$EXPOSE"; do
   [[ $value =~ ^[A-Za-z0-9._-]+$ ]] || { echo "refusing unsafe argument: $value" >&2; exit 1; }
 done
 
-read -r -a SSH <<<"${INVINCIBLE_SSH:-ssh}"
+# Keepalives: a step of the setup can be silent for many minutes (the first build of the Lab image), and an idle session
+# can be dropped on the way, which ends the setup with it.
+read -r -a SSH <<<"${INVINCIBLE_SSH:-ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40}"
 cd "$(git rev-parse --show-toplevel)"
 if [[ -n $(git status --porcelain) ]]; then
   echo "refusing to deploy: the working tree has uncommitted changes (deploys ship commits, not drafts)" >&2
