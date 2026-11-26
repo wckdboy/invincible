@@ -58,6 +58,12 @@ const model = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (request)
     const delta = turns.some((message) => message.role === "tool") ? { content: "It has more now." } : call;
     return new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
   }
+  // The primary asked to tell Ada something as her task runs: its team_steer once, then a word on what came of it.
+  if (turns.some((message) => message.content?.includes?.("STEER_ADA"))) {
+    const call = { tool_calls: [{ index: 0, id: "call_steer", function: { name: "team_steer", arguments: JSON.stringify({ agent: "ada", text: "Keep the old reader." }) } }] };
+    const delta = turns.some((message) => message.role === "tool") ? { content: "Told Ada." } : call;
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+  }
   // The primary asked to use its computer: the tool once, then a word on what came of it (HOLD_: a command that runs until it's let go).
   if (turns.some((message) => /(USE|HOLD)_YOUR_COMPUTER/.test(message.content ?? ""))) {
     const command = turns.some((message) => message.content?.includes?.("HOLD_YOUR_COMPUTER")) ? "echo hold-its" : "echo computer-ok";
@@ -258,24 +264,36 @@ test("a running task steered over HTTP: the command it runs finishes first, the 
     expect(((await theirs.json()) as { error: string }).error).toContain("only your agent itself steers");
     expect((await raw("steerTeamTask", { task: given.id, text: `Use ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` })).status).toBe(422);
     expect((await raw("steerTeamTask", { task: given.id, text: "x".repeat(4001) })).status).toBe(400);
+    // Asked in your conversation, your agent tells her itself (its team_steer, by her handle): said as its, after yours.
+    const chat = await (await raw("chat", { messages: [{ role: "user", content: "STEER_ADA: tell Ada to keep the old reader." }] })).text();
+    expect(chat).toContain("Told Ada.");
+    const told = String(prompts.flatMap((p) => p.messages as { role: string; content: string; tool_call_id?: string }[]).findLast((m) => m.role === "tool" && m.tool_call_id === "call_steer")?.content ?? "");
+    expect(told).toContain(`Sent to ada's running task “STEER” (${given.id}): it takes your words at its next safe point, after the one said before them, and its trail says they were yours.`);
+    expect((await task(given.id)).steers!.map((s) => [s.by, s.text])).toEqual([["owner", "Use the new schema."], ["primary", "Keep the old reader."]]);
     releaseSteer!();
     await until(async () => (await task(given.id)).status === "done");
   } finally { releaseSteer?.(); }
   const ended = await task(given.id);
+  // Yours is stepping in; your agent's is not.
   expect(ended).toMatchObject({ status: "done", verified: true, interventions: { steer: 1 } });
-  expect(ended.steers).toEqual([{ by: "owner", text: "Use the new schema.", at: expect.any(Number), taken: { at: expect.any(Number), step: 1 } }]);
+  expect(ended.steers).toEqual([
+    { by: "owner", text: "Use the new schema.", at: expect.any(Number), taken: { at: expect.any(Number), step: 1 } },
+    { by: "primary", text: "Keep the old reader.", at: expect.any(Number), taken: { at: expect.any(Number), step: 1 } },
+  ]);
   // The engineer was told it with its command's result; the reviewer judged the work against it.
   const engineer = prompts.filter((p) => p.model === "engineer" && JSON.stringify(p.messages).includes("TASK_STEER"));
   expect(JSON.stringify(engineer.at(-1)!.messages)).toContain("The owner says, while you work: Use the new schema.");
   const review = prompts.filter((p) => p.model === "reviewer" && JSON.stringify(p.messages).includes("TASK_STEER")).at(-1)!;
   expect(JSON.stringify(review.messages)).toContain("1. The owner, at step 1: Use the new schema.");
+  expect(JSON.stringify(review.messages)).toContain("2. The primary, which leads the work for the owner, at step 1: Keep the old reader.");
   const lines = (await api<{ entries: { text: string }[] }>("teamTrail", { task: given.id })).entries.map((entry) => entry.text.split("\n")[0]!);
   const ran = lines.findIndex((line) => line.startsWith("Running · ") && line.includes("write-steer"));
   const said = lines.indexOf("Steered · You: Use the new schema.");
   expect(ran).toBeGreaterThan(-1);
   expect(said).toBeGreaterThan(ran);
   expect(said).toBeLessThan(lines.findIndex((line) => line.startsWith("Submitted for review")));
-  const judged = lines.indexOf("Judged · against its goal and 1 steer, in order");
+  expect(lines[said + 1]).toBe("Steered · Your agent: Keep the old reader.");
+  const judged = lines.indexOf("Judged · against its goal and 2 steers, in order");
   expect(judged).toBeGreaterThan(said);
   expect(lines[judged + 1]).toBe("Review · pass");
   // Ended, it takes no more: refused in words that say what to do instead.

@@ -78,7 +78,7 @@ async function settled(): Promise<TeamSnapshot> {
   return state;
 }
 // Its own tools: the ones to the agents, its own computer, giving a VM more, proposing a fact about you, and a look later.
-const OWN = ["about_you", "computer", "look_later", "mac", "team", "team_give", "team_grow", "team_message", "team_outcome", "team_recruit"];
+const OWN = ["about_you", "computer", "look_later", "mac", "team", "team_give", "team_grow", "team_message", "team_outcome", "team_recruit", "team_steer"];
 /** One of your own devices, paired with these scopes: its requests are signed, as a phone's are. */
 async function pairDevice(name: string, scopes: Scope[]) {
   const keys = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])) as CryptoKeyPair;

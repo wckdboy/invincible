@@ -45,7 +45,8 @@ import {
   type SkillView,
   TEAM_PRIMARY,
   TEAM_OWNER,
-  type TeamMessage, type TeamOutcome, type TeamTask,
+  TEAM_LIMITS,
+  type TeamMessage, type TeamOutcome, type TeamSteer, type TeamTask,
   type TeamOverview,
   type Agent,
 } from "@invincible/core";
@@ -912,6 +913,27 @@ export const TOOLS: PrimaryTool[] = [
         `${given.task.id} is queued in ${given.choice.name}'s own conversation with the user (conversation ${given.task.room}); its gates and an independent reviewer decide when it is done. Read how it went with team, room "${given.task.room}".`,
         ...(others.length ? [`The others: ${others.join(" · ")}`] : []),
       ].join("\n");
+    },
+  }),
+
+  tool({
+    name: "team_steer",
+    title: "Steer an agent's running task",
+    description:
+      "Tell an agent's running task something it must take up now, from where it is: a change of course, a fact it lacks, what the user just said of that work (\"tell Coder to use the new schema\"). Name the agent whose task it is, or the task's id. It reaches the work at its next safe point (a command that's running finishes first; a coding tool takes it in its own session), its trail says it was you, and its independent reviewer judges the work against its goal and every steer, in order: a steer changes what is wanted, never a way around its gates or its review. Only a task that is running takes one: for an agent that is free, or work that hasn't started, write to it (team_message, which waits until it is free) or give it a task; work that has ended is given again. A task takes only so many.",
+    input: {
+      agent: z.string().min(1).max(32).describe("The handle of the agent whose running task it is, e.g. coder").optional(),
+      task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("Or the running task's id, as team lists it").optional(),
+      text: z.string().min(1).max(TEAM_LIMITS.steer).describe("What it must take up, in a sentence or two. Never a key or a password."),
+    },
+    routes: ["primarySteer"],
+    flow: "egress",
+    own: true,
+    async run(api, { agent, task, text }) {
+      if (Boolean(agent) === Boolean(task)) return "Name the agent whose running task it is (agent), or the task's id (task): one of them.";
+      const { task: steered } = await api.call<{ task: TeamTask; steer: TeamSteer }>("primarySteer", { ...(task ? { task } : { agent }), text });
+      const waiting = (steered.steers ?? []).filter((s) => !s.taken).length;
+      return `Sent to ${steered.assignee}'s running task “${steered.title}” (${steered.id}): it takes your words at its next safe point${waiting > 1 ? `, after ${waiting === 2 ? "the one" : `the ${waiting - 1}`} said before them` : ""}, and its trail says they were yours. Its reviewer judges the work against its goal and every steer. Read how it went with team, room "${steered.room}".`;
     },
   }),
 
