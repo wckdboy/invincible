@@ -9,12 +9,15 @@ import {
   MARK_PALETTE,
   MARK_PAUSED,
   MARK_QUEUED,
+  MARK_STATES,
   markColors,
+  markCos,
   markForm,
   markGeometry,
   markOf,
   markProfile,
   markState,
+  markSin,
   readMarkProfile,
   snapColor,
   type AgentMark,
@@ -243,5 +246,40 @@ describe("its geometry, number for number with O1's sheet", () => {
     expect(done.slats.map((s) => [two(s.from), two(s.to)])).toEqual([[-44, -15.42], [-14.29, 14.29], [15.42, 44]]);
     const after = slats("researcher", SHEET.researcher!, "done", 20, 0, 2);
     expect(after.slats.map((s) => two(s.from))).toEqual([-44, -12.17, 19.67]);
+  });
+});
+
+describe("its arithmetic, the same to the last bit on every platform", () => {
+  test("a mark is drawn without the platform's sine, cosine or power, in every state and moment", () => {
+    // Their last bits are each platform's own: CI's Linux runner read a working slat's slide one bit off the Mac's.
+    const real = { sin: Math.sin, cos: Math.cos, pow: Math.pow };
+    const refuse = (name: string) => () => {
+      throw new Error(`a mark asked the platform for Math.${name}`);
+    };
+    Object.assign(Math, { sin: refuse("sin"), cos: refuse("cos"), pow: refuse("pow") });
+    try {
+      for (const state of MARK_STATES)
+        for (const [t, since] of [[null, null], [0, 0], [2.1, 0.3], [7.7, 1.1], [86_400.25, 0.59]] as const)
+          for (const form of [0, 5, 11]) markGeometry({ mark: { color: 3, form }, seed: 12_345, state, size: 44, t, since });
+    } finally {
+      Object.assign(Math, real);
+    }
+  });
+
+  test("markSin and markCos are within 1e-13 of the true values for a mark's angles, and 1e-10 a day into a page's clock", () => {
+    const worst = (from: number, to: number, step: number) => {
+      let most = 0;
+      for (let x = from; x <= to; x += step) most = Math.max(most, Math.abs(markSin(x) - Math.sin(x)), Math.abs(markCos(x) - Math.cos(x)));
+      return most;
+    };
+    expect(worst(-1_000, 1_000, 0.010_000_3)).toBeLessThan(1e-13);
+    // (A page open a day: the working slats' phase is 2π·86,400/5.5 there.)
+    expect(worst(98_000, 99_000, 0.007_31)).toBeLessThan(1e-10);
+  });
+
+  test("their bits, pinned: what every port must say", () => {
+    expect([markSin(0), markCos(0), markSin(1), markCos(1), markSin(-2.5), markCos(-2.5), markSin(100), markCos(100)]).toEqual([
+      0, 1, 0.8414709848078965, 0.5403023058681399, -0.5984721441039573, -0.8011436155469338, -0.5063656411097555, 0.8623188722876859,
+    ]);
   });
 });

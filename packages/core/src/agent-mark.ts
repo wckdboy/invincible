@@ -211,9 +211,55 @@ export interface MarkGeometry {
   slats: MarkSlat[];
 }
 
+/* ---------- its arithmetic: the same to the last bit everywhere ---------- */
+
+/*
+ * A mark's sines and cosines come from + − × ÷ and floor alone, in one fixed order, never from Math.sin, Math.cos or
+ * Math.pow. What those say in their last bit is each platform's own: CI's Linux runner read one frame of the vectors one
+ * bit off the Mac's (26 November 2026, a working slat's slide). Each of these operations is correctly rounded in
+ * TypeScript, Swift and Kotlin, so every app draws a mark from exactly the vectors' numbers, as its colour is.
+ *
+ * An angle is taken to its quarter turn, q (the nearest), and what is left, r (|r| ≤ π/4, and a few ulps of reduction),
+ * then Taylor's series to the 13th power for sine and the 14th for cosine: within 1e-13 of the true value for any angle
+ * of a mark's, and 1e-10 a day into a page's clock (the reduction's share), far finer than any screen draws. The ports
+ * copy these lines in this order.
+ */
+const QUARTER = Math.PI / 2;
+const quarterOf = (x: number): { q: number; r: number } => {
+  const q = Math.floor(x / QUARTER + 0.5);
+  return { q, r: x - q * QUARTER };
+};
+const sinNear = (r: number): number => {
+  const r2 = r * r;
+  return r + r * r2 * (-1 / 6 + r2 * (1 / 120 + r2 * (-1 / 5040 + r2 * (1 / 362880 + r2 * (-1 / 39916800 + r2 * (1 / 6227020800))))));
+};
+const cosNear = (r: number): number => {
+  const r2 = r * r;
+  return 1 + r2 * (-1 / 2 + r2 * (1 / 24 + r2 * (-1 / 720 + r2 * (1 / 40320 + r2 * (-1 / 3628800 + r2 * (1 / 479001600 + r2 * (-1 / 87178291200)))))));
+};
+/** Which quarter turn, 0 to 3, of a whole number of them. */
+const turnOf = (q: number): number => q - 4 * Math.floor(q / 4);
+
+/** The sine of `x` radians, the same to the last bit on every platform. */
+export function markSin(x: number): number {
+  const { q, r } = quarterOf(x);
+  const m = turnOf(q);
+  return m === 0 ? sinNear(r) : m === 1 ? cosNear(r) : m === 2 ? -sinNear(r) : -cosNear(r);
+}
+
+/** The cosine of `x` radians, the same to the last bit on every platform. */
+export function markCos(x: number): number {
+  const { q, r } = quarterOf(x);
+  const m = turnOf(q);
+  return m === 0 ? cosNear(r) : m === 1 ? -sinNear(r) : m === 2 ? -cosNear(r) : sinNear(r);
+}
+
 const TAU = Math.PI * 2;
-const beat = (t: number, period: number) => 0.5 - 0.5 * Math.cos((TAU * t) / period);
-const easeOut = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+const beat = (t: number, period: number) => 0.5 - 0.5 * markCos((TAU * t) / period);
+const easeOut = (x: number) => {
+  const left = 1 - Math.min(1, Math.max(0, x));
+  return 1 - left * left * left;
+};
 
 /**
  * Its slats as they stand: `size` the mark's square in points (a slot is 7.5 units, or 1.35 pt where that is wider);
@@ -225,7 +271,7 @@ export function markGeometry(input: { mark: AgentMark; seed: number; state: Mark
   const { slots, angle } = markForm(mark.form);
   const radius = 44;
   let gap = Math.max(7.5, (1.35 * 100) / size);
-  if (state === "done") gap *= 1 - 0.85 * (since !== null && since < MARK_TIMING.doneSettle ? Math.sin(Math.PI * (since / MARK_TIMING.doneSettle)) : 0);
+  if (state === "done") gap *= 1 - 0.85 * (since !== null && since < MARK_TIMING.doneSettle ? markSin(Math.PI * (since / MARK_TIMING.doneSettle)) : 0);
   const n = slots + 1;
   const width = (2 * radius - slots * gap) / n;
   const turned = (angle * Math.PI) / 180;
@@ -235,11 +281,11 @@ export function markGeometry(input: { mark: AgentMark; seed: number; state: Mark
     const to = from + width;
     const key = state === "needs" ? i === 0 : state === "failed" ? i === n - 1 : false;
     let slide = 0;
-    if (state === "working" && t !== null) slide = 6 * Math.sin(TAU * (t / MARK_TIMING.workCycle) + (i * TAU) / n + (seed % 7));
+    if (state === "working" && t !== null) slide = 6 * markSin(TAU * (t / MARK_TIMING.workCycle) + (i * TAU) / n + (seed % 7));
     if (key && state === "needs") slide = t !== null ? 3 + 4 * beat(t, MARK_TIMING.needsBeat) : 5;
     let drop = 0, turn = 0;
     const middle = (from + to) / 2;
-    const pivot: [number, number] = [50 - middle * Math.sin(turned), 50 + middle * Math.cos(turned)];
+    const pivot: [number, number] = [50 - middle * markSin(turned), 50 + middle * markCos(turned)];
     if (key && state === "failed") {
       const k = since === null ? 1 : easeOut(since / MARK_TIMING.failDrop);
       drop = 8 * k;

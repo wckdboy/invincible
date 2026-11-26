@@ -1440,6 +1440,9 @@ const marks = {
     { id: "docs", profile: { v: 3, color: "#0084ba", form: 1, glow: true } },
   ].map((c) => ({ ...c, saved: core.isMarkProfile(c.profile), mark: core.markOf(c.id, c.profile ?? undefined) })),
   geometry: markGeometryCases,
+  // Its sines and cosines, from + − × ÷ and floor alone (core's markSin and markCos): each port says these to the last
+  // bit, its forms' angles, its motion's phases and a page open a day among them.
+  trig: [0, 1, -2.5, 100, Math.PI / 4, Math.PI / 2, Math.PI, -Math.PI, 3 * Math.PI / 2, 2.1, 6.283185307179586, 98_700.1, -98_700.1, 1e-9, -0.785398, ...core.MARK_ANGLES.map((a) => (a * Math.PI) / 180)].map((x) => ({ x, sin: core.markSin(x), cos: core.markCos(x) })),
 };
 
 const vectors = {
