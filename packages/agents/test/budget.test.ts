@@ -83,7 +83,7 @@ describe("a budget in dollars", () => {
  * reviewer cost `perAsk` a call.
  */
 function agentAtWork(options: Partial<RunOptions>, { perPoll, polls = 6, perAsk = 0, reviewer = ["PASS\nIt holds."], minutes = 60 }: { perPoll: number; polls?: number; perAsk?: number; reviewer?: string[]; minutes?: number }) {
-  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
+  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
   const queues: Record<RunRole, string[]> = { planner: ["1. Do it.\nDone when: it is done."], engineer: [], reviewer: [...reviewer] };
   let usd = 0;
@@ -200,7 +200,7 @@ describe("a coding agent out of time", () => {
  * (`minutes`) or its budget (`budgetUsd`, spent once it starts) ends it.
  */
 function agentThatFails({ worked = true, firstExit = 1, then = "cant-start", minutes = 60, budgetUsd, reviewer = ["PASS\nThe report is there."] }: { worked?: boolean; firstExit?: number; then?: "cant-start" | "hangs"; minutes?: number; budgetUsd?: number; reviewer?: string[] } = {}) {
-  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
+  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
   const queues: Record<RunRole, string[]> = { planner: ["1. Write the report.\nDone when: it is written."], engineer: [], reviewer: [...reviewer] };
   let launches = 0;

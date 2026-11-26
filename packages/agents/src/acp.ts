@@ -349,6 +349,8 @@ export function readBridge(line: string): AgentEvent[] {
   if (e.type === "call" && callId(e.id)) return [{ type: "call", id: e.id }];
   if (e.type === "tokens" && [e.input, e.output].every((v) => Number.isSafeInteger(v) && v >= 0)) return [{ type: "tokens", input: e.input, output: e.output }];
   if (e.type === "retry" && Number.isSafeInteger(e.attempt) && e.attempt > 0 && typeof e.error === "string") return [{ type: "retry", attempt: e.attempt, error: redact(e.error), waitMs: Number.isSafeInteger(e.waitMs) && e.waitMs >= 0 ? e.waitMs : 0 }];
+  // Words the node told it, by its own id for them: how far they got.
+  if (e.type === "steer" && typeof e.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(e.id) && (e.state === "queued" || e.state === "taken" || e.state === "late")) return [{ type: "steer", id: e.id, state: e.state }];
   return [];
 }
 
@@ -412,6 +414,9 @@ export function acpDriver(command: string): AgentDriver {
     name: "acp",
     title,
     kind: "openai",
+    // (Its run takes no words once started. One that can load its session again keeps it, and is steered between its
+    // calls as OpenCode is; whether it can is its own to say as it runs, so it isn't declared.)
+    capabilities: { steer: "restart", streams: true, resumes: false, readsWindows: false },
     ownSetup: true,
     check: `python3 -c ${quote(ACP_PROBE)} ${quote(command)}`,
     files: (_models, engram) => ({ [ACP_BRIDGE_PATH]: engram ? `${ACP_CLIENT}${GENERIC}${withNotes([notesServer(engram)])}${ACP_ENTRY}` : ACP_BRIDGE }),

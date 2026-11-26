@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { desktopArgv } from "./desktop-command.ts";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK } from "@invincible/core";
-import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel } from "./harnesses.ts";
+import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
 import { commandsRun, runLoop, type RunEvent, type RunSteer } from "./run.ts";
@@ -46,6 +46,8 @@ export interface TeamRuntimeDeps {
    * VM's held desktop session runs in milliseconds (desktop-command.ts). Absent: every command is a shell's.
    */
   execArgv?(agent: Agent, argv: string[], timeout: number, signal: AbortSignal): Promise<ExecResult>;
+  /** A coding agent's run in its VM followed as it goes, from byte `offset` of its events (harnesses.ts FOLLOW). */
+  follow?(agent: Agent, offset: number, signal: AbortSignal): Promise<FollowedRun>;
   /** The address a key of yours is pinned to (PLAN #17), for telling an agent where it may use it; null: none. */
   keyAddress?(secret: string): string | null;
   /** A step of a task's work, kept as a commit in its agent's VM as it ended (PLAN #15): told once each. */
@@ -772,6 +774,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           return { usd: cost.usd, complete: cost.complete };
         },
         stopAgent: () => deps.stopWorker(agent),
+        // Its coding agent's run followed as it goes, where its VM's node can keep a command open: else looked at.
+        ...(deps.follow ? { follow: (offset: number) => deps.follow!(agent, offset, ctx.signal) } : {}),
         // What you and your agent said to it as it ran, taken at its safe points.
         ...(ctx.steers ? { steers: (step: number) => ctx.steers!(step) } : {}),
         agentSession: async (id) => {

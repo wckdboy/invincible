@@ -177,7 +177,7 @@ describe("the engineer's own loop, audited", () => {
  * clock six minutes; it ends of itself at its `polls`th look. The reviewer's answers are the audits' and the review's.
  */
 function agentAtWork(reviewer: string[], options: Partial<RunOptions> = {}, polls = 10, minutes: number | null = 600) {
-  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
+  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
   const events: RunEvent[] = [];
   const prompts: string[] = [];

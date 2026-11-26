@@ -902,6 +902,24 @@ export const routes = {
     }),
   },
   /**
+   * A coding agent's run in a sandbox followed as it goes (the agents package's FOLLOW, harnesses.ts): its events from
+   * byte `offset` of its events file as they are written, one long-lived command in the sandbox that runs only that
+   * fixed script, never a command of the caller's. Answered as lines (application/x-ndjson) that end with the run, or at
+   * that script's time; asked of the node the sandbox is on, it is followed there and its lines passed back.
+   */
+  followSandbox: {
+    method: "POST",
+    path: "/api/sandboxes/follow",
+    scope: "sandbox",
+    input: z.strictObject({
+      id: SandboxId,
+      offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      on: NodeRef.optional(),
+      /** Set by a full node relaying an arm's request: the arm may only follow its own sandboxes. */
+      run: z.string().max(64).optional(),
+    }),
+  },
+  /**
    * What a sandbox's own calls through its node's gateway have come to (a coding agent's, a script's), by model, as that
    * node counted them by the sandbox's token: `{ lines: UsageLine[] }`, role "tool". `invincible do` counts them in its
    * budget. Asked of the node the sandbox is on; an agent, of its own sandboxes only.

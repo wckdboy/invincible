@@ -66,6 +66,8 @@ export interface ToolApi {
   call<T = any>(name: RouteName, input?: unknown): Promise<T>;
   /** A route that answers with bytes (an artifact's file). */
   bytes(name: RouteName, input: unknown): Promise<{ bytes: Uint8Array; type: string }>;
+  /** A route that answers as it goes (a run followed: followSandbox), its answer whole, to be read as it comes. */
+  answer?(name: RouteName, input: unknown): Promise<Response>;
 }
 
 export interface PrimaryTool {

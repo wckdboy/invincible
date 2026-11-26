@@ -112,12 +112,16 @@ describe("a driver and the notes store", () => {
   // Codex's again that day, when a seat's status came to say three things more (I15: its tier, its account as a salted
   // hash made in the VM, when its sign-in ends), each tool's sign-in read by one account() its sign_in() now asks, and
   // Codex's from its own app server for a seat: their texts at the commit before (278581a) hash to 019a8c1a… and ef08b762…,
-  // so nothing else changed; what a run runs and writes is as it was (vendor-cli.test.ts).
+  // so nothing else changed; what a run runs and writes is as it was (vendor-cli.test.ts). Claude Code's and Codex's
+  // made anew that day, when their bridges came to run live (I15 step 5: Claude Code on its stream-json input, Codex on
+  // its app server, each told your words and its stop on its own input as it works): their runs were rewritten, so these
+  // are new pins (they were 8da77ff7… and 9859b640…), and what each runs and writes is held by vendor-cli.test.ts, which
+  // replays the real 2.1.326 and 0.172.0 as their bridges drove them. OpenCode's and Hermes' are as they were.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "91daad81e7e298606abf3e1974f9b26adfa3cb50841073baed40aa037e32c5ec",
-    claude: "8da77ff7029145e563fbc75fb81639b8dd240facffc824a84f6c8a38dad8eaca",
-    codex: "9859b6405a70b1ddb1c9948c1911fba7ac3743e43c67d250a5783f71e7af9e7f",
+    claude: "7ceaaf3f3a380818c83c5e48a9cd754f385897b73d8407bf430873a5cb3faf1c",
+    codex: "7d7ef05d7fd8b0a7e4629aa7dda34cb8566f8073e7b089d75273a297b5345ee5",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

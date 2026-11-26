@@ -197,7 +197,7 @@ describe("what is said of a steer", () => {
  * run's clock `minutes`.
  */
 function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1) {
-  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
+  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
   const events: RunEvent[] = [];
   const prompts: string[] = [];

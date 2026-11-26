@@ -1,6 +1,6 @@
 import { type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type RuleDoes } from "@invincible/core";
 import type { ToolSpec } from "@invincible/models";
-import { type AgentDriver, type AgentModel, agentModelName, runAgent } from "./harnesses.ts";
+import { type AgentDriver, type AgentModel, type AgentRunDeps, agentModelName, runAgent } from "./harnesses.ts";
 import { ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput } from "./engineer-tools.ts";
 import { engramBriefing, engramProject } from "./engram.ts";
 import { changesOf, checkOf, contentsOf, readOf, readsOf, testFilesOf, writesOf } from "./shell-paths.ts";
@@ -38,6 +38,8 @@ export interface RunDeps {
   exec(command: string, timeoutSec: number): Promise<ExecResult>;
   /** Fixed cleanup for this worker, available even after ordinary execution is cancelled. */
   stopAgent?(): Promise<void>;
+  /** A coding agent's run followed as it goes, where its VM's host can keep a command open (harnesses.ts AgentRunDeps.follow). */
+  follow?: AgentRunDeps["follow"];
   /** Persist the harness session as soon as it is created; used when resuming a task. */
   agentSession?(id: string): Promise<void>;
   /** Progress, for whoever is watching. */
@@ -1550,6 +1552,15 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       heard = [...heard, ...got];
       return got.length > 0;
     };
+    /**
+     * At each tick of a run that can be told as it works (a live driver, followed): the steers waiting now, taken (said on
+     * its trail, kept for its reviewer) and put as its next message would put them. Its own session isn't needed: they
+     * follow its message on its input. What it never takes comes back as `untold`, for its next run to say.
+     */
+    const steersLive = async (): Promise<string | null> => {
+      const got = await takeSteers(steps);
+      return got.length ? steersSaid(got, o.unreviewed) : null;
+    };
     /** The steers the next run's message carries: said again if that run fails on its model before it could take them up. */
     let carried = "";
     /** What a coding agent is told of steers in its session, and what to do once they are done. */
@@ -1607,9 +1618,10 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       worked = agentModelName(model);
       const run = await runAgent(
         agent.driver,
-        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers ? { steer: steerNow } : {}) },
+        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers ? { steer: steerNow, steers: steersLive } : {}) },
         {
           exec: deps.exec,
+          ...(deps.follow ? { follow: deps.follow } : {}),
           stopAgent: deps.stopAgent,
           session: async (id) => {
             live = id;
@@ -1635,9 +1647,13 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       if (run.status === "stopped") return finish({ status: "stopped", summary: "Stopped at your request." });
       // (Its message reached a run that went on: what it carried needn't be said again.)
       if (run.status !== "failed") carried = "";
+      // Steers told it as it worked that it never took (late, or never told): said in what comes next, before the rest.
+      const unheard = run.untold?.length ? run.untold.join("\n\n") : "";
+      const withUnheard = (text: string) => (unheard ? `${unheard}\n\n${text}` : text);
+      if (unheard) carried = [carried, unheard].filter(Boolean).join("\n\n");
       // Ended by a steer of yours, or your agent's, between its tool calls: taken up in its own session.
       if (run.status === "steered") {
-        prompt = carried = steerPrompt(heard);
+        prompt = carried = withUnheard(steerPrompt(heard));
         heard = [];
         continue;
       }
@@ -1645,7 +1661,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       if (run.status === "audited" && audited) {
         const found: { verdict: AuditVerdict; note: string } = audited;
         audited = null;
-        prompt = `${steered(found.note)} Then end with a short summary and the evidence.`;
+        prompt = withUnheard(`${steered(found.note)} Then end with a short summary and the evidence.`);
         continue;
       }
       // Spent: what it left is judged as it stands (submitAtLimit), as when the engineer's budget runs out. (Only what
@@ -1676,10 +1692,11 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         }
         return finish({ status: "gave-up", summary: gaveUp, ...(review ? { review } : {}) });
       }
-      // Words that waited as it ended of itself are said in its own session before it is judged.
+      // Words that waited as it ended of itself, or that it never took as it worked, are said in its own session before it
+      // is judged.
       const waiting = session ? await takeSteers(steps) : [];
-      if (waiting.length) {
-        prompt = carried = steerPrompt(waiting);
+      if (waiting.length || (unheard && session)) {
+        prompt = carried = waiting.length ? withUnheard(steerPrompt(waiting)) : `${unheard} Then end with a short summary and the evidence.`;
         continue;
       }
       // The reviewer sees the latest commands; every one of them is in the ledger.

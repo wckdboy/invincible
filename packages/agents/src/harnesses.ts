@@ -50,7 +50,25 @@ export type AgentEvent =
   | { type: "tokens"; input: number; output: number }
   | { type: "error"; message: string }
   /** The tool asking a provider again by itself after a refusal: which try this is, why, and how long it waits first. */
-  | { type: "retry"; attempt: number; error: string; waitMs: number };
+  | { type: "retry"; attempt: number; error: string; waitMs: number }
+  /**
+   * Words the node told a run as it went (runAgent: a live steer), by its id: queued by the tool, taken into its work, or
+   * late (it had stopped taking any: they are said in its next run).
+   */
+  | { type: "steer"; id: string; state: "queued" | "taken" | "late" };
+
+/**
+ * What a driver's tool can do as it runs, declared and never faked (T3 Code: "Declare only what the provider actually
+ * supports"). `steer`: your words reach it as it works (`live`), end its run between its tool calls to be said in its own
+ * session (`restart`), or wait for its run to end (`none`). `streams`: it says what it does as it does it. `resumes`: a run
+ * of it continues its session. `readsWindows`: it says its plan's windows as it runs (used, and when they reset).
+ */
+export interface DriverCapabilities {
+  steer: "live" | "restart" | "none";
+  streams: boolean;
+  resumes: boolean;
+  readsWindows: boolean;
+}
 
 export interface AgentDriver {
   name: string;
@@ -58,6 +76,8 @@ export interface AgentDriver {
   title: string;
   /** The API a gateway model must speak for it: a provider's kind. */
   kind: "openai" | "anthropic";
+  /** What it can do as it runs. A `live` one reads its run's input channel (runAgent: AGENT_DIR/input). */
+  capabilities: DriverCapabilities;
   /** A command that exits 0 in a sandbox where it is installed and can start. */
   check: string;
   /**
@@ -112,6 +132,8 @@ export const OPENCODE: AgentDriver = {
   name: "opencode",
   title: "OpenCode",
   kind: "openai",
+  // (Its run reads no input once started, so a steer ends it between calls and is said with --session.)
+  capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false },
   check: "opencode --version",
   files: (models, engram) => {
     // One provider per gateway provider, all on the sandbox's one token: each model the
@@ -189,6 +211,12 @@ export function driverFor(harness: string, acp?: string | null): AgentDriver | u
 
 export interface AgentRunDeps {
   exec(command: string, timeoutSec: number): Promise<ExecResult>;
+  /**
+   * The run followed as it goes, where its host can keep a command open (FOLLOW, from byte `offset` of its events): its
+   * events reach the node as they are written. Each follow ends by itself after FOLLOW_SECONDS and is opened again where
+   * it stopped. Without one, or when none can be opened, the run is looked at every `pollMs`, as before.
+   */
+  follow?(offset: number): Promise<FollowedRun>;
   /** Trusted, workspace-bound cleanup that remains available after the request aborts. */
   stopAgent?(): Promise<void>;
   /** Persist a newly observed harness session before following more events. */
@@ -214,7 +242,22 @@ export interface AgentRun {
   tokens: { input: number; output: number };
   /** Why it failed (its exit, its last error, its stderr). */
   error?: string;
+  /** Words told to it as it ran that it never took (late, or that couldn't be told): its next run says them. */
+  untold?: string[];
 }
+
+/** A run being followed: FOLLOW's lines as they come, and an end to them. */
+export interface FollowedRun {
+  lines: AsyncIterable<string>;
+  close(): void;
+}
+
+/** How long one follow of a run lasts before it is opened again where it stopped: one command in its VM, ledgered once. */
+export const FOLLOW_SECONDS = 600;
+/** How often a followed run is looked at for what's cheap to ask (stopped? steered? out of time?). Its events don't wait. */
+export const FOLLOW_TICK_MS = 250;
+/** How long a live run that is stopped has to end its turn by its own interrupt before it is ended anyway. */
+export const STOP_GRACE_SECONDS = 3;
 
 /**
  * How long a run may go unread, every look at it failing, before it is ended: the primary has lost sight of it. On 22
@@ -258,14 +301,111 @@ except FileNotFoundError:
 print(json.dumps({"alive": alive, "exit": exit_code, "next": nxt, "lines": lines}))`;
 
 /**
- * One run of a coding agent: write its message, start it in the background (its own
- * process group, so it outlives the command that started it and can be stopped as a
- * whole), follow its events until it ends, the deadline passes, its budget is spent
- * (`spent`, asked at each look), a steer ends it (`steer`, asked at a look between its tool calls) or you stop it.
+ * Follows a run from byte argv[1] of its events for argv[2] seconds: each line as it is written (`E<end> <line>`, `end`
+ * the byte its line ends at, so a follow opened again never says one twice), and how it stands (`S{alive, exit, next}`)
+ * after each batch and at least every second. It ends with the run (having said what it wrote as it ended), or at its
+ * time. A line is cut at 20,000 bytes, as POLL's are: a bridge's never are, and a tool's own that is cut isn't JSON.
+ */
+export const FOLLOW = `${AGENT_PROCESS_PY}
+off, until = int(sys.argv[1]), time.monotonic() + float(sys.argv[2])
+out = sys.stdout
+
+def state():
+    alive, code = False, None
+    try:
+        item = marker()
+        alive = bool(item and matches(item, identity(item["pid"])))
+    except Exception:
+        pass
+    try:
+        code = int((D / "exit").read_text())
+    except Exception:
+        pass
+    return alive, code
+
+def read():
+    global off
+    try:
+        with open(D / "events.jsonl", "rb") as f:
+            f.seek(off)
+            data = f.read(2000000)
+    except FileNotFoundError:
+        return 0
+    end = data.rfind(b"\\n")
+    if end < 0:
+        return 0
+    at = off
+    for raw in data[:end].split(b"\\n"):
+        at += len(raw) + 1
+        out.write("E%d %s\\n" % (at, raw[:20000].decode("utf-8", "replace")))
+    off += end + 1
+    return end + 1
+
+said = -1.0
+while True:
+    got = read()
+    now = time.monotonic()
+    if got or now - said >= 1.0:
+        alive, code = state()
+        if not alive:
+            read()
+        out.write("S" + json.dumps({"alive": alive, "exit": code, "next": off}) + "\\n")
+        out.flush()
+        said = now
+        if not alive:
+            break
+    if now >= until:
+        break
+    if not got:
+        time.sleep(0.02)`;
+
+/** The command that follows a run from byte `offset` (FOLLOW), for a host's stream. */
+export const followArgv = (offset: number, seconds = FOLLOW_SECONDS): string[] => ["python3", "-c", FOLLOW, String(Math.max(0, Math.trunc(offset))), String(seconds)];
+
+/**
+ * Tells a live run one line on its input channel (base64, argv[1]); exits 3 when no run is reading it. With a run and
+ * seconds (argv[2], argv[3]), it then waits up to that long for that run to end (a stop: its own interrupt first).
+ */
+const TELL = `import base64
+${AGENT_PROCESS_PY}
+line = base64.b64decode(sys.argv[1]) + b"\\n"
+try:
+    fd = os.open(str(D / "input"), os.O_WRONLY | os.O_NONBLOCK)
+except OSError:
+    sys.exit(3)
+try:
+    until = time.monotonic() + 5
+    while line:
+        try:
+            line = line[os.write(fd, line):]
+        except BlockingIOError:
+            if time.monotonic() > until:
+                sys.exit(4)
+            time.sleep(0.01)
+finally:
+    os.close(fd)
+if len(sys.argv) > 3:
+    run, until = sys.argv[2], time.monotonic() + float(sys.argv[3])
+    while time.monotonic() < until:
+        item = marker()
+        if not item or item["run"] != run or not matches(item, identity(item["pid"])) or (D / "exit").exists():
+            break
+        time.sleep(0.05)`;
+
+const tellCommand = (line: object, wait?: { run: string; seconds: number }): string =>
+  `python3 -c ${quote(TELL)} ${quote(Buffer.from(JSON.stringify(line), "utf8").toString("base64"))}${wait ? ` ${quote(wait.run)} ${wait.seconds}` : ""}`;
+
+/**
+ * One run of a coding agent: write its message, start it in the background (its own process group, so it outlives the
+ * command that started it and can be stopped as a whole), follow its events until it ends, the deadline passes, its
+ * budget is spent (`spent`, asked at each look), a steer ends it (`steer`, asked at a look between its tool calls) or you
+ * stop it. Followed (deps.follow), its events reach the node as they are written, and a `live` driver is told your words
+ * as it works: `steers`, asked every FOLLOW_TICK_MS, gives what to tell it now (the caller has said them on its trail),
+ * and what it never takes comes back as `untold`. Looked at instead (no follow), it is as it always was.
  */
 export async function runAgent(
   driver: AgentDriver,
-  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<boolean>; steer?: () => boolean | Promise<boolean> },
+  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<boolean>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<string | null> },
   deps: AgentRunDeps,
 ): Promise<AgentRun> {
   const now = deps.now ?? Date.now;
@@ -273,13 +413,25 @@ export async function runAgent(
   /** The tool calls it began and hasn't ended, as its stream says (`call`, ended by the `tool` with its id), and since when. */
   const open = new Map<string, number>();
   const runId = randomId(12);
+  /** It reads an input channel of its own (AGENT_DIR/input) as it works: your words, and its stop. */
+  const live = driver.capabilities.steer === "live";
+  /** Your words told it as it ran, by the id each went with, and how far each got. */
+  const told = new Map<string, { words: string; state: "sent" | "queued" | "taken" | "late" }>();
   let launched = false;
+  /** It has been followed, so its channel can be told: a live one's stop is its own interrupt first. */
+  let followed = false;
   let stopping: Promise<void> | undefined;
-  const stop = () => stopping ??= deps.stopAgent
+  const cleanup = () => deps.stopAgent
     ? deps.stopAgent()
     : deps.exec(agentCleanupCommand(runId), 30).then((result) => {
       if (result.exitCode !== 0) throw new Error("Could not safely stop the worker process");
     });
+  const stop = () => stopping ??= (live && followed ? deps.exec(tellCommand({ stop: true }, { run: runId, seconds: STOP_GRACE_SECONDS }), STOP_GRACE_SECONDS + 15).then(() => undefined, () => undefined) : Promise.resolve()).then(cleanup);
+  /** A run as it ends, with whatever of yours it never took. */
+  const ended = (result: AgentRun): AgentRun => {
+    const left = [...told.values()].filter((t) => t.state !== "taken").map((t) => t.words);
+    return left.length ? { ...result, untold: left } : result;
+  };
   try {
     if (deps.signal?.aborted) return { ...run, status: "stopped" };
     // Read the previous end before spawning: a fast agent can write its entire run
@@ -292,11 +444,12 @@ export async function runAgent(
     launched = true;
     const started = await deps.exec(
       [
-        `mkdir -p ${AGENT_DIR} && rm -f ${AGENT_DIR}/exit ${AGENT_DIR}/pid`,
+        // (A live one's input is a FIFO, opened read and write so that it never reads an end while its writers come and go.)
+        `mkdir -p ${AGENT_DIR} && rm -f ${AGENT_DIR}/exit ${AGENT_DIR}/pid${live ? ` ${AGENT_DIR}/input && mkfifo -m 600 ${AGENT_DIR}/input` : ""}`,
         `printf %s ${quote(prompt)} | base64 -d > ${AGENT_DIR}/prompt.md`,
         `cd ${quote(input.workdir)}`,
         // Backgrounded inside braces: `… & && …` isn't shell.
-        `{ setsid bash -c ${quote(`${agentProcessCommand("record", runId)} && ${driver.command(input.model, input.session)} < /dev/null >> ${AGENT_DIR}/events.jsonl 2>> ${AGENT_DIR}/stderr.log; echo $? > ${AGENT_DIR}/exit`)} > /dev/null 2>&1 & echo $! > ${AGENT_DIR}/pid; }`,
+        `{ setsid bash -c ${quote(`${agentProcessCommand("record", runId)} && ${driver.command(input.model, input.session)} ${live ? `<> ${AGENT_DIR}/input` : "< /dev/null"} >> ${AGENT_DIR}/events.jsonl 2>> ${AGENT_DIR}/stderr.log; echo $? > ${AGENT_DIR}/exit`)} > /dev/null 2>&1 & echo $! > ${AGENT_DIR}/pid; }`,
         agentProcessCommand("wait_record", runId),
       ].join(" && "),
       60,
@@ -310,6 +463,165 @@ export async function runAgent(
     }
 
     let lastError = "";
+    /** One line of its events: each event it says, kept, paired and passed on. */
+    const take = async (line: string): Promise<void> => {
+      for (const event of driver.read(line)) {
+        if (event.type === "session") {
+          const changed = run.session !== event.id;
+          run.session = event.id;
+          if (changed) await deps.session?.(event.id);
+          continue;
+        }
+        // (Bounded: a stream that names more calls than any run makes is a stream that can't be believed about them.)
+        if (event.type === "call") {
+          if (open.size < 512 && !open.has(event.id)) open.set(event.id, now());
+          continue;
+        }
+        if (event.type === "steer") {
+          // (Only words told it, and only forward: taken and late are where they stay.)
+          const said = told.get(event.id);
+          if (!said || said.state === "taken" || said.state === "late") continue;
+          said.state = event.state;
+        }
+        if (event.type === "tool" && event.id !== undefined) open.delete(event.id);
+        if (event.type === "text") run.summary = event.text;
+        if (event.type === "tool") run.steps += 1;
+        if (event.type === "tokens") {
+          run.tokens.input += event.input;
+          run.tokens.output += event.output;
+        }
+        if (event.type === "error") lastError = event.message;
+        deps.event?.(event);
+      }
+    };
+    /** Its end, as the last look said it: its marker cleared, and failed if it failed. */
+    const finished = async (exit: number | null): Promise<AgentRun> => {
+      const cleared = await deps.exec(agentProcessCommand("finish", runId), 30);
+      if (cleared.exitCode !== 0) throw new Error("Could not clear the completed worker's process marker");
+      if (exit !== 0 || (!run.summary && lastError)) {
+        const stderr = (await deps.exec(`tail -c 2000 ${AGENT_DIR}/stderr.log 2>/dev/null`, 30).catch(() => null))?.stdout ?? "";
+        return ended({ ...run, status: "failed", error: redact([lastError, exit === null ? "it stopped without an exit code" : `it exited with ${exit}`, stderr.trim()].filter(Boolean).join("\n")).slice(0, 3000) });
+      }
+      return ended(run);
+    };
+    /** Your words, told it now on its channel: late if no run of it was there to read them. */
+    const tell = async (words: string): Promise<void> => {
+      const id = randomId(12);
+      told.set(id, { words, state: "sent" });
+      const sent = await deps.exec(tellCommand({ say: words, id }), 15).catch(() => null);
+      if (!sent || sent.exitCode !== 0) told.get(id)!.state = "late";
+    };
+    /** A steer ends a run that can't be told it as it works, between its tool calls (one it is in finishes first, for up to STEER_WAIT_MS). */
+    const between = () => [...open.values()].every((since) => now() - since >= STEER_WAIT_MS);
+
+    /**
+     * Followed: its events as they are written; what's cheap to ask every FOLLOW_TICK_MS; its budget and its audit every
+     * pollMs, as when it was looked at. Null: it can't be followed (never could, or no longer), and is looked at instead.
+     */
+    const follow = async (): Promise<AgentRun | null> => {
+      let stream: FollowedRun | null = null;
+      let lines: AsyncIterator<string> | null = null;
+      let next: Promise<IteratorResult<string>> | null = null;
+      let state = { alive: true, exit: null as number | null };
+      /** Follows that couldn't be opened again in a row. */
+      let lost = 0;
+      let ticked = Number.NEGATIVE_INFINITY;
+      let looked = now();
+      const end = () => {
+        try {
+          stream?.close();
+        } catch {
+          // (Already ended.)
+        }
+        stream = lines = next = null;
+      };
+      try {
+        for (;;) {
+          if (!stream) {
+            try {
+              stream = await deps.follow!(offset);
+              lines = stream.lines[Symbol.asyncIterator]();
+              next = lines.next();
+              followed = true;
+              lost = 0;
+            } catch {
+              // Never followed, or lost three times running: looked at instead, from where it stands.
+              if (!followed || ++lost >= 3) return null;
+              await deps.sleep(1_000);
+            }
+          }
+          if (next) {
+            const got = await Promise.race([next, deps.sleep(FOLLOW_TICK_MS).then(() => null)]);
+            if (got?.done) {
+              // Its follow ended: at its time (opened again where it stopped), or with the run.
+              end();
+              if (!state.alive) return await finished(state.exit);
+            } else if (got) {
+              next = lines!.next();
+              const line = got.value;
+              if (line.startsWith("E")) {
+                const space = line.indexOf(" ");
+                const at = space > 1 ? Number(line.slice(1, space)) : NaN;
+                // (Each line once: a follow opened again says nothing before where the last one stopped.)
+                if (Number.isSafeInteger(at) && at > offset) {
+                  offset = at;
+                  await take(line.slice(space + 1));
+                }
+              } else if (line.startsWith("S")) {
+                let said: { alive?: unknown; exit?: unknown; next?: unknown } = {};
+                try {
+                  said = JSON.parse(line.slice(1));
+                } catch {
+                  // (Not its own: passed over.)
+                }
+                state = { alive: said.alive !== false, exit: Number.isSafeInteger(said.exit) ? (said.exit as number) : null };
+                if (Number.isSafeInteger(said.next) && (said.next as number) > offset) offset = said.next as number;
+                if (!state.alive) {
+                  end();
+                  return await finished(state.exit);
+                }
+              }
+            }
+          }
+          if (now() - ticked < FOLLOW_TICK_MS) continue;
+          ticked = now();
+          if (deps.signal?.aborted) {
+            await stop();
+            return { ...run, status: "stopped" };
+          }
+          // Your words: told it as it works, where it can be; otherwise they end this run between its tool calls.
+          if (live && input.steers) {
+            const words = await input.steers();
+            if (words) await tell(words);
+          } else if (between() && (await input.steer?.())) {
+            await stop();
+            return { ...run, status: "steered", error: "it was steered" };
+          }
+          if (now() > input.deadline) {
+            await stop();
+            return ended({ ...run, status: "timeout", error: "it ran out of time" });
+          }
+          if (now() - looked < (input.pollMs ?? 10_000)) continue;
+          looked = now();
+          if (await input.spent?.()) {
+            await stop();
+            return ended({ ...run, status: "spent", error: "its budget was spent" });
+          }
+          // An audit, when one is due, may end this run (RunOptions.audit): the caller says what comes of it.
+          if (await input.audit?.()) {
+            await stop();
+            return ended({ ...run, status: "audited", error: "its audit ended this run" });
+          }
+        }
+      } finally {
+        end();
+      }
+    };
+    if (deps.follow) {
+      const result = await follow();
+      if (result) return result;
+    }
+
     /** Since when its looks have failed in a row (null: the last one was read), and what the latest said. */
     let unreadSince: number | null = null;
     let unreadWhy = "";
@@ -326,67 +638,34 @@ export async function runAgent(
         unreadWhy = redact((looked ? looked.stderr || looked.stdout || `exit ${looked.exitCode}` : String((error as Error)?.message ?? error)).trim().split("\n").filter(Boolean).at(-1) ?? "").slice(0, 300);
         if (now() - unreadSince > UNREAD_LIMIT_MS) {
           await stop();
-          return { ...run, status: "failed", error: `Invincible couldn't read how its run was going for ${Math.round(UNREAD_LIMIT_MS / 60_000)} minutes, so it was stopped: ${unreadWhy || "no reason given"}` };
+          return ended({ ...run, status: "failed", error: `Invincible couldn't read how its run was going for ${Math.round(UNREAD_LIMIT_MS / 60_000)} minutes, so it was stopped: ${unreadWhy || "no reason given"}` });
         }
         poll = { alive: true, exit: null, next: offset, lines: [] };
       }
       offset = poll.next;
-      for (const line of poll.lines) {
-        for (const event of driver.read(line)) {
-          if (event.type === "session") {
-            const changed = run.session !== event.id;
-            run.session = event.id;
-            if (changed) await deps.session?.(event.id);
-            continue;
-          }
-          // (Bounded: a stream that names more calls than any run makes is a stream that can't be believed about them.)
-          if (event.type === "call") {
-            if (open.size < 512 && !open.has(event.id)) open.set(event.id, now());
-            continue;
-          }
-          if (event.type === "tool" && event.id !== undefined) open.delete(event.id);
-          if (event.type === "text") run.summary = event.text;
-          if (event.type === "tool") run.steps += 1;
-          if (event.type === "tokens") {
-            run.tokens.input += event.input;
-            run.tokens.output += event.output;
-          }
-          if (event.type === "error") lastError = event.message;
-          deps.event?.(event);
-        }
-      }
+      for (const line of poll.lines) await take(line);
       if (deps.signal?.aborted) {
         await stop();
         return { ...run, status: "stopped" };
       }
-      if (!poll.alive) {
-        const cleared = await deps.exec(agentProcessCommand("finish", runId), 30);
-        if (cleared.exitCode !== 0) throw new Error("Could not clear the completed worker's process marker");
-        if (poll.exit !== 0 || (!run.summary && lastError)) {
-          const stderr = (await deps.exec(`tail -c 2000 ${AGENT_DIR}/stderr.log 2>/dev/null`, 30).catch(() => null))?.stdout ?? "";
-          return { ...run, status: "failed", error: redact([lastError, poll.exit === null ? "it stopped without an exit code" : `it exited with ${poll.exit}`, stderr.trim()].filter(Boolean).join("\n")).slice(0, 3000) };
-        }
-        return run;
-      }
+      if (!poll.alive) return await finished(poll.exit);
       if (await input.spent?.()) {
         await stop();
-        return { ...run, status: "spent", error: "its budget was spent" };
+        return ended({ ...run, status: "spent", error: "its budget was spent" });
       }
-      // A steer ends this run only between its tool calls (one it is in finishes first, for up to STEER_WAIT_MS), so its
-      // own session can be told: the caller says what comes of it.
-      const between = [...open.values()].every((since) => now() - since >= STEER_WAIT_MS);
-      if (between && (await input.steer?.())) {
+      // A steer ends this run only between its tool calls, so its own session can be told: the caller says what comes of it.
+      if (between() && (await input.steer?.())) {
         await stop();
-        return { ...run, status: "steered", error: "it was steered" };
+        return ended({ ...run, status: "steered", error: "it was steered" });
       }
       // An audit, when one is due, may end this run (RunOptions.audit): the caller says what comes of it.
       if (await input.audit?.()) {
         await stop();
-        return { ...run, status: "audited", error: "its audit ended this run" };
+        return ended({ ...run, status: "audited", error: "its audit ended this run" });
       }
       if (now() > input.deadline) {
         await stop();
-        return { ...run, status: "timeout", error: "it ran out of time" };
+        return ended({ ...run, status: "timeout", error: "it ran out of time" });
       }
       await deps.sleep(input.pollMs ?? 10_000);
     }

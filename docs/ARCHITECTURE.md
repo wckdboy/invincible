@@ -158,7 +158,11 @@ The run loop is carried and renamed (§10), the most proven part of it:
   one are), or your agent's (`team_steer`, through `POST /api/team/primary-steer`, `mind:write`), reach it at its next
   safe point.
   - In the native loop: a command that's running finishes first, and one it asked for but hasn't started isn't run.
-  - A coding harness's run is ended between its tool calls (a call it is in finishes first, for up to 15 minutes; its
+  - A coding harness that can be told as it works (Claude Code and Codex: their drivers say `steer: live`) is told at
+    once, on its own input (`packages/agents/src/vendor-cli.ts`): one sent during a tool call reaches it once that call
+    ends, in the same turn, and one after its turn starts another. Claude Code takes words that come while it answers
+    once that answer ends; Codex 0.172.0 takes them at once. Words it never took are said in its next run.
+  - Any other harness's run is ended between its tool calls (a call it is in finishes first, for up to 15 minutes; its
     stream says when one begins, but OpenCode's only when one ends) and its own session is told, as the audit's steer is.
   - The trail says it where it was taken ("You: …", "Your agent: …"), and every audit is told it.
   - The reviewer judges the work against its goal and every steer, in order, and the trail says so before its verdict.
@@ -172,6 +176,18 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - the native tools loop (the default, measured level with OpenCode);
   - Claude Code, Codex and OpenCode through the key gateway (a run uses your keys without seeing them);
   - any ACP agent.
+  - Each driver declares what its tool can do as it runs, and nothing it can't: `steer` (`live`, `restart` or `none`),
+    `streams`, `resumes`, `readsWindows` (`packages/agents/src/harnesses.ts`).
+  - A coding agent's run is followed as it goes: its events reach the node as they are written, by one long-lived
+    command in its VM that runs a fixed script from where the last one stopped (`POST /api/sandboxes/follow`, `sandbox`;
+    on the VM's own node, or forwarded there), renewed every ten minutes. Where none can be kept, it is looked at every
+    ten seconds, as before.
+  - Claude Code runs on its stream-json input and Codex on its app server, each with an input of its own in its VM (a
+    FIFO): the node tells it your words and its stop there, and it says back what it took. A stop is the tool's own
+    interrupt (SIGINT, `turn/interrupt`), given three seconds, then the end of its process group as before.
+  - Measured on 26 November 2026 with the real pinned tools against a loopback model (10 runs each): the first event on
+    the node 0.44 s after the start (it was 10.2 s), an event on the node 7 to 20 ms after the tool printed it, and your
+    words accepted by the tool in 70 ms (they were taken in 6.5 s, by ending the run).
 - **Seats:** an account you hold with a vendor, added once, that any agent may use (`packages/core/src/seats.ts`):
   - the kinds: a Claude plan, a ChatGPT plan (through Codex, or Sign in with ChatGPT), a Mistral plan, a coding plan's
     key, an API key;

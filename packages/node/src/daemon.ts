@@ -13,7 +13,7 @@ import { cloudflareNatives } from "./cloudflare.ts";
 import { gmailNatives, outlookNatives } from "./mail.ts";
 import { PairingHost, SyncEngine } from "@invincible/link";
 import { adoptChains, LedgerStore, Vault } from "@invincible/ledger";
-import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
+import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
 import type { ArgValue, HostLoad, TeamTrailEntry } from "@invincible/core";
 import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
@@ -140,6 +140,8 @@ export interface DaemonOptions {
   macFirewall?: () => Promise<MacFirewallState>;
   /** How a terminal's process is started beside that stand-in (tests: a local shell instead of `docker exec`). */
   spawnTerminal?: SpawnTerminal;
+  /** How a process that runs while it's wanted is started in a sandbox (tests: a stand-in, beside one for Docker). */
+  spawnStream?: SpawnStream;
   /**
    * How this node measures itself. Default: the real benchmark, a few seconds at low priority (and never in
    * tests that pass their own capabilities, unless they give one here). false: it doesn't.
@@ -433,6 +435,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       ...(opts.launchctl ? { launchctl: opts.launchctl } : opts.docker ? { launchctl: async () => ({ code: 0, stdout: "", stderr: "" }) } : {}),
       ...(opts.macFirewall ? { firewall: opts.macFirewall } : {}),
       ...(opts.spawnTerminal ? { spawnTerminal: opts.spawnTerminal } : {}),
+      ...(opts.spawnStream ? { spawnStream: opts.spawnStream } : {}),
       maxCpus: caps.cores,
       maxMemoryGb: Math.max(1, Math.floor(caps.memoryGb * 0.75)),
       // Size-limited workspaces when the root helper is installed (scripts/remote-setup.sh); otherwise

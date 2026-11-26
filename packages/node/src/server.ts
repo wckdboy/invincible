@@ -123,7 +123,7 @@ import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, c
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, windowsOf, choreRole, Steering, countable, nowLine } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
-import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
+import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
 import type { GovernedSandboxHost } from "./compute/governed-host.ts";
 import type { Governor } from "./compute/governor.ts";
 import type { ComputeService } from "./compute/service.ts";
@@ -176,7 +176,7 @@ import type { DoctorOptions, DoctorRun } from "./doctor-facts.ts";
 import { NotifyError, type NotifyService } from "./notify.ts";
 import { TeamService, TeamError } from "./team.ts";
 import type { TeamAsker, TeamStore } from "./team-store.ts";
-import { primaryInRoom, harnessReadiness, newestFiles, quote, TEAM_COMMAND_SECONDS, teamRuntime, withGateway } from "@invincible/agents";
+import { FOLLOW_SECONDS, followArgv, type FollowedRun, primaryInRoom, harnessReadiness, newestFiles, quote, TEAM_COMMAND_SECONDS, teamRuntime, withGateway } from "@invincible/agents";
 import { APPLE_PUSH, APPLE_PUSH_SECRET, appleProviderToken, storedApplePushKey } from "./apns-send.ts";
 import { inputRefused, type MacScreen, ScreenError, screenDid } from "./mac-screen.ts";
 import { primaryRevision } from "./revision.ts";
@@ -732,7 +732,58 @@ export function createApp(ctx: AppContext) {
         if (!result.ok) throw await failure(result);
         return { bytes: new Uint8Array(await result.arrayBuffer()), type: result.headers.get("content-type") ?? "" };
       },
+      async answer(name, input) {
+        const result = await invoke(name, input);
+        if (!(result instanceof Response)) throw new HttpError(500, "that doesn't answer as it goes");
+        if (!result.ok) throw await failure(result);
+        return result;
+      },
     };
+  }
+
+  /** A command's lines in a sandbox of this node's, as an answer of lines: ended with it, and it ended with the answer. */
+  function linesAnswer(stream: SandboxStream, signal: AbortSignal): Response {
+    const lines = stream.lines[Symbol.asyncIterator]();
+    const encoder = new TextEncoder();
+    const end = () => stream.kill();
+    signal.addEventListener("abort", end, { once: true });
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const next = await lines.next().catch(() => ({ done: true as const, value: undefined }));
+          if (next.done) {
+            signal.removeEventListener("abort", end);
+            controller.close();
+            return;
+          }
+          controller.enqueue(encoder.encode(`${next.value}\n`));
+        },
+        cancel: end,
+      }),
+      { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store", ...SECURITY_HEADERS } },
+    );
+  }
+
+  /** The same asked of the node a sandbox is on, signed as this node: its lines passed back as they come. */
+  async function linesFrom(target: Device, path: string, body: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
+    if (!target.profile?.endpoint) throw new HttpError(424, `${target.name} has no reachable endpoint`);
+    let upstream: Response;
+    try {
+      upstream = await signedFetch(ctx.identity, target.profile.endpoint, path, body, { signal });
+    } catch {
+      throw new HttpError(502, `${target.name} is unreachable`);
+    }
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => "");
+      let message = text;
+      try {
+        message = (JSON.parse(text) as { error?: string }).error ?? text;
+      } catch {
+        /* plain text */
+      }
+      throw new HttpError(upstream.status, `${target.name}: ${message}`.slice(0, 500));
+    }
+    return new Response(upstream.body, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store", ...SECURITY_HEADERS } });
   }
 
   /** Self-action as the owner sees it: on or off, the heartbeats it follows, the allowlist, its latest fixes. */
@@ -2148,6 +2199,41 @@ export function createApp(ctx: AppContext) {
     if (!current.workspace) throw new HttpError(424, "this agent has no VM yet");
     return inProcess(agentPrincipal(member.id), signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: current.workspace.node, id: current.workspace.id, cmd, timeoutSec: timeout });
   }
+  /**
+   * A coding agent's run in its VM followed as it goes (followSandbox: the agents' FOLLOW, on the node the VM is on): its
+   * lines as they come, each bounded as a stream's are, and an end to them.
+   */
+  async function followTeam(member: Seat, offset: number, signal: AbortSignal): Promise<FollowedRun> {
+    if (signal.aborted) throw new HttpError(409, "agent stopped");
+    const current = seatOf(member.id);
+    if (!current.workspace) throw new HttpError(424, "this agent has no VM yet");
+    const ended = new AbortController();
+    const answer = await inProcess(agentPrincipal(member.id), AbortSignal.any([signal, ended.signal])).answer!("followSandbox", { on: current.workspace.node, id: current.workspace.id, offset });
+    const reader = answer.body!.getReader();
+    async function* lines(): AsyncIterable<string> {
+      const decoder = new TextDecoder();
+      let held = "";
+      let dropping = false;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        held += decoder.decode(value, { stream: true });
+        let at: number;
+        while ((at = held.indexOf("\n")) >= 0) {
+          const line = held.slice(0, at);
+          held = held.slice(at + 1);
+          if (!dropping && line.length <= STREAM_LINE_LIMIT) yield line;
+          dropping = false;
+        }
+        // (A line longer than a stream's limit is dropped whole, never cut.)
+        if (held.length > STREAM_LINE_LIMIT) {
+          held = "";
+          dropping = true;
+        }
+      }
+    }
+    return { lines: lines(), close: () => { ended.abort(); void reader.cancel().catch(() => undefined); } };
+  }
   /** The providers with a key now: what an agent's task lease covers when the task starts, and a VM made (again) with. */
   const keyedProviders = (): string[] => providerViews(ctx.store, ctx.vault).filter((v) => v.hasKey).map((v) => v.id).slice(0, 16);
   async function prepareTeam(member: Agent, signal: AbortSignal, models?: readonly string[]) {
@@ -2351,7 +2437,7 @@ export function createApp(ctx: AppContext) {
     const runtime = teamRuntime({
       brain: (member) => ({ ...brainFor(agentPrincipal(member.id)), ...(ctx.fetch ? { fetch: overFleet(ctx.fetch) } : {}) }),
       enter: (signal) => ctx.governor.enterModel({ wait: true }, signal),
-      exec: execTeam, execArgv: execTeamArgv, prepare: prepareTeam, renew: renewTeam, agent: teamMember,
+      exec: execTeam, execArgv: execTeamArgv, follow: followTeam, prepare: prepareTeam, renew: renewTeam, agent: teamMember,
       // An agent on the roster's engineer models works with its own tools, as was measured (team-runtime toolsLoop).
       toolsLoop: true,
       files: (refs) => filesFor(refs, ctx.uploads),
@@ -3583,6 +3669,22 @@ export function createApp(ctx: AppContext) {
           { sandbox: rest.id },
         ).finally(() => ended?.()),
       );
+    },
+    followSandbox: async (input, p, req) => {
+      const { on, run: relayed, ...rest } = input;
+      const run = p.kind === "arm" ? armRun(p.label!) : p.kind === "node" ? relayed : undefined;
+      // Followed on the node the sandbox is on; a request another node forwarded is followed where it lands.
+      const target = p.kind === "node" ? null : on ? resolveNode(on) : null;
+      if (target && target.id !== ctx.identity.id) return linesFrom(target, routes.followSandbox.path, { ...rest, ...(run ? { run } : {}) }, req.signal);
+      if (!ctx.sandbox) throw new HttpError(424, "this node is not a sandbox host");
+      if (run) {
+        const sandbox = await ctx.sandbox.get(rest.id);
+        if (!sandbox) throw new HttpError(404, "no such sandbox on this node");
+        if (sandbox.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
+      }
+      // (Only the fixed script, from where it is asked to start: never a command of the caller's.)
+      const stream = await ctx.sandbox.stream(rest.id, followArgv(rest.offset), FOLLOW_SECONDS + 30);
+      return linesAnswer(stream, req.signal);
     },
     sandboxSpend: (input, p) => {
       const { on, run: relayed, ...rest } = input;

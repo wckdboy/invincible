@@ -89,6 +89,8 @@ export const HERMES: AgentDriver = {
   name: "hermes",
   title: "Hermes",
   kind: "openai",
+  // (It loads its session again or doesn't run: a steer ends its run between calls and is said there.)
+  capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false },
   check: "hermes acp --check",
   files: (_models, engram) => ({ "/work/.agent/hermes-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram)])}${ACP_ENTRY}` : HERMES_ACP_BRIDGE }),
   command: (model, session) => `python3 /work/.agent/hermes-acp.py --provider ${quote(model.provider)} --model ${quote(model.model)}${session ? ` --session ${quote(session)}` : ""}`,

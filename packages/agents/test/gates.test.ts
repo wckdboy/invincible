@@ -412,7 +412,7 @@ describe("gates the planner proposes", () => {
 
 describe("gates with a coding agent", () => {
   /** A driver whose event stream is already the primary's own events, a JSON list a line. */
-  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
+  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
 
   test("a failing gate continues the agent's own session, and the reviewer is asked only once they pass", async () => {
     const prompts: string[] = [];
