@@ -23,6 +23,7 @@ import { ArmTokens, PRIMARY_ARM } from "./arms.ts";
 import { QampGrants, type QampRunner, qampRunner, unspecified } from "./qamp-grants.ts";
 import { Fabric, fabricRequest, type FabricPrincipal } from "./fabric/service.ts";
 import { Sidecar, type SpawnSidecar } from "./fabric/sidecar.ts";
+import { Handoffs } from "./fabric/handoff.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, skillsAdapter, evalsAdapter } from "./archive/adapters.ts";
 import { LocalDiskBackend } from "./archive/blobs.ts";
@@ -75,6 +76,8 @@ export interface Daemon {
   sync: SyncEngine;
   /** Its peers over Q-AMP, through its sidecar (fabric/service.ts). */
   fabric: Fabric;
+  /** Tasks it handed to other nodes' agents, and runs it runs for others (fabric/handoff.ts). */
+  handoffs: Handoffs;
   loops: LoopRunner;
   connectors: ConnectorService;
   artifacts: ArtifactStore;
@@ -331,6 +334,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       }
     },
   });
+  // Tasks handed to other nodes' agents and handed here, each over one Q-AMP call, its proof signed by the node that ran it.
+  const handoffs = new Handoffs({ db: local, store, identity, fabric, log });
+  fabric.attach(handoffs);
   /** Its capabilities as its profile says them: with its Q-AMP endpoint, once its sidecar has said one. */
   const withQamp = (c: Capabilities): Capabilities => (qampEndpoint ? { ...c, qamp: qampEndpoint } : c);
   let profiled = false;
@@ -717,6 +723,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     pairing,
     sync,
     fabric,
+    handoffs,
     tokens,
     arms,
     qamp,
@@ -900,6 +907,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     store,
     sync,
     fabric,
+    handoffs,
     loops,
     connectors,
     artifacts,

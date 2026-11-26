@@ -94,6 +94,13 @@ export class GatewayTokens {
       .map(toInfo);
   }
 
+  /** The label of a token that is good now (not expired, requests left), without spending it; null otherwise. */
+  liveLabel(token: string): string | null {
+    if (!/^gw_[A-Za-z0-9_-]{43}$/.test(token)) return null;
+    const info = this.info(sha256B64u(token));
+    return info && info.expiresAt > this.now() && info.used < info.maxRequests ? info.label : null;
+  }
+
   /** The label a token was minted with (e.g. "sandbox:<id>"), without spending it; null if it isn't one. */
   labelOf(token: string): string | null {
     if (!/^gw_[A-Za-z0-9_-]{43}$/.test(token)) return null;

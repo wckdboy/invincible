@@ -7,6 +7,7 @@ import { ActionId, ArtifactId, ConnectorId, LoopName, LoopStatus, NoticeKey, Not
 import { Conclusion, InvestigationId, InvestigationStatus, PredictionOutcome, Preregistration } from "./investigations.ts";
 import { MAX_ORDER_DAYS, OrderId, OrderPattern } from "./orders.ts";
 import { QampGrantInput, QampRevokeInput } from "./qamp.ts";
+import { HandId, HandTaskInput } from "./fabric.ts";
 import { RuleInput, RuleName, RuleToldInput, RuleTrippedInput } from "./rules.ts";
 import { type Scope, Scope as ScopeSchema } from "./scopes.ts";
 import { EvalRecord, EvalRunId, type EvalRunSettings } from "./evals.ts";
@@ -1370,6 +1371,16 @@ export const routes = {
   qampGrant: { method: "POST", path: "/api/qamp/grants", scope: "fleet:admin", input: QampGrantInput },
   /** End one grant, or every one: its arm deleted at once (the agent's next call refused), its bridge stopped. */
   qampRevoke: { method: "POST", path: "/api/qamp/revoke", scope: "fleet:admin", input: QampRevokeInput },
+
+  // ---- The fabric (fabric.ts; docs/ARCHITECTURE.md §3): a task handed to another node's agents, over Q-AMP ----
+  /** Hand a task to another node's agents: it runs there, its trail streams back, and its proof is checked here. Yours alone. */
+  handTask: { method: "POST", path: "/api/fabric/hand", scope: "fleet:admin", input: HandTaskInput },
+  /** The tasks this node handed on, the latest first, without their trails. */
+  handedTasks: { method: "GET", path: "/api/fabric/handed", scope: "chat", input: null },
+  /** One task handed on, with its trail after line `after` (0: all of it that is kept). */
+  handedTask: { method: "POST", path: "/api/fabric/handed/one", scope: "chat", input: z.strictObject({ id: HandId, after: z.number().int().min(0).max(10_000_000).optional() }) },
+  /** Stop a task handed on: the node it runs on stops the work and says how it ended. Yours alone. */
+  stopHanded: { method: "POST", path: "/api/fabric/handed/stop", scope: "fleet:admin", input: z.strictObject({ id: HandId }) },
 
   // ---- The archive (node-local: what this node keeps, for good) -----------------
   /** Entries, chunks embedded, the backlog, the embedder, the last integrity check, disk used. */

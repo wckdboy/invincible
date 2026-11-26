@@ -181,8 +181,9 @@ import { localModelsOf, type ModelPeer, serves, viaFleet } from "./local-models.
 import { githubRepo, shipBranch } from "./run-cli.ts";
 import type { Terminals } from "./terminals.ts";
 import { LiveChanges, LedgerCounts, timedStamp } from "./live.ts";
-import { QampGrantError, QampGrants } from "./qamp-grants.ts";
+import { grantScopes, QampGrantError, QampGrants } from "./qamp-grants.ts";
 import { type Fabric, fabricPrincipalOf } from "./fabric/service.ts";
+import { handleFabricTool, type Handoffs } from "./fabric/handoff.ts";
 
 /**
  * loopback  127.0.0.1:<port>         local processes only: CLI (admin token), model gateway
@@ -205,6 +206,8 @@ export interface AppContext {
   sync: SyncEngine;
   /** Its peers over Q-AMP, through its sidecar (fabric/service.ts): forwarded work goes there first, HTTPS where it can't. */
   fabric?: Fabric;
+  /** Tasks handed to other nodes' agents, and handed here (fabric/handoff.ts). */
+  handoffs?: Handoffs;
   tokens: GatewayTokens;
   arms: ArmTokens;
   /** Grants to agents on your other machines, over Q-AMP (qamp-grants.ts): each an arm, a chain and a bridge. */
@@ -2313,12 +2316,16 @@ export function createApp(ctx: AppContext) {
       countable: (ref) => countable(ctx.store, ctx.vault, ref),
       // Its skills for an agent's task, as for a run of its: chosen once from its goal, under the task's own ref.
       skills: (_member, task) => {
+        let given: { text: string; brief: string } | null = null;
         try {
-          return ctx.skills.forRun(`team:${task.id}`, task.goal);
+          given = ctx.skills.forRun(`team:${task.id}`, task.goal);
         } catch (error) {
           ctx.log(`skills: ${(error as Error).message}`);
-          return null;
         }
+        // A task another node handed over, with some of that node's tools for its run: how its run calls them (handoff.ts).
+        const elsewhere = ctx.handoffs?.toolsNote(task.id) ?? null;
+        if (!elsewhere) return given;
+        return given ? { ...given, text: `${given.text}\n\n${elsewhere.text}`, brief: `${given.brief}\n${elsewhere.brief}` } : elsewhere;
       },
       // Its verified work may teach one (skills.ts checks it against what the ledger recorded of the agent's own VM).
       learned: (member, task, evidence) => {
@@ -2392,6 +2399,38 @@ export function createApp(ctx: AppContext) {
       if (task.fix) void offerFix({ call: (input) => ctx.connectors.call(input, { kind: "agent", by: agentLabel(task.assignee) }), note: (id, text) => team.service?.noteTask(id, text), log: ctx.log }, task);
     } });
     ctx.team.service.start();
+    // A task another node handed over (fabric/handoff.ts): given to the agents here as you would give it, followed, stopped.
+    ctx.handoffs?.attachTeam({
+      give: async (args, signal) => {
+        const budget = args.budgetUsd !== undefined ? { budgetUsd: args.budgetUsd } : {};
+        if (args.agent) {
+          const agent = teamOf().store.agent(args.agent);
+          if (!agent || !agent.enabled) throw new HttpError(404, `no agent ${args.agent} that works here now`);
+          const room = teamOf().direct(agent.id);
+          const task = teamOf().createTask({ room: room.id, assignee: agent.id, title: args.title, goal: args.goal, gates: args.gates, ...budget }, TEAM_OWNER);
+          return { task, agent: { id: agent.id, name: agent.name } };
+        }
+        const { task, choice } = await giveTask({ goal: args.goal, title: args.title, gates: args.gates, ...budget }, TEAM_OWNER, signal);
+        return { task, agent: { id: choice.id, name: choice.name } };
+      },
+      task: (id) => teamOf().task(id),
+      trail: (id, after) => {
+        const { entries, more } = teamOf().trail(id, after);
+        return { entries, more };
+      },
+      stop: (id) => {
+        try {
+          teamOf().control({ task: id, action: "stop" });
+        } catch (error) {
+          ctx.log(`fabric: ${id} wasn't stopped: ${(error as Error).message}`);
+        }
+      },
+      runningIn: (sandbox) => {
+        const snapshot = teamOf().snapshot();
+        const agent = snapshot.agents.find((m) => m.workspace?.id === sandbox && m.workspace.node === ctx.identity.id);
+        return agent ? (snapshot.tasks.find((t) => t.assignee === agent.id && t.status === "running")?.id ?? null) : null;
+      },
+    });
     outcomes.start();
     // Work for idle agents from your backlog (backlog.ts): one proposal a day at most for each, waiting for your tap.
     const backlog = new BacklogRunner({
@@ -4131,6 +4170,26 @@ export function createApp(ctx: AppContext) {
       ownerOfQamp(p);
       return { grants: ctx.qamp.list() };
     },
+    handTask: (input, p) => {
+      ownerOnly(p);
+      return handErrors(() => {
+        const node = resolveNode(input.node);
+        if (node.id === ctx.identity.id) throw new HttpError(400, "that is this node: give the task to its agents here (invincible give, or the agents' page)");
+        return ctx.handoffs!.hand(input, node);
+      });
+    },
+    handedTasks: (_input, p) => {
+      ownerOnly(p);
+      return handErrors(() => ({ handed: ctx.handoffs!.list() }));
+    },
+    handedTask: (input, p) => {
+      ownerOnly(p);
+      return handErrors(() => ctx.handoffs!.get(input.id, input.after ?? 0));
+    },
+    stopHanded: (input, p) => {
+      ownerOnly(p);
+      return handErrors(() => ctx.handoffs!.stop(input.id));
+    },
     qampGrant: (input, p) => {
       ownerOfQamp(p);
       return qampErrors(() => ctx.qamp.grant(input, p));
@@ -4329,6 +4388,30 @@ export function createApp(ctx: AppContext) {
     }
   };
 
+  // A run another node runs for this one calls back one of the tools its task was given (fabric/handoff.ts, once its
+  // chain checked): run here as that run alone, with the scopes those tools' routes need and nothing more.
+  ctx.handoffs?.attachTools(async (tool, input, run, signal) => {
+    const scopes = grantScopes(run.tools);
+    const p: Principal = { device: `arm:fabric.${run.handoff}`, kind: "arm", label: `fabric.${run.handoff}`, scopes };
+    const tools = chatTools(toolsFor(p.scopes).filter((t) => t.name === tool), inProcess(p, signal), explain);
+    const done = await tools.run({ id: `fabric-${run.handoff}`, name: tool, input }, signal);
+    ctx.ledger?.({ class: "read", resource: "fabric", target: tool, verdict: done.isError ? "deny" : "allow", reason: "a run on another node called it, under its own chain for its task", detail: `${run.handoff}: ${done.summary.slice(0, 200)}` });
+    if (done.isError) throw new Error(done.content.slice(0, 500));
+    return { content: done.content, summary: done.summary };
+  });
+
+  /** What the hand-off says went wrong, as the API says it. */
+  const handErrors = async <T,>(work: () => T | Promise<T>): Promise<T> => {
+    if (!ctx.handoffs) throw new HttpError(424, "this node has no fabric");
+    try {
+      return await work();
+    } catch (error) {
+      const status = (error as { status?: unknown }).status;
+      if (typeof status === "number") throw new HttpError(status, (error as Error).message);
+      throw error;
+    }
+  };
+
   const routeTable = new Map(Object.entries(routes).map(([name, r]) => [`${r.method} ${r.path}`, name as RouteName]));
 
   async function handle(req: Request, listener: Listener): Promise<Response> {
@@ -4342,6 +4425,9 @@ export function createApp(ctx: AppContext) {
       if (path.startsWith("/git/")) return handleGitGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, ...(ctx.ledger ? { ledger: ctx.ledger } : {}), ...(ctx.fetch ? { fetch: ctx.fetch } : {}) });
       // (And the key gateway: an API called with a key of yours an agent may use but never see, PLAN #17.)
       if (path.startsWith("/key/")) return handleKeyGateway(req, { vault: ctx.vault, tokens: ctx.tokens, ...(ctx.ledger ? { ledger: ctx.ledger } : {}), ...(ctx.fetch ? { fetch: ctx.fetch } : {}) });
+      // (And the tools a task handed over from another node was given there: carried to that node over Q-AMP under the
+      // run's own chain, which this VM never sees, as it never sees a key: fabric/handoff.ts.)
+      if (path.startsWith("/fabric/tool/")) return handleFabricTool(req, { tokens: ctx.tokens, handoffs: ctx.handoffs ?? null });
       if (!path.startsWith("/gw/")) throw new HttpError(404, "not found");
       return handleGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, onUsage: toolCalled });
     }

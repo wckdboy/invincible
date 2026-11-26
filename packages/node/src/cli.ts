@@ -22,6 +22,7 @@ import { keyAddCommand, keyElsewhereLine } from "./key-cli.ts";
 import { skillsCommand } from "./skills-cli.ts";
 import { ruleCommand } from "./rule-cli.ts";
 import { qampCommand } from "./qamp-cli.ts";
+import { handCommand } from "./fabric-cli.ts";
 import { computeCommand, parseEffort } from "./compute-cli.ts";
 import { checkGates, githubConnector, githubRepo, investigateFromCli, runFromCli, shipBranch } from "./run-cli.ts";
 import { askCommand, runsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
@@ -407,6 +408,12 @@ Agents (MCP, ACP)
                                   alone, through a bridge on this node's tailnet address. Prints what its machine runs
   qamp grants | qamp revoke <id>|--all
                                   the grants in force; end one, or every one, now (each also ends by itself)
+  hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools fleet,compute,place,ledger] [--budget 2] [--follow]
+                                  a task for another node's agents, over Q-AMP: it runs there, its trail comes back as it
+                                  goes, and its proof (signed by that node's own key) is checked here; --tools: what its
+                                  run may call back here, under a grant to its own key that ends with the task
+  handed [<id> [--follow] | stop <id>]
+                                  the tasks handed on, one with its trail, or stop one there; the exit code is the verdict
 
 Maintenance
   awake on|off|status             a Mac set to stay on (a Mac mini serving the fleet) is kept from sleeping while its
@@ -2070,6 +2077,10 @@ Evidence: invincible artifact ${i!.artifact}`));
       return;
     case "qamp":
       await qampCommand(new Admin(home), sub, rest, flags);
+      return;
+    case "hand":
+    case "handed":
+      await handCommand(new Admin(home), command, [sub, ...rest].filter((x): x is string => typeof x === "string"), flags);
       return;
     case "archive":
       await archiveCommand(new Admin(home), sub, rest, flags, { confirm, readStdin: () => Bun.stdin.text() });

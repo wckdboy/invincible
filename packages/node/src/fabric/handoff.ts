@@ -1,0 +1,581 @@
+import type { Database } from "bun:sqlite";
+import { randomBytes } from "node:crypto";
+import {
+  didKeyOfEd25519,
+  FABRIC,
+  FABRIC_RUN_TOOLS,
+  type FabricRunTool,
+  goalDigest,
+  HandArgs,
+  HandChunk,
+  type HandedView,
+  HandInputChunk,
+  type HandTaskInput,
+  type NodeIdentity,
+  proofRefusal,
+  type ProofStatement,
+  qdtChainText,
+  qdtChainTokens,
+  randomId,
+  readQdt,
+  RUN_GRANT_COMMAND,
+  RUN_GRANT_TTL,
+  runGrantPolicy,
+  signingPublicKey,
+  signProof,
+  signQdt,
+  type TeamTask,
+  TeamTaskProof,
+} from "@invincible/core";
+import type { Device, LedgerStore } from "@invincible/ledger";
+import type { Fabric, FabricTools } from "./service.ts";
+import { type Call, type Invocation, SidecarError, type ToolSpec } from "./socket.ts";
+
+/*
+ * Agents working together across nodes (docs/ARCHITECTURE.md §3, PLAN Phase 2): a task handed from one node to another
+ * node's agents, over one Q-AMP call between the two nodes' transport keys.
+ *
+ *  - The node that hands it on (the giver) opens the call with the task; the node that runs it (the runner) gives it to
+ *    its own agents, as you would there, and streams back its trail as it goes. The giver streams in the run's chain and
+ *    each renewal of it, and a stop when you stop it; a stop on either side ends the work on the other.
+ *  - The runner makes the run a key of its own, in memory alone and destroyed when the run ends. Where the task was given
+ *    some of the giver's tools, the giver grants them to that key: a chain from its transport key, held to this task by
+ *    its policy, for a few minutes at a time, renewed while the task lives and revoked when it ends. The run calls them
+ *    through its own node, which passes the grant on to its own transport key under the run's key (a link the run's key
+ *    signs), so the chain the giver checks names the run's key, and ends at the node it handed the task to.
+ *  - The proof survives the hop: the runner signs what the work came to (each gate's exit before and after, the
+ *    reviewer's verdict, how it ended) with its device key, for this hand-off and its nonce, and the giver checks that
+ *    signature before it says anything is proven. A node that didn't run the work can't make it look proven.
+ */
+
+/** What the runner's agents need: the team service's own operations (the server binds them). */
+export interface HandTeam {
+  /** Gives the task to an agent here, as you would (the one named, or the one best suited): its task and who took it. */
+  give(args: HandArgs, signal: AbortSignal): Promise<{ task: TeamTask; agent: { id: string; name: string } }>;
+  task(id: string): TeamTask | null;
+  trail(id: string, after: number): { entries: { n: number; at: number; text: string }[]; more: boolean };
+  stop(id: string): void;
+  /** The task an agent's VM is running now, by the VM's id (the sandbox its gateway token names). */
+  runningIn(sandbox: string): string | null;
+}
+
+/** A tool of the primary's, run on this node for a run another node runs for it (the server binds it, as that run's principal). */
+export type RunTool = (tool: FabricRunTool, input: Record<string, unknown>, run: { handoff: string; tools: readonly FabricRunTool[] }, signal: AbortSignal) => Promise<unknown>;
+
+export interface HandoffsDeps {
+  db: Database;
+  store: LedgerStore;
+  identity: NodeIdentity;
+  fabric: Fabric;
+  log(message: string): void;
+  now?(): number;
+}
+
+const ENDED = new Set(["done", "failed", "stopped", "interrupted"]);
+/** The most trail lines a hand-off keeps here (its runner keeps all of them). */
+const TRAIL_KEEP = 2_000;
+/** How long a stop waits for the runner to say the work stopped, before the call itself is cancelled. */
+const STOP_WAIT_MS = 15_000;
+/** How long a run's link (the run's key to its node's) lasts at most; it is signed again as the grant renews. */
+const LINK_TTL = RUN_GRANT_TTL;
+
+interface Row {
+  id: string;
+  node: string;
+  node_name: string;
+  task: string | null;
+  agent: string | null;
+  title: string;
+  goal: string;
+  gates: string;
+  tools: string;
+  nonce: string;
+  run: string | null;
+  grant_id: string | null;
+  tokens: string;
+  phase: "handing" | "following" | "ended";
+  status: string;
+  proof: string | null;
+  output: string;
+  error: string | null;
+  created_at: number;
+  first_output_at: number | null;
+  stop_asked_at: number | null;
+  ended_at: number | null;
+}
+
+/** A run this node runs for another: its hand-off, the key it holds in memory alone, and the giver's chain for it. */
+interface Running {
+  handoff: string;
+  giver: string;
+  giverKey: string;
+  task: string;
+  seed: Uint8Array;
+  did: string;
+  tools: FabricRunTool[];
+  /** The giver's grant, as its encoded tokens (root first), and the link this node's run key signed onto it. */
+  chain: Uint8Array[] | null;
+  link: { encoded: Uint8Array; exp: number } | null;
+  inv: Invocation;
+}
+
+export class Handoffs implements FabricTools {
+  private readonly now: () => number;
+  private team: HandTeam | null = null;
+  private runTool: RunTool | null = null;
+  /** Here, as the giver: the calls of the hand-offs under way, and their grants' renewals. */
+  private readonly calls = new Map<string, { call: Call; renew: ReturnType<typeof setInterval> | null }>();
+  /** Here, as the runner: the runs under way, by hand-off and by task. */
+  private readonly runs = new Map<string, Running>();
+
+  constructor(private readonly deps: HandoffsDeps) {
+    this.now = deps.now ?? Date.now;
+    deps.db.exec(`CREATE TABLE IF NOT EXISTS fabric_handed (
+      id TEXT PRIMARY KEY, node TEXT NOT NULL, node_name TEXT NOT NULL, task TEXT, agent TEXT, title TEXT NOT NULL, goal TEXT NOT NULL,
+      gates TEXT NOT NULL, tools TEXT NOT NULL, nonce TEXT NOT NULL, run TEXT, grant_id TEXT, tokens TEXT NOT NULL DEFAULT '[]',
+      phase TEXT NOT NULL, status TEXT NOT NULL, proof TEXT, output TEXT NOT NULL DEFAULT '', error TEXT,
+      created_at INTEGER NOT NULL, first_output_at INTEGER, stop_asked_at INTEGER, ended_at INTEGER)`);
+    deps.db.exec("CREATE TABLE IF NOT EXISTS fabric_handed_trail (handoff TEXT NOT NULL, n INTEGER NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (handoff, n))");
+    // A hand-off a node that stopped was following has lost its call: the runner stopped the work when it did.
+    for (const row of this.rows().filter((r) => r.phase !== "ended")) this.end(row.id, { status: "interrupted", error: "this node stopped while it followed the task: the node that ran it stopped the work when the call ended" });
+  }
+
+  /** The runner's side, once the server has its agents. */
+  attachTeam(team: HandTeam): void {
+    this.team = team;
+  }
+
+  /** The giver's side: how a run elsewhere calls this node's tools. */
+  attachTools(run: RunTool): void {
+    this.runTool = run;
+  }
+
+  // ---- what the fabric serves for it ----
+
+  specs(): { tools: ToolSpec[]; public: string[] } {
+    const tools: ToolSpec[] = [
+      { name: FABRIC.hand, description: "A task handed over by an active full node of this fleet, run by this node's agents, its trail streamed back and its proof signed" },
+      ...FABRIC_RUN_TOOLS.map((tool) => ({ name: `${FABRIC.agent}/${tool}`, description: `The primary's ${tool}, for a run another node runs for this one, under that run's own chain`, annotations: { read_only: true } })),
+    ];
+    // The hand-off is public at Q-AMP's door, and this node's decides; a run's tools are never: its chain is checked first.
+    return { tools, public: [FABRIC.hand] };
+  }
+
+  owns(tool: string): boolean {
+    return tool === FABRIC.hand || tool.startsWith(`${FABRIC.agent}/`);
+  }
+
+  invoked(inv: Invocation, caller: Device | null): void {
+    if (inv.tool === FABRIC.hand) void this.runHanded(inv, caller);
+    else void this.agentTool(inv, caller);
+  }
+
+  /** A node revoked here: what it ran for this node stops being followed, its runs' grants end, and what it gave here stops. */
+  revoked(device: string): void {
+    for (const row of this.rows().filter((r) => r.node === device && r.phase !== "ended")) {
+      this.calls.get(row.id)?.call.cancel();
+      this.end(row.id, { status: "interrupted", error: "the node it ran on was revoked" });
+    }
+    for (const run of [...this.runs.values()].filter((r) => r.giver === device)) {
+      this.team?.stop(run.task);
+      run.inv.fail(3, "the node that handed this task over was revoked");
+    }
+  }
+
+  // ---- the giver ----
+
+  private rows(): Row[] {
+    return this.deps.db.query<Row, []>("SELECT * FROM fabric_handed ORDER BY created_at DESC LIMIT 200").all();
+  }
+
+  private row(id: string): Row | null {
+    return this.deps.db.query<Row, [string]>("SELECT * FROM fabric_handed WHERE id = ?").get(id);
+  }
+
+  private set(id: string, fields: Partial<Omit<Row, "id">>): void {
+    const keys = Object.keys(fields);
+    if (!keys.length) return;
+    this.deps.db.query(`UPDATE fabric_handed SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...(keys.map((k) => (fields as Record<string, unknown>)[k] ?? null) as never[]), id);
+  }
+
+  /** Hands a task to another node's agents, over Q-AMP: refused at once when it can't be had (there is no HTTPS form). */
+  async hand(input: HandTaskInput, node: Device): Promise<HandedView> {
+    const why = this.deps.fabric.unusable(node);
+    if (why) throw Object.assign(new Error(`a task is handed to another node over Q-AMP alone, and ${why}`), { status: 424 });
+    const endpoint = this.deps.fabric.peerEndpoint(node)!;
+    const client = this.deps.fabric.sidecar.client!;
+    const id = `h_${randomId(16)}`;
+    const nonce = randomId(16);
+    const title = input.title ?? input.goal.slice(0, 200);
+    const gates = input.gates ?? [];
+    const tools = input.tools ?? [];
+    this.deps.db
+      .query("INSERT INTO fabric_handed (id, node, node_name, title, goal, gates, tools, nonce, phase, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'handing', 'handing', ?)")
+      .run(id, node.id, node.name, title, input.goal, JSON.stringify(gates), JSON.stringify(tools), nonce, this.now());
+    const args: HandArgs = { handoff: id, nonce, goal: input.goal, title, gates, tools, ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}), ...(input.agent ? { agent: input.agent } : {}) };
+    const call = client.call(endpoint.address, FABRIC.hand, args, { input: true });
+    this.calls.set(id, { call, renew: null });
+    void this.follow(id, node, call);
+    return this.view(this.row(id)!);
+  }
+
+  private async follow(id: string, node: Device, call: Call): Promise<void> {
+    let n = 0;
+    try {
+      for await (const chunk of call.chunks) {
+        const parsed = "value" in chunk ? HandChunk.safeParse(chunk.value) : null;
+        if (!parsed?.success) continue;
+        const said = parsed.data;
+        if (said.kind === "accepted") {
+          this.set(id, { phase: "following", task: said.task, agent: JSON.stringify(said.agent), run: said.run, status: "queued" });
+          await this.grant(id, call);
+        } else if (said.kind === "state") this.set(id, { status: said.status });
+        else {
+          n++;
+          this.deps.db.query("INSERT OR REPLACE INTO fabric_handed_trail (handoff, n, at, text) VALUES (?, ?, ?, ?)").run(id, n, said.at, said.text);
+          if (n > TRAIL_KEEP) this.deps.db.query("DELETE FROM fabric_handed_trail WHERE handoff = ? AND n <= ?").run(id, n - TRAIL_KEEP);
+          if (n === 1) this.set(id, { first_output_at: this.now() });
+        }
+      }
+      const result = (await call.result) as { task?: { status?: unknown; output?: unknown; error?: unknown }; proof?: unknown } | null;
+      const row = this.row(id)!;
+      const status = typeof result?.task?.status === "string" && ENDED.has(result.task.status) ? result.task.status : "failed";
+      // Checked before anything is said of it: signed by the node it was handed to, for this hand-off, over its goal and gates.
+      const refusal = proofRefusal(result?.proof, {
+        by: node.id,
+        for: this.deps.identity.id,
+        handoff: id,
+        nonce: row.nonce,
+        goal: row.goal,
+        gates: JSON.parse(row.gates) as string[],
+        active: (device) => this.deps.store.activeDevice(device)?.kind === "node",
+      });
+      const statement = refusal ? null : (result!.proof as { statement: ProofStatement }).statement;
+      const proof = refusal ? { state: "refused", why: refusal } : { state: "checked", verified: statement!.verified, proof: statement!.proof, ended: statement!.ended, attestation: result!.proof };
+      this.end(id, {
+        status: statement?.status ?? status,
+        proof: JSON.stringify(proof),
+        output: typeof result?.task?.output === "string" ? result.task.output.slice(0, 20_000) : "",
+        error: typeof result?.task?.error === "string" ? result.task.error.slice(0, 2_000) : refusal ? `its proof didn't check: ${refusal}` : null,
+      });
+      if (refusal) this.deps.log(`fabric: ${id}'s proof from ${node.name} was refused: ${refusal}`);
+    } catch (error) {
+      const e = error as SidecarError;
+      const stopped = this.row(id)?.stop_asked_at != null || e.kind === "cancelled";
+      this.end(id, { status: stopped ? "stopped" : "interrupted", error: stopped ? null : `the link to ${node.name} failed: ${String(e.message ?? e).slice(0, 300)}` });
+    }
+  }
+
+  /** The run's grant: minted once the runner says the run's key, sent in on the call, renewed at half its life. */
+  private async grant(id: string, call: Call): Promise<void> {
+    const row = this.row(id)!;
+    const tools = JSON.parse(row.tools) as FabricRunTool[];
+    const client = this.deps.fabric.sidecar.client;
+    if (!tools.length || !row.run || !client) return;
+    const minted = await client.mint({ aud: row.run, cmds: [RUN_GRANT_COMMAND], sub: this.deps.fabric.sidecar.did ?? undefined, pol: runGrantPolicy(id), ttlSecs: RUN_GRANT_TTL, renewable: true });
+    const chain = minted.tokens[0]!.chain;
+    this.set(id, { grant_id: minted.grant, tokens: JSON.stringify(minted.tokens.map((t) => t.tokenId)) });
+    call.send({ value: { kind: "chain", chain } });
+    const held = this.calls.get(id);
+    if (!held) return;
+    held.renew = setInterval(() => {
+      void (async () => {
+        const live = this.row(id);
+        const sidecar = this.deps.fabric.sidecar.client;
+        if (!live || live.phase === "ended" || !live.grant_id || !sidecar) return;
+        try {
+          const renewed = await sidecar.renew(live.grant_id, RUN_GRANT_TTL);
+          const ids = [...(JSON.parse(live.tokens) as string[]), ...renewed.tokens.map((t) => t.tokenId)].slice(-8);
+          this.set(id, { tokens: JSON.stringify(ids) });
+          call.send({ value: { kind: "chain", chain: renewed.tokens[0]!.chain } });
+        } catch (error) {
+          this.deps.log(`fabric: ${id}'s grant wasn't renewed: ${(error as Error).message}`);
+        }
+      })();
+    }, (RUN_GRANT_TTL * 1000) / 2);
+    held.renew.unref?.();
+  }
+
+  /** It ended here: its grant ends with it (revoked, so its next call is refused), and nothing more is followed. */
+  private end(id: string, fields: Partial<Omit<Row, "id">>): void {
+    const row = this.row(id);
+    if (!row || row.phase === "ended") return;
+    this.set(id, { ...fields, phase: "ended", ended_at: this.now() });
+    const held = this.calls.get(id);
+    this.calls.delete(id);
+    if (held?.renew) clearInterval(held.renew);
+    const client = this.deps.fabric.sidecar.client;
+    if (row.grant_id && client) void client.revoke({ grant: row.grant_id }).catch((error: Error) => this.deps.log(`fabric: ${id}'s grant wasn't revoked: ${error.message}`));
+    this.set(id, { tokens: "[]" });
+  }
+
+  /**
+   * Cuts a run's key off, its task going on without this node's tools: its grant revoked at this node's sidecar, so the
+   * run's very next call is refused (and this node's door refuses it too: no token of the hand-off's is current).
+   */
+  async revokeRun(id: string): Promise<string[]> {
+    const row = this.row(id);
+    if (!row) throw Object.assign(new Error("no such task handed on"), { status: 404 });
+    const held = this.calls.get(id);
+    if (held?.renew) clearInterval(held.renew);
+    if (held) held.renew = null;
+    this.set(id, { tokens: "[]" });
+    const client = this.deps.fabric.sidecar.client;
+    return row.grant_id && client ? client.revoke({ grant: row.grant_id }) : [];
+  }
+
+  /** Stops a task handed on: the runner stops the work and says how it ended; past a while, the call itself is cancelled. */
+  stop(id: string): HandedView {
+    const row = this.row(id);
+    if (!row) throw Object.assign(new Error("no such task handed on"), { status: 404 });
+    const held = this.calls.get(id);
+    if (row.phase !== "ended" && held) {
+      this.set(id, { stop_asked_at: this.now() });
+      held.call.send({ value: { kind: "stop" } });
+      setTimeout(() => {
+        if (this.row(id)?.phase !== "ended") held.call.cancel();
+      }, STOP_WAIT_MS).unref?.();
+    }
+    return this.view(this.row(id)!);
+  }
+
+  list(): HandedView[] {
+    return this.rows().map((row) => this.view(row, -1));
+  }
+
+  get(id: string, after = 0): HandedView {
+    const row = this.row(id);
+    if (!row) throw Object.assign(new Error("no such task handed on"), { status: 404 });
+    return this.view(row, after);
+  }
+
+  /** How long the stop of a hand-off took, from asking to its end (ms), and its first output (bench/fabric). */
+  timings(id: string): { firstOutputMs: number | null; stopMs: number | null } {
+    const row = this.row(id);
+    if (!row) return { firstOutputMs: null, stopMs: null };
+    return { firstOutputMs: row.first_output_at ? row.first_output_at - row.created_at : null, stopMs: row.stop_asked_at && row.ended_at ? row.ended_at - row.stop_asked_at : null };
+  }
+
+  private view(row: Row, after = 0): HandedView {
+    const proof = row.proof ? (JSON.parse(row.proof) as { state: string; why?: string; verified?: boolean; proof?: unknown; ended?: string | null }) : null;
+    const trail = after < 0 ? [] : this.deps.db.query<{ at: number; text: string }, [string, number]>("SELECT at, text FROM fabric_handed_trail WHERE handoff = ? AND n > ? ORDER BY n").all(row.id, after);
+    const facts = proof?.state === "checked" ? TeamTaskProof.nullable().safeParse(proof.proof ?? null) : null;
+    return {
+      id: row.id,
+      node: { id: row.node, name: row.node_name },
+      task: row.task,
+      agent: row.agent ? (JSON.parse(row.agent) as { id: string; name: string }) : null,
+      title: row.title,
+      goal: row.goal,
+      gates: JSON.parse(row.gates) as string[],
+      tools: JSON.parse(row.tools) as FabricRunTool[],
+      phase: row.phase,
+      status: row.status,
+      path: "qamp",
+      proof: proof?.state === "checked" ? { state: "checked", verified: proof.verified === true, proof: facts?.success ? facts.data : null, ended: proof.ended ?? null } : proof?.state === "refused" ? { state: "refused", why: proof.why ?? "" } : { state: "none" },
+      output: row.output,
+      error: row.error,
+      createdAt: row.created_at,
+      firstOutputAt: row.first_output_at,
+      endedAt: row.ended_at,
+      trail,
+    };
+  }
+
+  // ---- the giver's door for a run elsewhere ----
+
+  private async agentTool(inv: Invocation, caller: Device | null): Promise<void> {
+    const tool = inv.tool.slice(FABRIC.agent.length + 1) as FabricRunTool;
+    if (!(FABRIC_RUN_TOOLS as readonly string[]).includes(tool)) return inv.fail(1, `no tool ${inv.tool}`);
+    const args = inv.args as { task?: unknown; input?: unknown } | null;
+    const row = typeof args?.task === "string" ? this.row(args.task) : null;
+    // What the sidecar checked (signatures, revocation, expiry, linkage, policy, binding to the caller's key) is checked
+    // again here for what only this node knows: this hand-off's grant, its run's key, and the node it was handed to.
+    const refuse = (why: string) => inv.fail(3, why);
+    if (!row || row.phase === "ended") return refuse("that task has ended here, and its grant with it");
+    if (!caller || caller.id !== row.node) return refuse("only the node this task was handed to calls for its run");
+    if (inv.authorization.kind !== "delegated" || inv.chain.length !== 2) return refuse("a run calls with its own chain: this node's grant to its key, and its key's link to its node");
+    const [root, link] = inv.chain as [(typeof inv.chain)[0], (typeof inv.chain)[0]];
+    if (root.iss !== this.deps.fabric.sidecar.did || !(JSON.parse(row.tokens) as string[]).includes(root.id)) return refuse("that grant isn't this task's");
+    if (root.aud !== row.run || link.iss !== row.run || link.aud !== inv.caller) return refuse("that chain isn't this task's run's");
+    if (!(JSON.parse(row.tools) as string[]).includes(tool)) return refuse(`${tool} isn't one of the tools this task was given`);
+    if (!this.runTool) return inv.fail(1, "this node serves no tools to runs elsewhere");
+    try {
+      const input = args?.input && typeof args.input === "object" && !Array.isArray(args.input) ? (args.input as Record<string, unknown>) : {};
+      inv.complete(await this.runTool(tool, input, { handoff: row.id, tools: JSON.parse(row.tools) as FabricRunTool[] }, inv.signal));
+    } catch (error) {
+      if (!inv.signal.aborted) inv.fail(8, String((error as Error).message ?? error).slice(0, 500));
+    }
+  }
+
+  // ---- the runner ----
+
+  private async runHanded(inv: Invocation, caller: Device | null): Promise<void> {
+    if (!caller || caller.role !== "full") return inv.fail(3, "a task is handed over by an active full node of this fleet alone");
+    const parsed = HandArgs.safeParse(inv.args);
+    if (!parsed.success) return inv.fail(2, `that isn't a task handed over: ${parsed.error.issues.map((i) => i.message).join("; ").slice(0, 300)}`);
+    const args = parsed.data;
+    if (!this.team) return inv.fail(1, "this node has no agents to give it to");
+    // The run's own key: made here for this run alone, held in memory, destroyed when it ends.
+    const seed = new Uint8Array(randomBytes(32));
+    const did = didKeyOfEd25519(signingPublicKey(seed));
+    let given: { task: TeamTask; agent: { id: string; name: string } };
+    try {
+      given = await this.team.give(args, inv.signal);
+    } catch (error) {
+      seed.fill(0);
+      return inv.fail(8, `it couldn't be given to an agent here: ${String((error as Error).message ?? error).slice(0, 400)}`);
+    }
+    const run: Running = { handoff: args.handoff, giver: caller.id, giverKey: inv.caller, task: given.task.id, seed, did, tools: args.tools, chain: null, link: null, inv };
+    this.runs.set(args.handoff, run);
+    this.deps.log(`fabric: ${caller.name} handed over “${args.title.slice(0, 80)}”: ${given.agent.name} took it as ${given.task.id}`);
+    inv.emit({ value: { kind: "accepted", task: given.task.id, agent: given.agent, run: did } });
+    // In: the giver's chain for the run (and each renewal), or a stop.
+    void (async () => {
+      for await (const chunk of inv.inputs) {
+        const said = "value" in chunk ? HandInputChunk.safeParse(chunk.value) : null;
+        if (!said?.success) continue;
+        if (said.data.kind === "stop") this.team?.stop(run.task);
+        else
+          try {
+            run.chain = qdtChainTokens(said.data.chain);
+            run.link = null;
+          } catch {
+            // Not a chain: the run's calls are refused as without one.
+          }
+      }
+    })();
+    // A call that ended (the giver cancelled, went away, or its link did): the work stops here too.
+    inv.signal.addEventListener("abort", () => this.team?.stop(run.task), { once: true });
+    let after = 0;
+    let status = "";
+    try {
+      for (;;) {
+        const task = this.team.task(run.task);
+        if (!task) break;
+        const page = this.team.trail(run.task, after);
+        for (const entry of page.entries) {
+          inv.emit({ value: { kind: "trail", at: entry.at, text: entry.text.slice(0, 4000) } });
+          after = entry.n;
+        }
+        if (task.status !== status) {
+          status = task.status;
+          inv.emit({ value: { kind: "state", status } });
+        }
+        if ((ENDED.has(task.status) && !page.more) || inv.signal.aborted) break;
+        await Bun.sleep(page.more ? 0 : 100);
+      }
+      if (inv.signal.aborted) return;
+      const task = this.team.task(run.task)!;
+      const statement: ProofStatement = {
+        v: 1,
+        by: this.deps.identity.id,
+        for: caller.id,
+        handoff: args.handoff,
+        nonce: args.nonce,
+        task: task.id,
+        run: did,
+        goal: goalDigest(args.goal),
+        gates: args.gates,
+        status: (ENDED.has(task.status) ? task.status : "interrupted") as ProofStatement["status"],
+        verified: task.status === "done" && task.verified,
+        ended: task.record?.ended ?? null,
+        proof: task.record?.proof ?? null,
+        startedAt: task.record?.startedAt ?? null,
+        endedAt: task.record?.endedAt ?? null,
+      };
+      inv.complete({ task: { id: task.id, status: task.status, verified: task.verified, output: task.output.slice(0, 20_000), error: task.error }, proof: signProof(this.deps.identity, statement) });
+    } finally {
+      this.runs.delete(args.handoff);
+      seed.fill(0);
+    }
+  }
+
+  /**
+   * A run here calling one of its giver's tools, from its VM through this node's gateway: carried to the giver over
+   * Q-AMP with the giver's grant and the run key's own link onto this node's transport key. Null: no such run.
+   */
+  async callGiver(sandbox: string, tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<{ status: number; body: unknown }> {
+    const task = this.team?.runningIn(sandbox) ?? null;
+    const run = task ? [...this.runs.values()].find((r) => r.task === task) : undefined;
+    if (!run) return { status: 404, body: { error: "this VM runs no task handed over by another node" } };
+    if (!(run.tools as string[]).includes(tool)) return { status: 403, body: { error: `${tool} isn't one of the tools this task was given (${run.tools.join(", ") || "none"})` } };
+    // The grant follows the run's key by a round trip: a call made the moment the run begins waits for it a little.
+    for (let waited = 0; !run.chain?.length && waited < 3_000 && !signal.aborted; waited += 50) await Bun.sleep(50);
+    if (!run.chain?.length) return { status: 503, body: { error: "the node that gave this task hasn't granted its tools yet" } };
+    const giver = this.deps.store.activeDevice(run.giver);
+    const endpoint = giver ? this.deps.fabric.peerEndpoint(giver) : null;
+    const client = this.deps.fabric.sidecar.client;
+    const self = this.deps.fabric.sidecar.did;
+    if (!giver || !endpoint || !client || !self) return { status: 503, body: { error: "the node that gave this task can't be reached over Q-AMP now" } };
+    const root = readQdt(run.chain[0]!).payload;
+    const nowSecs = Math.floor(this.now() / 1000);
+    if (!run.link || run.link.exp - nowSecs < 30) {
+      // The run's key passes the grant on to its own node's transport key: no more than it was given, never past it.
+      const exp = Math.min(root.exp, nowSecs + LINK_TTL);
+      const link = signQdt(run.seed, { aud: self, sub: root.sub, cmd: `/tool/${FABRIC.agent}/${tool}`, exp, pol: runGrantPolicy(run.handoff) });
+      run.link = { encoded: link.encoded, exp };
+    }
+    const call = client.call(endpoint.address, `${FABRIC.agent}/${tool}`, { task: run.handoff, input }, { proofs: [...run.chain, run.link.encoded], deadlineMs: 60_000, signal });
+    try {
+      return { status: 200, body: await call.result };
+    } catch (error) {
+      const e = error as SidecarError;
+      if (e.kind === "remote" && e.code === 3) return { status: 403, body: { error: `refused: ${e.message}` } };
+      return { status: 502, body: { error: String(e.message ?? e).slice(0, 300) } };
+    }
+  }
+
+  /**
+   * What a run here is told of the tools its task was given by the node that handed it over (its planner whole, its
+   * engineer in brief): which, and how its commands call them through this node's gateway. Null: none were given.
+   */
+  toolsNote(task: string): { text: string; brief: string } | null {
+    const run = [...this.runs.values()].find((r) => r.task === task);
+    if (!run?.tools.length) return null;
+    const giver = this.deps.store.device(run.giver)?.name ?? "the node that gave it";
+    const how = `curl -s -X POST "\${INVINCIBLE_GATEWAY%/gw}/fabric/tool/<tool>" -H "Authorization: Bearer $INVINCIBLE_TOKEN" -H "content-type: application/json" -d '<the tool's input as JSON, {} for none>'`;
+    return {
+      text: `This task was handed to you by ${giver}, another node of the owner's fleet. Your commands may call these tools of its (read-only): ${run.tools.join(", ")}. Each call is ${how}; the answer is the tool's result there, as JSON. Each one is checked on ${giver} against a grant to this run alone, which ends with the task.`,
+      brief: `Tools of ${giver}, which gave this task: ${run.tools.join(", ")}, by ${how}.`,
+    };
+  }
+
+  /** The runs under way here, for the doctor and tests: their hand-offs, tasks and keys. */
+  running(): { handoff: string; task: string; run: string; chained: boolean }[] {
+    return [...this.runs.values()].map((r) => ({ handoff: r.handoff, task: r.task, run: r.did, chained: !!r.chain }));
+  }
+
+  /** The chain a run holds now (tests), as text. */
+  chainOf(handoff: string): string | null {
+    const run = this.runs.get(handoff);
+    return run?.chain ? qdtChainText(run.chain) : null;
+  }
+}
+
+
+/**
+ * The VM's way to the tools its task was given by the node that handed it over: POST /fabric/tool/<name> on its node's
+ * gateway, with the VM's own gateway token (whose label names its VM) and the tool's input as JSON. Its node carries it
+ * over Q-AMP under the run's own chain (Handoffs.callGiver), which the VM never sees, as it never sees a key.
+ */
+export async function handleFabricTool(req: Request, ctx: { tokens: { liveLabel(token: string): string | null }; handoffs: Pick<Handoffs, "callGiver"> | null }): Promise<Response> {
+  const answer = (status: number, body: unknown) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
+  if (req.method !== "POST") return answer(405, { error: "POST" });
+  const label = ctx.tokens.liveLabel(req.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1] ?? "");
+  if (!label?.startsWith("sandbox:")) return answer(401, { error: "this VM's gateway token, as its model access uses it" });
+  const tool = new URL(req.url).pathname.slice("/fabric/tool/".length);
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(tool)) return answer(404, { error: "no such tool" });
+  const text = await req.text();
+  if (text.length > 1 << 20) return answer(413, { error: "a tool's input is at most 1 MiB" });
+  let input: unknown = {};
+  try {
+    input = text.trim() ? JSON.parse(text) : {};
+  } catch {
+    return answer(400, { error: "the tool's input is JSON" });
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) return answer(400, { error: "the tool's input is a JSON object" });
+  if (!ctx.handoffs) return answer(404, { error: "this node has no fabric" });
+  const done = await ctx.handoffs.callGiver(label.slice("sandbox:".length), tool, input as Record<string, unknown>, req.signal);
+  return answer(done.status, done.body);
+}
