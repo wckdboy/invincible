@@ -2,6 +2,10 @@ import { Database } from "bun:sqlite";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename } from "node:path";
 
+/** SQLite's open flags (sqlite3.h): read only, and the name a URI. */
+const SQLITE_OPEN_READONLY = 0x00000001;
+const SQLITE_OPEN_URI = 0x00000040;
+
 /** Why a home can't be read, or written: said as it is, and never with a value in it. */
 export class ImportError extends Error {}
 
@@ -47,7 +51,10 @@ function logged(path: string): Database {
     throw new ImportError(`${basename(path)} has pages in its write-ahead log but no index beside it, and making one would write in that home: start and stop its node once, then import again`);
   }
   const mode = existsSync(wal) && existsSync(shm) ? "mode=ro&readonly_shm=1" : "immutable=1";
-  const db = new Database(`file:${encodeURI(path).replaceAll("?", "%3F").replaceAll("#", "%23")}?${mode}`, { readonly: true });
+  // Opened by flags, read only and as a URI: SQLite reads `file:` names as URIs only when asked (SQLITE_OPEN_URI), or when
+  // built to by default, as the macOS one is and the one Bun brings on Linux is not, where the options object's open
+  // says "unable to open database file" (measured on the owner's server, 26 November 2026).
+  const db = new Database(`file:${encodeURI(path).replaceAll("?", "%3F").replaceAll("#", "%23")}?${mode}`, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI);
   // SQLite reads the file at the first query: a damaged one says so here, and is closed.
   try {
     db.query("SELECT count(*) FROM sqlite_master").get();
