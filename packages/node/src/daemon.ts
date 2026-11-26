@@ -967,6 +967,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       await teamEnded;
       await qampStopped;
       await sidecarStopped;
+      // Nothing of a hand-off outlives the node: its timers end, and it writes nothing more (its database closes below).
+      handoffs.close();
       fabric.close();
       await Promise.all(servers.map((s) => s.stop(true)));
       notifyDb.close();

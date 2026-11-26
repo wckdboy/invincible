@@ -71,6 +71,8 @@ export interface HandoffsDeps {
   now?(): number;
   /** How long a run's grant lasts before it is renewed at half of it, in seconds (tests: a few; RUN_GRANT_TTL). */
   grantTtlSecs?: number;
+  /** How long a stop waits for the runner's answer before the call itself is cancelled (tests: less; STOP_WAIT_MS). */
+  stopWaitMs?: number;
 }
 
 const ENDED = new Set(["done", "failed", "stopped", "interrupted"]);
@@ -131,6 +133,10 @@ export class Handoffs implements FabricTools {
   private readonly calls = new Map<string, { call: Call; renew: ReturnType<typeof setInterval> | null }>();
   /** Here, as the runner: the runs under way, by hand-off and by task. */
   private readonly runs = new Map<string, Running>();
+  /** Stops waiting for the runner's answer, cleared when the node stops. */
+  private readonly stopTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** The node is stopping: nothing more is written or followed (its database closes after this). */
+  private closed = false;
 
   constructor(private readonly deps: HandoffsDeps) {
     this.now = deps.now ?? Date.now;
@@ -189,16 +195,18 @@ export class Handoffs implements FabricTools {
   // ---- the giver ----
 
   private rows(): Row[] {
+    if (this.closed) return [];
     return this.deps.db.query<Row, []>("SELECT * FROM fabric_handed ORDER BY created_at DESC LIMIT 200").all();
   }
 
   private row(id: string): Row | null {
+    if (this.closed) return null;
     return this.deps.db.query<Row, [string]>("SELECT * FROM fabric_handed WHERE id = ?").get(id);
   }
 
   private set(id: string, fields: Partial<Omit<Row, "id">>): void {
     const keys = Object.keys(fields);
-    if (!keys.length) return;
+    if (!keys.length || this.closed) return;
     this.deps.db.query(`UPDATE fabric_handed SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...(keys.map((k) => (fields as Record<string, unknown>)[k] ?? null) as never[]), id);
   }
 
@@ -236,6 +244,7 @@ export class Handoffs implements FabricTools {
         } else if (said.kind === "state") this.set(id, { status: said.status });
         else {
           n++;
+          if (this.closed) return;
           this.deps.db.query("INSERT OR REPLACE INTO fabric_handed_trail (handoff, n, at, text) VALUES (?, ?, ?, ?)").run(id, n, said.at, said.text);
           if (n > TRAIL_KEEP) this.deps.db.query("DELETE FROM fabric_handed_trail WHERE handoff = ? AND n <= ?").run(id, n - TRAIL_KEEP);
           if (n === 1) this.set(id, { first_output_at: this.now() });
@@ -337,11 +346,26 @@ export class Handoffs implements FabricTools {
     if (row.phase !== "ended" && held) {
       this.set(id, { stop_asked_at: this.now() });
       held.call.send({ value: { kind: "stop" } });
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        this.stopTimers.delete(timer);
         if (this.row(id)?.phase !== "ended") held.call.cancel();
-      }, STOP_WAIT_MS).unref?.();
+      }, this.deps.stopWaitMs ?? STOP_WAIT_MS);
+      timer.unref?.();
+      this.stopTimers.add(timer);
     }
     return this.view(this.row(id)!);
+  }
+
+  /**
+   * As the node stops, before its database closes: nothing more is written or followed here, and no timer of a hand-off
+   * outlives the node (the calls end with its sidecar, and each runner stops its work when its call ends).
+   */
+  close(): void {
+    this.closed = true;
+    for (const timer of this.stopTimers) clearTimeout(timer);
+    this.stopTimers.clear();
+    for (const held of this.calls.values()) if (held.renew) clearInterval(held.renew);
+    this.calls.clear();
   }
 
   list(): HandedView[] {
@@ -362,6 +386,7 @@ export class Handoffs implements FabricTools {
   }
 
   private view(row: Row, after = 0): HandedView {
+    if (this.closed) after = -1;
     const proof = row.proof ? (JSON.parse(row.proof) as { state: string; why?: string; verified?: boolean; proof?: unknown; ended?: string | null }) : null;
     const trail = after < 0 ? [] : this.deps.db.query<{ at: number; text: string }, [string, number]>("SELECT at, text FROM fabric_handed_trail WHERE handoff = ? AND n > ? ORDER BY n").all(row.id, after);
     const facts = proof?.state === "checked" ? TeamTaskProof.nullable().safeParse(proof.proof ?? null) : null;
