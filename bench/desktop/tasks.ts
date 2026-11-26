@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExecResult } from "../../packages/core/src/index.ts";
+import type { ExecResult, Usage } from "../../packages/core/src/index.ts";
+import type { ModelsContext } from "../../packages/models/src/index.ts";
 import { OUT_DIR } from "../scorecard.ts";
 import { type Asked, type LoopRun, loopAsk, modelsContext, standIn, type Turn, viaLoop, type Where } from "./loop.ts";
 import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
@@ -30,7 +31,19 @@ import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
 export const TASKS = ["form", "terminal", "settings", "editor"] as const;
 export type TaskName = (typeof TASKS)[number];
 export const POLICIES = ["naive", "settled", "careful", "toolset"] as const;
-export type Policy = (typeof POLICIES)[number];
+/** The scorecard's ways, and a real model's (model-runs.ts, by hand: it spends money). */
+export type Policy = (typeof POLICIES)[number] | "model";
+
+/**
+ * A real model's way through the loop (model-runs.ts): a mind whose engineer is that model, its requests kept as Asked;
+ * told after each of its calls what the run has spent so far; a signal that ends the run past its share.
+ */
+export interface ModelWay {
+  ctx(asked: Asked[]): ModelsContext;
+  spent?(counted: { calls: number; usage: Usage; unknown?: number }): void;
+  signal?: AbortSignal;
+  maxSteps?: number;
+}
 
 export interface TaskRun {
   task: TaskName;
@@ -43,8 +56,8 @@ export interface TaskRun {
   commands: number;
   /** Where an agent would have asked its eyes (a model's call). */
   looks: number;
-  /** Through the loop (toolset): its model calls (each a turn), the toolset's actions, and whether every request offered the toolset and every turn came back as the toolset's. */
-  loop?: { calls: number; actions: number; shape: string | null };
+  /** Through the loop: its model calls (each a turn), the toolset's actions, its other commands, its tokens (the calls its provider said nothing of, apart), and whether every request offered the toolset and every turn came back as the toolset's. */
+  loop?: { calls: number; actions: number; commands: number; usage: Usage; unknown: number; shape: string | null; ms: number };
 }
 
 /** What each task asks of an agent, as its goal: done on the screen, the point being the desktop. */
@@ -112,20 +125,24 @@ export async function* standInTurns(task: TaskName, where: Where, file: string):
   }
 }
 
-/** How the stand-in was asked, in a phrase when something wasn't the toolset's shape (null: every request was). */
-export function shapeOf(asked: readonly Asked[]): string | null {
+/**
+ * How the model was asked, in a phrase when something wasn't the toolset's shape (null: every request was). `pictures`:
+ * each turn that acted ended with exactly one picture of the screen, as the stand-in's do (a real model may look in the
+ * middle of a turn, or act on nothing).
+ */
+export function shapeOf(asked: readonly Asked[], pictures = true): string | null {
   if (!asked.length) return "it was never asked";
   if (!asked.every((a) => a.toolset)) return "a request didn't offer the computer toolset";
   if (asked.some((a) => a.echoed.calls !== a.echoed.asToolset)) return "a turn's toolset calls came back without toolset_name";
   if (asked.some((a) => a.echoed.calls && a.echoed.resultsAsToolset !== a.echoed.calls)) return "a toolset call's result came back without toolset_name";
-  if (asked.slice(1).some((a) => a.echoed.calls && a.echoed.pictures !== 1)) return "a turn that acted didn't end with one picture of the screen";
+  if (pictures && asked.slice(1).some((a) => a.echoed.calls && a.echoed.pictures !== 1)) return "a turn that acted didn't end with one picture of the screen";
   return null;
 }
 
 const FORM = { name: "Søren Ærø", email: "soren@example.test", plan: "Team", terms: "on", note: "Ready by Friday" };
 const FORM_VALUES = FORM;
 
-export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: number): Promise<TaskRun> {
+export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: number, way?: ModelWay): Promise<TaskRun> {
   let commands = 0;
   let looks = 0;
   const sh = async (command: string, timeout = 120): Promise<Ran> => {
@@ -148,21 +165,32 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     if (r.code !== 0) throw new Error(`the click failed: ${r.stderr.slice(-200)}`);
   };
   const careful = policy === "careful";
-  // Through the loop (toolset): the stand-in's turns, the VM's commands through the agent's path; what it took, kept.
-  const byLoop = policy === "toolset";
+  // Through the loop (toolset, model): the stand-in's turns or a real model's, the VM's commands through the agent's
+  // path; what it took, kept.
+  const byLoop = policy === "toolset" || policy === "model";
+  if (policy === "model" && !way) throw new Error("a real model's way needs its mind (model-runs.ts)");
   let looped: LoopRun | null = null;
   let shape: string | null = null;
+  let counted: { calls: number; usage: Usage; unknown?: number } = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
   const loop = async (file: string) => {
     const asked: Asked[] = [];
-    const counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
-    const ctx = modelsContext("bench-stand-in-key-FAKE-0000", standIn(standInTurns(task, where, file), asked));
+    counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
+    const ctx = way ? way.ctx(asked) : modelsContext("bench-stand-in-key-FAKE-0000", standIn(standInTurns(task, where, file), asked));
     const exec = async (command: string, timeoutSec: number): Promise<ExecResult> => {
       const r = await vm.agent(command, timeoutSec);
       return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr, durationMs: Math.round(r.ms), truncated: false };
     };
-    looped = await viaLoop(GOALS[task](file), loopAsk(ctx, counted), exec, counted);
+    const asking = loopAsk(ctx, counted);
+    const ask: typeof asking = async (...args) => {
+      try {
+        return await asking(...args);
+      } finally {
+        way?.spent?.(counted);
+      }
+    };
+    looped = await viaLoop(GOALS[task](file), ask, exec, counted, way?.maxSteps ?? 40, way?.signal);
     commands += looped.actions + looped.commands;
-    shape = shapeOf(asked);
+    shape = shapeOf(asked, !way);
     if (looped.error) throw new Error(`the loop failed: ${looped.error}`);
     if (looped.outcome?.status !== "done") throw new Error(`the loop ended ${looped.outcome?.status}: ${looped.outcome?.summary.slice(0, 200)}`);
   };
@@ -351,7 +379,7 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     pass = false;
     why = `it passed its gate, but not in the toolset's shape: ${shape}`;
   }
-  return { task, policy, run, pass, why, actedMs, commands, looks, ...(through ? { loop: { calls: through.calls, actions: through.actions, shape } } : {}) };
+  return { task, policy, run, pass, why, actedMs, commands, looks, ...(through ? { loop: { calls: through.calls, actions: through.actions, commands: through.commands, usage: through.usage, unknown: counted.unknown ?? 0, shape, ms: Math.round(through.ms) } } : {}) };
 }
 
 /**

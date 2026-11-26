@@ -76,57 +76,74 @@ export interface Asked {
   echoed: { calls: number; asToolset: number; results: number; resultsAsToolset: number; pictures: number };
 }
 
+/** A request to Anthropic's API as Asked: whether it offered the toolset, and how its last turn and what came of it came back. */
+export function askedOf(raw: unknown): Asked {
+  const body = JSON.parse(String(raw)) as { tools?: { type?: string }[]; messages: { role: string; content: unknown }[] };
+  // (Its last turn, and what came of it: a change of effort may stand between them, as a system message.)
+  const last = body.messages.findLast((m) => m.role === "assistant");
+  const results = body.messages.findLast((m) => m.role === "user");
+  const blocks = (m: { content: unknown } | undefined) => (Array.isArray(m?.content) ? (m!.content as Record<string, unknown>[]) : []);
+  const calls = blocks(last).filter((b) => b.type === "tool_use");
+  const given = blocks(results).filter((b) => b.type === "tool_result");
+  return {
+    toolset: (body.tools ?? []).some((t) => t.type === "computer_toolset_20260801"),
+    echoed: {
+      calls: calls.filter((c) => COMPUTER_MEMBERS.has(String(c.name))).length,
+      asToolset: calls.filter((c) => c.toolset_name === "computer").length,
+      results: given.length,
+      resultsAsToolset: given.filter((r) => r.toolset_name === "computer").length,
+      pictures: given.flatMap((r) => (Array.isArray(r.content) ? (r.content as { type: string }[]) : [])).filter((p) => p.type === "image").length,
+    },
+  };
+}
+
+/** A fetch whose every request is kept as Asked first. */
+export const recording = (via: typeof fetch, asked: Asked[]): typeof fetch =>
+  (async (url: string | URL | Request, init?: RequestInit) => {
+    asked.push(askedOf(init?.body));
+    return via(url, init);
+  }) as typeof fetch;
+
 /**
  * The stand-in Anthropic endpoint: each request for the engineer answered with the task's next turn (`turns`, pulled as
  * it is asked), every request kept as Asked. A turn it has none left for is GIVE UP, never a hang.
  */
 export function standIn(turns: AsyncGenerator<Turn, void>, asked: Asked[]): typeof fetch {
   let n = 0;
-  return (async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { tools?: { type?: string }[]; messages: { role: string; content: unknown }[] };
-    // (Its last turn, and what came of it: a change of effort may stand between them, as a system message.)
-    const last = body.messages.findLast((m) => m.role === "assistant");
-    const results = body.messages.findLast((m) => m.role === "user");
-    const blocks = (m: { content: unknown } | undefined) => (Array.isArray(m?.content) ? (m!.content as Record<string, unknown>[]) : []);
-    const calls = blocks(last).filter((b) => b.type === "tool_use");
-    const given = blocks(results).filter((b) => b.type === "tool_result");
-    asked.push({
-      toolset: (body.tools ?? []).some((t) => t.type === "computer_toolset_20260801"),
-      echoed: {
-        calls: calls.filter((c) => COMPUTER_MEMBERS.has(String(c.name))).length,
-        asToolset: calls.filter((c) => c.toolset_name === "computer").length,
-        results: given.length,
-        resultsAsToolset: given.filter((r) => r.toolset_name === "computer").length,
-        pictures: given.flatMap((r) => (Array.isArray(r.content) ? (r.content as { type: string }[]) : [])).filter((p) => p.type === "image").length,
-      },
-    });
+  const reply = async (): Promise<Response> => {
     const next = await turns.next();
     return anthropicReply(next.done ? { text: "GIVE UP\nThe stand-in has no turn left for this task." } : next.value, ++n);
-  }) as typeof fetch;
+  };
+  return recording(reply as unknown as typeof fetch, asked);
 }
 
 /**
  * The gateway as Anthropic's own API: each request the adapter sends to api.anthropic.com goes to the node's gateway
- * for its provider instead, with the benchmark's token (which the adapter sends as its key), and nowhere else.
+ * for its provider instead, with the benchmark's token (which the adapter sends as its key), and nowhere else. A route
+ * whose provider's address ends in its API's version already (orcarouter's) takes the path without Anthropic's /v1.
  */
-export function throughGateway(gateway: string): typeof fetch {
+export function throughGateway(gateway: string, route: { versioned?: boolean } = {}): typeof fetch {
   const base = gateway.replace(/\/+$/, "");
   return (async (url: string | URL | Request, init?: RequestInit) => {
     const asked = new URL(url instanceof Request ? url.url : String(url));
     if (asked.origin !== "https://api.anthropic.com") throw new Error(`the bench's model calls go to Anthropic's API alone, not ${asked.origin}`);
-    return fetch(`${base}${asked.pathname}${asked.search}`, { ...init, redirect: "manual" });
+    const path = route.versioned ? asked.pathname.replace(/^\/v1\//, "/") : asked.pathname;
+    return fetch(`${base}${path}${asked.search}`, { ...init, redirect: "manual" });
   }) as typeof fetch;
 }
 
-/** A node's mind for the loop's model: one provider, Anthropic's, its key the one given (the stand-in's is obviously none). */
-export function modelsContext(key: string, fetchVia: typeof fetch): ModelsContext {
+/**
+ * A node's mind for the loop's model: one provider, Anthropic's, its key the one given (the stand-in's is obviously
+ * none), on the roster as `model` (a router's name for it where the route is a router's).
+ */
+export function modelsContext(key: string, fetchVia: typeof fetch, model: string = MODEL): ModelsContext {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "bench", nodeName: "bench" });
   const vault = new Vault(store, identity);
   vault.set("claude", key, { provider: "claude", origin: "https://api.anthropic.com" });
   store.emit(identity, "provider.set", { id: "claude", kind: "anthropic", baseUrl: "https://api.anthropic.com", secret: "claude" });
-  for (const role of ["planner", "engineer", "reviewer"]) store.emit(identity, "roster.set", { role, models: [`claude/${MODEL}`] });
+  for (const role of ["planner", "engineer", "reviewer"]) store.emit(identity, "roster.set", { role, models: [`claude/${model}`] });
   return { store, vault, fetch: fetchVia };
 }
 
@@ -161,7 +178,7 @@ export const ENVIRONMENT =
   "Your persistent Linux VM; your workspace is /work. This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it. Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do. To find something on the screen, ask `desktop find` first (`desktop find button \"Send\"` says where it is), then `desktop tree` (what can be acted on in the window with the focus). Computer tools of your own (screenshot, left_click, type and the rest), if you have them, work this same screen, in its pixels.";
 
 /** One task through the loop: its goal, the model's way (ask), the VM's commands (exec). Never throws: an error is said. */
-export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command: string, timeoutSec: number) => Promise<ExecResult>, counted: { calls: number; usage: Usage; unknown?: number }, maxSteps = 40): Promise<LoopRun> {
+export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command: string, timeoutSec: number) => Promise<ExecResult>, counted: { calls: number; usage: Usage; unknown?: number }, maxSteps = 40, signal?: AbortSignal): Promise<LoopRun> {
   const events: RunEvent[] = [];
   const t0 = performance.now();
   let outcome: RunOutcome | null = null;
@@ -169,7 +186,7 @@ export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command:
   try {
     outcome = await runLoop(
       { goal, environment: ENVIRONMENT, plan: "", tools: true, computer: true, maxSteps, maxRevisions: 0, commandTimeoutSec: 120 },
-      { ask, exec, emit: (event) => events.push(event), sleep: async () => {} },
+      { ask, exec, emit: (event) => events.push(event), sleep: async () => {}, ...(signal ? { signal } : {}) },
     );
   } catch (e) {
     error = String((e as Error).message ?? e).slice(0, 300);
