@@ -14,7 +14,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** What went wrong, in the node's own words where it said any. */
@@ -122,20 +126,42 @@ class NodeClient(val origin: String, private val signer: Signer) {
     suspend fun post(path: String, body: Json): Json = send("POST", path, body)
 
     /**
-     * A POST answered with server-sent events (the primary's chat): each payload as it arrives. Ending the collection ends the
-     * watching and nothing else: a turn the node owns runs on to its end, and can be attached to again.
+     * A GET answered with server-sent events that stays open (the live stream, GET /api/live): `alive` on every line it
+     * sends, its beats included, and `event` for each payload. Returns when it ends, and throws as [get] does. Its beats
+     * are watched by whoever opened it (LiveLink), which closes it with what `opened` is handed, at once, from any thread
+     * (a read blocked on a dead link ends only when its connection is closed). A minute without a line ends it too: a
+     * backstop only, as a node beats every 1.5 s (an older one every 15).
      */
-    fun events(path: String, body: Json): Flow<Json> = flow {
-        val bytes = body.text().toByteArray(Charsets.UTF_8)
+    suspend fun stream(path: String, opened: (close: () -> Unit) -> Unit, alive: () -> Unit, event: (Json) -> Unit) =
+        sse("GET", path, null, 60_000, alive, opened).collect { event(it) }
+
+    /**
+     * A POST answered with server-sent events (the primary's chat): each payload as it arrives, and `alive` on every line
+     * (its beats included: a turn's stream beats as the live stream does, so a silent one can be told). Ending the
+     * collection ends the watching and nothing else: a turn the node owns runs on to its end, and can be attached to again.
+     */
+    fun events(path: String, body: Json, alive: () -> Unit = {}): Flow<Json> = sse("POST", path, body.text().toByteArray(Charsets.UTF_8), 120_000, alive)
+
+    /** A request answered with server-sent events: each `data:` payload as it arrives, and `alive` on every line; `opened`
+     * is handed how to close it, from any thread. */
+    private fun sse(method: String, path: String, bytes: ByteArray?, readTimeoutMs: Int, alive: () -> Unit, opened: (close: () -> Unit) -> Unit = {}): Flow<Json> = flow {
         val c = try {
-            open("POST", path, bytes, 120_000)
+            open(method, path, bytes, readTimeoutMs)
         } catch (e: IOException) {
             throw unreachable(e)
         }
-        // Closing the connection is how a blocked read ends when the collector goes.
-        val watching = currentCoroutineContext()[Job]?.invokeOnCompletion { c.disconnect() }
+        // (A connection's own close does nothing before it connects: one asked before then is kept, and holds after.)
+        val shut = java.util.concurrent.atomic.AtomicBoolean(false)
+        val close = {
+            shut.set(true)
+            c.disconnect()
+        }
+        opened(close)
+        // Closing the connection is how a blocked read ends when the collector goes: at once, as it is cancelled.
+        val watching = closeOnCancel(close)
         try {
             val status = c.responseCode
+            if (shut.get()) throw IOException("closed")
             if (status !in 200..299) {
                 val said = c.errorStream?.use { it.readBytes() } ?: ByteArray(0)
                 throw NodeError.from(status, c.getHeaderField("content-type"), c.getHeaderField("date"), said)
@@ -144,6 +170,8 @@ class NodeClient(val origin: String, private val signer: Signer) {
             val block = ArrayList<String>()
             while (true) {
                 val line = reader.readLine() ?: break
+                if (shut.get()) throw IOException("closed")
+                alive()
                 if (line.isEmpty()) {
                     for (payload in block) runCatching { Json.parse(payload) }.getOrNull()?.let { emit(it) }
                     block.clear()
@@ -154,8 +182,23 @@ class NodeClient(val origin: String, private val signer: Signer) {
         } catch (e: IOException) {
             throw unreachable(e)
         } finally {
-            watching?.dispose()
+            watching.cancel()
             c.disconnect()
         }
     }.flowOn(Dispatchers.IO)
 }
+
+/**
+ * Calls `close` as soon as the coroutine it is called in is cancelled, or at once if it already is. A read blocked on a
+ * connection holds its thread, and cancelling alone never ends it (a coroutine completes, and its completion handlers run,
+ * only once the read returns): a stream that went silent on a dead link would hang there, unnoticed, until the socket gave
+ * up. Begun undispatched: a watch launched as usual can be cancelled before it ever runs, and then its `finally` never does.
+ */
+internal suspend fun closeOnCancel(close: () -> Unit): Job =
+    CoroutineScope(currentCoroutineContext()).launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+        try {
+            awaitCancellation()
+        } finally {
+            close()
+        }
+    }

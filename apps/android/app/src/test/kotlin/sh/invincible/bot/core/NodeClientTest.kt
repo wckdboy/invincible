@@ -1,7 +1,12 @@
 package sh.invincible.bot.core
 
 import java.net.ServerSocket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -44,6 +49,118 @@ class NodeClientTest {
             NodeClient("http://127.0.0.1:${server.localPort}", signer).get("/api/team")
             val zone = head.lines().firstOrNull { it.startsWith("x-invincible-tz:", ignoreCase = true) }?.substringAfter(":")?.trim()
             assertEquals(java.util.TimeZone.getDefault().id, zone)
+        }
+    }
+
+    /** A node that says one event, then nothing: a half-open link, as a dead network leaves one. */
+    private fun silentAfterOne(server: ServerSocket) = thread(isDaemon = true) {
+        runCatching {
+            server.accept().use { socket ->
+                socket.getInputStream().read(ByteArray(8192))
+                socket.getOutputStream().apply {
+                    write("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\ndata: {\"type\":\"hello\",\"topics\":[]}\r\n\r\n".toByteArray())
+                    flush()
+                }
+                Thread.sleep(60_000)
+            }
+        }
+    }
+
+    // Seen on the emulator (26 November 2026): with the link dead, the stream taken for dead was cancelled but its read
+    // went on blocking, and the app never said it couldn't reach its node. A cancelled read must end at once.
+    @Test
+    fun aSilentAnswerStreamIsClosedAtOnceWhenItsReaderGoes() {
+        ServerSocket(0).use { server ->
+            silentAfterOne(server)
+            val got = CountDownLatch(1)
+            val done = CountDownLatch(1)
+            val job = CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    NodeClient("http://127.0.0.1:${server.localPort}", signer).events("/api/chat", Json.obj()).collect { got.countDown() }
+                } finally {
+                    done.countDown()
+                }
+            }
+            assertTrue(got.await(5, TimeUnit.SECONDS))
+            job.cancel()
+            assertTrue("closed within two seconds of its reader going", done.await(2, TimeUnit.SECONDS))
+        }
+    }
+
+    // Seen on the mini under load (26 November 2026): the answer stream's reader went, and its read went on blocking. The
+    // watch that closes its connection is a coroutine of its own, and one cancelled before it ever ran never runs its
+    // `finally`: nothing closed the connection.
+    @Test
+    fun aWatchCancelledBeforeItRanStillClosesItsConnection() {
+        val closed = CountDownLatch(1)
+        runBlocking {
+            launch(Dispatchers.IO) {
+                // (Its reader gone before the watch could begin.)
+                kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]!!.cancel()
+                closeOnCancel { closed.countDown() }
+            }.join()
+        }
+        assertTrue("closed though cancelled before it began", closed.await(2, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun aSilentLiveStreamIsClosedAtOnceByWhoOpenedIt() {
+        ServerSocket(0).use { server ->
+            silentAfterOne(server)
+            val got = CountDownLatch(1)
+            val done = CountDownLatch(1)
+            var close: () -> Unit = {}
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    NodeClient("http://127.0.0.1:${server.localPort}", signer).stream("/api/live", opened = { close = it }, alive = {}) { got.countDown() }
+                } catch (_: NodeError) {
+                } finally {
+                    done.countDown()
+                }
+            }
+            assertTrue(got.await(5, TimeUnit.SECONDS))
+            // As LiveLink does when it hears nothing for three beats: from its own thread, not the reader's.
+            close()
+            assertTrue("closed within two seconds", done.await(2, TimeUnit.SECONDS))
+        }
+    }
+
+    /** A node that beats on its stream as one of today does (every 100 ms here), for as long as it is read. */
+    private fun beating(server: ServerSocket) = thread(isDaemon = true) {
+        runCatching {
+            server.accept().use { socket ->
+                socket.getInputStream().read(ByteArray(8192))
+                val out = socket.getOutputStream()
+                out.write("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\ndata: {\"type\":\"hello\",\"topics\":[]}\r\n\r\n".toByteArray())
+                out.flush()
+                while (true) {
+                    Thread.sleep(100)
+                    out.write(": beat\r\n\r\n".toByteArray())
+                    out.flush()
+                }
+            }
+        }
+    }
+
+    // A close asked before there is a connection to close (the network changed, or the app went off screen, just as a
+    // stream was being opened) must hold. A connection's own close does nothing before it connects, and the stream was
+    // read on, unseen, for as long as its node beat.
+    @Test
+    fun aLiveStreamClosedBeforeItsConnectionIsMadeIsNeverRead() {
+        ServerSocket(0).use { server ->
+            beating(server)
+            val heard = java.util.concurrent.atomic.AtomicInteger(0)
+            val done = CountDownLatch(1)
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    NodeClient("http://127.0.0.1:${server.localPort}", signer).stream("/api/live", opened = { close -> close() }, alive = { heard.incrementAndGet() }) {}
+                } catch (_: NodeError) {
+                } finally {
+                    done.countDown()
+                }
+            }
+            assertTrue("ended within two seconds", done.await(2, TimeUnit.SECONDS))
+            assertEquals(0, heard.get())
         }
     }
 
