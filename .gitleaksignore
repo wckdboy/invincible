@@ -3,47 +3,47 @@
 
 # The Q-AMP tests' and the web app's did:key identities: each an Ed25519 or P-256 PUBLIC key (two are the W3C did:key
 # examples), which the generic-api-key rule reads as "key:<token>". A did:key is a public key by construction.
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:apps/web/src/lib/grants.test.ts:generic-api-key:13
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/qamp.test.ts:generic-api-key:11
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/qamp.test.ts:generic-api-key:36
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/qamp.test.ts:generic-api-key:78
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-cli.test.ts:generic-api-key:7
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-cli.test.ts:generic-api-key:8
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-cli.test.ts:generic-api-key:82
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-grants.test.ts:generic-api-key:20
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-grants.test.ts:generic-api-key:21
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-routes.test.ts:generic-api-key:171
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-routes.test.ts:generic-api-key:38
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/qamp-routes.test.ts:generic-api-key:39
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:apps/web/src/lib/grants.test.ts:generic-api-key:13
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/qamp.test.ts:generic-api-key:11
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/qamp.test.ts:generic-api-key:36
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/qamp.test.ts:generic-api-key:78
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-cli.test.ts:generic-api-key:7
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-cli.test.ts:generic-api-key:8
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-cli.test.ts:generic-api-key:82
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-grants.test.ts:generic-api-key:20
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-grants.test.ts:generic-api-key:21
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-routes.test.ts:generic-api-key:171
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-routes.test.ts:generic-api-key:38
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/qamp-routes.test.ts:generic-api-key:39
 
 # A Web Push VAPID public key (the push tests' subscription key): public by design.
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:apps/web/src/lib/push.test.ts:generic-api-key:65
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:apps/web/src/lib/push.test.ts:generic-api-key:65
 
 # JSON Web Tokens that sign nothing: RFC 8292's own example (webpush.test.ts) and one spelled FAKE not-a-token in base64
 # (vendor-cli.test.ts, a coding tool's sign-in that must never be printed).
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/brain/test/vendor-cli.test.ts:jwt:37
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/webpush.test.ts:jwt:158
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/brain/test/vendor-cli.test.ts:jwt:37
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/webpush.test.ts:jwt:158
 
 # Keys made up for tests, and said to be: forge_test_key_0123456789, forge_e2e_key_0123456789abcdef, a GitHub token
 # of 0123456789abcdefghij… (a connector must redact it), and the secret scanner's own samples of what it must find.
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/brain/test/connectors.test.ts:generic-api-key:20
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/connectors.test.ts:generic-api-key:61
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/connectors.test.ts:github-pat:61
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/secret-scan.test.ts:generic-api-key:44
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/secret-scan.test.ts:generic-api-key:45
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/secret-scan.test.ts:generic-api-key:46
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/core/test/secret-scan.test.ts:generic-api-key:55
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/connectors.e2e.test.ts:generic-api-key:46
-8f6d2e0d09718c327e96b2aaebbe7ae82fbc86e0:packages/node/test/connectors.e2e.test.ts:github-pat:210
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/brain/test/connectors.test.ts:generic-api-key:20
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/connectors.test.ts:generic-api-key:61
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/connectors.test.ts:github-pat:61
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/secret-scan.test.ts:generic-api-key:44
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/secret-scan.test.ts:generic-api-key:45
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/secret-scan.test.ts:generic-api-key:46
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/core/test/secret-scan.test.ts:generic-api-key:55
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/connectors.e2e.test.ts:generic-api-key:46
+07cd3d3f6c8f5b2164cb6499e215a6f8a249d04d:packages/node/test/connectors.e2e.test.ts:github-pat:210
 
 # A key-derivation label, not a key: pairing's HKDF info string ("invincible/pair/v1/mac"), named on the line
 # `const pairKey = …` that the generic-api-key rule reads as an assignment of a key.
-717c7812c4a1b302e6cd55c4063c46c45d993cae:packages/core/src/pairing.ts:generic-api-key:49
+1714a96c8eff3ad47a771483f112756eb0b99471:packages/core/src/pairing.ts:generic-api-key:49
 
 # The native apps' ports of the same: pairing's HKDF info string ("invincible/pair/v1/mac") in the Apple and Android apps'
 # Pairing, a key-derivation label and no key; and RequestAuthTests' declaration of its signer's private key's type
 # (CryptoKit's P-256), whose value is the parity vectors' test scalar (32 bytes of 0x11, apps/apple/scripts/vectors.ts):
 # obviously fake.
-cd64cd5469c851001ec9cac8abea52c2040a98fd:apps/android/app/src/main/kotlin/sh/invincible/bot/core/Pairing.kt:generic-api-key:63
-cd64cd5469c851001ec9cac8abea52c2040a98fd:apps/apple/Invincible/Core/Pairing.swift:generic-api-key:122
-cd64cd5469c851001ec9cac8abea52c2040a98fd:apps/apple/InvincibleTests/RequestAuthTests.swift:generic-api-key:92
+6ec0b00140cc8240237ff78d7c846dad936d1acf:apps/android/app/src/main/kotlin/sh/invincible/bot/core/Pairing.kt:generic-api-key:63
+6ec0b00140cc8240237ff78d7c846dad936d1acf:apps/apple/Invincible/Core/Pairing.swift:generic-api-key:122
+6ec0b00140cc8240237ff78d7c846dad936d1acf:apps/apple/InvincibleTests/RequestAuthTests.swift:generic-api-key:92
