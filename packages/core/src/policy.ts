@@ -58,7 +58,7 @@ export function decide(action: Action): Decision {
  * What the primary approves itself, of what asks (your word, 23 November 2026: it approves its own decisions and its
  * agents'; what is monetary, legal or destructive still asks you). An outward call is its to answer only when what it
  * does is known, and is none of the three: its agents' work in the repositories you gave them, on GitHub (a pull
- * request from a invincible/… branch, a fix pushed onto one, an issue, a comment on an issue or a pull request, a review
+ * request from an invincible/… branch, a fix pushed onto one, an issue, a comment on an issue or a pull request, a review
  * that comments or asks for changes). Only you give an agent its repository, so it can't widen this itself. Everything else asks as
  * before: a delete, which can't be undone; whatever spends or books money; whatever speaks for you to other people or
  * in their places (mail, someone else's repository); the physical world; a review that approves (your word on your
@@ -98,7 +98,7 @@ export function ownApproval(call: OwnCall, repositories: readonly string[]): str
   const theirs = repositories.some((remote) => githubRepository(remote) === `${owner}/${repo}`.toLowerCase());
   if (!theirs) return null;
   const where = `${owner}/${repo}, a repository you gave an agent`;
-  if (call.native === "github.ship") return `a pull request of the work, on a invincible/… branch, in ${where}`;
+  if (call.native === "github.ship") return `a pull request of the work, on an invincible/… branch, in ${where}`;
   if (call.native === "github.ship.update") return `a fix pushed onto its invincible/… branch, in ${where}`;
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];

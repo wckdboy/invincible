@@ -181,6 +181,9 @@ The models layer, carried (§10):
   - Wide screens: three panes. Your agent pinned atop the work, a task's thread, and its details: the VM, the
     changes, the proof, the cost.
   - It was designed and measured in the last redesign before the carry (§10), and carried over without the old theme.
+- **The look** is the new look carried from the system Invincible succeeds (§10), by the owner's word of 26 November
+  2026: the field orb (gold, with its beam) for the primary, fields in their own colours for agents, the embers,
+  Field · Aurum as the icon (with a transparent dark variant for iOS), and the INVINCIBLE wordmark.
 - **Its bar** is the owner's: hyper modern and super usable, measured.
   - One focal point per screen.
   - Layered hairline surfaces in each platform's own materials.
@@ -203,13 +206,13 @@ The models layer, carried (§10):
 |---|---|
 | `packages/core` | Contracts (routes, scopes, events, all zod), crypto, canonical JSON, the clock, pairing math, request signing, secret scanning |
 | `packages/ledger` | The log and its views, the vault, the fleet's enrolment and revocation |
-| `packages/link` | Pairing, sync, and the node's side of the Q-AMP sidecar |
-| `packages/models` | Providers, plans, the roster, fallback, the gateway, prices and usage |
-| `packages/agents` | The run loop: harnesses, gates, the reviewer, rules, audits, checkpoints, shipping |
+| `packages/link` | Pairing and sync (the node's side of the Q-AMP sidecar is in `packages/node` for now: its grants, `qamp-grants.ts`) |
+| `packages/models` | Providers, plans, the roster, fallback, the gateway, prices and usage; the primary's chat and its prompt, connectors and their sign-ins, decisions, embeddings, and the evals' suites |
+| `packages/agents` | The run loop: harnesses, gates, the reviewer, rules, audits, checkpoints, shipping, the team runtime, investigations |
 | `packages/sandbox` | VM drivers and their firewall |
 | `packages/node` | The daemon, the server, the CLI, the primary, approvals, notifications, projects, placement |
-| `apps/web`, `apps/apple`, `apps/android`, `apps/site` | The clients and invincible.sh |
-| `bench/` | The scorecard: every suite against its recorded baseline |
+| `apps/web` | The web client (the PWA the node serves); `apps/apple`, `apps/android` and `apps/site` (invincible.sh) come in Phase 3 |
+| `bench/` | The scorecard: every suite against its recorded baseline; the vocabulary check |
 
 **Coexisting with the system it succeeds on one host** (§10) until the cutover:
 - the home is `~/.invincible` and the service user is `invincible`;

@@ -33,8 +33,10 @@ What the owner uses every day, built on the carried engine around the new model.
 - The primary orchestrates: it decides who does what, gives the work, follows it to its proof, ships it, and comes
   back with the result.
 - The web app on the redesign's interface, around your agent (named by you at first run) and the work by attention.
-- The new identity on every surface: the name, the mark, the type, the colour. It is designed with the owner and held
-  to his bar.
+- The look on every surface: the new look carried from the system Invincible succeeds ([ARCHITECTURE §10](ARCHITECTURE.md)),
+  by the owner's word of 26 November 2026: the field orb (gold, with its beam) for the primary, fields in their own
+  colours for agents, the embers, Field · Aurum as the icon (with a transparent dark variant for iOS), and the
+  INVINCIBLE wordmark.
 
 **Exit:**
 - a task given in plain words, in a repository the agent has never seen, ends verified and shipped as a pull request,

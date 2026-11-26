@@ -441,7 +441,7 @@ describe("the gate, end to end", () => {
     }
     const agent = { kind: "agent" as const, by: "team.0123456789.liv" };
     const actions = async () => (await send(home.adminToken(), "actions")).body.actions as ActionView[];
-    const why = "a pull request of the work, on a invincible/… branch, in amiriteorg/shipyard, a repository you gave an agent";
+    const why = "a pull request of the work, on an invincible/… branch, in amiriteorg/shipyard, a repository you gave an agent";
     let before = seen.length;
     const shipped = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/its-own" }, why: "its gates and its reviewer passed" }, agent);
     expect(shipped.status).toBe("done");

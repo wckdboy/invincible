@@ -32,7 +32,7 @@ describe("what your agent approves itself", () => {
   const github = (over: Partial<OwnCall>): OwnCall => ({ class: "outward", origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/pulls", args: { owner: "amiriteorg", repo: "invincible", head: "invincible/units" }, ...over });
 
   test("its agents' work in the repositories you gave them: a pull request, a fix onto its branch, an issue, a comment, a review that isn't an approval", () => {
-    expect(ownApproval(github({ native: "github.ship" }), AGENTS)).toBe("a pull request of the work, on a invincible/… branch, in amiriteorg/invincible, a repository you gave an agent");
+    expect(ownApproval(github({ native: "github.ship" }), AGENTS)).toBe("a pull request of the work, on an invincible/… branch, in amiriteorg/invincible, a repository you gave an agent");
     expect(ownApproval(github({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}" }), AGENTS)).toBe("a fix pushed onto its invincible/… branch, in amiriteorg/invincible, a repository you gave an agent");
     expect(ownApproval(github({ path: "/repos/{owner}/{repo}/issues" }), AGENTS)).toBe("an issue in amiriteorg/invincible, a repository you gave an agent");
     expect(ownApproval(github({ path: "/repos/{owner}/{repo}/issues/{number}/comments" }), AGENTS)).toStartWith("a comment in");

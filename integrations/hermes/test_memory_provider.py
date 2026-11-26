@@ -11,7 +11,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
-# Hermes is not a Invincible test dependency. The plugin implements this public ABC;
+# Hermes is not an Invincible test dependency. The plugin implements this public ABC;
 # tests exercise its actual HTTP behavior with an in-process loopback server.
 base = types.ModuleType("agent.memory_provider")
 class MemoryProvider:

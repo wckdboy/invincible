@@ -193,7 +193,10 @@ describe("invincible mcp (official MCP client over stdio)", () => {
       ].sort(),
     );
     const policy = await client.readResource({ uri: "invincible://policy" });
-    expect(JSON.stringify(policy.contents)).toContain("Policy");
+    // docs/POLICY.md itself, never the line said when it is missing.
+    expect(JSON.stringify(policy.contents)).toContain("# Invincible's policy");
+    expect(JSON.stringify(policy.contents)).toContain("Creating is free; deleting asks");
+    expect(JSON.stringify(policy.contents)).not.toContain("is not available on this node");
   });
 
   test("compute: an agent reads the census, and has no way to raise a ceiling, change the budget or make a node measure itself", async () => {

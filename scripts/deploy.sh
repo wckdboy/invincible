@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy or update a Invincible node on a Linux or macOS host over SSH.
+# Deploy or update an Invincible node on a Linux or macOS host over SSH.
 #
 # Idempotent: re-running ships the current commit, keeps the node's identity and
 # mind, re-runs the test suite on the host, and restarts the service. Each commit
