@@ -61,7 +61,10 @@ function fake() {
       case "ps": {
         const wanted = rest.filter((_, i) => rest[i - 1] === "--filter").map((f) => f.replace(/^label=/, ""));
         const matching = [...containers.entries()].filter(([, c]) => wanted.every((w) => { const [k, ...v] = w.split("="); return c.labels[k!] === v.join("="); }));
-        return ok(matching.map(([name]) => name).join("\n"));
+        // (Asked for a label, the label; otherwise Docker's names for them, which are not a sandbox's id.)
+        const format = rest.includes("--format") ? rest[rest.indexOf("--format") + 1] : undefined;
+        const label = /^\{\{\.Label "([^"]+)"\}\}$/.exec(format ?? "")?.[1];
+        return ok(matching.map(([name, c]) => (label ? (c.labels[label] ?? "") : name)).join("\n"));
       }
       case "inspect": {
         if (rest[0] === "--format") {
@@ -108,6 +111,16 @@ describe("a seat's VM", () => {
     expect(f.volumes.has(seatVolumeName(SEAT.id))).toBe(true);
     await f.host.createSeatVm({ seat: SEAT, ...ask });
     expect(f.calls.filter((a) => a[0] === "run" && a.includes("--rm"))).toHaveLength(1);
+  });
+
+  test("the VMs that have a seat's home are named by their own ids, so each can be removed (a run's, a sign-in's)", async () => {
+    const f = fake();
+    expect(await f.host.seatVms(SEAT.id)).toEqual([]);
+    const vm = await f.host.createSeatVm({ seat: SEAT, ...ask });
+    expect(await f.host.seatVms(SEAT.id)).toEqual([vm.id]);
+    expect(await f.host.seatVms(`st_${"z".repeat(22)}`)).toEqual([]);
+    for (const id of (await f.host.seatVms(SEAT.id))!) expect((await f.host.destroy(id, { run: ask.run })).verdict).toBe("allow");
+    expect(await f.host.seatVms(SEAT.id)).toEqual([]);
   });
 
   test("a seat's home is in no more VMs at once than it takes: one more is refused, even asked at the same moment", async () => {

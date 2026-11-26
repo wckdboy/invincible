@@ -1386,9 +1386,9 @@ export class SandboxHost {
     }
   }
 
-  /** The VMs on this host that have a seat's home, in any state (a stopped one still holds it): null when docker can't say. */
+  /** The VMs on this host that have a seat's home, in any state (a stopped one still holds it), by their own ids: null when docker can't say. */
   async seatVms(seat: string): Promise<string[] | null> {
-    const listed = await this.docker(["ps", "-aq", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.seat=${seat}`]);
+    const listed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.seat=${seat}`, "--format", `{{.Label "${LABEL}.id"}}`]);
     return listed.code === 0 ? listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : null;
   }
 
