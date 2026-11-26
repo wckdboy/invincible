@@ -5,7 +5,7 @@ Phase 2 of [PLAN.md](PLAN.md), as built (26 November 2026). [ARCHITECTURE](ARCHI
 protocol for proof across nodes, the numbers, and how to switch it on.
 
 **State:** on main, dormant. It is off on every node until that node's own setting says so (`invincible fabric on`), and
-today's pin is Q-AMP 0.1.0, which has no sidecar, so every node stays on HTTPS with signed requests and its Doctor says
+today's pin is Q-AMP 0.1.0, which has no sidecar, so every node stays on HTTP with signed requests and its Doctor says
 why. The pin moves to a Q-AMP release with the sidecar only after the independent security review of the fabric is
 answered and its fixes reviewed again.
 
@@ -67,7 +67,7 @@ answered and its fixes reviewed again.
   body as the JSON text that was signed, and the sending node's device signature over them, made and checked exactly as
   its HTTPS request's (the same time window, nonce cache and body digest), with the method `QAMP`, so a signature made
   for either path never passes on the other. It must be the transport key's own node's, active, fresh and for the
-  tool's path. A forwarded route then runs through the same door as over HTTPS (the `fabric` listener), for that
+  tool's path. A forwarded route then runs through the same door as over HTTP (the `fabric` listener), for that
   node's principal.
 - **When Q-AMP is tried again after it wasn't had.** It waits by why:
   - refused (`UNAUTHORIZED`: the peer doesn't know this node's key yet; its next pull of this node's profile cures it), 2 s;
@@ -76,6 +76,10 @@ answered and its fixes reviewed again.
   - unreachable, 5 s, longer each time, to a minute.
 
   An error the peer answered with over Q-AMP is its answer, not a reason to leave Q-AMP.
+- **Never in clear.** The fallback is plain HTTP with signed requests, said as HTTP everywhere (the API's `path` keeps
+  its value `https`). To a peer that speaks Q-AMP, while this node runs its sidecar, it is refused off the tailnet and
+  this machine (a tailnet address or MagicDNS name, or loopback): the link waits for Q-AMP and says why. On the
+  tailnet, a peer that speaks Q-AMP and drops to HTTP raises a notice (the Doctor's `mind.sync.<peer>`).
 
 ## Agents across nodes: the hand-off
 
@@ -264,7 +268,7 @@ answered and a Q-AMP release with the sidecar is pinned.
    - `invincible hand <the other node> "Write hello.txt" --gate "test -f hello.txt" --agent <a test agent there>
      --follow`, then `invincible handed <id>`: its first output and end are `firstOutputAt` and `endedAt` against
      `createdAt` in `handedTask`.
-7. **Back to HTTPS alone**, if Q-AMP misbehaves: `invincible fabric off` (at once, no restart), `INVINCIBLE_QAMP=off` in
+7. **Back to HTTP alone**, if Q-AMP misbehaves: `invincible fabric off` (at once, no restart), `INVINCIBLE_QAMP=off` in
    the node's service environment and a restart, or close UDP 7410. Each peer falls back within one failed call and
    tries Q-AMP again later, so nothing waits on it.
 

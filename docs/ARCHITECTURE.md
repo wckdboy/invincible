@@ -87,7 +87,7 @@ out QAMP"). What runs over it, in order:
 
 | Link | Over | Since |
 |---|---|---|
-| Node ↔ node: ledger sync, pushes, forwarded work (a sandbox on another node) | Q-AMP, one connection per peer; HTTPS with signed requests as the fallback | Phase 2 |
+| Node ↔ node: ledger sync, pushes, forwarded work (a sandbox on another node) | Q-AMP, one connection per peer; HTTP with signed requests as the fallback, on the tailnet alone to a peer that speaks Q-AMP | Phase 2 |
 | An agent outside the fleet using the primary's tools | Q-AMP grants (carried, §10) | Phase 2 |
 | A run on another node calling the primary's tools; one agent handing work to another | Q-AMP, the run's own key and chain | Phase 2 |
 | Native clients (iPhone, iPad, Mac, Android) ↔ their node | Q-AMP through Swift and Kotlin bindings, signing with the device's hardware key | Phase 5 |
@@ -102,8 +102,9 @@ November 2026). The sidecar holds no secret but the node's transport key.
 sidecar):
 - **The sidecar.** Each node starts its sidecar on UDP 7410, under a transport key of its own that its signed profile
   names, and watches and restarts it.
-- **The link.** Its sync, pushes and forwarded work go over Q-AMP; over HTTPS with signed requests where Q-AMP can't be
-  had, each peer saying which path it is on.
+- **The link.** Its sync, pushes and forwarded work go over Q-AMP, each call signed by the node's device key; over HTTP
+  with signed requests where Q-AMP can't be had (never in clear off the tailnet to a peer that speaks Q-AMP), each
+  peer saying which path it is on.
 - **A task handed to another node's agents** runs there and streams back over one call. It can be stopped from either
   end. Its run calls the giver's tools under a grant to the run's own key, held to the task and ended with it, and it
   comes back with a proof the runner signs with its device key, which the giver checks before it says Proven.

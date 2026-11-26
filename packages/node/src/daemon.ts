@@ -174,7 +174,7 @@ export interface DaemonOptions {
   /**
    * The node's sidecar (fabric/sidecar.ts). Default: <home>/bin/qamp (or INVINCIBLE_QAMP_BIN) on the advertised address,
    * UDP 7410 (INVINCIBLE_QAMP_PORT). Tests: another binary, port or socket, or a stand-in spawner; false: none (every
-   * link over HTTPS).
+   * link over HTTP with signed requests).
    */
   sidecar?: { binary?: string | null; port?: number; socket?: string; spawn?: SpawnSidecar } | false;
   /** How long a run's grant lasts before it is renewed at half of it (tests: a few seconds; default 300). */
@@ -302,10 +302,10 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const endpoint = `http://${advertise}:${port}`;
 
   // The fabric (docs/ARCHITECTURE.md §3): its peers over Q-AMP, through its sidecar, which holds no secret but the node's
-  // transport key; HTTPS with signed requests to any peer it can't be had for, as before it.
+  // transport key; HTTP with signed requests to any peer it can't be had for, as before it.
   const qampBin = env.INVINCIBLE_QAMP_BIN ?? join(home.dir, "bin", "qamp");
   // (With test capabilities, none unless the test asks for one: no test binds a real port by accident. INVINCIBLE_QAMP=off:
-  // none at all, every link over HTTPS, the way back if Q-AMP misbehaves, whatever the node's setting says.)
+  // none at all, every link over HTTP with signed requests, the way back if Q-AMP misbehaves, whatever the node's setting says.)
   const sidecarOpts = opts.sidecar === false || env.INVINCIBLE_QAMP === "off" || (opts.sidecar === undefined && opts.capabilities) ? null : (opts.sidecar ?? {});
   // Its own setting, off by default: the binary alone switches nothing on (the grants' bridges run it either way).
   let fabricOn = config.fabric === true;
@@ -341,7 +341,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     sidecar,
     log,
     presence: async () => ({ ...(await presence()), compute: compute.usage() }),
-    // A route a node forwarded over Q-AMP: the same door as over HTTPS, for the principal its key proved.
+    // A route a node forwarded over Q-AMP: the same door as over HTTP, for the principal its key proved.
     route: async (path, body, principal: FabricPrincipal, signal) => {
       if (!routes) return { status: 503, body: { error: "this node is starting" } };
       const res = await routes(fabricRequest(path, body, principal, signal), "fabric");
@@ -361,7 +361,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   let profiled = false;
   /**
    * Its own switch, kept in its config: on starts its sidecar now (its profile names its endpoint once it listens); off
-   * stops it, and its profile names none from then on, so its peers reach it over HTTPS alone.
+   * stops it, and its profile names none from then on, so its peers reach it over HTTP alone, with signed requests.
    */
   let switching: Promise<unknown> = Promise.resolve();
   const fabricView = (): FabricSettingView => ({ on: fabricOn, state: sidecar.state, why: sidecar.why, did: sidecar.did, address: sidecar.address });

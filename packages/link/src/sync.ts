@@ -74,13 +74,18 @@ export function answerPush(store: LedgerStore, events: unknown[]): { added: numb
 
 /**
  * Another way to a peer than HTTPS: Q-AMP, through the node's sidecar (the node's fabric/service.ts). Null or false: it
- * can't be had for that peer now, and the request goes over HTTPS with a signed request, as before it.
+ * can't be had for that peer now, and the request goes over HTTP with a signed request, as before it.
  */
 export interface SyncTransport {
   sync(peer: Device, request: SyncRequest): Promise<SyncPage | null>;
   push(peer: Device, events: GEvent[]): Promise<boolean>;
-  /** Why a peer is on HTTPS, when it is. */
+  /** Why a peer is on HTTP, when it is. */
   pathOf?(peer: string): { path: PeerPath; why: string | null } | null;
+  /**
+   * Why this peer may not be reached over plain HTTP now (it speaks Q-AMP, and its HTTP endpoint is off the tailnet, so
+   * its requests and answers would travel in clear), or null: then HTTP, signed, as before.
+   */
+  httpRefused?(peer: Device): string | null;
 }
 
 export interface SyncOptions {
@@ -129,9 +134,11 @@ export class SyncEngine {
     try {
       for (let page = 0; page < MAX_PAGES; page++) {
         const request = pull.request(this.comparesSets.has(peer.id));
-        // Q-AMP first; a peer it can't be had for (or that failed over it) is asked over HTTPS, signed, as before.
+        // Q-AMP first; a peer it can't be had for (or that failed over it) is asked over HTTP, signed, as before (never in clear off the tailnet to a peer that speaks Q-AMP).
         const viaQamp = this.opts.transport ? await this.opts.transport.sync(peer, request).catch(() => null) : null;
         path = viaQamp ? "qamp" : "https";
+        const refused = viaQamp ? null : (this.opts.transport?.httpRefused?.(peer) ?? null);
+        if (refused) throw new Error(refused);
         const result =
           viaQamp ??
           (await signedPost<SyncPage>(this.identity, peer.profile!.endpoint!, "/link/sync", request, { fetch: this.opts.fetch, timeoutMs: 8000 }));
@@ -182,7 +189,8 @@ export class SyncEngine {
   push(events: GEvent[]): void {
     for (const peer of this.peers()) {
       if (this.statuses.get(peer.id)?.online === false) continue;
-      const https = () => signedPost(this.identity, peer.profile!.endpoint!, "/link/push", { events }, { fetch: this.opts.fetch, timeoutMs: 5000 }).catch(() => {});
+      // (Never over plain HTTP off the tailnet to a peer that speaks Q-AMP: its pull takes the events later.)
+      const https = () => (this.opts.transport?.httpRefused?.(peer) ? Promise.resolve() : signedPost(this.identity, peer.profile!.endpoint!, "/link/push", { events }, { fetch: this.opts.fetch, timeoutMs: 5000 }).catch(() => {}));
       if (!this.opts.transport) {
         void https();
         continue;

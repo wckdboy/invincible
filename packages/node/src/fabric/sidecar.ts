@@ -11,7 +11,7 @@ import { SidecarClient, within } from "./socket.ts";
  *
  * The node starts the sidecar, watches it, and starts it again when it stops (at once after one that ran a while,
  * longer each time after one that keeps stopping). While it is down, or the binary isn't installed, every link goes
- * over HTTPS with signed requests, as before it, and the node says so.
+ * over HTTP with signed requests, as before it, and the node says so.
  */
 
 /** A Unix socket's path is short (104 bytes on macOS, 108 on Linux, with its NUL). */

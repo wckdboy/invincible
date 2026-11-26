@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync, statfsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, redact, type Agent } from "@invincible/core";
+import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, qampEndpointOf, redact, type Agent } from "@invincible/core";
 import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { containerKernel, macFirewallInstalled, type SandboxHost } from "@invincible/sandbox";
@@ -473,6 +473,7 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
           error: status?.error ? redact(status.error).slice(0, 200) : null,
           clockOffsetMs: status?.online ? await system.peerClock(d.profile!.endpoint!) : null,
           ...(status?.path ? { path: status.path, fallback: status.fallback ? redact(status.fallback).slice(0, 200) : null } : {}),
+          qamp: qampEndpointOf(d.profile?.caps, d.id) !== null,
         };
       }),
     ),

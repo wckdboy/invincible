@@ -161,3 +161,31 @@ describe("the sync engine", () => {
     expect(page).toEqual({ events: [] as GEvent[], more: false, sets: true });
   });
 });
+
+describe("the fallback to HTTP (the fabric's security review, L7)", () => {
+  /** A transport whose Q-AMP fails, and which says whether HTTP may be had for the peer. */
+  const transport = (refused: string | null) => ({ sync: async () => null, push: async () => false, httpRefused: () => refused });
+
+  test("a peer that speaks Q-AMP, off the tailnet, is never asked over plain HTTP: its pulls and pushes fail, and say why", async () => {
+    const { a, b, storeA, storeB } = fleet();
+    // b knows a and where a answers, as a's own profile says.
+    storeA.emit(a, "node.profile", { endpoint: "http://192.0.2.10:7400", caps: {} });
+    storeB.ingest(storeA.eventsSince({}, 1000).events);
+    const seen: Seen = { bodies: [], largest: 0 };
+    const why = "a speaks Q-AMP, and its HTTP endpoint (192.0.2.10) is off the tailnet: its requests and answers would travel in clear";
+    const engine = new SyncEngine(storeB, b, { fetch: today(storeA, seen), transport: transport(why) });
+    await engine.pullFrom(peer(a));
+    expect(engine.status().find((s) => s.device === a.id)).toMatchObject({ online: false, error: why });
+    engine.push([storeB.emit(b, "memory.added", { text: "not sent in clear" }, { trust: "owner" })]);
+    await Bun.sleep(50);
+    expect(seen.bodies).toEqual([]);
+  });
+
+  test("where HTTP may be had (the tailnet, this machine, a peer without Q-AMP), it is, as before", async () => {
+    const { a, b, storeA, storeB } = fleet();
+    const seen: Seen = { bodies: [], largest: 0 };
+    const engine = new SyncEngine(storeB, b, { fetch: today(storeA, seen), transport: transport(null) });
+    await engine.pullFrom(peer(a));
+    expect(storeB.digest()).toBe(storeA.digest());
+  });
+});

@@ -134,3 +134,25 @@ describe("who a transport key is", () => {
     expect(f.nodeOfKey(did(8))).toBeNull();
   });
 });
+
+describe("plain HTTP to a peer that speaks Q-AMP (L7)", () => {
+  const withEndpoint = (endpoint: string, qamp = true): Device => ({ ...peer, profile: { endpoint, caps: qamp ? peer.profile!.caps : {} } });
+  const fabricOf = (state: "up" | "down" | "off") => {
+    const sidecar = { client: null, did: "did:key:z6Mkself", address: null, state, why: null } as unknown as Sidecar;
+    const store = { onApplied: () => () => {}, devices: () => [], activeDevice: () => null } as unknown as LedgerStore;
+    return new Fabric({ store, identity: newNodeIdentity(), sidecar, log: () => {}, presence: async () => ({}) as never });
+  };
+
+  test("off the tailnet, while this node runs its sidecar (up or down), it is refused, and says why", () => {
+    for (const state of ["up", "down"] as const) expect(fabricOf(state).httpRefused(withEndpoint("http://192.0.2.10:7400"))).toBe("beta speaks Q-AMP, and its HTTP endpoint (192.0.2.10) is off the tailnet: its requests and answers would travel in clear, so it waits for Q-AMP (invincible fabric off on this node goes back to HTTP knowingly)");
+  });
+
+  test("on the tailnet or this machine, to a peer without Q-AMP, or with this node's fabric off: HTTP, as before", () => {
+    // (A tailnet address, made from RFC 6598's numbers: no real host.)
+    expect(fabricOf("up").httpRefused(withEndpoint(`http://${[100, 70, 1, 2].join(".")}:7400`))).toBeNull();
+    expect(fabricOf("up").httpRefused(withEndpoint("http://[fd7a:115c:a1e0::5]:7400"))).toBeNull();
+    expect(fabricOf("up").httpRefused(withEndpoint("http://127.0.0.1:7400"))).toBeNull();
+    expect(fabricOf("up").httpRefused(withEndpoint("http://192.0.2.10:7400", false))).toBeNull();
+    expect(fabricOf("off").httpRefused(withEndpoint("http://192.0.2.10:7400"))).toBeNull();
+  });
+});

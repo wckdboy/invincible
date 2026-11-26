@@ -667,37 +667,52 @@ describe("the fabric, as the doctor says it (docs/ARCHITECTURE.md §3)", () => {
     expect(line.line).toBe(`its sidecar is up as ${did.slice(0, 22)}… on 192.0.2.10:7410 (qamp 0.2.0): its links to other nodes go over Q-AMP`);
   });
 
-  test("no binary is no fault: every link goes over HTTPS, and it says so", () => {
+  test("no binary is no fault: every link goes over HTTP with signed requests, and it says so", () => {
     const off = healthy();
     off.fabric = sidecar({ state: "off", why: "Q-AMP isn't installed on this node: its pinned binary goes to <home>/bin/qamp", address: null, version: null });
-    expect(byId(diagnose(off), "node.qamp")).toMatchObject({ state: "ok", line: "Q-AMP isn't installed here, so every link to another node goes over HTTPS with signed requests" });
+    expect(byId(diagnose(off), "node.qamp")).toMatchObject({ state: "ok", line: "Q-AMP isn't installed here, so every link to another node goes over HTTP with signed requests" });
     // Nor is a node that runs none, as it was told.
     const none = healthy();
     none.fabric = sidecar({ state: "off", why: "this node runs no sidecar", address: null, version: null });
-    expect(byId(diagnose(none), "node.qamp")).toMatchObject({ state: "ok", line: "this node runs no sidecar, so every link to another node goes over HTTPS with signed requests" });
+    expect(byId(diagnose(none), "node.qamp")).toMatchObject({ state: "ok", line: "this node runs no sidecar, so every link to another node goes over HTTP with signed requests" });
   });
 
   test("a binary from before the sidecar (0.1.0) is yours to replace: the line says so, and how", () => {
     const old = fault((f) => (f.fabric = sidecar({ state: "off", why: "the qamp here (0.1.0) has no sidecar: Q-AMP's release with one goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)", address: null, version: null })), "node.qamp");
     expect(old.state).toBe("needs-you");
     expect(old.line).toStartWith("the qamp here (0.1.0) has no sidecar");
-    expect(old.line).toEndWith("every link to another node goes over HTTPS with signed requests meanwhile");
+    expect(old.line).toEndWith("every link to another node goes over HTTP with signed requests meanwhile");
     expect(old.fix).toContain("deploy.sh --qamp");
   });
 
-  test("a sidecar that is down is yours to know: why, that HTTPS carries the links meanwhile, and what to check", () => {
+  test("a sidecar that is down is yours to know: why, that HTTP carries the links meanwhile, and what to check", () => {
     const down = fault((f) => (f.fabric = sidecar({ state: "down", why: "it stopped (9)" })), "node.qamp");
     expect(down.state).toBe("needs-you");
-    expect(down.line).toBe("its sidecar is down: it stopped (9); its links to other nodes go over HTTPS meanwhile");
+    expect(down.line).toBe("its sidecar is down: it stopped (9); its links to other nodes go over HTTP meanwhile");
     expect(down.fix).toContain("7410");
   });
 
-  test("each peer's sync line says its path, and why HTTPS when it is", () => {
+  test("each peer's sync line says its path, and why HTTP when it is", () => {
     const qamp = healthy();
     qamp.mind.peers[0] = { ...qamp.mind.peers[0]!, online: true, path: "qamp", fallback: null };
     expect(byId(diagnose(qamp), `mind.sync.${qamp.mind.peers[0]!.name}`).line).toBe(`in sync with ${qamp.mind.peers[0]!.name} over Q-AMP`);
-    const https = healthy();
-    https.mind.peers[0] = { ...https.mind.peers[0]!, online: true, path: "https", fallback: "Q-AMP to rack failed: connection lost" };
-    expect(byId(diagnose(https), `mind.sync.${https.mind.peers[0]!.name}`)).toMatchObject({ state: "ok", line: `in sync with ${https.mind.peers[0]!.name} over HTTPS (Q-AMP to rack failed: connection lost)` });
+    const http = healthy();
+    http.mind.peers[0] = { ...http.mind.peers[0]!, online: true, path: "https", fallback: "Q-AMP to rack failed: connection lost" };
+    expect(byId(diagnose(http), `mind.sync.${http.mind.peers[0]!.name}`)).toMatchObject({ state: "ok", line: `in sync with ${http.mind.peers[0]!.name} over HTTP (Q-AMP to rack failed: connection lost)` });
+  });
+
+  test("a peer that speaks Q-AMP, on HTTP while this node's sidecar runs, is yours to know: a notice, why, and what to check (L7)", () => {
+    const left = healthy();
+    left.fabric = sidecar({});
+    left.mind.peers[0] = { ...left.mind.peers[0]!, online: true, path: "https", fallback: "Q-AMP to rack failed: connection lost", qamp: true };
+    const line = byId(diagnose(left), `mind.sync.${left.mind.peers[0]!.name}`);
+    expect(line).toMatchObject({ state: "needs-you", line: `in sync with ${left.mind.peers[0]!.name} over HTTP, though it speaks Q-AMP (Q-AMP to rack failed: connection lost)` });
+    expect(line.fix).toContain("UDP 7410");
+    expect(line.finding).toMatchObject({ severity: "warn", title: `${left.mind.peers[0]!.name}'s link left Q-AMP for HTTP` });
+    // With this node's fabric off, HTTP is its own choice: no fault.
+    const off = healthy();
+    off.fabric = sidecar({ state: "off", why: "the fabric is off on this node (invincible fabric on switches it on)", address: null, version: null });
+    off.mind.peers[0] = { ...left.mind.peers[0]! };
+    expect(byId(diagnose(off), `mind.sync.${off.mind.peers[0]!.name}`).state).toBe("ok");
   });
 });

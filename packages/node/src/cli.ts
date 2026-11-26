@@ -1027,14 +1027,14 @@ Next:
       for (const d of fleet.devices) {
         const caps = d.caps as Record<string, any> | null;
         const peer = peers.get(d.id);
-        // (Its path: Q-AMP through the sidecars, or HTTPS with signed requests where Q-AMP can't be had.)
-        const path = peer?.path === "qamp" ? " q-amp" : peer?.path === "https" ? " https" : "";
+        // (Its path: Q-AMP through the sidecars, or HTTP with signed requests where Q-AMP can't be had: the API calls it "https".)
+        const path = peer?.path === "qamp" ? " q-amp" : peer?.path === "https" ? " http" : "";
         const state = d.revokedAt ? "revoked" : d.id === fleet.self ? "this node" : d.kind === "client" ? "client" : peer?.online ? `online ${peer.rttMs}ms${path}` : "offline";
         const summary = caps
           ? `${caps.os}/${caps.arch} ${caps.cores}c ${caps.memoryGb}GB${caps.gpu?.length ? ` gpu:${caps.gpu[0].name}` : ""}${caps.docker ? " docker" : ""}${caps.vm?.kvm ? " kvm" : ""}${caps.localModels?.some((r: any) => r.models.length) ? " local-ai" : ""}`
           : "";
         console.log(`  ${d.name.padEnd(18)} ${d.kind.padEnd(6)} ${state.padEnd(20)} ${dim(summary)}`);
-        if (peer?.online && peer.path === "https" && peer.fallback) console.log(`  ${" ".repeat(18)} ${dim(`over HTTPS: ${peer.fallback}`)}`);
+        if (peer?.online && peer.path === "https" && peer.fallback) console.log(`  ${" ".repeat(18)} ${dim(`over HTTP: ${peer.fallback}`)}`);
       }
       await statusLine(new Admin(home));
       return;

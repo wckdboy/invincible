@@ -483,7 +483,7 @@ export function createApp(ctx: AppContext) {
 
   /**
    * Send a request to another node: over Q-AMP, its one connection to that node through the sidecars, where it can be had,
-   * else over HTTPS, signed as this one; its errors come back as ours either way.
+   * else over HTTP, signed as this one (never in clear off the tailnet to a node that speaks Q-AMP); its errors come back as ours either way.
    */
   async function forward<T>(target: Device, path: string, body: Record<string, unknown>): Promise<T> {
     if (!target.profile?.endpoint) throw new HttpError(424, `${target.name} has no reachable endpoint`);
@@ -503,6 +503,9 @@ export function createApp(ctx: AppContext) {
       if (failed) throw new HttpError(failed.status, `${target.name}: ${failed.error}`);
       return result;
     }
+    // Never over plain HTTP off the tailnet to a node that speaks Q-AMP: it waits for Q-AMP, and says why.
+    const refused = ctx.fabric?.httpRefused(target) ?? null;
+    if (refused) throw new HttpError(424, refused);
     try {
       result = await signedPost<T>(ctx.identity, target.profile.endpoint, path, body, { timeoutMs: 75 * 60_000 });
     } catch (error) {

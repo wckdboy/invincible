@@ -74,7 +74,7 @@ describe("the node's sidecar, by its own setting", () => {
     expect(daemon.fabric.sidecar.why).toBe(OFF);
     expect(existsSync(join(home!.dir, "qamp", "node.qamp-key"))).toBe(false);
     expect(ownCaps(daemon).qamp).toBeUndefined();
-    expect((await daemon.doctor({ quick: true })).diagnoses.find((d) => d.id === "node.qamp")).toMatchObject({ state: "ok", line: "the fabric is off on this node, so every link to another node goes over HTTPS with signed requests (invincible fabric on switches it on)" });
+    expect((await daemon.doctor({ quick: true })).diagnoses.find((d) => d.id === "node.qamp")).toMatchObject({ state: "ok", line: "the fabric is off on this node, so every link to another node goes over HTTP with signed requests (invincible fabric on switches it on)" });
   });
 
   test("on: the node starts the sidecar it was given (here, one that ends at once: down, and why)", async () => {
@@ -100,7 +100,7 @@ describe("the node's sidecar, by its own setting", () => {
     daemon = await node({ INVINCIBLE_QAMP: "off" }, true);
     expect(daemon.fabric.sidecar.state).toBe("off");
     expect(daemon.fabric.sidecar.why).toBe("this node runs no sidecar");
-    expect((await daemon.doctor({ quick: true })).diagnoses.find((d) => d.id === "node.qamp")).toMatchObject({ state: "ok", line: "this node runs no sidecar, so every link to another node goes over HTTPS with signed requests" });
+    expect((await daemon.doctor({ quick: true })).diagnoses.find((d) => d.id === "node.qamp")).toMatchObject({ state: "ok", line: "this node runs no sidecar, so every link to another node goes over HTTP with signed requests" });
   });
 
   test("the grants' bridges run the same binary with the fabric off: a grant is made, and its bridge is up", async () => {

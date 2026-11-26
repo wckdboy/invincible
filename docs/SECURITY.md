@@ -540,9 +540,18 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     sync page and route answer), refused past it whether it says its length or not. Tests: `fabric-socket.test.ts`,
     `packages/link/test/client.test.ts`. Tests: `fabric-socket.test.ts`,
   `fabric-gateway.test.ts`, the seeded fuzzing in `fabric.test.ts`, and `bench/fabric/fuzz.ts` (FABRIC.md).
-- **Falling back.** Where Q-AMP can't be had (no sidecar there or here, a peer from before the fabric, a failure), each
-  link goes over HTTP with signed requests on the tailnet, as before, and says so; nothing is weakened. What it loses
-  is Q-AMP's post-quantum key exchange inside the tunnel (WireGuard's own is classical), its streams and its stop.
+- **Falling back, never in clear** (the review's L7). Where Q-AMP can't be had (no sidecar there or here, a peer from
+  before the fabric, a failure), each link goes over HTTP with signed requests, as before, and says so as HTTP (the
+  CLI, the Doctor, the web app; the API's `path` keeps its value `https`).
+  - To a peer that speaks Q-AMP, while this node runs its sidecar, plain HTTP is refused off the tailnet and this
+    machine (anywhere but the tailnet's own addresses and MagicDNS names, and loopback): its requests and
+    answers would travel in clear, so it waits for Q-AMP, and says why. Dropping UDP can then stall a link, never
+    downgrade it.
+  - On the tailnet, a peer that speaks Q-AMP and drops to HTTP raises a notice (the Doctor's `mind.sync.<peer>`
+    needs you), so a downgrade is never silent.
+  - What HTTP loses on the tailnet is Q-AMP's post-quantum key exchange inside the tunnel (WireGuard's own is
+    classical), its streams and its stop.
+  - Tests: `fabric-service.test.ts`, `packages/link/test/sync.test.ts`, `doctor.test.ts`, `fabric.test.ts`.
 - **Residual risk.**
   - **A runner can lie with its own key.** The proof says which node vouches for the work; it can't show that node ran
     its gates truthfully. A false proof is signed evidence against that node, and kept.

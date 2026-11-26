@@ -51,7 +51,7 @@ const Env = z.object({
     .optional(),
   /**
    * off: this node runs no Q-AMP sidecar, whatever its own setting says (`invincible fabric`, off by default), and every
-   * link to another node goes over HTTPS with signed requests (docs/FABRIC.md). on: as its setting says.
+   * link to another node goes over HTTP with signed requests (docs/FABRIC.md). on: as its setting says.
    */
   INVINCIBLE_QAMP: z.enum(["on", "off"]).optional(),
   /** The UDP port its sidecar listens on, on its advertised address (default 7410: docs/ARCHITECTURE.md §9). */

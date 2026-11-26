@@ -15,7 +15,7 @@ import { TEAM_LIMITS } from "./team-limits.ts";
  * of each, the path a node says it is on, and the proof a node signs for work it ran for another.
  */
 
-/** How a node reaches a peer: Q-AMP through its sidecar, or HTTPS with signed requests (the fallback). */
+/** How a node reaches a peer: Q-AMP through its sidecar, or HTTP with signed requests (the fallback; "https" is the API's name for it). */
 export const PEER_PATHS = ["qamp", "https"] as const;
 export type PeerPath = (typeof PEER_PATHS)[number];
 
@@ -35,6 +35,23 @@ export const transportClaimInput = (node: string): Uint8Array<ArrayBuffer> => do
 
 /** The proof that the transport key with this seed is `node`'s, for its profile. */
 export const signTransportClaim = (seed: Uint8Array, node: string): string => b64u(signEd25519(seed, transportClaimInput(node)));
+
+/**
+ * Whether plain HTTP to this host stays inside the tailnet's own encryption (WireGuard) or on this machine: a tailnet
+ * address (RFC 6598's shared range, which Tailscale gives its machines, or its own IPv6 prefix), a MagicDNS name, or
+ * loopback. Anywhere else, a link's
+ * requests and answers would travel in clear.
+ */
+export function onTailnetOrLoopback(host: string): boolean {
+  const bare = host.replace(/^\[(.*)\]$/, "$1").toLowerCase();
+  if (bare === "localhost" || bare === "::1" || /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/.test(bare)) return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(bare);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 127 || (a === 100 && b >= 64 && b <= 127);
+  }
+  return /^fd7a:115c:a1e0:/.test(bare);
+}
 
 /** The key a `qamp://<did>@<host>:<port>` address names, or null when it isn't one. */
 export function qampAddressDid(address: string): string | null {

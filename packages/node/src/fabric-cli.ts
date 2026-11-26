@@ -134,7 +134,7 @@ export async function fabricCommand(api: Api, sub: string | undefined, config: F
   }
   console.log(fabricLine(view));
   if (on === true && view.state !== "up") console.log(dim("It goes on trying by itself; invincible doctor says why, and docs/FABRIC.md what to check."));
-  if (on === false) console.log(dim("Every link to another node goes over HTTPS with signed requests, as before the fabric."));
+  if (on === false) console.log(dim("Every link to another node goes over HTTP with signed requests, as before the fabric."));
 }
 
 export async function handCommand(api: Api, command: "hand" | "handed", rest: string[], flags: Flags): Promise<void> {

@@ -9,6 +9,7 @@ import {
   LinkForwardPath,
   NonceCache,
   type NodeIdentity,
+  onTailnetOrLoopback,
   OWNER_SCOPES,
   type PeerPath,
   type Presence,
@@ -36,7 +37,7 @@ import { type CallOptions, type Chunk, type Invocation, SidecarError, type Sidec
  *    own signed profile names it, and for nothing else. Who is active is read afresh on every call, never cached, so a
  *    node revoked here is refused from its very next call.
  *  - It calls them, and says for each peer which path it is on: Q-AMP when its sidecar is up and the peer's answers,
- *    HTTPS with signed requests otherwise, and why.
+ *    HTTP with signed requests otherwise, and why (never in clear off the tailnet to a peer that speaks Q-AMP).
  */
 
 /** Who calls, as the server's principal is (server.ts): a node of the fleet, owner-equivalent when it is a full one. */
@@ -50,7 +51,7 @@ const principals = new WeakMap<Request, FabricPrincipal>();
 
 /**
  * A request for this node's own API on behalf of a node that called over Q-AMP: the same route, scope and checks as
- * over HTTPS, with the principal its key proved (server.ts reads it on the "fabric" listener, and nowhere else).
+ * over HTTP, with the principal its key proved (server.ts reads it on the "fabric" listener, and nowhere else).
  */
 export function fabricRequest(path: string, body: Record<string, unknown>, principal: FabricPrincipal, signal: AbortSignal): Request {
   const req = new Request(`http://fabric.invalid${path}`, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" }, signal });
@@ -90,7 +91,7 @@ export interface FabricTools {
 }
 
 /**
- * How long a peer is reached over HTTPS before Q-AMP is tried again, by why it wasn't had. A peer that couldn't be
+ * How long a peer is reached over HTTP before Q-AMP is tried again, by why it wasn't had. A peer that couldn't be
  * reached costs a timeout each try: 5 s, longer each time, to a minute. One that answered "not over this path" costs a
  * round trip: refused (UNAUTHORIZED: its door doesn't know this node's key yet, which its next pull of this node's profile
  * cures), 2 s; busy or draining (OVERLOADED, GOING_AWAY), 5 s; a node from before the fabric (UNKNOWN_TOOL), a minute.
@@ -332,12 +333,30 @@ export class Fabric implements SyncTransport {
     return this.endpoints.get(key) ?? null;
   }
 
+  /**
+   * Why this peer may not be reached over plain HTTP now: it speaks Q-AMP (its profile names an endpoint its key signed
+   * for), this node runs its sidecar (its fabric is on), and the peer's HTTP endpoint is off the tailnet, so a link's
+   * requests and answers would travel in clear. Null: HTTP, signed, as before (the tailnet, this machine, a peer without
+   * Q-AMP, or a node whose fabric is off).
+   */
+  httpRefused(peer: Device): string | null {
+    if (this.deps.sidecar.state === "off" || !this.peerEndpoint(peer)) return null;
+    let host: string;
+    try {
+      host = new URL(peer.profile?.endpoint ?? "").hostname;
+    } catch {
+      return null;
+    }
+    if (onTailnetOrLoopback(host)) return null;
+    return `${peer.name} speaks Q-AMP, and its HTTP endpoint (${host}) is off the tailnet: its requests and answers would travel in clear, so it waits for Q-AMP (invincible fabric off on this node goes back to HTTP knowingly)`;
+  }
+
   /** The path a peer was last reached on, and why not Q-AMP (null: not reached yet). */
   pathOf(peer: string): PathState | null {
     return this.paths.get(peer) ?? null;
   }
 
-  /** It goes over HTTPS for now, and why; Q-AMP is tried again after `fixedMs`, or a while longer each time (null). */
+  /** It goes over HTTP for now, and why; Q-AMP is tried again after `fixedMs`, or a while longer each time (null). */
   private notHere(peer: string, why: string, fixedMs: number | null): { unavailable: string } {
     this.paths.set(peer, { path: "https", why, at: this.now() });
     const prior = this.backoff.get(peer);
@@ -357,7 +376,7 @@ export class Fabric implements SyncTransport {
   }
 
   /**
-   * Calls a peer's tool over Q-AMP: its value, or why it couldn't be had this way (the caller then goes over HTTPS). A
+   * Calls a peer's tool over Q-AMP: its value, or why it couldn't be had this way (the caller then goes over HTTP). A
    * peer that answered with an error of its own throws it, as an HTTPS peer's error would be.
    */
   async call(peer: Device, tool: string, args: unknown, opts: CallOptions & { timeoutMs?: number; chunks?: (chunk: Chunk) => void } = {}): Promise<{ value: unknown } | { unavailable: string }> {
@@ -409,7 +428,7 @@ export class Fabric implements SyncTransport {
     return "value" in answer;
   }
 
-  /** A route forwarded to a peer over Q-AMP: its status and JSON answer, or null when it must go over HTTPS. */
+  /** A route forwarded to a peer over Q-AMP: its status and JSON answer, or null when it must go over HTTP. */
   async forward(peer: Device, path: string, body: Record<string, unknown>, timeoutMs: number): Promise<{ status: number; body: unknown } | null> {
     const answer = await this.call(peer, FABRIC.forward, await this.seal(path, body), { timeoutMs });
     if (!("value" in answer)) return null;

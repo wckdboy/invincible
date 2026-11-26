@@ -14,7 +14,7 @@ import { fakeCaps, HAVE_QAMP, type Pair, QAMP, startPair, until } from "./fabric
  * The fabric, end to end on one machine (docs/ARCHITECTURE.md §3): two nodes in temporary homes, each with a real Q-AMP
  * sidecar on loopback (fabric-pair.ts). Their sync, their pushes and the work one forwards to the other's sandbox go over
  * Q-AMP, one connection between their transport keys; a key no node of the fleet names is refused at the door; while a
- * sidecar is down the link goes over HTTPS with signed requests, and says so; a node revoked is refused from its very
+ * sidecar is down the link goes over HTTP with signed requests, and says so; a node revoked is refused from its very
  * next call.
  *
  * It needs Q-AMP's binary (0.2's sidecar): INVINCIBLE_QAMP_TEST_BIN, or INVINCIBLE_QAMP_BIN. Without one it is skipped,
@@ -87,7 +87,7 @@ describe.skipIf(!HAVE_QAMP)(`the fabric between two nodes on one machine${HAVE_Q
     expect((error as SidecarError).message).toMatch(/active nodes of its fleet alone/);
   });
 
-  test("while a node's sidecar is down the link goes over HTTPS and says why; once it is back, over Q-AMP again", async () => {
+  test("while a node's sidecar is down the link goes over HTTP and says why; once it is back, over Q-AMP again", async () => {
     const pid = b.fabric.sidecar.pid!;
     expect(pid).toBeGreaterThan(1);
     process.kill(pid, "SIGKILL");

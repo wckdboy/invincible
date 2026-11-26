@@ -64,9 +64,11 @@ export interface DoctorFacts {
       lastSeen: number | null;
       error: string | null;
       /** Its clock minus this node's, in ms (null: not known). */ clockOffsetMs: number | null;
-      /** The path its sync is on, and why HTTPS when it is (absent: gathered before the fabric). */
+      /** The path its sync is on, and why HTTP when it is (absent: gathered before the fabric; "https" is the API's name for HTTP). */
       path?: "qamp" | "https";
       fallback?: string | null;
+      /** It speaks Q-AMP: its profile names an endpoint its key signed for (absent: not known). */
+      qamp?: boolean;
     }[];
     /** Where backups of the mind are looked for, and the newest file there (null: not looked for here). */
     backup: { dir: string; exists: boolean; newestAt: number | null; files: number } | null;
@@ -252,11 +254,11 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     const q = f.fabric;
     const where = q.address ? `on ${q.address.split("@")[1]}` : "dialling out only";
     if (q.state === "up") add("node", "node.qamp", "ok", `its sidecar is up as ${q.did?.slice(0, 22)}… ${where} (qamp ${q.version ?? "?"}): its links to other nodes go over Q-AMP`);
-    else if (q.state === "off" && /has no sidecar/.test(q.why ?? "")) add("node", "node.qamp", "needs-you", `${q.why}; every link to another node goes over HTTPS with signed requests meanwhile`, "Put the pinned release in place: deploy.sh --qamp <its binary for this machine> (scripts/qamp-pin.sh checks its SHA-256). The node starts its sidecar by itself once it is there.");
-    else if (q.state === "off" && /^the fabric is off/.test(q.why ?? "")) add("node", "node.qamp", "ok", "the fabric is off on this node, so every link to another node goes over HTTPS with signed requests (invincible fabric on switches it on)");
-    else if (q.state === "off") add("node", "node.qamp", "ok", /isn't installed/.test(q.why ?? "") ? "Q-AMP isn't installed here, so every link to another node goes over HTTPS with signed requests" : "this node runs no sidecar, so every link to another node goes over HTTPS with signed requests");
+    else if (q.state === "off" && /has no sidecar/.test(q.why ?? "")) add("node", "node.qamp", "needs-you", `${q.why}; every link to another node goes over HTTP with signed requests meanwhile`, "Put the pinned release in place: deploy.sh --qamp <its binary for this machine> (scripts/qamp-pin.sh checks its SHA-256). The node starts its sidecar by itself once it is there.");
+    else if (q.state === "off" && /^the fabric is off/.test(q.why ?? "")) add("node", "node.qamp", "ok", "the fabric is off on this node, so every link to another node goes over HTTP with signed requests (invincible fabric on switches it on)");
+    else if (q.state === "off") add("node", "node.qamp", "ok", /isn't installed/.test(q.why ?? "") ? "Q-AMP isn't installed here, so every link to another node goes over HTTP with signed requests" : "this node runs no sidecar, so every link to another node goes over HTTP with signed requests");
     else
-      add("node", "node.qamp", "needs-you", `its sidecar is ${q.state === "starting" ? "starting" : "down"}${q.why ? `: ${q.why}` : ""}; its links to other nodes go over HTTPS meanwhile`, "It is started again by itself (its log says each try: qamp: …). If it keeps stopping, check its binary (<home>/bin/qamp, scripts/qamp-pin.sh) and that its UDP port (7410) is free on the node's address.");
+      add("node", "node.qamp", "needs-you", `its sidecar is ${q.state === "starting" ? "starting" : "down"}${q.why ? `: ${q.why}` : ""}; its links to other nodes go over HTTP meanwhile`, "It is started again by itself (its log says each try: qamp: …). If it keeps stopping, check its binary (<home>/bin/qamp, scripts/qamp-pin.sh) and that its UDP port (7410) is free on the node's address.");
   }
 
   /* ---------- the mind ---------- */
@@ -306,7 +308,13 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   if (!f.mind.peers.length) add("mind", "mind.sync", "ok", "the only node in its fleet, so there's nothing to sync with (a second node would also be a living copy of the mind)");
   for (const peer of f.mind.peers) {
     const id = `mind.sync.${peer.name}`;
-    if (peer.online) add("mind", id, "ok", `in sync with ${peer.name}${peer.path === "qamp" ? " over Q-AMP" : peer.path === "https" ? ` over HTTPS${peer.fallback ? ` (${redact(peer.fallback).slice(0, 160)})` : ""}` : ""}`);
+    const why = peer.fallback ? ` (${redact(peer.fallback).slice(0, 160)})` : "";
+    // A peer that speaks Q-AMP, on HTTP while this node's sidecar runs: its link left Q-AMP, and you hear of it.
+    if (peer.online && peer.path === "https" && peer.qamp && f.fabric && f.fabric.state !== "off")
+      add("mind", id, "needs-you", `in sync with ${peer.name} over HTTP, though it speaks Q-AMP${why}`, "Check UDP 7410 between the two nodes (their firewalls, the tailnet's ACLs): Q-AMP is tried again by itself.", {
+        finding: { severity: "warn", title: `${peer.name}'s link left Q-AMP for HTTP`, body: `Its requests are still signed, and on the tailnet WireGuard still encrypts them; off it, nothing goes in clear: it waits for Q-AMP.${why}` },
+      });
+    else if (peer.online) add("mind", id, "ok", `in sync with ${peer.name}${peer.path === "qamp" ? " over Q-AMP" : peer.path === "https" ? ` over HTTP${why}` : ""}`);
     else if (peer.error && /\b40[13]\b/.test(peer.error)) add("mind", id, "needs-you", `${peer.name} refuses this node's requests (${redact(peer.error).slice(0, 120)})`, "A clock out of step, or one of them was revoked: check both clocks, then invincible status on each.");
     else if (!peer.alwaysOn) add("mind", id, "ok", `${peer.name} is asleep or away (a personal machine: it syncs when it's back)`);
     else if (f.now - (peer.lastSeen ?? f.self.startedAt) < OFFLINE_AFTER_MS) add("mind", id, "ok", `${peer.name} hasn't answered in the last minutes`);

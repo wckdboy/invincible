@@ -9,6 +9,7 @@ import {
   goalDigest,
   handoffUnder,
   newNodeIdentity,
+  onTailnetOrLoopback,
   type ProofStatement,
   proofRefusal,
   qampAddressDid,
@@ -311,5 +312,17 @@ describe("readQdt reads what Q-AMP's SPEC 9.3 says, and nothing else (I1)", () =
     expect(() => readQdt(token)).toThrow(CborError);
     // As a uint, the same token reads, and is signed.
     expect(readQdt(good.encoded).signed).toBe(true);
+  });
+});
+
+describe("where plain HTTP to a peer stays inside the tailnet (L7)", () => {
+  // Tailnet addresses and names, made here from the ranges' own numbers (RFC 6598's shared range, Tailscale's MagicDNS
+  // domain): none of them a real host.
+  const shared = (b: number, c: number, d: number) => [100, b, c, d].join(".");
+  const magic = (...labels: string[]) => [...labels, "ts", "net"].join(".");
+
+  test("a tailnet address, a MagicDNS name or this machine: yes; any other: no", () => {
+    for (const host of [shared(64, 0, 1), shared(127, 255, 254), "fd7a:115c:a1e0::1", "[fd7a:115c:a1e0:ab12::7]", "127.0.0.1", "::1", "[::1]", "localhost", magic("node", "tail1a2b")]) expect([host, onTailnetOrLoopback(host)]).toEqual([host, true]);
+    for (const host of ["192.0.2.10", "198.51.100.7", "203.0.113.9", shared(128, 0, 1), shared(63, 255, 255), "fd7a:115c:a1e1::1", "node.example.test", `${magic()}.example.test`, ""]) expect([host, onTailnetOrLoopback(host)]).toEqual([host, false]);
   });
 });
