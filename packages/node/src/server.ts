@@ -115,6 +115,7 @@ import {
   LIVE_BEAT_MS,
   LIVE_TOPICS,
   type LiveBye,
+  LiveCursor,
   type LiveEvent,
   type LiveTopic,
 } from "@invincible/core";
@@ -1781,9 +1782,10 @@ export function createApp(ctx: AppContext) {
 
   /**
    * What changed, as it changes (core's live.ts), to one of your devices: the topics it may read (each route's own
-   * scope), then each change among them. It ends when the device is no longer what it was when it opened it (revoked,
-   * or its scopes changed), when the node stops, and when the device goes away; one that can't keep up (a megabyte
-   * unread) is let go, and opens it again.
+   * scope), then each change among them, each with where things stand after it. Opened again from where one left off
+   * (`?since=<cursor>`), its hello says which of those topics changed since. It ends when the device is no longer what
+   * it was when it opened it (revoked, or its scopes changed), when the node stops, and when the device goes away; one
+   * that can't keep up (a megabyte unread) is let go, and opens it again.
    */
   function liveStream(p: Principal, req: Request): Response {
     if (!isOwner(p)) throw new HttpError(403, "the live stream is your own devices': an agent or a node keeps up its own way");
@@ -1793,6 +1795,10 @@ export function createApp(ctx: AppContext) {
         return scope === null || p.scopes.includes(scope);
       }),
     );
+    // Where it left off: one cursor (core's LiveCursor), or none. Anything else (two, an empty one, a character no
+    // cursor has) is no cursor, never a refusal: a fresh hello is always a right answer (core's live.ts says why).
+    const asked = new URL(req.url).searchParams.getAll("since");
+    const since = asked.length === 1 && LiveCursor.safeParse(asked[0]).success ? asked[0]! : null;
     const encoder = new TextEncoder();
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     let open = true;
@@ -1851,16 +1857,19 @@ export function createApp(ctx: AppContext) {
     );
     if (mine.size >= LIVE_PER_DEVICE) [...mine][0]!("replaced");
     mine.add(end);
-    send({ type: "hello", topics: [...topics], beat: LIVE_BEAT_MS });
-    // (Nothing can change between the hello and this: no write runs until this returns.)
-    const unsubscribe = liveChanges.subscribe((changed) => {
+    // Subscribed first, so what moved while nobody listened is counted before the hello says what changed. Nothing can
+    // change between the two, or between them and what follows: no write runs until this returns.
+    const unsubscribe = liveChanges.subscribe((changed, at) => {
       if (changed.includes("fleet")) {
         const why = changedUnder();
         if (why) return end(why);
       }
       const told = changed.filter((topic) => topics.has(topic));
-      if (told.length) send({ type: "changed", topics: told });
+      if (told.length) send({ type: "changed", topics: told, at });
     });
+    // (Its cursor, and what changed since one, count only what it may read: nothing of the rest, as its changes don't.)
+    const moved = liveChanges.since(since, topics);
+    send({ type: "hello", topics: [...topics], beat: LIVE_BEAT_MS, at: liveChanges.at(topics), ...(moved ? { changed: moved } : {}) });
     if (open) leave = unsubscribe;
     else unsubscribe();
     heartbeat = setInterval(() => write(": keep-alive\n\n"), LIVE_BEAT_MS);

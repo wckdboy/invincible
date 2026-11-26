@@ -15,6 +15,21 @@ import type { RouteName } from "./api.ts";
  * from the network) within seconds that way, and a turn's stream beats as often. Server-sent events, as a turn's stream
  * is: `data: <json>` and a blank line.
  *
+ * It resumes. The hello and each change say where things stand (`at`, a cursor: opaque to a device, and short, in
+ * characters a URL carries as they are, LIVE_CURSOR), and a device opens it again from the last it was given
+ * (livePath: GET /api/live?since=<cursor>). The hello then says which of its topics changed since (`changed`), and the
+ * device reads those alone, not everything: a stream renewed with nothing changed (a stall on a busy node or network,
+ * three beats long) costs the one request that opens it, where it cost a read of every route. A device's cursor moves
+ * only with what it may read, and the node seals it, so it tells nothing of the rest: not where things stand, not how
+ * far they moved, and none can be made up. `changed` comes only when the node can answer for that cursor; one it can't
+ * (another boot's, one past any it gave that device, or a since that isn't a cursor at all) is no cursor, and the hello
+ * is a fresh one: read everything. A since that isn't a cursor is never refused (400), because a fresh hello is always
+ * a right answer and a refusal would leave a device that kept a bad one without its stream until its code dropped it.
+ * An older node ignores the query and says no `at`, and an older device sends none: each reads everything on a hello,
+ * as before. The signature covers the query as sent, as it covers every path, which is why a cursor holds nothing a URL
+ * would escape. A device trusts `changed` only from a stream it opened from a cursor that tells of the same topics as
+ * the stream before it (otherwise its scopes changed: read everything).
+ *
  * A few topics are told more coarsely than their route answers, on purpose; the pages that show the rest ask for it:
  *  - `fleet`: a device joined, left or changed, or a node went on- or offline; not a node's load or round trip, nor
  *    the mind's count of events.
@@ -44,11 +59,27 @@ export type LiveTopic = (typeof LIVE_TOPICS)[number];
 export type LiveBye = "revoked" | "rescoped" | "stopping" | "replaced";
 
 export type LiveEvent =
-  /** The topics this stream tells of: read each now. `beat`: how often a comment comes between events (LIVE_BEAT_MS). */
-  | { type: "hello"; topics: LiveTopic[]; beat?: number }
-  /** These changed: read them again. */
-  | { type: "changed"; topics: LiveTopic[] }
+  /**
+   * The topics this stream tells of: read each now, or, with `changed`, only those of them that changed since the
+   * cursor it was opened from. `beat`: how often a comment comes between events (LIVE_BEAT_MS). `at`: where things
+   * stand, to open it again from (absent from a node older than it).
+   */
+  | { type: "hello"; topics: LiveTopic[]; beat?: number; at?: string; changed?: LiveTopic[] }
+  /** These changed: read them again. `at`: where things stand after them (absent from a node older than it). */
+  | { type: "changed"; topics: LiveTopic[]; at?: string }
   | { type: "bye"; reason: LiveBye };
+
+/**
+ * What a cursor of the stream is (`at`, and `since` opening it again): short, and only characters a URL carries as
+ * they are, so the path a device signs is byte for byte the path its node reads back. A device keeps one only when it
+ * is one; the node takes `since` only when it is one (core's LiveCursor, api.ts).
+ */
+export const LIVE_CURSOR = /^[A-Za-z0-9_.-]{1,64}$/;
+
+/** The stream's path, opened again from where the last left off (`since`, a cursor its node gave) when there is one. */
+export function livePath(since?: string | null): string {
+  return since && LIVE_CURSOR.test(since) ? `/api/live?since=${since}` : "/api/live";
+}
 
 /**
  * A comment comes on the stream (and on a turn's) this often: one silent for three of them is gone, so a dead link is

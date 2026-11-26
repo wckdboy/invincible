@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLIENT_DEFAULT_SCOPES, clientIdFromKey, LIVE_BEAT_MS, LIVE_TOPICS, type LiveEvent, type LiveTopic, newNodeIdentity, type RouteName, routes, type Scope, signRequest, utf8 } from "@invincible/core";
+import { CLIENT_DEFAULT_SCOPES, clientIdFromKey, LIVE_BEAT_MS, LIVE_TOPICS, LiveCursor, type LiveEvent, livePath, type LiveTopic, newNodeIdentity, type RouteName, routes, type Scope, signRequest, utf8 } from "@invincible/core";
 import { requestPairing, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
@@ -83,16 +83,16 @@ async function pair(name: string, scopes: Scope[]) {
     const response = await fetch(`http://127.0.0.1:${port}${r.path}`, { method: r.method, headers });
     return { status: response.status, body: (await response.json().catch(() => ({}))) as T };
   };
-  const listen = async (): Promise<Listening> => {
-    const headers = await signRequest(device, signer, "GET", routes.live.path, new Uint8Array());
-    return listenWith(headers);
-  };
-  return { device, read, listen };
+  /** Its stream, opened again from where one left off when `since` is given (core's livePath). */
+  const listen = async (since?: string): Promise<Listening> => listenAt(livePath(since));
+  /** Its stream at exactly this path and query, signed over them as they are sent. */
+  const listenAt = async (path: string): Promise<Listening> => listenWith(await signRequest(device, signer, "GET", path, new Uint8Array()), path);
+  return { device, read, listen, listenAt };
 }
 
-async function listenWith(headers: Record<string, string>): Promise<Listening> {
+async function listenWith(headers: Record<string, string>, path: string = routes.live.path): Promise<Listening> {
   const controller = new AbortController();
-  const response = await fetch(`http://127.0.0.1:${port}${routes.live.path}`, { headers, signal: controller.signal });
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, { headers, signal: controller.signal });
   const heard: Heard[] = [];
   /** When each of its beats came (a comment: nothing to tell, but alive). */
   const beats: number[] = [];
@@ -161,6 +161,36 @@ const told = (topic: LiveTopic) => (event: LiveEvent) => event.type === "changed
 const said = (event: LiveEvent): string[] => (event.type === "hello" || event.type === "changed" ? [...event.topics] : [event.reason]);
 const MIND_READ_TOPICS = LIVE_TOPICS.filter((topic) => routes[topic].scope === "mind:read");
 
+/** A stream's hello, as it came. */
+async function helloOf(live: Listening): Promise<Extract<LiveEvent, { type: "hello" }>> {
+  const { event } = await live.next((e) => e.type === "hello", 0);
+  if (event.type !== "hello") throw new Error("not a hello");
+  return event;
+}
+
+/** Where the stream left a device: the `at` of the last event it heard (a device keeps the last it was given). */
+function lastAt(live: Listening): string | undefined {
+  for (let i = live.heard.length - 1; i >= 0; i--) {
+    const { event } = live.heard[i]!;
+    if (event.type !== "bye" && event.at) return event.at;
+  }
+  return undefined;
+}
+
+/** Its hello, then a look's time more, so what a write just before it moved is heard too: where it left the device. */
+async function settled(live: Listening): Promise<string> {
+  await helloOf(live);
+  await Bun.sleep(300);
+  return lastAt(live)!;
+}
+
+/** Until the node has let a closed stream go (its end reaches the node a moment after the device's). */
+const letGo = async (live: Listening): Promise<void> => {
+  live.close();
+  await live.ended;
+  await Bun.sleep(150);
+};
+
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
@@ -184,6 +214,10 @@ describe("your devices' live stream", () => {
     expect([full.status, narrow.status]).toEqual([200, 200]);
     expect(said((await full.next((e) => e.type === "hello", 0)).event).sort()).toEqual([...LIVE_TOPICS].sort());
     expect(said((await narrow.next((e) => e.type === "hello", 0)).event).sort()).toEqual([...MIND_READ_TOPICS].sort());
+    // Opened afresh: where things stand, to open it again from, and nothing said of what changed (read everything).
+    const hello = await helloOf(full);
+    expect(LiveCursor.safeParse(hello.at).success).toBe(true);
+    expect(hello.changed).toBeUndefined();
     full.close();
     narrow.close();
   });
@@ -311,6 +345,123 @@ describe("your devices' live stream", () => {
     await Bun.sleep(2 * LIVE_BEAT_MS + 400);
     expect(live.beats.length).toBeGreaterThanOrEqual(2);
     live.close();
+  });
+
+  test("opened again from where it left off with nothing changed since, its hello says nothing changed: a renewal costs the stream alone", async () => {
+    const phone = await pair("phone-resume", CLIENT_DEFAULT_SCOPES);
+    const first = await phone.listen();
+    const left = await settled(first);
+    await letGo(first);
+    const again = await phone.listen(left);
+    expect(again.status).toBe(200);
+    const hello = await helloOf(again);
+    expect(hello.changed).toEqual([]);
+    expect(hello.at).toBe(left);
+    // And it is a stream as any other: what changes from now on is told, with where things stand after it.
+    await admin("requestSecret", { name: "resume-token", purpose: "To check that a resumed stream tells what changes." });
+    const heard = (await again.next(told("secretRequests"), 0)).event;
+    expect(heard.type === "changed" && LiveCursor.safeParse(heard.at).success && heard.at !== left).toBe(true);
+    again.close();
+  });
+
+  test("opened again after some of what it may read changed, its hello names those and only those, each once", async () => {
+    const phone = await pair("phone-resume-2", CLIENT_DEFAULT_SCOPES);
+    const first = await phone.listen();
+    const left = await settled(first);
+    await letGo(first);
+    // Another stream listens meanwhile, so each change is told as it is written.
+    const other = await phone.listen();
+    await settled(other);
+    await admin("requestSecret", { name: "resume-token-2", purpose: "To check what a resumed stream names." });
+    await admin("requestSecret", { name: "resume-token-3", purpose: "To check that a topic is named once." });
+    await other.next(told("secretRequests"), 0);
+    await Bun.sleep(300);
+    const again = await phone.listen(left);
+    expect((await helloOf(again)).changed).toEqual(["secretRequests"]);
+    // From where the other stood after the changes, nothing changed.
+    const later = await phone.listen(lastAt(other));
+    expect((await helloOf(later)).changed).toEqual([]);
+    for (const live of [other, again, later]) live.close();
+  });
+
+  test("what changed while no device listened is named to the device that comes back", async () => {
+    const phone = await pair("phone-resume-3", CLIENT_DEFAULT_SCOPES);
+    const first = await phone.listen();
+    const left = await settled(first);
+    await letGo(first);
+    // Written with nobody listening: nothing is read then, so it is counted when someone listens again.
+    await admin("requestSecret", { name: "away-token", purpose: "To check what changed while nobody listened." });
+    daemon.chats.create({ title: "While you were away", project: null, role: "planner" });
+    const again = await phone.listen(left);
+    expect((await helloOf(again)).changed).toEqual(["secretRequests", "turns"]);
+    again.close();
+  });
+
+  test("a cursor this node can't answer for (not one it sealed: another boot's, one altered) is no cursor: a fresh hello", async () => {
+    const phone = await pair("phone-resume-4", CLIENT_DEFAULT_SCOPES);
+    const first = await phone.listen();
+    const left = await settled(first);
+    first.close();
+    // Opaque: it says nothing of where things stand, in the one form a cursor takes.
+    expect(left).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    const altered = `${left.slice(0, 5)}${left[5] === "A" ? "B" : "A"}${left.slice(6)}`;
+    for (const since of ["A".repeat(22), altered, "r3st4rt3d.0"]) {
+      const again = await phone.listen(since);
+      expect(again.status).toBe(200);
+      const hello = await helloOf(again);
+      expect(hello.changed).toBeUndefined();
+      expect(hello.at).toBe(left);
+      again.close();
+    }
+  });
+
+  test("a since that isn't a cursor is treated as none (a fresh hello), never an error: the stream still opens", async () => {
+    const phone = await pair("phone-resume-5", CLIENT_DEFAULT_SCOPES);
+    const first = await phone.listen();
+    const left = await settled(first);
+    first.close();
+    // Empty, too long, a character outside the cursor's, one escaped, two of them, and one beside another parameter.
+    const paths = ["/api/live?since=", `/api/live?since=${"a".repeat(65)}`, "/api/live?since=a!b", "/api/live?since=a%20b", "/api/live?since=a%2Eb", `/api/live?since=${left}&since=${left}`];
+    for (const path of paths) {
+      const again = await phone.listenAt(path);
+      expect([path, again.status]).toEqual([path, 200]);
+      expect([path, (await helloOf(again)).changed]).toEqual([path, undefined]);
+      again.close();
+    }
+    // (A parameter it doesn't know is no reason to refuse: it is left alone.)
+    const beside = await phone.listenAt(`/api/live?since=${left}&later=1`);
+    expect((await helloOf(beside)).changed).toEqual([]);
+    beside.close();
+  });
+
+  test("a resumed hello names only what the device may read: one without the vault's scope is never told of a key asked for", async () => {
+    const phone = await pair("phone-resume-6", CLIENT_DEFAULT_SCOPES);
+    const reader = await pair("reader-resume-6", ["mind:read"]);
+    const full = await phone.listen();
+    const narrow = await reader.listen();
+    const [fullLeft, narrowLeft] = [await settled(full), await settled(narrow)];
+    await letGo(full);
+    await letGo(narrow);
+    await admin("requestSecret", { name: "scoped-token", purpose: "To check whom a resumed stream names it to." });
+    // A key asked for moves nothing the reader may read: it stands where it stood.
+    const fresh = await reader.listen();
+    expect((await helloOf(fresh)).at).toBe(narrowLeft);
+    fresh.close();
+    const phoneFresh = await phone.listen();
+    const phoneAt = (await helloOf(phoneFresh)).at!;
+    expect(phoneAt).not.toBe(fullLeft);
+    phoneFresh.close();
+    // The phone's cursor stands past the reader's: no cursor to the reader, so asking from it tells the reader nothing.
+    const past = await reader.listen(phoneAt);
+    expect((await helloOf(past)).changed).toBeUndefined();
+    past.close();
+    await admin("remember", { text: "The release goes out on Thursdays." });
+    const fullAgain = await phone.listen(fullLeft);
+    const narrowAgain = await reader.listen(narrowLeft);
+    expect((await helloOf(fullAgain)).changed).toEqual(["secretRequests", "aboutYou"]);
+    expect((await helloOf(narrowAgain)).changed).toEqual(["aboutYou"]);
+    fullAgain.close();
+    narrowAgain.close();
   });
 
   test("the node stopping ends every stream with a word, so a device opens it again when it is back", async () => {

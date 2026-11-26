@@ -127,6 +127,130 @@ describe("what changed", () => {
   });
 });
 
+describe("where a stream stood: the cursor it is opened again from", () => {
+  test("each change comes with where things stand after it; resumed from there with nothing changed since, nothing changed", async () => {
+    const s = stamps();
+    const live = new LiveChanges(s.table, { everyMs: 60_000, soonMs: 1 });
+    const told: [LiveTopic[], string][] = [];
+    const stop = live.subscribe((topics, at) => told.push([topics, at]));
+    const opened = live.at();
+    expect(live.since(opened)).toEqual([]);
+    s.set("actions", "1");
+    live.poke();
+    await Bun.sleep(15);
+    expect(told.map(([topics]) => topics)).toEqual([["actions"]]);
+    const after = told[0]![1];
+    expect(after).toBe(live.at());
+    expect(after).not.toBe(opened);
+    expect(live.since(opened)).toEqual(["actions"]);
+    // Read again with nothing moved: it stands where it stood.
+    live.poke();
+    await Bun.sleep(15);
+    expect(live.at()).toBe(after);
+    expect(live.since(after)).toEqual([]);
+    stop();
+  });
+
+  test("resumed from further back, it is told what moved since then, each once, and only that", async () => {
+    const s = stamps();
+    const live = new LiveChanges(s.table, { everyMs: 60_000, soonMs: 1 });
+    const stop = live.subscribe(() => {});
+    const before = live.at();
+    s.set("actions", "1");
+    live.poke();
+    await Bun.sleep(15);
+    const between = live.at();
+    s.set("notices", "1");
+    s.set("actions", "2");
+    live.poke();
+    await Bun.sleep(15);
+    expect(live.since(before)).toEqual(["actions", "notices"]);
+    expect(live.since(between)).toEqual(["actions", "notices"]);
+    s.set("team", "9");
+    live.poke();
+    await Bun.sleep(15);
+    expect(live.since(between)).toEqual(["actions", "notices", "team"]);
+    expect(live.since(live.at())).toEqual([]);
+    stop();
+  });
+
+  test("what moved while nobody listened (nothing read then) counts once someone listens again", async () => {
+    const s = stamps();
+    const live = new LiveChanges(s.table, { everyMs: 10, soonMs: 1 });
+    const stop = live.subscribe(() => {});
+    const left = live.at();
+    stop();
+    const reads = s.reads.n;
+    s.set("team", "7");
+    s.set("fleet", "2");
+    // Something moved back as it was: no change at all.
+    s.set("notices", "1");
+    s.set("notices", "0");
+    await Bun.sleep(40);
+    expect(s.reads.n).toBe(reads);
+    const again = live.subscribe(() => {});
+    expect(live.since(left)).toEqual(["fleet", "team"]);
+    expect(live.since(live.at())).toEqual([]);
+    again();
+    // And with nothing moved while nobody listened, nothing more moves.
+    const quiet = live.at();
+    live.subscribe(() => {})();
+    expect(live.at()).toBe(quiet);
+  });
+
+  test("a reader's cursor moves only with what it may read and says nothing of the rest, nor does one past it", async () => {
+    const s = stamps();
+    const live = new LiveChanges(s.table, { everyMs: 60_000, soonMs: 1 });
+    const narrow: LiveTopic[] = ["actions", "notices"];
+    const told: string[] = [];
+    const stop = live.subscribe((_, at) => told.push(at));
+    const left = live.at(narrow);
+    s.set("secretRequests", "1");
+    live.poke();
+    await Bun.sleep(15);
+    s.set("pairings", "1");
+    live.poke();
+    await Bun.sleep(15);
+    // Two moves of what it may not read: it stands where it stood, and nothing it reads changed.
+    expect(live.at(narrow)).toBe(left);
+    expect(live.since(left, narrow)).toEqual([]);
+    // A reader of everything's cursor stands past it: no cursor to it, so asking from one tells it nothing.
+    expect(live.since(live.at(), narrow)).toBeNull();
+    expect(live.since(live.at())).toEqual([]);
+    expect(live.since(left)).toEqual(["pairings", "secretRequests"]);
+    s.set("notices", "1");
+    live.poke();
+    await Bun.sleep(15);
+    const now = live.at(narrow);
+    expect(now).not.toBe(left);
+    expect(told.at(-1)).toBe(now);
+    expect(live.since(left, narrow)).toEqual(["notices"]);
+    // What it is given says neither where things stand nor how far they moved: a sealed block, one length for any count.
+    expect([left, now, live.at()].every((cursor) => /^[A-Za-z0-9_-]{22}$/.test(cursor))).toBe(true);
+    stop();
+  });
+
+  test("a cursor it can't answer for is no cursor: another boot's, one altered, or one that isn't one", async () => {
+    const s = stamps();
+    const live = new LiveChanges(s.table, { everyMs: 60_000, soonMs: 1 });
+    const other = new LiveChanges(s.table, { everyMs: 60_000, soonMs: 1 });
+    const stop = live.subscribe(() => {});
+    const first = live.at();
+    s.set("runs", "1");
+    live.poke();
+    await Bun.sleep(15);
+    expect(live.since(first)).toEqual(["runs"]);
+    // Another boot's (the node started again): each tracker seals under its own key.
+    expect(other.at()).not.toBe(first);
+    expect(other.since(first)).toBeNull();
+    expect(live.since(other.at())).toBeNull();
+    // Altered by a character, spelled another way, or not one at all.
+    const altered = `${first.slice(0, 5)}${first[5] === "A" ? "B" : "A"}${first.slice(6)}`;
+    for (const cursor of [null, undefined, "", "b00t.0", altered, `${first}A`, first.slice(1), "A".repeat(22), `${first.slice(0, 21)}${first[21] === "A" ? "B" : "A"}`]) expect([cursor, live.since(cursor)]).toEqual([cursor, null]);
+    stop();
+  });
+});
+
 describe("the mind's part", () => {
   test("each event kind touches what shows it, and the ledger nothing", () => {
     expect(mindTopics("action.requested")).toEqual(["actions"]);

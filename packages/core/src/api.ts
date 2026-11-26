@@ -25,6 +25,7 @@ import { type ArchiveContextEntry, ArchiveBudgetInput, ArchiveDeleteInput, Archi
 import { RunEvidenceInput, SkillApproveInput, SkillId, SkillLockInput, SkillRetireInput, SkillsBudgetInput, SkillWriteInput } from "./skills-input.ts";
 import { QUESTION_ID, QUESTION_LIMITS } from "./questions.ts";
 import { ApplePushInput, ApplePushKeyInput, LiveActivityInput, NotifyDeviceRef, NotifyPrefsInput, PushSubscriptionInput } from "./notify-input.ts";
+import { LIVE_CURSOR } from "./live.ts";
 
 /*
  * The node HTTP API contract, shared by the daemon, the CLI and the PWA.
@@ -340,6 +341,13 @@ export interface ScreenView {
   height: number;
 }
 
+/**
+ * Where the live stream stood (core's live.ts): the `at` of its hello and each change, and the `since` it is opened
+ * again from (GET /api/live?since=<cursor>). The node reads `since` through this alone; one that isn't a cursor is no
+ * cursor (a fresh hello), never a refusal.
+ */
+export const LiveCursor = z.string().regex(LIVE_CURSOR);
+
 export const routes = {
   team: { method: "GET", path: "/api/team", scope: "chat", input: null },
   saveAgent: { method: "POST", path: "/api/team/agents", scope: "fleet:admin", input: AgentInput },
@@ -541,7 +549,8 @@ export const routes = {
   /**
    * What changed, as it changes (core's live.ts): one answer that stays open, server-sent events naming the routes whose
    * answers changed, never what they hold, each only to a device that holds that route's scope. Your devices' alone; it
-   * ends when the device is revoked or its scopes change, and when the node stops.
+   * ends when the device is revoked or its scopes change, and when the node stops. Opened again from where it left off
+   * with `?since=<cursor>` (LiveCursor, above), its hello says what changed since.
    */
   live: { method: "GET", path: "/api/live", scope: "mind:read", input: null },
   fleet: { method: "GET", path: "/api/fleet", scope: "mind:read", input: null },
