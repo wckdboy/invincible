@@ -99,6 +99,21 @@ export interface FabricTools {
  * cures), 2 s; busy or draining (OVERLOADED, GOING_AWAY), 5 s; a node from before the fabric (UNKNOWN_TOOL), a minute.
  */
 const RETRY_MS = { first: 5_000, max: 60_000 } as const;
+
+/**
+ * Whether a call that failed may have reached its peer, and so may have run there: then it is never sent again another
+ * way. Not reached: what surely never left (this node's sidecar couldn't take it or refused it, or couldn't connect, or
+ * the peer was going away), and what the peer's door refused before running anything (NOT_HERE's codes). The sidecar says
+ * `unavailable` both for a peer it couldn't reach and for a connection lost mid-call; its words tell them apart (Q-AMP's
+ * errors: "connect: …", "connect timed out", "peer is going away", "task ids exhausted…"), and any it doesn't say
+ * plainly counts as reached: a change of words can cost a fallback, never a second run.
+ */
+function mayHaveRun(error: SidecarError): boolean {
+  if (error.kind === "unsent" || error.kind === "invalid") return false;
+  if (error.kind === "remote") return error.code === null || !NOT_HERE.has(error.code);
+  if (error.kind === "unavailable") return !/^(connect: |connect timed out$|peer is going away$|task ids exhausted)/.test(error.message);
+  return true;
+}
 const NOT_HERE = new Map<number, number>([
   [3, 2_000],
   [6, 5_000],
@@ -414,12 +429,12 @@ export class Fabric implements SyncTransport {
    * Calls a peer's tool over Q-AMP: its value, or why it couldn't be had this way (the caller then goes over HTTP). A
    * peer that answered with an error of its own throws it, as an HTTPS peer's error would be.
    */
-  async call(peer: Device, tool: string, args: unknown, opts: CallOptions & { timeoutMs?: number; chunks?: (chunk: Chunk) => void } = {}): Promise<{ value: unknown } | { unavailable: string }> {
+  async call(peer: Device, tool: string, args: unknown, opts: CallOptions & { timeoutMs?: number; chunks?: (chunk: Chunk) => void } = {}): Promise<{ value: unknown } | { unavailable: string; reached: boolean }> {
     const why = this.unusable(peer);
     if (why) {
       // (Its own path is said only once it has been tried: a peer with no endpoint is simply on HTTPS.)
       if (!this.peerEndpoint(peer) || !this.deps.sidecar.client?.open) this.paths.set(peer.id, { path: "https", why, at: this.now() });
-      return { unavailable: why };
+      return { unavailable: why, reached: false };
     }
     const client = this.deps.sidecar.client!;
     const endpoint = this.peerEndpoint(peer)!;
@@ -447,7 +462,7 @@ export class Fabric implements SyncTransport {
       }
       if (error.kind === "cancelled") throw error;
       const refused = error.kind === "remote" && error.code !== null ? (NOT_HERE.get(error.code) ?? null) : null;
-      return this.notHere(peer.id, `Q-AMP to ${peer.name} failed: ${plainLine(error.message).slice(0, 160)}`, refused);
+      return { ...this.notHere(peer.id, `Q-AMP to ${peer.name} failed: ${plainLine(error.message).slice(0, 160)}`, refused), reached: mayHaveRun(error) };
     }
   }
 
@@ -464,9 +479,17 @@ export class Fabric implements SyncTransport {
   }
 
   /** A route forwarded to a peer over Q-AMP: its status and JSON answer, or null when it must go over HTTP. */
+  /**
+   * A request of this node's, forwarded to a peer's route over Q-AMP: its answer, or null when it never reached the peer
+   * (it goes over HTTP then). One that may have reached it throws: a route may not be safe to run twice (execSandbox,
+   * destroySandbox, a write), so it is never sent again another way.
+   */
   async forward(peer: Device, path: string, body: Record<string, unknown>, timeoutMs: number): Promise<{ status: number; body: unknown } | null> {
     const answer = await this.call(peer, FABRIC.forward, await this.seal(path, body), { timeoutMs });
-    if (!("value" in answer)) return null;
+    if (!("value" in answer)) {
+      if (answer.reached) throw new Error(`${answer.unavailable}, after it may have reached ${plainLine(peer.name)}: it may have run there, so it isn't sent again`);
+      return null;
+    }
     const value = answer.value as { status?: unknown; body?: unknown };
     return { status: typeof value?.status === "number" ? value.status : 502, body: value?.body ?? null };
   }

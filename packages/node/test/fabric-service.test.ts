@@ -50,7 +50,7 @@ describe("when Q-AMP is tried again", () => {
     const now = { t: 1_000_000 };
     const { fabric } = fabricWith(() => Promise.reject(new SidecarError("remote", "remote error UNAUTHORIZED: not one of its fleet's keys", 3)), now);
     for (let i = 0; i < 4; i++) {
-      expect(await fabric.call(peer, "invincible/link/sync", {})).toEqual({ unavailable: expect.stringContaining("UNAUTHORIZED") });
+      expect(await fabric.call(peer, "invincible/link/sync", {})).toEqual({ unavailable: expect.stringContaining("UNAUTHORIZED"), reached: false });
       expect(fabric.pathOf(peer.id)?.path).toBe("https");
       expect(fabric.unusable(peer)).toMatch(/tried again in 2 s/);
       now.t += 2_001;

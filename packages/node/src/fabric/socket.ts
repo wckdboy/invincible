@@ -47,7 +47,9 @@ export async function within<T, U>(work: Promise<T>, ms: number, late: () => U |
   }
 }
 
-export type SidecarErrorKind = "remote" | "cancelled" | "deadline" | "unavailable" | "invalid" | "internal" | "closed";
+/** The sidecar's kinds (SIDECAR.md), and this node's own: `closed`, its socket to the sidecar is; `unsent`, a call never left
+ * this node (the sidecar's socket couldn't take it). */
+export type SidecarErrorKind = "remote" | "cancelled" | "deadline" | "unavailable" | "invalid" | "internal" | "closed" | "unsent";
 
 /** A call that ended without a result, or a request the sidecar refused. `code` is the peer's Q-AMP error code (SPEC 5.5). */
 export class SidecarError extends Error {
@@ -667,7 +669,7 @@ export class SidecarClient {
       } catch (error) {
         this.calls.delete(id);
         state.done = true;
-        reject(error instanceof SidecarError ? new SidecarError("unavailable", error.message) : (error as Error));
+        reject(error instanceof SidecarError ? new SidecarError("unsent", error.message) : (error as Error));
         state.stream.end();
       }
       opts.signal?.addEventListener("abort", cancel, { once: true });
