@@ -47,7 +47,7 @@ export function openReadOnly(path: string): Database {
 
 function logged(path: string): Database {
   const [wal, shm] = [`${path}-wal`, `${path}-shm`];
-  if (existsSync(wal) && statSync(wal).size > 0 && !existsSync(shm)) {
+  if (sizeOf(wal) > 0 && !existsSync(shm)) {
     throw new ImportError(`${basename(path)} has pages in its write-ahead log but no index beside it, and making one would write in that home: start and stop its node once, then import again`);
   }
   const mode = existsSync(wal) && existsSync(shm) ? "mode=ro&readonly_shm=1" : "immutable=1";
@@ -69,9 +69,15 @@ function logged(path: string): Database {
 const TRIES = 10;
 const APART_MS = 50;
 
+/**
+ * A file's size in one look, 0 when it isn't there: a journal or log asked first whether it is there and then how big,
+ * could go between the two (the write it held ended), and its stat threw ENOENT.
+ */
+const sizeOf = (path: string): number => statSync(path, { throwIfNoEntry: false })?.size ?? 0;
+
 function copied(path: string): Database {
   const journal = `${path}-journal`;
-  const writing = () => existsSync(journal) && statSync(journal).size > 0;
+  const writing = () => sizeOf(journal) > 0;
   let why = "it kept changing while it was read";
   for (let attempt = 0; attempt < TRIES; attempt++) {
     if (attempt) Bun.sleepSync(APART_MS * attempt);
