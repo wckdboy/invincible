@@ -172,10 +172,10 @@ final class ShotsTests: XCTestCase {
         }
     }
 
-    /// The app started afresh in a look and paired, on Home.
+    /// The app started afresh in a look and paired, on Home (openHome starts it).
     @MainActor
     private func home(_ app: XCUIApplication, _ look: Look, _ node: DevNode) throws {
-        launch(app, look)
+        dress(app, look)
         try app.openHome(node)
     }
 
@@ -258,12 +258,17 @@ final class ShotsTests: XCTestCase {
         add(attachment)
     }
 
-    /// The app started afresh in a look: its appearance, and its text size.
+    /// The look the app starts in: its appearance, and its text size.
     @MainActor
-    private func launch(_ app: XCUIApplication, _ look: Look) {
-        app.terminate()
+    private func dress(_ app: XCUIApplication, _ look: Look) {
         if !appearanceGiven { XCUIDevice.shared.appearance = look.dark ? .dark : .light }
         app.launchArguments = look.size.map { ["-UIPreferredContentSizeCategoryName", $0] } ?? []
+    }
+
+    /// The app started afresh in a look (launch ends a running one first).
+    @MainActor
+    private func launch(_ app: XCUIApplication, _ look: Look) {
+        dress(app, look)
         app.launch()
     }
 

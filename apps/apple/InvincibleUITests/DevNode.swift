@@ -110,10 +110,13 @@ extension XCUIApplication {
         return Int(label[range].prefix { $0.isNumber })
     }
 
-    /// Paired with the dev node, on Home: joined through the app's own Join screen the first time (the dev node lets the
-    /// app's request in by itself), Home's header at once every time after.
+    /// Paired with the dev node, on Home, the app started afresh: joined through the app's own Join screen the first time
+    /// (the dev node lets the app's request in by itself), Home's header at once every time after.
     func openHome(_ node: DevNode, timeout: TimeInterval = 60) throws {
-        if state != .runningForeground { launch() }
+        // Afresh whatever ran before (launch ends a running app first): one left on another screen by the test before is
+        // neither Home nor the Join screen, and was waited on for the whole timeout (26 November 2026: PerfTests, after
+        // the Settings NavTests left open). StartTests holds it.
+        launch()
         // (A field of several lines: a text view to the tests.)
         let field = descendants(matching: .any)["invite-link"]
         let deadline = Date().addingTimeInterval(timeout)
