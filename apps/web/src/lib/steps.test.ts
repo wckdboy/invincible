@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTrailEntry } from "@invincible/core/team";
-import { commandKind, costWords, factsOfProof, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, proofSeal, readTrailLine, workedLine, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
+import { because, commandKind, costWords, factsOfProof, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, proofSeal, readTrailLine, saidBesideProof, workedLine, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
 
 /* A task's trail as the node writes it (team-runtime.ts progress()), its lines in the order they happened. */
 const T0 = 1_764_000_000_000;
@@ -209,8 +209,21 @@ describe("the verdict, in words that follow the proof", () => {
     expect(proofSeal(failed, factsOfRecord(failed.record), "Its gate failed at the end")).toEqual({ word: "Failed · gate 2", by: "Its gate failed at the end", passed: false });
     const gave = { status: "failed" as const, verified: false, error: "gave-up", record: record({ before: [1], after: [], review: null, sameModel: false }, "gave-up") };
     expect(proofSeal(gave, factsOfRecord(gave.record), "")).toEqual({ word: "Gave up", by: "its gates or the review did not pass", passed: false });
+    // Its why, never its verdict's word again (the iPhone's, I10): "Gave up · It gave up." said it twice.
+    expect(proofSeal(gave, factsOfRecord(gave.record), "It gave up.")).toEqual({ word: "Gave up", by: "", passed: false });
     // In hand, there is no seal.
     expect(proofSeal({ status: "running", verified: false, error: null, record: undefined }, null, "")).toBeNull();
+  });
+
+  test("nothing said twice beside the proof (the iPhone's TaskCard, I10): an agent's bare claim, and its verdict's word again", () => {
+    for (const bare of ["Verified.", "done", " Proven! ", "PASSED", "Completed.", "OK"]) expect([bare, saidBesideProof(bare)]).toEqual([bare, null]);
+    expect(saidBesideProof("The importer reads ISO 8601 dates; four new tests cover both.")).toBe("The importer reads ISO 8601 dates; four new tests cover both.");
+    expect([saidBesideProof(""), saidBesideProof("   "), saidBesideProof(null)]).toEqual([null, null, null]);
+    expect(because("It gave up.", "Gave up")).toBeNull();
+    expect(because("Not verified: its gates prove nothing", "Not verified")).toBe("Its gates prove nothing");
+    expect(because("Not verified · the review sent it back", "Not verified")).toBe("The review sent it back");
+    expect(because("The gate needs a Postgres this VM does not have", "Failed · gate 1")).toBe("The gate needs a Postgres this VM does not have");
+    expect([because("", "Gave up"), because(null, "Gave up")]).toEqual([null, null]);
   });
 
   test("failed at a gate names the first that failed at the end; sent back, gave up, stopped say so", () => {

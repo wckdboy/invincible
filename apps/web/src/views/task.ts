@@ -9,7 +9,7 @@ import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { agentOfCaller } from "../lib/roster.ts";
-import { costWords, factsOfProof, factsOfRecord, type GateRow, judgedWith, liveStep, type Proof, proofOf, proofSeal, type StepGroup, stepGroups, summaryWords, workedLine, workSummary } from "../lib/steps.ts";
+import { costWords, factsOfProof, factsOfRecord, type GateRow, judgedWith, liveStep, type Proof, proofOf, proofSeal, saidBesideProof, type StepGroup, stepGroups, summaryWords, workedLine, workSummary } from "../lib/steps.ts";
 import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../lib/steer.ts";
 import { sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
 import { teamSpeaker } from "../lib/team.ts";
@@ -376,13 +376,13 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const judged = judgedLine(judgedWith(trail.entries), task.steers ?? []);
     return h(
       "section",
-      { class: "proof", "data-verdict": verified ? "verified" : "failed", "aria-label": `${seal.word}: ${seal.by}` },
+      { class: "proof", "data-verdict": verified ? "verified" : "failed", "aria-label": seal.by ? `${seal.word}: ${seal.by}` : seal.word },
       h(
         "header",
         { class: "proof-seal" },
         h("span", { class: "proof-mark", "aria-hidden": "true" }, icon(seal.passed ? "check" : "x", { size: 14 })),
         // The verdict that follows the proof (the iPhone's words): never "Verified" above a warning that its gates proved nothing.
-        h("div", {}, h("strong", {}, seal.word), h("span", { class: "proof-by" }, ` · ${seal.by}`)),
+        h("div", {}, h("strong", {}, seal.word), seal.by ? h("span", { class: "proof-by" }, ` · ${seal.by}`) : null),
       ),
       ...caveats.map((line) => h("p", { class: "proof-caveat" }, icon("alert", { size: 13 }), h("span", {}, line))),
       proof.gates.length
@@ -447,7 +447,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const proof = proofOf(task, entries);
     const running = task.status === "running";
     const asks = running ? ctx.live.actions.value.filter((action) => isWaiting(action) && agentOfCaller(action.by) === task.assignee) : [];
-    const said = taskEnd(task)?.said ?? null;
+    // (What it said, unless no more than a verdict the proof says: never "Verified." beside it.)
+    const said = saidBesideProof(taskEnd(task)?.said);
     const talk = conversationOf(room, task);
     const dependents = n.snapshot.tasks.filter((other) => other.dependsOn.includes(task.id));
     const waitsFor = task.status === "queued" ? task.dependsOn.map((dep) => n.snapshot.tasks.find((other) => other.id === dep)).filter((other): other is TeamTask => Boolean(other && !(other.status === "done" && other.verified))) : [];

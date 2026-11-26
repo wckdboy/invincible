@@ -478,7 +478,39 @@ export function proofSeal(task: Pick<TeamTask, "status" | "verified" | "record" 
   if (!verdict) return null;
   if (verdict.verdict === "proven") return { word: verdict.word, by: "a gate that failed before the work passes now, and a reviewer that didn't write it passed it", passed: true };
   if (verdict.verdict === "reviewed") return { word: verdict.word, by: "its reviewer passed it; what its gates can't show is said below", passed: true };
-  return { word: verdict.word, by: why || "its gates or the review did not pass", passed: false };
+  // Its why, beside its word, never that word again ("" where the why says only the word).
+  return { word: verdict.word, by: why ? (because(why, verdict.word) ?? "") : "its gates or the review did not pass", passed: false };
+}
+
+/** The words an agent may end on that only claim what its proof says ("Verified.", "Done."): beside the proof they would
+ * say the verdict twice, and in the agent's voice, so a thread leaves them out (the iPhone's TaskCard.saidBesideProof). */
+const BARE_CLAIMS = new Set(["verified", "done", "proven", "passed", "pass", "complete", "completed", "finished", "ok", "success", "succeeded"]);
+/** Its letters alone, lower case: no punctuation or space at either end. */
+const plainly = (text: string): string => text.toLowerCase().replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "");
+
+/** What the agent said, as a thread shows it under its name beside the proof: its own account as it said it, or nothing
+ * where it said no more than a verdict (I10: the verdict is the proof's alone). */
+export function saidBesideProof(said: string | null | undefined): string | null {
+  const trimmed = (said ?? "").trim();
+  if (!trimmed) return null;
+  return BARE_CLAIMS.has(plainly(trimmed)) ? null : trimmed;
+}
+
+/** Why it ended as it did, beside its verdict's word, never that word again (the iPhone's TaskCard.because): "It gave
+ * up." beside Gave up says nothing; "Not verified: its gates…" beside Not verified says only the rest. */
+export function because(why: string | null | undefined, verdict: string): string | null {
+  const text = (why ?? "").trim();
+  if (!text) return null;
+  let said = plainly(text);
+  if (said.startsWith("it ")) said = said.slice(3);
+  if (said === plainly(verdict)) return null;
+  for (const joint of [":", " ·", " –", " —"]) {
+    if (text.toLowerCase().startsWith(verdict.toLowerCase() + joint)) {
+      const rest = text.slice(verdict.length + joint.length).trim();
+      return rest ? rest[0]!.toUpperCase() + rest.slice(1) : null;
+    }
+  }
+  return text;
 }
 
 /**

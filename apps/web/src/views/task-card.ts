@@ -1,5 +1,6 @@
 import type { TeamCheckpoint, TeamTask } from "@invincible/core/team";
 import { taskRecordFacts } from "@invincible/core/team-record";
+import { saidBesideProof } from "../lib/steps.ts";
 import type { Price } from "@invincible/core/spend";
 import { type Api, isAbort } from "../api.ts";
 import type { Ctx } from "../context.ts";
@@ -197,7 +198,8 @@ export function taskCard(ctx: Ctx, task: TeamTask, o: CardOptions): HTMLElement 
     o.trail?.el ?? null,
     // Why it wasn't verified, as the node said it; a stop of your own is said quietly.
     end?.why ? callout(task.status === "failed" ? "danger" : task.status === "stopped" ? "quiet" : "warn", end.why) : null,
-    end?.said ? h("p", { class: "task-said" }, end.said) : null,
+    // (What it said, unless no more than a verdict its badge says: never "Verified." beside it.)
+    saidBesideProof(end?.said) ? h("p", { class: "task-said" }, saidBesideProof(end?.said)) : null,
     // What its run came to, as the runner counted it: its time, commands, tokens, and money at your prices.
     task.record ? h("p", { class: "tiny subtle tnum", title: "Counted by the runner as the task ran" }, taskRecordFacts(task.record, o.prices ?? {}).join(" · ")) : null,
     // What it changed in its repository, kept to read and to ship (a pull request from Artifacts, on your word).
