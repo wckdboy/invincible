@@ -54,7 +54,7 @@ answered and its fixes reviewed again.
 |---|---|---|---|
 | The ledger's sync (a pull, every 5 s) | `invincible/link/sync` | `POST /link/sync`, signed | `peers` (PeerStatus `path`, `fallback`), `invincible status`, the Doctor's `mind.sync.<peer>`, the fleet's status line in the web app |
 | Pushes (each event as it is written) | `invincible/link/push` | `POST /link/push`, signed | as above |
-| Forwarded work (every route `forward` sends: a sandbox on another node, its commands, its files' listing, its spend) | `invincible/link/forward`, the route and its body | the same route, signed | as above |
+| Forwarded work (every route `forward` sends: a sandbox on another node, its commands, its files' listing, its spend) | `invincible/link/forward`, the route and its body | the same route, signed, only when the call never reached the peer | as above |
 | A task handed to another node's agents | `invincible/task/hand` | none: refused, with why | the hand-off (`path`) |
 | A run's calls back to the tools its task was given | `invincible/agent/<tool>`, under the run's own chain | none | the run's answer |
 
@@ -64,11 +64,11 @@ answered and its fixes reviewed again.
   whose signed profile names it with that key's proof, read afresh on every call. A key nobody names, a key two
   profiles name, or a key a revoked node ever held is refused, whoever names it after.
 - **Each call is its node's own word.** Every sync, push, forwarded route and hand-off is a `LinkCall`: its path, its
-  body as the JSON text that was signed, and the sending node's device signature over them, made and checked exactly as
-  its HTTPS request's (the same time window, nonce cache and body digest), with the method `QAMP`, so a signature made
-  for either path never passes on the other. It must be the transport key's own node's, active, fresh and for the
-  tool's path. A forwarded route then runs through the same door as over HTTP (the `fabric` listener), for that
-  node's principal.
+  body as the JSON text that was signed, and the sending node's device signature over them, made and checked as its
+  HTTPS request's (the same time window and body digest, and a nonce cache of the fabric's own, so a call sent twice is
+  refused the second time), with the method `QAMP`, so a signature made for either path never passes on the other. It
+  must be the transport key's own node's, active, fresh and for the tool's path. A forwarded route then runs through
+  the same door as over HTTP (the `fabric` listener), for that node's principal.
 - **When Q-AMP is tried again after it wasn't had.** It waits by why:
   - refused (`UNAUTHORIZED`: the peer doesn't know this node's key yet; its next pull of this node's profile cures it), 2 s;
   - busy or draining, 5 s;
@@ -77,9 +77,22 @@ answered and its fixes reviewed again.
 
   An error the peer answered with over Q-AMP is its answer, not a reason to leave Q-AMP.
 - **Never in clear.** The fallback is plain HTTP with signed requests, said as HTTP everywhere (the API's `path` keeps
-  its value `https`). To a peer that speaks Q-AMP, while this node runs its sidecar, it is refused off the tailnet and
-  this machine (a tailnet address or MagicDNS name, or loopback): the link waits for Q-AMP and says why. On the
-  tailnet, a peer that speaks Q-AMP and drops to HTTP raises a notice (the Doctor's `mind.sync.<peer>`).
+  its value `https`). To a peer that speaks Q-AMP, while this node's fabric is on, it is refused off the tailnet and
+  this machine: the link waits for Q-AMP and says why. "On" is the node's setting, whatever its sidecar's state: one
+  that can't start for a fault here (no binary, a key it can't read, a socket directory that isn't private) is
+  refused too, and its Doctor says so as a line that needs you. "The tailnet" is an address in RFC 6598's shared
+  range (all of it: carriers use the same range for their NAT), Tailscale's IPv6 range, or a MagicDNS name; "this
+  machine" is loopback. On the tailnet, a peer that speaks Q-AMP and drops to HTTP raises a notice (the Doctor's
+  `mind.sync.<peer>`).
+- **Never twice.** A forward goes over HTTP only when its Q-AMP call never reached the peer: this node's sidecar
+  couldn't take it or refused it, it couldn't connect, the peer was going away, or the peer's door refused it before
+  running anything. Any other failure (a connection lost mid-call, the peer gone silent, its deadline passed) fails
+  the forward, saying it may have run there: a route may not be safe to run twice (`execSandbox`, `destroySandbox`,
+  a write). The sidecar says `unavailable` both for a peer it couldn't reach and for a connection lost mid-call, and
+  only its words tell them apart, so what it doesn't say plainly counts as reached. The link's sync and push are safe
+  to send again, and fall back after any failure.
+- **The same scopes either way.** A pull needs `mind:read` of its node and a push `mind:write`, over Q-AMP and over
+  HTTP alike (a full node holds every scope; a limited node, what it was given).
 
 ## Agents across nodes: the hand-off
 
@@ -96,15 +109,26 @@ transport keys carries all of it:
    - **Your grant**, given once for the pair: `invincible fabric grant <from> <to> --budget <usd a day> [--agents <id>,…]
      [--tools fleet,…]` (the `grantHandoffs` route; `fabric grants`, `fabric revoke <from> <to>`). It is a
      `handoff.granted` event in the ledger, your word alone, recorded as rules and standing orders are: every replica
-     refuses one that isn't your word or wasn't written by a full node, on replay too.
+     refuses one that isn't your word or wasn't written by a full node, on replay too. Each names the full node that
+     recorded it (`invincible fabric grants` says which, and the device of yours it came from), and every grant a node
+     since revoked recorded ends with that node.
    - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of its
      day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among those it
-     names when the hand-off names none.
+     names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever smaller budget
+     it asks for (and keeps), so the day bounds how many there are as well as what they spend.
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node
-     are open there at once (waiting, queued or running). Your grant revoked stops what was handed under it; a node
-     that restarts ends what was handed to it before, as nobody follows it any more.
+     are open there at once (waiting for you, queued or running, and those still waiting their turn to be given). One
+     node's hand-offs are looked at one at a time: each is counted, given and written before the next, so a burst keeps
+     the day's budget and the 8 at once.
+   - **It ends with what it was taken under.** Your grant revoked stops what was handed under it, and so does a grant
+     whose recorder is revoked (below). A node that restarts ends what was handed to it before, as nobody follows it
+     any more: a planned restart (a deploy, an update) ends it as stopped and never takes it up again, and one a crash
+     cut off ends as the node comes back.
+   - **Its gates are bounded.** They are its giver's commands, run in your agent's VM: all of them together get as long
+     as one command may (15 minutes), every round counted, and once that is spent they aren't run and the work isn't
+     done.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:
@@ -177,9 +201,10 @@ transport keys carries all of it:
   - the signature verifies under that node's device key;
   - it is for this node, this hand-off and its nonce, over this goal;
   - its gates begin with the ones asked for (the planner's own, run after them, follow in `proof` unnamed);
-  - it names the task and the run's key it was taken as there (its `accepted`);
-  - it says verified only as its own facts do: done, its end done, every gate passing after, no review asking for
-    more;
+  - it names the task and the run's key it was taken as there (its `accepted`), and one that says verified is refused
+    if this node was never told them;
+  - it says verified only as its own facts do: done, its end done, an exit of 0 after for every gate it names, no review
+    asking for more;
   - its output and error, shown beside the verdict, are the ones it signed (`said`).
 
   A proof that fails any of these is kept as refused, with why, and the hand-off reads "Not proven: its proof didn't
@@ -201,9 +226,11 @@ transport keys carries all of it:
 
 Measured with `bun bench/fabric/measure.ts --qamp <binary> --samples 30`: three nodes in temporary homes, each with
 Q-AMP main's sidecar (`831b845`), on loopback, on an Apple M3 Pro, 26 November 2026. The two Q-AMP columns ran back to
-back on the same binary, the code before the security review's fixes (`04e7c6a`) and after them (`273e83b`), the
+back on the same binary, the code before the security review's fixes (`418b924`) and after them (`f3f46ad`), the
 machine's load average 8.4 over one minute and 23 over five through both. HTTP with signed requests is all there was
-before the fabric. p50s, in ms (10 samples for the hand-offs, 20 for the revocations).
+before the fabric. p50s, in ms (10 samples for the hand-offs, 20 for the revocations). They predate the re-review's
+fixes, which weren't measured again: of those, only N1's turn (one node's hand-offs looked at one at a time, which a
+single hand-off doesn't wait on) and the door's map of keys (N4, cheaper) are on a path measured here.
 
 | | HTTP, signed | Q-AMP, before the review's fixes | Q-AMP, after them |
 |---|---|---|---|
@@ -314,11 +341,14 @@ answered and a Q-AMP release with the sidecar is pinned.
 - **The owner's real pair has never run it:** those nodes run main, where the fabric is dormant. Across a real network
   only two throwaway test nodes have, on the same two machines, and only with the code from before the review's fixes
   (above).
-- **The security review's findings are fixed, each with a failing test first, and not yet reviewed again.** H1 (the
-  owner's grant for hand-offs), M1 (the transport key carries calls alone; L6 with it), L1 to L8, and I1 to I6 where
-  they were cheap. The independent re-review comes before the pin moves.
-- **A full node is still owner-equivalent in the ledger:** one that turned on you can write a grant for hand-offs as your
-  word, as it can a rule. It is a signed event every node shows, and revoking the node ends it.
+- **The re-review's findings are fixed, each with a failing test first, and not yet reviewed again.** The independent
+  re-review of the first fixes (`8da3916`) found them holding, H1 and L5 in part, and found five more (N1 to N5) and six
+  edges (I-a to I-f). Each is fixed on `fabric-2` after `8da3916`; a fresh re-review of those diffs comes before the pin
+  moves.
+- **A full node is owner-equivalent across the fleet, and nothing in the fabric changes that.** One that turned on you
+  can enroll a client of its own, which is you over HTTPS on every node (it can give your agents work there), and it
+  can write itself any grant for hand-offs as your word, as it can a rule. What the fabric adds is a record: each
+  grant names the node that recorded it, and every grant a revoked node recorded ends with it.
 - **The native apps** say nothing yet of hand-offs, their grants, or a task a node handed over (the web app and the CLI
   do); their parity vectors are unchanged.
 - **Q-AMP's side for grants that renew themselves** (holder-driven, in its spec first) isn't built. The giver renews

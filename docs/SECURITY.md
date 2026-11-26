@@ -442,9 +442,12 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   - A key no node names, a key two nodes' profiles both name, or a key a revoked node ever held (in any profile it
     signed) is refused (`UNAUTHORIZED`) before the node reads anything. A claim on a key a node doesn't hold is no
     claim (the review's L6), so no node can take, or block, another's calls by naming its key.
+  - The keys revoked nodes ever held are read once per revocation (again on a rebuild, or when a profile a revoked
+    node signed before arrives late), not on every rebuild of the door's map, so a node that published thousands of
+    profiles before its revocation doesn't stall every door after it (the re-review's N4).
   - Tests: `fabric.e2e.test.ts` (a stranger's key refused at the door; a revoked node refused on its very next call),
     `fabric-service.test.ts` and `fabric-link-auth.test.ts` (a claim without the key's proof, a key two hold, a key
-    nobody names, a revoked node's, and one it held before).
+    nobody names, a revoked node's, and one it held before), `fabric-burned.test.ts` (the reads counted).
 - **The transport key carries calls, not authority** (the review's M1). Every sync, push, forwarded route and hand-off
   carries its node's device signature, made and checked exactly as an HTTPS request's (`verifyRequestSignature`: the
   node's own, active, within 60 s, its nonce never seen before, over the path and the body as signed), with the method
@@ -456,8 +459,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   - Tests: `fabric-link-auth.test.ts` (unsigned, another device's, another tool's path, too old, changed after it was
     signed, sent twice: each refused; a hand-off held to the same), `fabric-sidecar.test.ts` (the keystore, the key
     on stdin of a real process), `fabric.e2e.test.ts` (the same against a real sidecar).
-- **What a node that turned on another can do: only what its grants say.** A full node is owner-equivalent by design
-  (it holds the vault), over HTTPS and over Q-AMP alike; what the fabric adds is held to grants.
+- **What a node that turned on another can do.** A full node is owner-equivalent by design, and the fabric doesn't
+  change that: it holds the vault, it can enroll a client of its own that is you over HTTPS on every node, and it can
+  write itself any grant for hand-offs (the residual, below). What the fabric holds to grants is what runs elsewhere
+  may do:
   - A run elsewhere reaches its giver's tools only under the giver's grant to the run's own key: the read-only tools its
     task was given (`fleet`, `compute`, `place`, `ledger`, your word for agents outside the fleet), for that task alone
     (its policy), while it lives (300 s at a time, renewed, revoked when it ends). The grant's command covers every
@@ -465,23 +470,33 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     node it was handed to.
   - Tests: `fabric-handoff.e2e.test.ts` (with the run's real chain and key, a tool its task wasn't given is refused at
     the giver's door, and the chain for another task at its sidecar; once the task ends nothing answers).
-- **Who may give a node's agents work: you, never another node by itself** (the fabric's security review, H1). Over
-  HTTPS a node may not give agents work at all (`ownerOnly`). Over Q-AMP a hand-off is taken at once only within your
-  grant for that pair of nodes:
+- **Who may give a node's agents work as a node: only you, by your grant** (the fabric's security review, H1). A node's
+  own request over HTTPS may not give agents work at all (`ownerOnly` refuses a node's principal). Over Q-AMP a
+  hand-off is taken at once only within your grant for that pair of nodes:
   - The grant is `handoff.granted`, your word, recorded as rules and standing orders are. Every replica refuses one that
-    isn't your word or wasn't written by a full node, on replay too.
-  - It bounds the agents, the tools and the day's budget (counted by the budgets given, the most each may spend).
+    isn't your word or wasn't written by a full node, on replay too. Each names the full node that recorded it.
+  - It bounds the agents, the tools and the day's budget, counted by the budgets given (the most each may spend), each
+    hand-off at least $0.10 whatever smaller budget it asks for, so the day bounds how many there are too (the
+    re-review's N5). A handed task's gates (its giver's commands, in your agent's VM) get 15 minutes in all, every
+    round counted.
+  - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
+    these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1).
   - Anything else waits on the node that would run it as a proposal that only you approve; its own agent never does,
     whatever it would spend.
   - Either way the task is recorded as the giving node's (`givenBy: node:<id>`), never yours.
-  - At most 8 tasks from one node are open on another at once.
   - A grant revoked stops what was handed under it, and a revocation that lands while a task is being given stops it.
+    So does a grant ending with the node that recorded it (I-f), and a restart: a planned one ends a handed task as
+    stopped and never takes it up again, and one a crash cut off ends as the node comes back (N2).
   - Tests: `fabric-hand-grant.test.ts` (the review's proof of concept, which failed before the fix: a node's hand call
-    made a task as yours, queued at once), `handoff-grants.test.ts` (only your word, any order, a rebuild, an upgrade),
-    `team.test.ts`, `fabric-cli.test.ts`.
-  - **Residual:** a full node that turned on you can write a grant as your word, as it can write a rule: a full node is
-    owner-equivalent in the ledger. It is a signed event every node holds and shows (`invincible fabric grants`), and
-    revoking the node ends it.
+    made a task as yours, queued at once), `fabric-hand-burst.test.ts` and `fabric-hand-burst.e2e.test.ts` (a burst
+    naming no agent: 12 taken against 8, and $36 against a $3 day, before the fix), `fabric-hand-day.test.ts`,
+    `fabric-hand-restart.test.ts`, `fabric-grant-writer.test.ts`, `handoff-grants.test.ts` (only your word, any order,
+    a rebuild, an upgrade, its recorder), `gates.test.ts` and `team-runtime.test.ts` (the gates' bound), `team.test.ts`,
+    `fabric-cli.test.ts`.
+  - **Residual:** a full node that turned on you can write itself a grant as your word, as it can write a rule, and it
+    can enroll a client that is you over HTTPS, which gives your agents work as you do: a full node is owner-equivalent
+    across the fleet. Each grant names the node that recorded it (`invincible fabric grants`), and every grant a node
+    recorded ends when that node is revoked (I-f).
 - **A stolen chain.** A run's chain ends at the transport key of the node its task was handed to, so presented on any
   other connection it binds to nobody (Q-AMP SPEC 9.4 step 8): refused at the giver's sidecar. Re-signed by the run's
   own key to another key, it is refused at the giver's door (only the node the task was handed to). The chain and the
@@ -496,16 +511,18 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
 - **One scope for each tool** (the review's I5). Over Q-AMP a sync needs `mind:read` of its caller, a push
   `mind:write`, a hand-off `fleet:admin` (`FABRIC_SCOPES`), a forwarded route its own route's, and a run's call back its
   tool's, each held by the caller's principal as over HTTP: a full node holds every scope, a limited node what it was
-  given. (Over HTTP, `/link/sync` and `/link/push` take any enrolled node, as before.) Test: `fabric-service.test.ts`.
+  given. Over HTTP, `/link/sync` and `/link/push` ask the same scopes, so a node refused one over Q-AMP isn't let in by
+  the fallback (the re-review's I-e). Tests: `fabric-service.test.ts`, `fabric-link-scopes.test.ts`.
 - **A node that lies about proof.** The node that ran the work signs what it came to (each gate's exit before and
   after, the reviewer's verdict, how it ended) with its own device key, for the hand-off and its nonce, over the goal
   and the gates asked for; the node that handed it on checks the signature, and only then reads the facts for
   "Proven", and keeps it. A node that didn't run the work can't make it look proven: another key's signature, the
   runner's proof of another hand-off, of another goal or other gates, a changed exit, or a revoked node's proof are
   each refused, and the hand-off says "Not proven: its proof didn't check". The proof also names the task and run key
-  it was taken as, says verified only as its own exits and review do, and covers the output and error shown beside it,
-  so a runner can't swap them (the review's I2). Tests: `fabric.test.ts` (each of those), `fabric-handoff.e2e.test.ts`
-  (a runner signing with another key, end to end).
+  it was taken as (one that says verified is refused if the giver was never told them), says verified only with an
+  exit of 0 after for every gate it names and no review asking for more, and covers the output and error shown beside
+  it, so a runner can't swap them (the review's I2, the re-review's I-d). Tests: `fabric.test.ts` (each of those),
+  `fabric-handoff.e2e.test.ts` (a runner signing with another key, end to end).
 - **Revocation.** A node revoked is refused from its very next call wherever the revocation has reached (a push: on
   loopback about 25 ms over Q-AMP, 32 ms over HTTP). Its calls under way at that node end, and their work stops with
   them, not only their answers (a forwarded command's own signal aborts; the review's I3). A revocation that lands
@@ -529,14 +546,19 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   or a day. It listens on the node's advertised address alone: every way of writing every interface makes it dial out
   only. Its socket's directory is the node's own (`<home>/run`, or one it makes, made 0700); a directory it didn't make
   must be this user's with mode 0700 already, so a socket put in a shared one (`/tmp`, `/run`) is refused, never made
-  private by changing it (the review's L4). Tests: `fabric-sidecar.test.ts`.
+  private by changing it (the review's L4). It is looked at before anything is changed, so a `<home>/run` that is a
+  symbolic link is refused and its target never chmodded (the re-review's I-a). Tests: `fabric-sidecar.test.ts`.
 - **Another node's words are plain text in your terminal** (the review's L5). What `invincible hand` and `invincible
   handed` print of a hand-off (its trail, its agent's name, its error, why it waits, the refusal's why) goes through
   core's `plainLine`, as the team CLI and `inv` do, so no escape sequence a runner or its agent wrote (a clipboard
-  write, a line rewritten to fake "all gates passed") reaches it. Test: `fabric-cli.test.ts`.
+  write, a line rewritten to fake "all gates passed") reaches it. So does every line and fix `invincible doctor` prints,
+  and each name, capability summary and reason in `invincible status`, where a peer's own error message and a device's
+  name and capabilities reach (the re-review's N3). Tests: `fabric-cli.test.ts`, `fabric-peer-words.test.ts`.
 - **A failure ends one hand-off, never the node** (the review's L3). The runner's loop, a run's call back to its giver
   and the giver's follower each catch what goes wrong in them: that hand-off fails (`INTERNAL`, with why), its task
-  stops there, and the node goes on. `invincible serve` also says, and survives, any failure nothing waited for. Test:
+  stops there, and the node goes on. `invincible serve` also says, and survives, a rejected promise nothing waited for
+  (an unhandled rejection); an exception thrown synchronously in a timer still ends the process, and the re-review found
+  none reachable from the fabric. Test:
   `fabric-runner.test.ts` (the review's proof of concept, which ended its process with exit 1 before the fix).
 - **Bounded input.** The node's side of the socket bounds a message's length before it buffers it (65 MiB, as the
   sidecar), decodes CBOR under Q-AMP's decode budget, checks every hand-off message with its schema, keeps a hand-off's
@@ -552,16 +574,24 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     route) drops them as they come; past 32 MiB unread, whatever it asked, the call is cancelled (a task's input, its
     task failed).
   - **Over HTTP** (the fallback, and every link before the fabric): a peer's answer is read up to 64 MiB (the largest
-    sync page and route answer), refused past it whether it says its length or not. Tests: `fabric-socket.test.ts`,
-    `packages/link/test/client.test.ts`. Tests: `fabric-socket.test.ts`,
-  `fabric-gateway.test.ts`, the seeded fuzzing in `fabric.test.ts`, and `bench/fabric/fuzz.ts` (FABRIC.md).
+    sync page and route answer), refused past it whether it says its length or not.
+  - Tests: `fabric-socket.test.ts`, `packages/link/test/client.test.ts`, `fabric-gateway.test.ts`, the seeded fuzzing in
+    `fabric.test.ts`, and `bench/fabric/fuzz.ts` (FABRIC.md).
 - **Falling back, never in clear** (the review's L7). Where Q-AMP can't be had (no sidecar there or here, a peer from
   before the fabric, a failure), each link goes over HTTP with signed requests, as before, and says so as HTTP (the
   CLI, the Doctor, the web app; the API's `path` keeps its value `https`).
-  - To a peer that speaks Q-AMP, while this node runs its sidecar, plain HTTP is refused off the tailnet and this
-    machine (anywhere but the tailnet's own addresses and MagicDNS names, and loopback): its requests and
-    answers would travel in clear, so it waits for Q-AMP, and says why. Dropping UDP can then stall a link, never
-    downgrade it.
+  - To a peer that speaks Q-AMP, while this node's fabric is on, plain HTTP is refused off the tailnet and this machine
+    (anywhere but RFC 6598's shared range, all of it, which carriers also use for their NAT; Tailscale's IPv6 range and
+    MagicDNS names; and loopback): its requests and answers would travel in clear, so it waits for Q-AMP, and says
+    why. Dropping UDP can then stall a link, never downgrade it. "On" is the node's setting, whatever its sidecar's
+    state: one that can't start for a fault here (no binary, a key it can't read, a socket directory that isn't
+    private) is refused too, and its Doctor says so as needing you (the re-review's I-b).
+  - **Never twice** (the re-review's I-c). A forward goes over HTTP only when its Q-AMP call never reached the peer:
+    this node's sidecar couldn't take it or refused it, it couldn't connect, the peer was going away, or the peer's door
+    refused it before running anything. Any other failure fails the forward, saying it may have run there, so a route
+    that isn't safe to repeat (`execSandbox`, `destroySandbox`, a write) never runs twice. The sidecar's words alone
+    tell a peer it couldn't reach from a connection lost mid-call, so what they don't say plainly counts as reached. The
+    link's sync and push are safe to send again, and fall back after any failure. Test: `fabric-forward-once.test.ts`.
   - On the tailnet, a peer that speaks Q-AMP and drops to HTTP raises a notice (the Doctor's `mind.sync.<peer>`
     needs you), so a downgrade is never silent.
   - What HTTP loses on the tailnet is Q-AMP's post-quantum key exchange inside the tunnel (WireGuard's own is
@@ -570,7 +600,8 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
 - **Residual risk.**
   - **A runner can lie with its own key.** The proof says which node vouches for the work; it can't show that node ran
     its gates truthfully. A false proof is signed evidence against that node, and kept.
-  - **A full node is still owner-equivalent.** The fabric narrows what runs elsewhere may do, not what a full node may.
+  - **A full node is still owner-equivalent.** The fabric narrows what runs elsewhere may do, not what a full node may:
+    one that turned on you can enroll a client that is you over HTTPS, and grant itself hand-offs as your word.
   - **The hand-off has no HTTPS form**, so a task for another node's agents waits on Q-AMP between them.
   - **A sidecar holding the transport key replays its own chains.** A compromised sidecar holds the node's transport
     key and sees each call's chain, so it can use a run's grant within its task, its tools and its 300 s, as the node
