@@ -2,6 +2,7 @@ import {
   AUTH,
   type DeviceId,
   FABRIC,
+  FABRIC_SCOPES,
   type GEvent,
   LINK_METHOD,
   LINK_PATHS,
@@ -256,6 +257,9 @@ export class Fabric implements SyncTransport {
       if (!caller) return inv.fail(3, "this node takes link calls from the active nodes of its fleet alone, by the key each one's signed profile names");
       const opened = this.opened(inv, caller, signedFor);
       if ("refused" in opened) return inv.fail(3, `refused: ${opened.refused}`);
+      // The tool's own scope, held by the caller as over HTTP (a forwarded route's is checked by that route).
+      const scope = FABRIC_SCOPES[inv.tool];
+      if (scope && !this.principalOf(caller).scopes.includes(scope)) return inv.fail(3, `refused: ${inv.tool} needs ${scope}, which ${caller.name} doesn't hold`);
       inv.args = inv.tool === FABRIC.forward ? { path: opened.path, body: opened.body } : opened.body;
     }
     if (this.tools?.owns(inv.tool)) {

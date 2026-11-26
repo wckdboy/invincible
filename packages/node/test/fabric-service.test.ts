@@ -193,3 +193,20 @@ describe("a node revoked here (I3)", () => {
     expect((routeSignal as AbortSignal | null)?.aborted).toBe(true);
   });
 });
+
+describe("each of the fabric's tools declares one scope, and its caller must hold it (I5)", () => {
+  test("a limited node holding only what it was given: its sync over Q-AMP needs mind:read, its push mind:write", async () => {
+    const node = newNodeIdentity();
+    const key = transportKeyOf(new Uint8Array(32).fill(5), node.id);
+    const limited: Device = { ...peer, id: node.id, name: "sensor", role: "limited", scopes: ["mind:read"], profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: key.did, address: `qamp://${key.did}@127.0.0.1:7410`, pop: key.pop } } } };
+    const store = { onApplied: () => () => {}, devices: () => [limited], activeDevice: (id: string) => (id === node.id ? limited : null), profilesOf: () => [], eventsSince: () => ({ events: [], more: false }) } as unknown as LedgerStore;
+    const sidecar = { client: null, did: "did:key:z6Mkself", address: null, state: "up", why: null } as unknown as Sidecar;
+    const fabric = new Fabric({ store, identity: newNodeIdentity(), sidecar, log: () => {}, presence: async () => ({}) as never });
+    const sealer = new Fabric({ store, identity: node, sidecar, log: () => {}, presence: async () => ({}) as never });
+    const knock = (tool: string, args: unknown) =>
+      new Promise<string>((resolve) => fabric.door({ task: 1, tool, args, caller: key.did, authorization: { kind: "public" }, chain: [], meta: null, deadlineMs: null, input: false, signal: new AbortController().signal, inputs: { [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }, emit() {}, progress() {}, complete: () => resolve("taken"), fail: (code: number, message: string) => resolve(`${code}: ${message}`) } as never));
+    expect(await knock("invincible/link/sync", await sealer.seal("/link/sync", { have: {} }))).toBe("taken");
+    expect(await knock("invincible/link/push", await sealer.seal("/link/push", { events: [] }))).toBe("3: refused: invincible/link/push needs mind:write, which sensor doesn't hold");
+    expect(await knock("invincible/task/hand", await sealer.seal("/fabric/hand", {}))).toBe("3: refused: invincible/task/hand needs fleet:admin, which sensor doesn't hold");
+  });
+});

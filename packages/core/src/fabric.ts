@@ -5,6 +5,7 @@ import { sha256B64u, signEd25519, verifyEd25519 } from "./crypto.ts";
 import { domain, isNodeId, type NodeIdentity, verifyDeviceSignature } from "./identity.ts";
 import { ed25519OfDidKey, QAMP_TOOLS, QampDid } from "./qamp.ts";
 import { MAX_PROPOSED_GATES, MAX_RUN_GATES } from "./runs.ts";
+import type { Scope } from "./scopes.ts";
 import { AgentId, TeamTaskProof } from "./team.ts";
 import { TEAM_LIMITS } from "./team-limits.ts";
 
@@ -91,6 +92,13 @@ export const FABRIC = {
   /** `invincible/agent/<tool>`: a tool of the primary's, for a run another node runs for this one. */
   agent: "invincible/agent",
 } as const;
+
+/**
+ * The one scope each of the fabric's tools needs of its caller (AGENTS.md: each Q-AMP tool declares one), held by the
+ * caller's principal as over HTTP (a full node holds every scope; a limited node, what it was given). A forwarded route
+ * needs its own route's (every route declares one), and a run's call back, its tool's (the run's own grant).
+ */
+export const FABRIC_SCOPES: Readonly<Record<string, Scope>> = { [FABRIC.sync]: "mind:read", [FABRIC.push]: "mind:write", [FABRIC.hand]: "fleet:admin" };
 
 /** The command a run's grant holds: every tool under `invincible/agent/`, held to the task by its policy. */
 export const RUN_GRANT_COMMAND = `/tool/${FABRIC.agent}`;

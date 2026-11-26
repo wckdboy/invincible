@@ -184,7 +184,8 @@ It reaches you by Web Push, to your own paired devices only. No messaging gatewa
   declined, saying why (tested).
 - **Residual risk:** `inv` speaks plain HTTP to the node's address, as nodes speak to each other: Tailscale encrypts the
   wire, and the signatures prove who sent each request and keep it from being replayed. On a network that isn't
-  encrypted, what the requests and answers hold could be read in passing. Q-AMP is the next transport.
+  encrypted, what the requests and answers hold could be read in passing. Q-AMP carries the links between nodes (the
+  fabric, below); a client's, `inv`'s among them, is still HTTP.
 
 ## The doctor (tested)
 
@@ -387,7 +388,7 @@ Your rules on the commands its work runs ([ARCHITECTURE](ARCHITECTURE.md) §6). 
 
 ## Q-AMP grants: an agent on another of your machines (tested)
 
-Its first phase (`packages/node/src/qamp-grants.ts`; how it works: [ARCHITECTURE](ARCHITECTURE.md) §3). This is a new door: a UDP port on the tailnet, through which an agent on a machine that runs no node calls a few of Invincible's tools.
+Its first phase (`packages/node/src/qamp-grants.ts`; how it works: [ARCHITECTURE](ARCHITECTURE.md) §3). This is a new door: a UDP port on the tailnet, through which an agent on a machine that runs no node calls a few of Invincible's tools. (Nodes and their agents over Q-AMP, the fabric, have a section of their own below; a grant's bridge runs whatever `qamp` the node has, and works with the fabric on or off.)
 
 - **What it admits.** Each grant you make runs one bridge (`qamp serve --mcp-stdio`, Q-AMP 0.1.0, pinned by SHA-256 in `scripts/qamp-pin.sh`).
   - It listens on the node's tailnet address and one port of 7411–7419 (7410 is the node's sidecar's), never `0.0.0.0`.
@@ -487,9 +488,15 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   run's key stay in the runner's daemon; the VM calls through its node's gateway with its own token and never sees
   either. Test: `fabric-handoff.e2e.test.ts` (a thief's sidecar refused, both ways).
 - **Replay.** Q-AMP sends nothing in 0-RTT (SPEC 2.3), and every call rides an authenticated connection, so a captured
-  packet replays nothing. A proof replayed for another hand-off names another hand-off and nonce. The HTTPS fallback
-  keeps its signed requests, their time window and nonce cache. Tests: `fabric.test.ts` (a proof of another hand-off,
-  another nonce), and the existing request-signing tests.
+  packet replays nothing. Each link call also carries its node's signature with a fresh nonce and a 60 s window, so
+  one sent twice is refused, whoever sends it. A proof replayed for another hand-off names another hand-off and nonce.
+  The HTTP fallback keeps its signed requests, their time window and nonce cache. Tests: `fabric-link-auth.test.ts`
+  (sent twice, too old), `fabric.test.ts` (a proof of another hand-off, another nonce), and the existing
+  request-signing tests.
+- **One scope for each tool** (the review's I5). Over Q-AMP a sync needs `mind:read` of its caller, a push
+  `mind:write`, a hand-off `fleet:admin` (`FABRIC_SCOPES`), a forwarded route its own route's, and a run's call back its
+  tool's, each held by the caller's principal as over HTTP: a full node holds every scope, a limited node what it was
+  given. (Over HTTP, `/link/sync` and `/link/push` take any enrolled node, as before.) Test: `fabric-service.test.ts`.
 - **A node that lies about proof.** The node that ran the work signs what it came to (each gate's exit before and
   after, the reviewer's verdict, how it ended) with its own device key, for the hand-off and its nonce, over the goal
   and the gates asked for; the node that handed it on checks the signature, and only then reads the facts for
