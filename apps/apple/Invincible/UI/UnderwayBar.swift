@@ -85,13 +85,21 @@ struct UnderwayBar: View {
     /// just after a look comes due, else in half a minute.
     private func keepAsking() async {
         guard let conversation = chat.conversation else { shown = .none; return }
-        while !Task.isCancelled {
+        let ask = {
             struct Asked: Encodable { let id: String }
             if let view = try? await session.client.post("/api/conversations/underway", Asked(id: conversation), as: UnderwayView.self) {
                 if view != shown { withAnimation(.snappy) { shown = view } }
             }
-            try? await Task.sleep(for: UnderwayWords.nextAsk(shown, answering: chat.answering))
         }
+        await ask()
+        // Asked again as the node says the agents or its turns moved; and just after a look of its comes due, which
+        // nothing else says.
+        let stop = session.follow(["team", "turns"], every: nil, gap: 2_000) { await ask() }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: UnderwayWords.nextLook(shown))
+            if !Task.isCancelled, UnderwayWords.lookDue(shown) { await ask() }
+        }
+        stop()
     }
 
     private func stop(_ task: UnderwayView.Task) async {

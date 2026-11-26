@@ -87,9 +87,9 @@ struct InvincibleMacApp: App {
         UserDefaults.standard.data(forKey: placeKey).flatMap { try? JSONDecoder().decode(Place.self, from: $0) } ?? .home
     }
 
-    /// Reads this Mac's key, then asks the node again every few seconds while the app runs, windows or not (the menu bar
-    /// shows the agents), and reads this Mac's own node again (the sidebar's foot shows it): every 5 s in front, every
-    /// 15 behind. A node the app runs is restarted onto a new release once, at launch.
+    /// Reads this Mac's key, then keeps the node's live stream open while the app runs, windows or not (the menu bar shows
+    /// the agents), and reads this Mac's own node again (the sidebar's foot shows it): every 5 s in front, every 15 behind.
+    /// A node the app runs is restarted onto a new release once, at launch.
     func run() {
         guard loop == nil else { return }
         app.start()
@@ -100,7 +100,9 @@ struct InvincibleMacApp: App {
         }
         loop = Task { [weak self] in
             while !Task.isCancelled {
-                if let session = self?.session { await session.refresh() }
+                // The node's live stream, open while the app runs (the menu bar shows the agents): nothing is asked of the
+                // node while nothing changes.
+                if let session = self?.session, !session.liveOn { session.live(true) }
                 await self?.thisMac.refresh()
                 try? await Task.sleep(for: .seconds(NSApplication.shared.isActive ? 5 : 15))
             }
@@ -111,7 +113,7 @@ struct InvincibleMacApp: App {
     func cameBack() async {
         guard let session else { return }
         await session.chat.resume(with: session.client)
-        await session.refresh()
+        if !session.linkUp { await session.refresh() }
     }
 
     /// A new chat with the primary, in the main window.

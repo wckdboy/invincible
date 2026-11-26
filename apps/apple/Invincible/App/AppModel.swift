@@ -39,9 +39,13 @@ struct PairedNode: Codable, Equatable, Sendable {
     }
 
     private(set) var phase = Phase.loading
-    /// The windows in front, and the one loop that asks the node again while any is (keepFresh).
+    /// The windows in front: the node's live stream is open while any is (keepFresh).
     @ObservationIgnored private var inFront = 0
-    @ObservationIgnored private var refreshing: Task<Void, Never>?
+
+    /// Started at once, so the first frame is the app itself (Home, from what was kept), never a spinner first.
+    init(startNow: Bool = false) {
+        if startNow { start() }
+    }
 
     func start() {
         // (Each window starts it: the first that finds this device paired is the one.)
@@ -67,24 +71,15 @@ struct PairedNode: Codable, Equatable, Sendable {
         phase = .paired(Session(key: key, node: node, keeping: KeptTable.Store.here))
     }
 
-    /// Asks the node again every few seconds while the window that called it is in front, in one loop for every window
-    /// that is: returns when this one leaves the front (its task is cancelled), and the loop stops with the last.
+    /// Keeps up with the node while the window that called it is in front: its live stream open for every window that is
+    /// (Session.live), and nothing asked while nothing changes. Returns when this one leaves the front (its task is
+    /// cancelled); the stream closes with the last.
     func keepFresh(_ session: Session) async {
         inFront += 1
-        if refreshing == nil {
-            refreshing = Task {
-                while !Task.isCancelled {
-                    await session.refresh()
-                    try? await Task.sleep(for: .seconds(5))
-                }
-            }
-        }
+        if inFront == 1 { session.live(true) }
         while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
         inFront -= 1
-        if inFront == 0 {
-            refreshing?.cancel()
-            refreshing = nil
-        }
+        if inFront == 0 { session.live(false) }
     }
 
     /// Deletes this device's key. It can't be recovered: pairing again makes a new device, and the old one stays in

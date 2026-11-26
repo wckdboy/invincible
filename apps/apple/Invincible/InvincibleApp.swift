@@ -6,8 +6,9 @@ import UIKit
 struct InvincibleApp: App {
     /// Apple's token for notifications, and the notification you tapped (PushCenter).
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    /// Whether this device is paired, and with what: one for every window (an iPad has several).
-    @State private var app = AppModel()
+    /// Whether this device is paired, and with what: one for every window (an iPad has several). Read before the first
+    /// frame, so it is Home from what was kept.
+    @State private var app = AppModel(startNow: true)
     /// The main window's group, which New Window opens another of.
     static let main = "main"
 

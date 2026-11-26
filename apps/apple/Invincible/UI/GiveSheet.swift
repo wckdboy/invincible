@@ -151,7 +151,7 @@ struct GiveSheet: View {
         do {
             given = try await session.client.post("/api/team/give", input, as: Given.self)
             problem = nil
-            await session.refresh()
+            await session.reread(["team"])
         } catch {
             problem = error.localizedDescription
         }

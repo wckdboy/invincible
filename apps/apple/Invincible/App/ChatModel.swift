@@ -111,7 +111,7 @@ struct ChatRequest: Encodable, Sendable {
         sent += 1
         thread.begin(question: text, role: role, attachments: files)
         let request = ChatRequest(role: role, model: model, project: conversation == nil ? project : nil, save: conversation == nil ? true : nil, conversation: conversation, messages: [.init(role: "user", content: text, attachments: files.isEmpty ? nil : files)])
-        watch(client.events("/api/chat", request))
+        watch(client, "/api/chat", request)
     }
 
     /// Its latest answer may be asked again: it has ended, it isn't answering, and the chat is kept.
@@ -126,7 +126,7 @@ struct ChatRequest: Encodable, Sendable {
         sent += 1
         thread.begin(question: question.content, role: role, attachments: question.attachments ?? [])
         let request = ChatRequest(role: role, model: model, conversation: conversation, messages: [.init(role: "user", content: question.content, attachments: question.attachments)], retry: true)
-        watch(client.events("/api/chat", request))
+        watch(client, "/api/chat", request)
     }
 
     /// A message of yours, back in the box to change and send again.
@@ -174,13 +174,23 @@ struct ChatRequest: Encodable, Sendable {
     private func attach(_ id: String, with client: NodeClient) {
         struct Attach: Encodable { let turn: String }
         turn = id
-        watch(client.events("/api/turns/attach", Attach(turn: id)))
+        watch(client, "/api/turns/attach", Attach(turn: id))
     }
 
-    private func watch(_ events: AsyncThrowingStream<ChatEvent, any Error>) {
+    /// The node's beat (its live stream's hello says it; an older node's is 15 s): a watch silent for three is dead.
+    var beat: Double = 15_000
+    /// The watch's silence, counted from the last line it carried (the node's beats too).
+    private var silence: Task<Void, Never>?
+    /// The node the chat on screen is watched from, to find it again there.
+    private var watchedFrom: NodeClient?
+
+    private func watch(_ client: NodeClient, _ path: String, _ body: some Encodable) {
         // Each watch is its own: one that was left (another chat opened) says nothing more to the chat on screen.
         let watch = UUID()
         watching = watch
+        watchedFrom = client
+        let events = client.events(path, body, alive: { [weak self] in Task { @MainActor in self?.heard(watch) } })
+        heard(watch)
         live = Task {
             do {
                 for try await event in events {
@@ -205,12 +215,39 @@ struct ChatRequest: Encodable, Sendable {
             }
             guard watching == watch else { return }
             (live, turn, watching) = (nil, nil, nil)
+            silence?.cancel()
+            silence = nil
         }
     }
 
-    /// Back in the app, or after the watching was cut: the chat on screen as the node holds it now.
+    /// Something came on the watch (a beat at least): it is alive for three more of the node's beats.
+    private func heard(_ watch: UUID) {
+        guard watching == watch else { return }
+        silence?.cancel()
+        let quiet = 3 * beat
+        silence = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(quiet))
+            guard !Task.isCancelled, let self, self.watching == watch else { return }
+            // Dead without a word (a half-open connection): found again where the node holds it.
+            self.linkLost()
+        }
+    }
+
+    /// The link to the node went (silent, cut, or the network changed under it): the watch is dropped without a word in
+    /// the thread, and the chat on screen is found again as the node holds it, its turn attached to again while it runs
+    /// (the node owns the turn: nothing of it was lost). A new chat the node hasn't kept yet has nowhere to be found: its
+    /// watch ends as a cut one does.
+    func linkLost() {
+        guard live != nil, let client = watchedFrom else { return }
+        guard conversation != nil else { return }
+        Task { await resume(with: client) }
+    }
+
+    /// Back in the app, after the watching was cut, or a dead watch dropped: the chat on screen as the node holds it now,
+    /// whether or not a watch still seemed live (one half-open would otherwise hold it until it timed out).
     func resume(with client: NodeClient) async {
-        guard let conversation, live == nil, !loading else { return }
+        guard let conversation, !loading else { return }
+        leave()
         await open(conversation, with: client)
     }
 
@@ -240,7 +277,8 @@ struct ChatRequest: Encodable, Sendable {
 
     private func leave() {
         live?.cancel()
-        (live, watching) = (nil, nil)
+        silence?.cancel()
+        (live, watching, silence) = (nil, nil, nil)
     }
 
     /// The chat on screen, read where it is shown: what it answered in it so far is no longer new, on any device. (An

@@ -372,11 +372,10 @@ private struct ChatWindow: View {
         .task {
             await chat.open(id, with: session.client)
             opened = true
-            // It may be answering in it for another device: looked at again every few seconds.
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                await chat.noticed(chats: nil, turns: session.turns, with: session.client)
-            }
+            // It may be answering in it for another device: looked at again as the node says its turns changed.
+            let stop = session.follow(["turns"], every: 5_000, gap: 1_000) { await chat.noticed(chats: nil, turns: session.turns, with: session.client) }
+            await Session.held()
+            stop()
         }
     }
 }

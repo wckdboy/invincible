@@ -154,8 +154,8 @@ struct TaskView: View {
         }
     }
 
-    /// While it is on screen: its trail read (then every second and a half while it works), its conversation, its changes,
-    /// your prices, and its result marked read.
+    /// While it is on screen: its trail read (then again as the node says the agents moved, while it works), its
+    /// conversation, its changes, your prices, and its result marked read.
     private func follow(_ task: TeamTask, _ thread: TaskThread) async {
         let client = session.client
         async let trail: Void = thread.readTrail(with: client)
@@ -165,16 +165,14 @@ struct TaskView: View {
         if task.record != nil { await session.askPrices() }
         await thread.readChanges(task, agent: session.drawn(task.assignee), session: session)
         await session.opened(task: task.id)
-        // At work (or about to be): asked again while it is on screen.
+        // At work (or about to be): read again as the node says the agents moved (each step it takes moves them), its
+        // trail within half a second, its conversation within two; nothing is asked while nothing moves.
         guard task.status == "running" || task.status == "queued" else { return }
-        var turns = 0
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            await thread.readTrail(with: client)
-            turns += 1
-            if turns % 3 == 0 { await thread.room.load(room: task.room, with: client) }
-        }
+        let steps = session.follow(["team"], every: 4_000, gap: 500) { await thread.readTrail(with: client) }
+        let talk = session.follow(["team"], every: 8_000, gap: 2_000) { await thread.room.load(room: task.room, with: client) }
+        await Session.held()
+        steps()
+        talk()
     }
 }
 

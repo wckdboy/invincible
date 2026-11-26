@@ -68,6 +68,19 @@ enum UnderwayWords {
 
     /// How soon to ask the node again (the PWA's nextLookMs): soon while a task is under way or it is answering; just
     /// after a look of its comes due, then soon until the node takes it (it is gone from the row then); else seldom.
+    /// When to look again for a look of its coming due (the stream says nothing of the clock): just after the soonest,
+    /// at most an hour on (and then again).
+    static func nextLook(_ shown: UnderwayView, now: Date = .now) -> Duration {
+        guard let soonest = shown.looks.map(\.at).min() else { return .seconds(3600) }
+        let ms = soonest - now.timeIntervalSince1970 * 1000
+        return .milliseconds(Int(max(1_000, min(3_600_000, ms + 1_000))))
+    }
+
+    /// A look of its came due: what is under way is asked again.
+    static func lookDue(_ shown: UnderwayView, now: Date = .now) -> Bool {
+        shown.looks.contains { $0.at <= now.timeIntervalSince1970 * 1000 }
+    }
+
     static func nextAsk(_ shown: UnderwayView, answering: Bool, now: Date = .now) -> Duration {
         if !shown.tasks.isEmpty || answering { return .seconds(5) }
         guard let soonest = shown.looks.map(\.at).min() else { return .seconds(30) }

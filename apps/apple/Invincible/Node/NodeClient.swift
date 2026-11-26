@@ -65,15 +65,25 @@ struct NodeClient: Sendable {
     }
 
     /// A POST answered with server-sent events (the primary's chat): each event as it arrives. Ending the stream (its
-    /// consumer goes away) ends the watching and nothing else: a turn the node owns runs on to its end.
-    func events(_ path: String, _ body: some Encodable) -> AsyncThrowingStream<ChatEvent, any Error> {
-        payloads(path, body, as: ChatEvent.init(json:))
+    /// consumer goes away) ends the watching and nothing else: a turn the node owns runs on to its end. `alive` is told
+    /// of every line that arrives, the node's beats too, so a watch that has gone quiet can be told from one that's slow.
+    func events(_ path: String, _ body: some Encodable, alive: (@Sendable () -> Void)? = nil) -> AsyncThrowingStream<ChatEvent, any Error> {
+        payloads(path, body, alive: alive, as: ChatEvent.init(json:))
+    }
+
+    /// The node's live stream (core's live.ts, GET /api/live): what changed, as it changes. `alive` is told of every line
+    /// that arrives, its beats too (LiveLink takes a stream silent for three of them for dead).
+    func live(alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error> {
+        stream(Result { try self.request("GET", "/api/live", body: nil, timeout: 120) }, alive: alive, as: LiveEvent.init(json:))
     }
 
     /// A POST answered with server-sent events, each read as `read` reads it (one it can't read is passed over).
-    func payloads<Event: Sendable>(_ path: String, _ body: some Encodable, as read: @escaping @Sendable (String) -> Event?) -> AsyncThrowingStream<Event, any Error> {
-        let request = Result { try self.request("POST", path, body: JSONEncoder().encode(body), timeout: 120) }
-        return AsyncThrowingStream { continuation in
+    func payloads<Event: Sendable>(_ path: String, _ body: some Encodable, alive: (@Sendable () -> Void)? = nil, as read: @escaping @Sendable (String) -> Event?) -> AsyncThrowingStream<Event, any Error> {
+        stream(Result { try self.request("POST", path, body: JSONEncoder().encode(body), timeout: 120) }, alive: alive, as: read)
+    }
+
+    private func stream<Event: Sendable>(_ request: Result<URLRequest, any Error>, alive: (@Sendable () -> Void)?, as read: @escaping @Sendable (String) -> Event?) -> AsyncThrowingStream<Event, any Error> {
+        AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let (bytes, response) = try await Self.session.bytes(for: request.get())
@@ -83,8 +93,11 @@ struct NodeClient: Sendable {
                         for try await byte in bytes where said.count < 65_536 { said.append(byte) }
                         throw NodeError.from(status: status, headers: Self.headers(of: response), body: said)
                     }
+                    alive?()
                     var reader = SSEReader()
                     for try await byte in bytes {
+                        // (Every line, a beat's too: the stream is alive.)
+                        if byte == 0x0A { alive?() }
                         for payload in reader.feed(CollectionOfOne(byte)) {
                             if let event = read(payload) { continuation.yield(event) }
                         }

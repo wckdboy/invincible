@@ -127,11 +127,12 @@ struct RoomView: View {
         }
         .modifier(ShipPrompt(task: $shipping, room: room, client: session.client))
         .modifier(StepsPicker(task: $stepping, room: room, client: session.client))
+        // Read again while you're here, as the node says the agents moved.
         .task(id: id) {
-            while !Task.isCancelled {
-                await room.load(room: id, with: session.client)
-                try? await Task.sleep(for: .seconds(writing.isEmpty ? 4 : 2))
-            }
+            await room.load(room: id, with: session.client)
+            let stop = session.follow(["team"], every: 4_000, gap: 1_000) { await room.load(room: id, with: session.client) }
+            await Session.held()
+            stop()
         }
         // On screen, what ended here is read: no longer new, on any device.
         .task(id: row?.unread) {

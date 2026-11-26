@@ -29,7 +29,9 @@ struct HomeView: View {
         let work = session.attended
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s6) {
-                if let trouble = session.trouble {
+                if session.reconnecting {
+                    ReconnectingLine(session: session)
+                } else if let trouble = session.trouble {
                     TroubleRow(trouble: trouble).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let since = session.keptSince { KeptLine(since: since) }
@@ -266,6 +268,28 @@ struct HomeView: View {
         } else {
             Composer(chat: chat, client: session.client, composing: $composing, sent: { go(.primary) }, prompt: "Ask \(Primary.name)…")
         }
+    }
+}
+
+/// The link to the node went and isn't back: said in one line where how things stand is, with what is shown still the
+/// last the node said, and a way to try at once.
+struct ReconnectingLine: View {
+    let session: Session
+
+    var body: some View {
+        let name = session.whoami?.nodeName ?? session.node.nodeName ?? "your node"
+        HStack(spacing: Space.s2) {
+            ProgressView().controlSize(.mini)
+            Text("Reconnecting to \(name)…").font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: Space.s2)
+            Button("Retry") { session.networkChanged() }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.borderless)
+                .frame(minHeight: Metrics.touch)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("link.down")
+        .accessibilityLabel("Reconnecting to \(name)")
     }
 }
 

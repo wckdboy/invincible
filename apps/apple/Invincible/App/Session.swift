@@ -176,57 +176,231 @@ import Observation
         id == whoami?.node ? (whoami?.nodeName ?? node.nodeName ?? id) : String(id.dropFirst(2).prefix(8))
     }
 
-    func refresh() async {
-        let client = self.client
-        async let me = attempt { try await client.get("/api/whoami", as: WhoAmI.self) }
-        async let team = attempt { try await client.read("/api/team", as: TeamSnapshot.self) }
-        async let actions = attempt { try await client.get("/api/actions", as: Listed.self).actions ?? [] }
-        async let requests = attempt { try await client.get("/api/secret-requests", as: Listed.self).requests ?? [] }
-        async let pairings = attempt { try await client.get("/api/pairings", as: Listed.self).pairings ?? [] }
-        async let about = attempt { try await client.get("/api/about-you", as: AboutYou.self) }
-        async let notices = attempt { try await client.get("/api/notices", as: Listed.self).notices ?? [] }
-        async let screens = attempt { try await client.get("/api/screen/sessions", as: Listed.self).sessions ?? [] }
-        async let questioned = attempt { try await client.get("/api/questions", as: Listed.self).questions ?? [] }
-        async let turns = attempt { try await client.get("/api/turns", as: Listed.self) }
-        async let runs = attempt { try await client.get("/api/runs", as: Listed.self).runs ?? [] }
-        async let usage = attempt { try await client.get("/api/usage/meter", as: UsageMeter.self) }
+    // MARK: Keeping up: the node's live stream, and what is read again as it says things changed
 
-        switch await me {
+    /// The node's live stream (Node/LiveLink.swift): open while a window of the app is in front (`live(true)`).
+    @ObservationIgnored private(set) lazy var link: LiveLink = {
+        let client = self.client
+        let link = LiveLink(
+            open: { alive in client.live(alive: { Task { @MainActor in alive() } }) },
+            // An older node without the stream (404), a device that may not read it (403), one revoked (401, which the
+            // reads then say): read on a timer instead, and opened again only when asked.
+            refused: { ($0 as? NodeError).map { [401, 403, 404].contains($0.status) } ?? false }
+        )
+        link.attach(.init(
+            up: { [weak self] _, at in
+                guard let self else { return }
+                (self.linkUp, self.reconnecting) = (true, false)
+                #if os(iOS)
+                PerfProbe.shared.linkBack()
+                #endif
+                // The node's beat, as its hello said: the chat's watch is held to it too.
+                self.chat.beat = self.link.beat
+                self.followers.up(at: at)
+            },
+            changed: { [weak self] topics in self?.followers.changed(topics) },
+            down: { [weak self] in
+                guard let self else { return }
+                if !self.reconnecting { Self.saidLost() }
+                (self.linkUp, self.reconnecting) = (false, true)
+                self.followers.down()
+            },
+            lost: { [weak self] in
+                if self?.reconnecting == false { Self.saidLost() }
+                self?.reconnecting = true
+                // Every stream of this node went the same way: the chat being watched is found again too.
+                self?.chat.linkLost()
+            }
+        ))
+        return link
+    }()
+    /// The link was just said to be lost (the performance suite reads when: PerfProbe).
+    private static func saidLost() {
+        #if os(iOS)
+        PerfProbe.shared.linkLost()
+        #endif
+    }
+
+    /// What this app reads, each for its topics (core's live.ts), as the stream says they changed.
+    @ObservationIgnored let followers = Followers()
+    /// The node tells this device what changes, as it changes.
+    private(set) var linkUp = false
+    /// The link went (silent, cut, or not back in time) and isn't back yet: said beside how things stand.
+    private(set) var reconnecting = false
+    /// While the stream is down, each of these is read this often instead (an older node, the node away).
+    private static let fallbackMs: Double = 15_000
+    @ObservationIgnored private var following = false
+    /// The actions and the keys asked for have each been read: the Inbox's count means something once both have.
+    @ObservationIgnored private var inboxParts: Set<String> = []
+
+    /// The network under the app, watched while it is in front.
+    @ObservationIgnored private let path = PathWatch()
+
+    /// The link is kept open (a window in front; on a Mac, while the app runs).
+    private(set) var liveOn = false
+
+    /// Waits until the task it is in is cancelled (a view gone from the screen): what it follows is followed until then.
+    static func held() async {
+        while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
+    }
+
+    /// The link opened (a window of the app in front) or closed (none is); what the app reads runs as it says from then.
+    func live(_ on: Bool) {
+        follow()
+        liveOn = on
+        if on {
+            link.start()
+            link.retry()
+            path.start { [weak self] in self?.networkChanged() }
+        } else {
+            path.stop()
+            link.stop()
+            followers.off()
+            (linkUp, reconnecting) = (false, false)
+        }
+    }
+
+    /// The network under the app changed (Wi-Fi to cellular, lost, back): the stream open may be dead without a word, so a
+    /// fresh one is opened at once, and the chat being watched is found again.
+    func networkChanged() {
+        link.renew()
+        chat.linkLost()
+    }
+
+    /// Everything this app reads, each by the topics that move it (once: they last as long as the session).
+    private func follow() {
+        guard !following else { return }
+        following = true
+        let every = Self.fallbackMs
+        _ = followers.follow(["fleet"], every: every, first: .later) { [weak self] _ in await self?.readMe() }
+        // (The largest answer: no oftener than a second, however busy the agents are.)
+        _ = followers.follow(["team"], every: every, gap: 1_000, first: .later) { [weak self] _ in await self?.readTeam() }
+        _ = followers.follow(Self.inboxTopics, every: every, first: .later) { [weak self] changed in await self?.readInbox(changed) }
+        _ = followers.follow(["turns"], every: every, first: .later) { [weak self] _ in await self?.readTurns() }
+        _ = followers.follow(["runs"], every: every, first: .later) { [weak self] _ in await self?.readRuns() }
+        // The meter moves with model calls, which turns and tasks make: read now and then while they do.
+        _ = followers.follow(["turns", "runs", "team"], every: 60_000, gap: 30_000, first: .later) { [weak self] _ in await self?.readUsage() }
+    }
+
+    /// What a view shows, read again as these topics change (at once and every `every` ms while the stream is down; nil:
+    /// once). Returns how to stop.
+    func follow(_ topics: [String], every: Double? = 15_000, gap: Double = 1_000, run: @escaping @MainActor () async -> Void) -> @MainActor () -> Void {
+        followers.follow(topics, every: every, gap: gap, first: .owner) { _ in await run() }
+    }
+
+    /// After a change of yours: what it changed, read now if the stream isn't up to say so (it says so within a moment
+    /// when it is), or whatever it says (`force`: something told of it before the stream could, a notification).
+    func reread(_ topics: [String], force: Bool = false) async {
+        guard force || !linkUp else { return }
+        for topic in topics {
+            switch topic {
+            case "team": await readTeam()
+            case "fleet": await readMe()
+            case "turns": await readTurns()
+            default: await readInbox([topic])
+            }
+        }
+    }
+
+    /// The Inbox's parts, each read by its own route.
+    private static let inboxTopics = ["actions", "secretRequests", "pairings", "aboutYou", "notices", "screenSessions", "questions"]
+
+    /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read.
+    func refresh() async {
+        async let me: Void = readMe()
+        async let team: Void = readTeam()
+        async let inbox: Void = readInbox(nil)
+        async let turns: Void = readTurns()
+        async let runs: Void = readRuns()
+        async let usage: Void = readUsage()
+        _ = await (me, team, inbox, turns, runs, usage)
+    }
+
+    private func readMe() async {
+        switch await attempt({ [client] in try await client.get("/api/whoami", as: WhoAmI.self) }) {
         case .success(let me):
             (whoami, trouble) = (me, nil)
             Primary.named(me.primaryName)
         case .failure(let error as NodeError): trouble = error
         case .failure: break
         }
-        // What the node said of the agents, as it came: kept for the next time the app opens.
-        var said: Data?
-        switch await team {
+    }
+
+    private func readTeam() async {
+        switch await attempt({ [client] in try await client.read("/api/team", as: TeamSnapshot.self) }) {
         case .success(let team):
             (self.team, teamProblem, kept) = (team.value, nil, nil)
-            said = team.bytes
+            // What the node said of the agents, as it came: kept for the next time the app opens.
+            keep(team.bytes)
+            trouble = trouble?.unreachable == true ? nil : trouble
         case .failure(let error as NodeError) where [404, 424, 501].contains(error.status): teamProblem = "This node has no other agents yet."
+        case .failure(let error as NodeError) where error.unreachable: trouble = error
         case .failure(let error): teamProblem = error.localizedDescription
         }
-        let (acted, asked) = await (actions, requests)
-        if case .success(let list) = acted { self.actions = list }
-        if case .success(let list) = asked { self.requests = list }
-        if case .success = acted, case .success = asked { inboxLoaded = true }
-        if case .success(let list) = await pairings { self.pairings = list }
-        if case .success(let about) = await about { self.facts = about.proposed }
-        if case .success(let list) = await notices { self.notices = Notices.open(list) }
-        if case .success(let list) = await screens { self.screenSessions = list.filter { $0.state == "waiting" || $0.state == "allowed" } }
-        if case .success(let list) = await questioned { self.questions = list }
-        if case .success(let listed) = await turns {
-            self.turns = listed.turns ?? []
-            self.unreadChats = listed.unread ?? []
-            // The chat on screen, as the node holds it, when anything kept changed on another device.
-            await chat.noticed(chats: listed.chats, turns: self.turns, with: client)
+    }
+
+    /// The Inbox's parts these topics name (nil: every one).
+    private func readInbox(_ changed: [String]?) async {
+        let client = self.client
+        // Each part read at once, side by side (each one's answer waits on the network, not on the others).
+        let reading = Set(changed ?? Self.inboxTopics).map { part in Task { await self.readInboxPart(part, client) } }
+        for part in reading { await part.value }
+    }
+
+    private func readInboxPart(_ part: String, _ client: NodeClient) async {
+        switch part {
+        case "actions":
+            if case .success(let list) = await attempt({ try await client.get("/api/actions", as: Listed.self).actions ?? [] }) {
+                actions = list
+                inboxRead(part)
+            }
+        case "secretRequests":
+            if case .success(let list) = await attempt({ try await client.get("/api/secret-requests", as: Listed.self).requests ?? [] }) {
+                requests = list
+                inboxRead(part)
+            }
+        case "pairings":
+            if case .success(let list) = await attempt({ try await client.get("/api/pairings", as: Listed.self).pairings ?? [] }) { pairings = list }
+        case "aboutYou":
+            if case .success(let about) = await attempt({ try await client.get("/api/about-you", as: AboutYou.self) }) { facts = about.proposed }
+        case "notices":
+            if case .success(let list) = await attempt({ try await client.get("/api/notices", as: Listed.self).notices ?? [] }) { notices = Notices.open(list) }
+        case "screenSessions":
+            if case .success(let list) = await attempt({ try await client.get("/api/screen/sessions", as: Listed.self).sessions ?? [] }) { screenSessions = list.filter { $0.state == "waiting" || $0.state == "allowed" } }
+        case "questions":
+            if case .success(let list) = await attempt({ try await client.get("/api/questions", as: Listed.self).questions ?? [] }) { questions = list }
+        default: break
         }
-        if case .success(let list) = await runs { self.runs = list }
-        if case .success(let meter) = await usage { self.usage = meter }
-        if let said, let keeping {
-            keeping.keep(team: said, for: node, turns: self.turns.map(\.title), unread: unreadChats.map(\.title), asks: asks, waiting: inboxLoaded ? inboxCount : 0)
-        }
+    }
+
+    private func inboxRead(_ part: String) {
+        inboxParts.insert(part)
+        if inboxParts.isSuperset(of: ["actions", "secretRequests"]) { inboxLoaded = true }
+        keep(nil)
+    }
+
+    private func readTurns() async {
+        guard case .success(let listed) = await attempt({ [client] in try await client.get("/api/turns", as: Listed.self) }) else { return }
+        turns = listed.turns ?? []
+        unreadChats = listed.unread ?? []
+        keep(nil)
+        // The chat on screen, as the node holds it, when anything kept changed on another device.
+        await chat.noticed(chats: listed.chats, turns: turns, with: client)
+    }
+
+    private func readRuns() async {
+        if case .success(let list) = await attempt({ [client] in try await client.get("/api/runs", as: Listed.self).runs ?? [] }) { runs = list }
+    }
+
+    private func readUsage() async {
+        if case .success(let meter) = await attempt({ [client] in try await client.get("/api/usage/meter", as: UsageMeter.self) }) { usage = meter }
+    }
+
+    /// The agents as the node just said them, kept for the next launch with what waits and runs as they stand (nil: kept
+    /// with the next answer about the agents, which is what a launch draws first).
+    private func keep(_ said: Data?) {
+        guard let said, let keeping else { return }
+        keeping.keep(team: said, for: node, turns: turns.map(\.title), unread: unreadChats.map(\.title), asks: asks, waiting: inboxLoaded ? inboxCount : 0)
     }
 
     /// Your budget for the node's model calls (a line to watch, never a stop): a day's or a month's, or none.
@@ -266,70 +440,70 @@ import Observation
     func decide(_ action: ActionView, approve: Bool, edits: [String: String]? = nil) async throws {
         struct Decision: Encodable { let id: String; let approve: Bool; let edits: [String: String]? }
         _ = try await client.post("/api/actions/decide", Decision(id: action.id, approve: approve, edits: edits), as: JSONValue.self)
-        await refresh()
+        await reread(["actions"])
     }
 
     /// Seals a key the primary asked for: the node keeps it in the vault, and it learns that it exists, never what it is.
     func seal(_ request: SecretRequestView, value: String) async throws {
         struct Secret: Encodable { let name: String; let value: String; let provider: String? }
         _ = try await client.post("/api/secrets", Secret(name: request.name, value: value, provider: request.provider), as: JSONValue.self)
-        await refresh()
+        await reread(["secretRequests"])
     }
 
     /// Dismisses a key it asked for that no longer matters (or that you won't give): out of the Inbox until it asks again.
     func dismiss(_ request: SecretRequestView) async throws {
         struct Dismiss: Encodable { let name: String }
         _ = try await client.post("/api/secret-requests/dismiss", Dismiss(name: request.name), as: JSONValue.self)
-        await refresh()
+        await reread(["secretRequests"])
     }
 
     /// Lets a device in (only when its code matches the one it shows), or turns it away.
     func answer(_ pairing: PairingView, approve: Bool) async throws {
         struct Answer: Encodable { let invite: String; let device: String }
         _ = try await client.post(approve ? "/api/pairings/approve" : "/api/pairings/reject", Answer(invite: pairing.invite, device: pairing.device), as: JSONValue.self)
-        await refresh()
+        await reread(["pairings", "fleet"])
     }
 
     /// Keeps a fact it proposed, in your words if you give them: it goes with every answer it gives from then on.
     func keep(_ fact: Fact, text: String? = nil) async throws {
         struct Keep: Encodable { let id: String; let text: String? }
         _ = try await client.post("/api/about-you/keep", Keep(id: fact.id, text: text), as: JSONValue.self)
-        await refresh()
+        await reread(["aboutYou"])
     }
 
     /// Drops a fact it proposed: it was only its note, and it goes with no answer.
     func drop(_ fact: Fact) async throws {
         struct Forget: Encodable { let id: String }
         _ = try await client.post("/api/memories/forget", Forget(id: fact.id), as: JSONValue.self)
-        await refresh()
+        await reread(["aboutYou"])
     }
 
     /// Your answer to its ask to use a Mac itself: its for its minutes from now, or not.
     func decide(screen: ScreenSessionView, allow: Bool) async throws {
         struct Decision: Encodable { let id: String; let allow: Bool }
         _ = try await client.post("/api/screen/decide", Decision(id: screen.id, allow: allow), as: JSONValue.self)
-        await refresh()
+        await reread(["screenSessions"])
     }
 
     /// Your answer to a service's question: what you filled in (sent to that service alone), or no. Its call goes on.
     func answer(question: QuestionView, accept: Bool, content: [String: QuestionAnswer] = [:]) async throws {
         struct Answer: Encodable { let id: String; let accept: Bool; let content: [String: QuestionAnswer]? }
         _ = try await client.post("/api/questions/answer", Answer(id: question.id, accept: accept, content: accept ? content : nil), as: JSONValue.self)
-        await refresh()
+        await reread(["questions"])
     }
 
     /// Ends its session on a Mac now: nothing of it is its after this.
     func end(screen: ScreenSessionView) async throws {
         struct End: Encodable { let id: String }
         _ = try await client.post("/api/screen/end", End(id: screen.id), as: JSONValue.self)
-        await refresh()
+        await reread(["screenSessions"])
     }
 
     /// Dismisses a notice: it stays quiet until it changes.
     func dismiss(_ notice: NoticeView) async throws {
         struct Dismiss: Encodable { let key: String }
         _ = try await client.post("/api/notices/dismiss", Dismiss(key: notice.key), as: JSONValue.self)
-        await refresh()
+        await reread(["notices"])
     }
 
     // MARK: Seating and keeping agents and rooms (yours alone: the node takes these from an owner's device)
@@ -339,7 +513,7 @@ import Observation
     func save(agent: AgentInput) async throws -> Agent {
         struct Saved: Decodable { let agent: Agent }
         let saved = try await client.post("/api/team/agents", agent, as: Saved.self).agent
-        await refresh()
+        await reread(["team"])
         return saved
     }
 
@@ -348,7 +522,7 @@ import Observation
     func save(room: RoomInput) async throws -> TeamRoom {
         struct Saved: Decodable { let room: TeamRoom }
         let saved = try await client.post("/api/team/rooms", room, as: Saved.self).room
-        await refresh()
+        await reread(["team"])
         return saved
     }
 
@@ -356,21 +530,21 @@ import Observation
     func control(task: String, _ action: String) async throws {
         struct Control: Encodable { let task: String; let action: String }
         _ = try await client.post("/api/team/control", Control(task: task, action: action), as: JSONValue.self)
-        await refresh()
+        await reread(["team"])
     }
 
     /// Pause, resume or stop a room's work, or an agent's (one of the two).
     func control(room: String? = nil, agent: String? = nil, _ action: String) async throws {
         struct Control: Encodable { let room: String?; let agent: String?; let action: String }
         _ = try await client.post("/api/team/control", Control(room: room, agent: agent, action: action), as: JSONValue.self)
-        await refresh()
+        await reread(["team"])
     }
 
     /// An agent taken off the agents for good; its VM goes with it only when `destroyWorkspace` says so.
     func remove(agent: String, destroyWorkspace: Bool) async throws {
         struct Remove: Encodable { let id: String; let destroyWorkspace: Bool? }
         _ = try await client.post("/api/team/remove", Remove(id: agent, destroyWorkspace: destroyWorkspace ? true : nil), as: JSONValue.self)
-        await refresh()
+        await reread(["team"])
     }
 
     /// The model roles your Models page has, each with whether a model answers for it (nil: this device may not read them).
@@ -418,9 +592,9 @@ import Observation
         await lookAtTeam()
     }
 
-    /// The agents as the node has it now, alone (after a change of yours, so it shows at once).
+    /// The agents as the node has it now, after a change of yours (the stream says so at once when it is up).
     private func lookAtTeam() async {
-        if let team = try? await client.get("/api/team", as: TeamSnapshot.self) { self.team = team }
+        await reread(["team"])
     }
 }
 

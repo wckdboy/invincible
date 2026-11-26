@@ -133,7 +133,7 @@ struct InboxView: View {
         // An approval its notification's Approve asked to see: its card, once the Inbox has it.
         .task(id: session.approvalToOpen) {
             guard let id = session.approvalToOpen else { return }
-            if !session.waiting.contains(where: { $0.id == id }) { await session.refresh() }
+            if !session.waiting.contains(where: { $0.id == id }) { await session.reread(["actions"], force: true) }
             session.approvalToOpen = nil
             guard let action = session.waiting.first(where: { $0.id == id }) else { return }
             guarded = true
