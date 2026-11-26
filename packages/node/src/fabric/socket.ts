@@ -1,4 +1,4 @@
-import { CBOR_BUDGET, CborError, cborDecode, cborEncode } from "@invincible/core";
+import { CBOR_BUDGET, cborDecode, cborEncode } from "@invincible/core";
 
 /*
  * The node's side of Q-AMP's sidecar socket (Q-AMP's docs/SIDECAR.md, API 1): the daemon is the host, and the sidecar is
@@ -142,7 +142,7 @@ export interface PeerInfo {
   name: string | null;
 }
 
-type Msg = Record<string, unknown> & { t: string };
+export type Msg = Record<string, unknown> & { t: string };
 
 /** A FIFO of chunks a reader takes from as they come; `bytes` is what it holds and the reader hasn't taken. */
 class Stream {
@@ -212,6 +212,68 @@ function jsonish(v: unknown): unknown {
 const num = (v: unknown): number | null => (typeof v === "number" ? v : typeof v === "bigint" ? Number(v) : null);
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
+/**
+ * The socket's framing, as it comes in: a 4-byte big-endian length, then that many bytes of CBOR, one map whose "t" is
+ * its type. A length past MAX_MESSAGE_BYTES is refused before anything of it is buffered; a body is decoded under
+ * Q-AMP's decode budget. Throws on anything that isn't a message: the connection is broken from there on.
+ */
+export class FrameReader {
+  private inbox: Uint8Array[] = [];
+  private inboxBytes = 0;
+
+  /** What this chunk completes, in order (none while a message is still coming). */
+  push(chunk: Uint8Array): Msg[] {
+    this.inbox.push(Uint8Array.from(chunk));
+    this.inboxBytes += chunk.length;
+    const out: Msg[] = [];
+    while (this.inboxBytes >= 4) {
+      const head = this.take(4, false);
+      const length = new DataView(head.buffer, head.byteOffset).getUint32(0);
+      // Bounded before it is buffered: a length past the limit is a broken socket, never memory to hold.
+      if (length > MAX_MESSAGE_BYTES) throw new SidecarError("internal", `the sidecar sent a message of ${length} bytes, past ${MAX_MESSAGE_BYTES}`);
+      if (this.inboxBytes < 4 + length) break;
+      this.take(4, true);
+      const body = this.take(length, true);
+      let decoded: unknown;
+      try {
+        decoded = cborDecode(body, { budget: CBOR_BUDGET });
+      } catch (error) {
+        throw new SidecarError("internal", `the sidecar sent what isn't a message: ${(error as Error).message}`);
+      }
+      if (!decoded || typeof decoded !== "object" || Array.isArray(decoded) || decoded instanceof Uint8Array || typeof (decoded as Msg).t !== "string") throw new SidecarError("internal", "the sidecar sent what isn't a message: not a map with a type");
+      out.push(decoded as Msg);
+    }
+    return out;
+  }
+
+  /** What it holds of a message still coming. */
+  get held(): number {
+    return this.inboxBytes;
+  }
+
+  /** The first `n` bytes held (consumed, or only looked at). */
+  private take(n: number, consume: boolean): Uint8Array {
+    const out = new Uint8Array(n);
+    let at = 0;
+    let i = 0;
+    while (at < n) {
+      const part = this.inbox[i]!;
+      const used = Math.min(part.length, n - at);
+      out.set(part.subarray(0, used), at);
+      at += used;
+      if (consume) {
+        if (used === part.length) {
+          this.inbox.shift();
+          continue;
+        }
+        this.inbox[0] = part.subarray(used);
+      } else i++;
+    }
+    if (consume) this.inboxBytes -= n;
+    return out;
+  }
+}
+
 interface CallState {
   stream: Stream;
   resolve(v: unknown): void;
@@ -247,8 +309,7 @@ export class SidecarClient {
   private readonly calls = new Map<number, CallState>();
   private readonly tasks = new Map<number, TaskState>();
   private handler: ((inv: Invocation) => void) | null = null;
-  private inbox: Uint8Array[] = [];
-  private inboxBytes = 0;
+  private readonly reader = new FrameReader();
   private outbound: Uint8Array[] = [];
   private closedWith: Error | null = null;
   private readonly closeListeners: ((why: Error) => void)[] = [];
@@ -329,54 +390,18 @@ export class SidecarClient {
   }
 
   private received(chunk: Uint8Array): void {
-    this.inbox.push(Uint8Array.from(chunk));
-    this.inboxBytes += chunk.length;
-    while (this.inboxBytes >= 4) {
-      const head = this.take(4, false);
-      const length = new DataView(head.buffer, head.byteOffset).getUint32(0);
-      // Bounded before it is buffered: a length past the limit is a broken socket, never memory to hold.
-      if (length > MAX_MESSAGE_BYTES) {
-        this.closed(new SidecarError("internal", `the sidecar sent a message of ${length} bytes, past ${MAX_MESSAGE_BYTES}`));
-        this.socket.end();
-        return;
-      }
-      if (this.inboxBytes < 4 + length) return;
-      this.take(4, true);
-      const body = this.take(length, true);
-      let message: Msg;
-      try {
-        const decoded = cborDecode(body, { budget: CBOR_BUDGET });
-        if (!decoded || typeof decoded !== "object" || Array.isArray(decoded) || decoded instanceof Uint8Array || typeof (decoded as Msg).t !== "string") throw new CborError("not a message");
-        message = decoded as Msg;
-      } catch (error) {
-        this.closed(new SidecarError("internal", `the sidecar sent what isn't a message: ${(error as Error).message}`));
-        this.socket.end();
-        return;
-      }
+    let messages: Msg[];
+    try {
+      messages = this.reader.push(chunk);
+    } catch (error) {
+      this.closed(new SidecarError("internal", (error as Error).message));
+      this.socket.end();
+      return;
+    }
+    for (const message of messages) {
+      if (this.closedWith) return;
       this.dispatch(message);
     }
-  }
-
-  /** The first `n` bytes held (consumed, or only looked at). */
-  private take(n: number, consume: boolean): Uint8Array {
-    const out = new Uint8Array(n);
-    let at = 0;
-    let i = 0;
-    while (at < n) {
-      const part = this.inbox[i]!;
-      const used = Math.min(part.length, n - at);
-      out.set(part.subarray(0, used), at);
-      at += used;
-      if (consume) {
-        if (used === part.length) {
-          this.inbox.shift();
-          continue;
-        }
-        this.inbox[0] = part.subarray(used);
-      } else i++;
-    }
-    if (consume) this.inboxBytes -= n;
-    return out;
   }
 
   private closed(why: Error): void {
