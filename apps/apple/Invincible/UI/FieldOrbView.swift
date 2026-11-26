@@ -102,7 +102,9 @@ extension FieldOrb.Motion {
 }
 
 /// A still orb: its picture, drawn once for each field, look, light, page and screen, and shared by every row that shows
-/// it. Compared by what it is drawn from, so a row drawn again draws nothing.
+/// it. Compared by what it is drawn from, so a row drawn again draws nothing. One not drawn yet is drawn away from the
+/// main thread, a quiet disc of its size standing in meanwhile, so a screen of orbs (Home's first frame) is never held up
+/// by drawing them, and nothing moves when each comes.
 private struct StillField: View, Equatable {
     let identity: FieldIdentity
     let beam: Bool
@@ -111,15 +113,30 @@ private struct StillField: View, Equatable {
     let frame: FieldOrb.Frame
     let paper: Bool
     let scale: CGFloat
+    @State private var drawn: CGImage?
+
+    nonisolated static func == (a: StillField, b: StillField) -> Bool {
+        a.identity == b.identity && a.beam == b.beam && a.agent == b.agent && a.size == b.size && a.frame == b.frame && a.paper == b.paper && a.scale == b.scale
+    }
 
     var body: some View {
-        if let image = FieldStills.shared.image(identity: identity, beam: beam, agent: agent, size: size, frame: frame, paper: paper, scale: scale) {
+        let key = FieldStills.key(identity: identity, beam: beam, agent: agent, size: size, frame: frame, paper: paper, scale: scale)
+        if let image = FieldStills.shared.kept(key) ?? drawn {
             Image(decorative: image, scale: scale)
                 .resizable()
                 .interpolation(.high)
                 .frame(width: size, height: size)
         } else {
-            Color.clear.frame(width: size, height: size)
+            Circle()
+                .fill(.fill.quaternary)
+                .frame(width: size * 0.62, height: size * 0.62)
+                .frame(width: size, height: size)
+                .task(id: key) {
+                    let (identity, beam, agent, size, frame, paper, scale) = (identity, beam, agent, size, frame, paper, scale)
+                    drawn = await Task.detached(priority: .userInitiated) {
+                        FieldStills.shared.image(identity: identity, beam: beam, agent: agent, size: size, frame: frame, paper: paper, scale: scale)
+                    }.value
+                }
         }
     }
 }
@@ -223,8 +240,17 @@ final class FieldStills: Sendable {
     static let shared = FieldStills()
     private let kept = Mutex<(images: [String: CGImage], order: [String])>(([:], []))
 
+    /// What a picture is kept by: everything it is drawn from.
+    static func key(identity: FieldIdentity, beam: Bool, agent: Bool, size: CGFloat, frame: FieldOrb.Frame, paper: Bool, scale: CGFloat) -> String {
+        "\(identity.seed)/\(identity.tilt)/\(identity.lines)/\(identity.colours.key)/\(identity.colours.rim)|\(beam)/\(agent)|\(frame.glow)/\(frame.rim)/\(frame.turn)|\(size)@\(scale)|\(paper)"
+    }
+
+    /// A picture drawn already, or nil.
+    func kept(_ key: String) -> CGImage? { kept.withLock { $0.images[key] } }
+
+    /// A picture, drawn now if it isn't kept (anywhere: the painter keeps its own caches behind locks).
     func image(identity: FieldIdentity, beam: Bool, agent: Bool, size: CGFloat, frame: FieldOrb.Frame, paper: Bool, scale: CGFloat) -> CGImage? {
-        let key = "\(identity.seed)/\(identity.tilt)/\(identity.lines)/\(identity.colours.key)/\(identity.colours.rim)|\(beam)/\(agent)|\(frame.glow)/\(frame.rim)/\(frame.turn)|\(size)@\(scale)|\(paper)"
+        let key = Self.key(identity: identity, beam: beam, agent: agent, size: size, frame: frame, paper: paper, scale: scale)
         if let image = kept.withLock({ $0.images[key] }) { return image }
         let px = Int((size * scale).rounded(.up))
         guard px > 0, let space = CGColorSpace(name: CGColorSpace.sRGB),

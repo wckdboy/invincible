@@ -128,28 +128,26 @@ struct DrawerHost<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GeometryReader { box in
-            let width = min(340, box.size.width * 0.86)
-            ZStack(alignment: .leading) {
-                content
-                if open {
-                    Color.black.opacity(0.28)
-                        .ignoresSafeArea()
-                        .onTapGesture { close() }
-                        .accessibilityLabel("Close the drawer")
-                        .accessibilityAddTraits(.isButton)
-                        .transition(.opacity)
-                    Drawer(session: session, go: { place in close(); go(place) }, chat: { id in close(); chat(id) }, close: close)
-                        .frame(width: width)
-                        .clipShape(.rect(bottomTrailingRadius: 24, topTrailingRadius: 24, style: .continuous))
-                        .shadow(color: .black.opacity(0.18), radius: 24, x: 6)
-                        .offset(x: min(0, dragging))
-                        .gesture(DragGesture(minimumDistance: 12).updating($dragging) { value, state, _ in state = value.translation.width }.onEnded { value in
-                            if value.translation.width < -width / 3 { close() }
-                        })
-                        .transition(reduceMotion ? .opacity : .move(edge: .leading))
-                        .ignoresSafeArea(edges: .bottom)
-                }
+        ZStack(alignment: .leading) {
+            content
+            if open {
+                Color.black.opacity(0.28)
+                    .ignoresSafeArea()
+                    .onTapGesture { close() }
+                    .accessibilityLabel("Close the drawer")
+                    .accessibilityAddTraits(.isButton)
+                    .transition(.opacity)
+                // (Its width from the window's own, without a reader round what is under it: Home lays out once.)
+                Drawer(session: session, go: { place in close(); go(place) }, chat: { id in close(); chat(id) }, close: close)
+                    .containerRelativeFrame(.horizontal) { width, _ in min(340, width * 0.86) }
+                    .clipShape(.rect(bottomTrailingRadius: 24, topTrailingRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.18), radius: 24, x: 6)
+                    .offset(x: min(0, dragging))
+                    .gesture(DragGesture(minimumDistance: 12).updating($dragging) { value, state, _ in state = value.translation.width }.onEnded { value in
+                        if value.translation.width < -110 { close() }
+                    })
+                    .transition(reduceMotion ? .opacity : .move(edge: .leading))
+                    .ignoresSafeArea(edges: .bottom)
             }
         }
     }

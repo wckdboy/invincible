@@ -204,7 +204,9 @@ import Observation
         link.attach(.init(
             up: { [weak self] _, at in
                 guard let self else { return }
-                (self.linkUp, self.reconnecting) = (true, false)
+                // (Set only when they change: what shows them is drawn again only then.)
+                if !self.linkUp { self.linkUp = true }
+                if self.reconnecting { self.reconnecting = false }
                 #if os(iOS)
                 PerfProbe.shared.linkBack()
                 #endif
@@ -216,7 +218,8 @@ import Observation
             down: { [weak self] in
                 guard let self else { return }
                 if !self.reconnecting { Self.saidLost() }
-                (self.linkUp, self.reconnecting) = (false, true)
+                if self.linkUp { self.linkUp = false }
+                if !self.reconnecting { self.reconnecting = true }
                 self.followers.down()
             },
             lost: { [weak self] in
@@ -270,7 +273,8 @@ import Observation
             path.stop()
             link.stop()
             followers.off()
-            (linkUp, reconnecting) = (false, false)
+            if linkUp { linkUp = false }
+            if reconnecting { reconnecting = false }
         }
     }
 
