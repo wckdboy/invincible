@@ -119,6 +119,12 @@ export class Fabric implements SyncTransport {
   private readonly paths = new Map<string, PathState>();
   private readonly backoff = new Map<string, { until: number; ms: number }>();
   private callers: Map<string, string | null> | null = null;
+  /**
+   * The transport keys revoked nodes ever held, by their profiles' proofs: nobody's from then on. Read again only when a
+   * node is revoked, a revoked node's profile arrives (one it signed before, coming late), or the ledger is rebuilt; a
+   * routine profile doesn't (reading them costs one signature check for each profile a revoked node ever signed).
+   */
+  private burnedKeys: Set<string> | null = null;
   /** Peers' endpoints as their profiles prove them (their transport keys' own signatures), until a profile changes. */
   private readonly endpoints = new Map<string, QampEndpoint | null>();
   /** Link calls' nonces, for their signatures' window: a call sent twice is refused the second time. */
@@ -137,6 +143,7 @@ export class Fabric implements SyncTransport {
         this.callers = null;
         this.endpoints.clear();
       }
+      if (rebuilt || events.some((e) => e.kind === "device.revoked" || (e.kind === "node.profile" && deps.store.device(e.device)?.revokedHlc))) this.burnedKeys = null;
       for (const event of events) {
         if (event.kind !== "device.revoked") continue;
         const body = event.body as { device?: unknown };
@@ -174,28 +181,36 @@ export class Fabric implements SyncTransport {
   nodeOfKey(did: string): Device | null {
     if (!this.callers) {
       const map = new Map<string, string | null>();
-      const burned = new Set<string>();
       for (const d of this.deps.store.devices(true)) {
-        if (d.kind !== "node" || d.id === this.deps.identity.id) continue;
-        if (d.revokedHlc) {
-          for (const caps of this.deps.store.profilesOf(d.id)) {
-            const held = qampEndpointOf(caps, d.id);
-            if (held) burned.add(held.did);
-          }
-          continue;
-        }
+        if (d.kind !== "node" || d.id === this.deps.identity.id || d.revokedHlc) continue;
         const endpoint = qampEndpointOf(d.profile?.caps, d.id);
         if (!endpoint) continue;
         // Two nodes naming one key (both holding it): neither is taken for it.
         map.set(endpoint.did, map.has(endpoint.did) ? null : d.id);
       }
-      for (const did of burned) map.set(did, null);
+      for (const did of this.burned()) map.set(did, null);
       this.callers = map;
     }
     const id = this.callers.get(did);
     // Never cached: a node revoked a moment ago is refused now.
     const device = id ? this.deps.store.activeDevice(id) : null;
     return device && device.kind === "node" ? device : null;
+  }
+
+  /** Every transport key a revoked node ever held (each profile it signed, by that profile's proof). */
+  private burned(): Set<string> {
+    if (!this.burnedKeys) {
+      const burned = new Set<string>();
+      for (const d of this.deps.store.devices(true)) {
+        if (d.kind !== "node" || d.id === this.deps.identity.id || !d.revokedHlc) continue;
+        for (const caps of this.deps.store.profilesOf(d.id)) {
+          const held = qampEndpointOf(caps, d.id);
+          if (held) burned.add(held.did);
+        }
+      }
+      this.burnedKeys = burned;
+    }
+    return this.burnedKeys;
   }
 
   /**
