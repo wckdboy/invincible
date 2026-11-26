@@ -143,8 +143,9 @@ struct KeptTableTests {
         #expect(session.rows.map(\.id) == ["ada", "tester", "writer"])
         #expect(session.roomRows.map(\.id) == ["r1"])
         #expect(session.drawn("ada")?.name == "Ada")
-        // Its line as it was: two chats under way, and what waited for you that its agents didn't ask.
-        #expect(session.primary == PrimaryNow(PrimaryWork(turns: turns, needs: 2, unread: unread)))
+        // Its line as it was: two chats under way, and what needed you, Home's count as it was kept (one count everywhere,
+        // 26 November 2026: the agents' line no longer leaves out what the agents asked, which made Home say 6 and it 5).
+        #expect(session.primary == PrimaryNow(PrimaryWork(turns: turns, needs: 3, unread: unread)))
         // Only looked at: an agent's page, and anything you change, wait for the node's word.
         #expect(session.team == nil)
         #expect(session.agent("ada") == nil)

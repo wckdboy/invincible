@@ -64,7 +64,8 @@ struct PlacesSidebar<Foot: View>: View {
 
     var body: some View {
         let work = session.attended
-        let beyond = work.map { Work.inboxBeyond(session.inboxCount, asks: session.asks, needs: $0.needs) } ?? session.inboxCount
+        // What needs you, one count everywhere (Session.needsYou): the rows that need you, and what waits in the Inbox beyond them.
+        let beyond = work.map { session.needsBeyond($0) } ?? session.needsYou
         List(selection: Binding<Place?>(get: { place }, set: { if let chosen = $0 { place = chosen } })) {
             // The head: the app's mark and its wordmark, as the web's sidebar and Android's begin.
             Section {
@@ -106,8 +107,8 @@ struct PlacesSidebar<Foot: View>: View {
                 #endif
             }
             if let work {
-                // (The rows that need you, and each thing that waits in the Inbox beyond them, as the web counts them.)
-                let needs = work.needs.count + beyond
+                // (The rows that need you, and each thing that waits in the Inbox beyond them: Home's count, whole.)
+                let needs = session.needsYou
                 if needs > 0 {
                     Section {
                         if beyond > 0 {

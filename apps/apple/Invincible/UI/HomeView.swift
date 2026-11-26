@@ -367,7 +367,7 @@ struct PlaceButtons: View {
         if let give { Button(action: give) { Label("Give a task…", systemImage: "square.stack.3d.up") } }
         Button { go(.primary) } label: { Label(Primary.name, systemImage: "bubble.left.and.text.bubble.right") }
         Button { go(.agents) } label: { Label("Agents", systemImage: "person.3") }
-        Button { go(.inbox) } label: { Label(session.inboxCount > 0 ? "Inbox · \(session.inboxCount)" : "Inbox", systemImage: "tray") }
+        Button { go(.inbox) } label: { Label(session.needsYou > 0 ? "Inbox · \(session.needsYou)" : "Inbox", systemImage: "tray") }
         Button { go(.more) } label: { Label("Settings", systemImage: "gearshape") }
     }
 }

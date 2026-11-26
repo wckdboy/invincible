@@ -20,7 +20,7 @@ enum KeptTable {
     static let fields: [String: Set<String>] = [
         "agents": ["id", "name", "role", "enabled", "dailyTurns", "turnsToday", "createdBy", "avatar", "workspace"],
         "rooms": ["id", "name", "direct", "members", "updatedAt", "paused"],
-        "tasks": ["id", "title", "assignee", "status", "verified", "updatedAt", "progress", "error", "changes", "proposedBy", "room", "dependsOn"],
+        "tasks": ["id", "title", "assignee", "status", "verified", "updatedAt", "progress", "error", "changes", "proposedBy", "room", "dependsOn", "record"],
         "deliveries": ["id", "agent", "status", "updatedAt", "error", "room"],
         "removed": ["id", "name"],
     ]
@@ -96,10 +96,16 @@ enum KeptTable {
         return kept
     }
 
-    /// An item with the fields it may keep (a task's changes: how many files, nothing of what they were).
+    /// An item with the fields it may keep (a task's changes: how many files, nothing of what they were; its record: how
+    /// it ended and what proves it, for its verdict, nothing of the models it called).
     private static func only(_ item: [String: Any], _ allowed: Set<String>) -> [String: Any] {
         var kept = item.filter { allowed.contains($0.key) }
         if let changes = kept["changes"] as? [String: Any] { kept["changes"] = changes.filter { $0.key == "files" } }
+        if let record = kept["record"] as? [String: Any] {
+            var trimmed = record.filter { ["startedAt", "endedAt", "ended", "proof"].contains($0.key) }
+            trimmed["spent"] = [Any]()
+            kept["record"] = trimmed
+        }
         return kept
     }
 

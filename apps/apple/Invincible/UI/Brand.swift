@@ -1,9 +1,11 @@
 import SwiftUI
 
 /*
- * The primary's accents, and nothing more: its red for what needs you and for its seat, the cream ink and the black tile
- * (scripts/brand.ts writes them from apps/web/src/brand.ts), the team's mark, and a face as it stands alone (an
- * orb: OrbView.swift); and the one scale every screen is spaced on. Everything else is the system's own.
+ * The look, monochrome (the owner's word, 26 November 2026: black, white and greys, bold type; colour kept for the
+ * agents, so they are told apart at a glance; red only for what went wrong; gold, amber and cream gone; the primary shown
+ * by the I-beam in one ink): the ink (scripts/brand.ts writes it, black on light and white on dark), what is written on
+ * it, the red, a face as it stands alone (an agent's orb, or the primary's I-beam), and the one scale every screen is
+ * spaced on. Everything else is the system's own: its surfaces, its greys, its type.
  */
 
 /// The app's one spacing scale: the PWA's (`--sp-*` in apps/web/src/index.html; each step named as there), in points.
@@ -56,24 +58,21 @@ enum Metrics {
 }
 
 extension Color {
-    /// The ink, the app's accent: the black tile on light, the cream on dark. Set as the tint at the root, since the
-    /// system's controls took system blue from the asset catalog's accent alone (seen on iOS 26.1).
+    /// The ink, the app's accent: black on light, white on dark. Set as the tint at the root, since the system's controls
+    /// took system blue from the asset catalog's accent alone (seen on iOS 26.1).
     static let ink = Color(.accent)
-    /// The red: what went wrong, and what can't be undone.
+    /// The red: what went wrong, and what can't be undone. The one colour that is the app's own.
     static let danger = Color(.danger)
 
-    // What is going on among the agents, one colour each and the PWA's too (its --work, --needs, --failed, --ok; lib/
-    // agent-state.ts): blue at work, amber for what waits on you, red for a failure, green for what ended and is new to
-    // you (verified work among it). No pair can be mistaken with full colour vision, light or dark (each at least 15
-    // apart in OKLab); under red-green colour blindness the words beside them tell them apart.
-    static let working = Color(light: "#0a5fcc", dark: "#58a6ff")
-    static let needs = Color(light: "#946200", dark: "#f0b549")
-    static let failed = Color(light: "#c4141b", dark: "#ff6b6b")
-    static let done = Color(light: "#137a43", dark: "#4cc38a")
-    /// What is written on the ink (the accent): cream on the black tile, black on the cream.
+    // What is going on among the agents, in ink and weight, never in a colour of its own (the owner's word, 26 November
+    // 2026): at work and what needs you are the ink (the word beside says which, in its weight), what ended is the
+    // system's grey, and only a failure is red. The words always say it; the colour never alone.
+    static let working = Color.primary
+    static let needs = Color.primary
+    static let failed = Color.danger
+    static let done = Color.secondary
+    /// What is written on the ink (the accent): white on black, black on white.
     static let onAccent = Color(.onAccent)
-    static let tile = Color(.tile)
-    static let cream = Color(.cream)
 }
 
 /// A face as it stands alone, beside its words, in a header or a pick list (the PWA's workerAvatar; your word, 25 November
@@ -124,16 +123,16 @@ extension Color {
 }
 
 extension Highlight.Tone {
-    /// Its colour, light and dark (the PWA's .tok-* and --code-*): a language's words in the cross's red, quiet blues for
-    /// what code holds, comments receding; a diff's lines in green and red.
+    /// Its ink, light and dark: code in the page's own greys and weights (the owner's word, 26 November 2026: monochrome),
+    /// a language's words in full ink, what code holds a step quieter, comments receding; a diff's lines told by their
+    /// sign and a faint ground, never by green and red.
     var color: Color {
         switch self {
-        case .keyword: Color(light: "#b3261e", dark: "#ff8a80")
-        case .string: Color(light: "#0a3069", dark: "#a5d6ff")
-        case .number: Color(light: "#0550ae", dark: "#79c0ff")
-        case .comment: Color(light: "#6e7781", dark: "#8b949e")
-        case .added: Color(light: "#116329", dark: "#7ee2a8")
-        case .removed: Color(light: "#82071e", dark: "#ffa198")
+        case .keyword: .primary
+        case .string, .number: Color(light: "#3f3f46", dark: "#c8c8d0")
+        case .comment: Color(light: "#696971", dark: "#8b8b94")
+        case .added: .primary
+        case .removed: Color(light: "#52525a", dark: "#a1a1a9")
         case .meta: .secondary
         }
     }
@@ -141,8 +140,8 @@ extension Highlight.Tone {
     /// A diff's line, under its words.
     var shade: Color? {
         switch self {
-        case .added: Color(light: "#dafbe1", dark: "#1d3a26")
-        case .removed: Color(light: "#ffebe9", dark: "#3d1f20")
+        case .added: Color(light: "#ebebed", dark: "#1f1f23")
+        case .removed: Color(light: "#f4f4f5", dark: "#17171a")
         default: nil
         }
     }
@@ -158,7 +157,7 @@ extension Highlight {
                 part.foregroundColor = tone.color
                 if let shade = tone.shade { part.backgroundColor = shade }
                 if tone == .comment { part.inlinePresentationIntent = .emphasized }
-                if tone == .meta { part.inlinePresentationIntent = .stronglyEmphasized }
+                if tone == .meta || tone == .keyword { part.inlinePresentationIntent = .stronglyEmphasized }
             }
             out += part
         }
@@ -206,64 +205,40 @@ extension View {
     }
 }
 
-/// The mark on what needs you: an amber orb, calling with a wave of its light.
+/// The mark on what needs you: a dot in the ink (its words say what it is).
 struct NeedsMark: View {
     var body: some View {
-        OrbPip(color: .needs, size: 10, waves: true).accessibilityLabel("Needs you")
+        OrbPip(color: .ink, size: 8).accessibilityLabel("Needs you")
     }
 }
 
-/// The mark on what is new to you (a room where something ended since you looked), until you open it: a green orb.
+/// The mark on what is new to you (a room where something ended since you looked), until you open it: a grey dot.
 struct NewMark: View {
     var body: some View {
-        OrbPip(color: .done, size: 10).accessibilityLabel("Something new")
+        OrbPip(color: .secondary, size: 8).accessibilityLabel("Something new")
     }
 }
 
-/// Something at work (the PWA's "live" dot): a small orb in its colour with a soft halo, sending out a wave of its light
-/// (your word, 24 November 2026: "pulsing/moving when doing a task"). The words beside it say what is going on.
+/// Something at work (the PWA's "live" dot): a dot in its ink, still. The words beside it say what is going on, and
+/// nothing is drawn while nothing changes (the owner's bar: nothing moving at rest).
 struct LiveDot: View {
     var color: Color = .ink
 
     var body: some View {
-        OrbPip(color: color, size: 6, waves: true)
+        OrbPip(color: color, size: 6)
             .padding(Space.line)
-            .background(color.opacity(0.22), in: .circle)
             .accessibilityHidden(true)
     }
 }
 
-/// A state's dot as a small orb of its colour, lit from above (the PWA's `.dot`; your word, 24 November 2026: everything
-/// orbs). With `waves`, for something going on, it sends out a wave of its light every 2.2 seconds, growing to nearly
-/// three times its size as it fades, unless the device asks for reduced motion. The wave takes nothing of the layout.
+/// A state's dot: a plain round of its ink beside its word, still. (`waves` is kept for the places that pass it: a dot no
+/// longer sends out waves; what goes on is said in words.)
 struct OrbPip: View {
     let color: Color
     var size: CGFloat = 8
     var waves = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Circle()
-            // (As the PWA's radial-gradient(circle at 34% 30%, …): out to its farthest corner, 0.96 of its width.)
-            .fill(RadialGradient(stops: [
-                .init(color: color.mix(with: .white, by: 0.55), location: 0),
-                .init(color: color, location: 0.55),
-                .init(color: color.mix(with: .black, by: 0.28), location: 1),
-            ], center: UnitPoint(x: 0.34, y: 0.3), startRadius: 0, endRadius: size * 0.96))
-            .frame(width: size, height: size)
-            .background {
-                if waves && !reduceMotion {
-                    TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
-                        // Fast, then slowing, as the PWA's ease-out has it.
-                        let gone = 1 - pow(1 - (OrbCourses.seconds(timeline.date) / 2.2).truncatingRemainder(dividingBy: 1), 4)
-                        Circle().fill(color)
-                            .frame(width: size, height: size)
-                            .scaleEffect(1 + 1.9 * gone)
-                            .opacity(0.55 * (1 - gone))
-                    }
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                }
-            }
+        Circle().fill(color).frame(width: size, height: size)
     }
 }

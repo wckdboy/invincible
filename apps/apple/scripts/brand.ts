@@ -6,8 +6,9 @@
  *     1024 px edge to edge and opaque, white on near black (iOS rounds the corners itself); its dark form is the mark
  *     alone on nothing, which iOS backs itself; its tinted form is that mark in grey, for the system to colour. The Mac's
  *     is the tile drawn at each size a Mac draws an icon at (macOS clips it to its own shape);
- *   - the app's colours: the ink (the black tile on light, the cream on dark), what is written on it, and the red of what
- *     went wrong.
+ *   - the app's colours, monochrome (the owner's word, 26 November 2026: black, white and greys, colour kept for the
+ *     agents): the ink (black on light, white on dark, as the web app's --accent), what is written on it, and the red of
+ *     what went wrong, the one colour of the app's own.
  *
  *   bun apps/apple/scripts/brand.ts      (pure TypeScript: no browser, no ImageMagick)
  */
@@ -16,9 +17,9 @@ import { join } from "node:path";
 import { greyscale, png } from "../../../scripts/field-icon.ts";
 import { renderMark } from "../../../scripts/mark.ts";
 
-/** The apps' inks, as the Android app's Theme.kt has them too: the black tile, the cream on dark, and the red of what went
- * wrong (its deeper form on light, its brighter one on dark). */
-export const INK = { tile: "#0a0a0b", cream: "#f8ebdc", danger: "#c4141b", dangerOnDark: "#ee2c36" } as const;
+/** The app's inks: black on light and white on dark (the web app's --accent), and the red of what went wrong (its deeper
+ * form on light, its brighter one on dark). Gold, amber and cream are gone (26 November 2026). */
+export const INK = { tile: "#0a0a0b", white: "#ffffff", danger: "#c4141b", dangerOnDark: "#ee2c36" } as const;
 
 const ASSETS = join(import.meta.dir, "../Invincible/Assets.xcassets");
 const MAC_ICON = join(import.meta.dir, "../Invincible/Mac/MacAssets.xcassets/MacIcon.appiconset");
@@ -44,13 +45,11 @@ if (import.meta.main) {
         ],
       }),
     );
-  // The ink: the black tile on light, the cream on dark; and what is written on it.
-  colour("AccentColor", INK.tile, INK.cream);
-  colour("OnAccent", INK.cream, INK.tile);
+  // The ink: black on light, white on dark; and what is written on it.
+  colour("AccentColor", INK.tile, INK.white);
+  colour("OnAccent", INK.white, INK.tile);
   // The red of what went wrong.
   colour("Danger", INK.danger, INK.dangerOnDark);
-  colour("Tile", INK.tile, INK.tile);
-  colour("Cream", INK.cream, INK.cream);
 
   // ---- the app icon --------------------------------------------------------------------------------------------------
   // The I-beam (scripts/mark.ts): white on near black; its dark form the mark alone on nothing, which iOS backs itself.

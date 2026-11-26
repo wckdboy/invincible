@@ -9,8 +9,8 @@ import SwiftUI
  */
 
 extension Color {
-    /// A state's colour by its tone (Standing.tone): blue at work, amber for what needs you, red for a failure, green for
-    /// what ended well; the secondary ink otherwise.
+    /// A state's ink by its tone (Standing.tone): the ink at work and for what needs you (the word and its weight say
+    /// which), red for a failure, the secondary ink otherwise (Brand.swift: monochrome).
     static func tone(_ tone: String) -> Color {
         switch tone {
         case "work": .working
@@ -48,18 +48,27 @@ struct ProjectBadge: View {
     }
 }
 
-/// How a task stands, as its row's first line ends: its word in its state's colour (a tick before Verified), never colour
-/// alone.
+/// How a task stands, as its row's first line ends: its word, or once it has ended its verdict as its proof allows
+/// (Proven with a tick, Reviewed, not proven in grey, Failed · gate 2 in red), never colour alone.
 struct StateWord: View {
     let row: WorkRow
 
     var body: some View {
         HStack(spacing: 3) {
-            if row.state == .verified { Image(systemName: "checkmark").font(.caption2.weight(.bold)) }
-            Text(row.word)
+            if row.verdict?.kind == .proven { Image(systemName: "checkmark").font(.caption2.weight(.bold)) }
+            Text(row.verdict?.word ?? row.word)
         }
         .fontWeight(.semibold)
-        .foregroundStyle(Color.tone(row.tone))
+        .foregroundStyle(ink)
+    }
+
+    private var ink: Color {
+        switch row.verdict?.kind {
+        case .proven: .primary
+        case .failed, .rejected, .gaveUp: .danger
+        case .reviewed, .stopped, .unverified: .secondary
+        case nil: Color.tone(row.tone)
+        }
     }
 }
 
@@ -116,7 +125,7 @@ struct WorkRowView: View {
 
     /// A row's words for VoiceOver and a tooltip: what it is, where, how it stands and who is on it.
     static func label(_ row: WorkRow) -> String {
-        [row.title, row.project.name, row.word, "\(row.agent.name)\(row.detail.isEmpty ? "" : ": \(row.detail)")", row.age.map { "\($0) ago" }].compactMap(\.self).joined(separator: ", ")
+        [row.title, row.project.name, row.verdict?.word ?? row.word, "\(row.agent.name)\(row.detail.isEmpty ? "" : ": \(row.detail)")", row.age.map { "\($0) ago" }].compactMap(\.self).joined(separator: ", ")
     }
 }
 

@@ -56,6 +56,14 @@ struct WorkRow: Equatable, Identifiable, Sendable {
     let mono: Bool
     /// When it last moved: the order within a section.
     let at: Double
+    /// Once it has ended, its verdict in words that follow its proof (Steps.verdict, from its record): what its row says in
+    /// place of `word`, so a row never says "Verified" where its gates proved nothing. Nil while it is in hand.
+    var verdict: Verdict? = nil
+
+    struct Verdict: Equatable, Sendable {
+        let word: String
+        let kind: Steps.Verdict
+    }
 
     struct Agent: Equatable, Sendable {
         let id: String
@@ -285,7 +293,8 @@ enum Work {
             let row = rowOf(task, name: name, paused: agent.map { !$0.enabled } ?? false, asks: task.status == "running" ? asking[task.assignee] ?? [] : [], seen: seenAt(task), now: now, titles: titles)
             out[row.attention].append(WorkRow(
                 id: task.id, room: task.room, title: task.title, project: project, agent: .init(id: task.assignee, name: name, avatar: agent?.avatar),
-                state: row.state, attention: row.attention, word: row.word, tone: row.state.tone, age: row.age, detail: row.detail, mono: row.mono, at: task.updatedAt
+                state: row.state, attention: row.attention, word: row.word, tone: row.state.tone, age: row.age, detail: row.detail, mono: row.mono, at: task.updatedAt,
+                verdict: Steps.verdict(status: task.status, verified: task.verified, error: task.error, record: task.record, facts: Steps.facts(record: task.record)).map { WorkRow.Verdict(word: $0.word, kind: $0.verdict) }
             ))
             if counts[project.key] == nil { order.append(project.key) }
             var counted = counts[project.key] ?? Count(project: project)

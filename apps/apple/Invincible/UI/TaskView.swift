@@ -374,7 +374,8 @@ private struct TaskThreadView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).rotationEffect(.degrees(workedOpen ? 90 : 0))
-                            Text("\(name) worked for \(Steps.workedFor(summary.ms))\(Text(words.isEmpty ? "" : " · \(words)").foregroundStyle(.tertiary))")
+                            // (Under half a second, no time: never "worked for 0s".)
+                            Text("\(name) \(summary.ms >= 500 ? "worked for \(Steps.workedFor(summary.ms))" : "worked")\(Text(words.isEmpty ? "" : " · \(words)").foregroundStyle(.tertiary))")
                                 .monospacedDigit()
                         }
                         .font(.footnote)
@@ -622,29 +623,33 @@ private struct ProofCard: View {
     var body: some View {
         let proof = Steps.proof(status: task.status, gates: task.gates ?? [], thread.entries)
         let verified = task.status == "done" && task.verified
-        let verdict: Color = verified ? .done : .failed
+        // The verdict as its proof allows: from its trail once read, from its record until then.
+        let said = Steps.verdict(status: task.status, verified: task.verified, error: task.error, record: task.record, facts: thread.read ? Steps.facts(proof) : Steps.facts(record: task.record))
+        let kind = said?.verdict
+        let failed = kind == .failed || kind == .rejected || kind == .gaveUp
+        let ink: Color = failed ? .danger : kind == .proven ? .primary : .secondary
         let end = TaskCard.end(task)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: verified ? "checkmark" : "xmark")
+                Image(systemName: kind == .proven ? "checkmark" : failed ? "xmark" : "minus")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.background)
+                    .foregroundStyle(failed ? AnyShapeStyle(Color.white) : AnyShapeStyle(.background))
                     .frame(width: 22, height: 22)
-                    .background(verdict, in: .circle)
+                    .background(ink, in: .circle)
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-                Text("\(Text(verified ? "Verified" : "Not verified").fontWeight(.bold).foregroundStyle(verdict)) · \(verified ? "by its gates and a reviewer that didn't write it" : end?.why ?? "its gates or the review did not pass")")
+                Text("\(Text(said?.word ?? (verified ? "Reviewed" : "Not verified")).fontWeight(.bold).foregroundStyle(failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.primary))) · \(Self.why(kind, end: end))")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(verdict.opacity(0.09))
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("task.verdict")
             ForEach(caveats(proof, verified: verified), id: \.self) { line in
                 Divider()
-                Label(line, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(Color.needs).padding(.horizontal, 14).padding(.vertical, Space.s2)
+                Label(line, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, Space.s2)
             }
             if !proof.gates.isEmpty {
                 Divider()
@@ -691,8 +696,18 @@ private struct ProofCard: View {
         }
         .background(.background.secondary)
         .clipShape(.rect(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(verdict.opacity(0.42), lineWidth: 1))
         .sheet(isPresented: $reviewing) { WorkspaceView(session: session, id: task.assignee, name: name, startOn: .changes) }
+    }
+
+    /// What the verdict rests on, after its word.
+    private static func why(_ kind: Steps.Verdict?, end: (why: String?, said: String?)?) -> String {
+        switch kind {
+        case .proven: "a gate that failed before the work passes now, and a reviewer that didn't write it passed it"
+        case .reviewed: "the reviewer passed it; no gate shows the work was done"
+        case .failed, .rejected, .gaveUp, .unverified: end?.why ?? "its gates or the review did not pass"
+        case .stopped: "it stopped where it was"
+        case nil: "it hasn't ended"
+        }
     }
 
     private func caveats(_ proof: Steps.Proof, verified: Bool) -> [String] {
@@ -773,36 +788,67 @@ private struct AgainPrompt: ViewModifier {
 private struct GateLine: View {
     let gate: Steps.GateRow
     let running: Bool
-    /// In the Verified card (what it printed beside it), or in the details (its time alone).
+    /// In the proof card (how it exited, in how long, what it printed, and how it stood before the work, on a line of its
+    /// own so none of it is cut), or in the details (its time alone).
     var ended = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-            Image(systemName: symbol)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(tint)
-                .frame(width: 16)
-                .accessibilityLabel(gate.state.rawValue)
-            Text(gate.command).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).foregroundStyle(.primary).layoutPriority(1)
-            Spacer(minLength: Space.s2)
-            Text(said)
+        VStack(alignment: .leading, spacing: Space.line) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Image(systemName: symbol)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 16)
+                    .accessibilityLabel(gate.state.rawValue)
+                Text(gate.command).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).foregroundStyle(.primary)
+                Spacer(minLength: Space.s2)
+                if !ended || gate.state == .running || gate.state == .waiting {
+                    Text(said).font(.caption).monospacedDigit().lineLimit(1).fixedSize().foregroundStyle(.tertiary)
+                }
+            }
+            if ended, gate.state == .passed || gate.state == .failed {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s1) {
+                    // Its exit and time are never cut; what it printed is, at the end.
+                    Text([gate.exit.map { "exit \($0)" }, gate.ms.map(Self.took)].compactMap(\.self).joined(separator: " · "))
+                        .fixedSize()
+                        .foregroundStyle(gate.state == .failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.secondary))
+                    if let before = beforeWords {
+                        Text("· \(before)").fixedSize().foregroundStyle(gate.before != 0 && gate.exit == 0 ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                    }
+                    if !gate.said.isEmpty {
+                        Text("· \(gate.said)").lineLimit(1).truncationMode(.tail).foregroundStyle(.tertiary)
+                    }
+                }
                 .font(.caption)
                 .monospacedDigit()
-                .lineLimit(1)
-                .foregroundStyle(gate.state == .failed ? AnyShapeStyle(Color.failed) : AnyShapeStyle(.tertiary))
+                .padding(.leading, 16 + Space.s2)
+            }
         }
         .padding(.horizontal, ended ? 14 : 0)
+        .padding(.vertical, ended ? Space.s1 : 0)
         .frame(minHeight: 28)
         .accessibilityElement(children: .combine)
+    }
+
+    /// How it stood before the work: failed then and passes now (it shows the work was done), or passed then too.
+    private var beforeWords: String? {
+        guard let before = gate.before else { return nil }
+        if before == 0 { return "passed before the work too" }
+        return gate.exit == 0 ? "failed before the work" : "failed before the work too"
+    }
+
+    /// How long a gate took, to the precision it needs: "340 ms", "4.2 s", "2m 05s". Never "0:00".
+    static func took(_ ms: Double) -> String {
+        if ms < 1_000 { return "\(Int(ms.rounded())) ms" }
+        if ms < 60_000 { return String(format: "%.1f s", ms / 1_000) }
+        return Steps.workedFor(ms)
     }
 
     private var said: String {
         switch gate.state {
         case .running: return "running"
         case .waiting: return running ? "next" : "not run"
-        case .passed, .failed:
-            guard ended else { return gate.ms.map { LiveLine.clock($0) } ?? "exit \(gate.exit ?? 0)" }
-            return [gate.exit.map { "exit \($0)" }, gate.ms.map { LiveLine.clock($0) }, gate.said.isEmpty ? nil : gate.said].compactMap(\.self).joined(separator: " · ")
+        case .passed, .failed: return gate.ms.map(Self.took) ?? "exit \(gate.exit ?? 0)"
         }
     }
 
@@ -817,9 +863,9 @@ private struct GateLine: View {
 
     private var tint: Color {
         switch gate.state {
-        case .passed: .done
-        case .failed: .failed
-        case .running: .working
+        case .passed: .primary
+        case .failed: .danger
+        case .running: .primary
         case .waiting: .secondary
         }
     }

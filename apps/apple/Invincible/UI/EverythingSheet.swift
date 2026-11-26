@@ -35,7 +35,7 @@ struct EverythingSheet: View {
                 Section {
                     place(.primary, Primary.name, "bubble.left.and.text.bubble.right", "Its conversations: what you asked it, and its answers.")
                     place(.agents, "Agents", "person.3", "Your agents, what each is doing, and their rooms.", trail: session.rows.isEmpty ? nil : "\(session.rows.count)")
-                    place(.inbox, "Inbox", "tray", "Approvals, keys it asked for, devices asking to join, what was noticed.", trail: session.inboxCount > 0 ? "\(session.inboxCount)" : nil, needs: session.inboxCount > 0)
+                    place(.inbox, "Inbox", "tray", "Approvals, keys it asked for, devices asking to join, what was noticed.", trail: session.needsYou > 0 ? "\(session.needsYou)" : nil, needs: session.needsYou > 0)
                 }
                 Section {
                     if session.can("vault:read") {

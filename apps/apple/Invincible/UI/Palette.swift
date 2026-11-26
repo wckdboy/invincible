@@ -39,7 +39,7 @@ struct CommandPalette: View {
             (.home, "Home", "What needs you, and the work", "house"),
             (.primary, Primary.name, "Its conversation", "bubble.left.and.text.bubble.right"),
             (.agents, "Agents", "Your agents and their rooms", "person.3"),
-            (.inbox, "Inbox", session.inboxCount > 0 ? "\(session.inboxCount) waiting" : "Nothing waits", "tray"),
+            (.inbox, "Inbox", session.needsYou > 0 ? "\(session.needsYou) need\(session.needsYou == 1 ? "s" : "") you" : "Nothing needs you", "tray"),
             (.more, "Settings", "This device, its node and fleet", "gearshape"),
         ]
         for (place, title, detail, symbol) in places where matches(title, detail) {

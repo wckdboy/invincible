@@ -16,34 +16,22 @@ import Synchronization
  * field.
  */
 
-/// The primary's orb: its field in gold, its beam through it. `tone` is where it stands: its field is gold in every state,
-/// its mood moves it, and the words beside it say where it stands. Decorative beside its name; named (`label`) where it
-/// stands alone.
+/// The primary, as a face: the I-beam in the page's ink (the owner's word, 26 November 2026: "the primary shown by the
+/// I-beam in one ink"), never an orb and never moving; where it stands is said by the words beside it. `tone` and
+/// `mood` are kept for the places that pass them (an agent's face takes both); the mark wears neither. Decorative beside
+/// its name; named (`label`) where it stands alone.
 struct PrimaryOrb: View {
     var size: CGFloat = 36
     var tone: Orb.Tone = .neutral
     var label: String? = nil
-    /// What it is doing: it moves as that mood does, unless motion is reduced. Nil: still.
     var mood: Orb.Mood? = nil
-    /// Which orb it is, so one drawn again carries on where it was and a change of mood eases rather than starting afresh.
     var key = "primary"
 
     var body: some View {
-        FieldOrbView(identity: FieldOrb.primary, beam: true, agent: false, size: size, mood: mood, key: key)
+        IBeam()
+            .fill(.primary)
+            .frame(width: size, height: size)
             .orbLabel(label)
-    }
-}
-
-/// The app's mark where a page shows it (Settings' About, joining, a Mac's first run): the app icon's field, its in gold,
-/// alone (no beam: that is its as the one you talk to), still, and on nothing, so it sits on a light page as on a dark one
-/// (your word, 26 November 2026: "make sure the app icon is transparent so it works in dark and white mode"): light added
-/// to light on a dark page, ink on a light one, as every orb is. Decorative: what it is in is named.
-struct AppMark: View {
-    var size: CGFloat = 40
-
-    var body: some View {
-        FieldOrbView(identity: FieldOrb.primary, beam: false, agent: false, size: size, key: "primary:mark")
-            .accessibilityHidden(true)
     }
 }
 

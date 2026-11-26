@@ -8,7 +8,7 @@ struct MenuBarMark: View {
     let mac: MacApp
 
     var body: some View {
-        let count = mac.session?.inboxCount ?? 0
+        let count = mac.session?.needsYou ?? 0
         HStack(spacing: Space.line) {
             Image(nsImage: Self.mark)
             if count > 0 { Text("\(count)").monospacedDigit() }
@@ -82,7 +82,7 @@ struct MenuBarAgents: View {
         .frame(maxHeight: 8 * (Metrics.sidebarSeat + Space.s3))
         .fixedSize(horizontal: false, vertical: true)
         Divider().padding(.vertical, Space.s1)
-        let count = session.inboxCount
+        let count = session.needsYou
         MenuRow(action: { show(.inbox) }) {
             HStack(spacing: Space.s2) {
                 if count > 0 {

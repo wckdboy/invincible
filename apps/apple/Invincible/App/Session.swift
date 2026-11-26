@@ -97,17 +97,16 @@ import Observation
     /// The primary's own line: what it's answering here, the turns the node runs, the runs in hand, what waits on you.
     var primary: PrimaryNow {
         // Until the node has answered, as it was kept: the chats under way, what waited for you.
+        // (What needs you is one count everywhere: Home's, as kept until the node has answered.)
         if team == nil, let kept {
-            let needs = Roster.primaryNeeds(inbox: kept.waiting, asks: kept.asks, agents: kept.team.agents.map(\.id))
-            return PrimaryNow(PrimaryWork(answering: chat.answering, step: chat.step, turns: kept.turns, runs: [], needs: needs, unread: kept.unread))
+            return PrimaryNow(PrimaryWork(answering: chat.answering, step: chat.step, turns: kept.turns, runs: [], needs: kept.waiting, unread: kept.unread))
         }
-        let agents = team?.agents.map(\.id) ?? []
         return PrimaryNow(PrimaryWork(
             answering: chat.answering,
             step: chat.step,
             turns: turns.map(\.title),
             runs: runs.map(\.goal),
-            needs: inboxLoaded ? Roster.primaryNeeds(inbox: inboxCount, asks: asks, agents: agents) : nil,
+            needs: inboxLoaded ? needsYou : nil,
             unread: unreadChats.map(\.title)
         ))
     }
@@ -133,12 +132,25 @@ import Observation
         return Work.attended(agents: snapshot.agents, tasks: snapshot.tasks, seen: snapshot.seen, projects: projects.map(Work.Named.init), asks: team == nil ? kept?.asks ?? [] : asks, now: Date.now.timeIntervalSince1970 * 1000)
     }
 
-    /// How many things need you, as Home's "Needs you" counts its items: every waiting approval once, each task that only
-    /// you can move on (an agent asking for your approval is its approval's), and everything else that waits in the Inbox.
+    /// What needs you, decisions only, counted one way for every place that says how many (Home's line and its Needs you,
+    /// the Inbox's count, the primary's line among the agents, the sidebar, a Mac's menu bar, the launch cache): every
+    /// approval waiting once, each task only you can move on (an agent asking for your approval is that approval's),
+    /// devices asking to join, keys it asked for, a service's question while it can be answered, and its asks to use a
+    /// Mac. What it noticed (a notice, a fact about you) is news, not a decision: shown in the Inbox, counted nowhere.
     func needsCount(_ work: Attended?) -> Int {
         let now = Date.now.timeIntervalSince1970 * 1000
         let tasks = work?.needs.filter { $0.word != "Allow?" }.count ?? 0
-        return waiting.count + tasks + pairings.count + requests.count + questions.filter { $0.expires > now }.count + screenSessions.count + notices.count + facts.count
+        return waiting.count + tasks + pairings.count + requests.count + questions.filter { $0.expires > now }.count + screenSessions.count
+    }
+
+    /// What needs you, as every place counts it (needsCount, of the work as it is drawn).
+    var needsYou: Int { needsCount(attended) }
+
+    /// What needs you beyond the work's own rows that need you: approvals no row stands for, and everything else that waits.
+    func needsBeyond(_ work: Attended) -> Int {
+        let asking = Set(work.needs.filter { $0.word == "Allow?" }.map(\.agent.id))
+        let shown = waiting.filter { asking.contains(Roster.agentOfCaller($0.by) ?? "") }.count
+        return max(0, needsCount(work) - work.needs.filter { $0.word != "Allow?" }.count - shown)
     }
 
     /// A task, as the agents are drawn.
@@ -400,7 +412,7 @@ import Observation
     /// with the next answer about the agents, which is what a launch draws first).
     private func keep(_ said: Data?) {
         guard let said, let keeping else { return }
-        keeping.keep(team: said, for: node, turns: turns.map(\.title), unread: unreadChats.map(\.title), asks: asks, waiting: inboxLoaded ? inboxCount : 0)
+        keeping.keep(team: said, for: node, turns: turns.map(\.title), unread: unreadChats.map(\.title), asks: asks, waiting: inboxLoaded ? needsYou : 0)
     }
 
     /// Your budget for the node's model calls (a line to watch, never a stop): a day's or a month's, or none.
