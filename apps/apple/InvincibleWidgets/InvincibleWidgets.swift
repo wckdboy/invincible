@@ -4,9 +4,9 @@ import WidgetKit
 
 /*
  * Invincible's widgets: a task's proof on the Lock Screen and in the Dynamic Island (I10, 26 November 2026; the X2
- * study's seventh item: no rival shows proof there). The agent's orb is the only colour, as in the app; red only where
- * it went wrong. What it says is the activity's state alone (TaskActivityState: where it is, each gate, the reviewer,
- * the verdict), and its title, which the app gave it on the device.
+ * study's seventh item: no rival shows proof there). The agent's mark is the only colour, as in the app, still, how its
+ * task stands in its shape; red only where it went wrong. What it says is the activity's state alone (TaskActivityState:
+ * where it is, each gate, the reviewer, the verdict), and its title, which the app gave it on the device.
  */
 @main
 struct InvincibleWidgets: WidgetBundle {
@@ -24,7 +24,7 @@ struct TaskActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    AgentDisc(colour: context.attributes.colour, size: 40).padding(.leading, 4)
+                    AgentDisc(attributes: context.attributes, state: context.state, size: 40).padding(.leading, 4)
                 }
                 // (First call on the width: the title beside it takes whatever is left, and broke "Review" in two.)
                 DynamicIslandExpandedRegion(.trailing, priority: 1) {
@@ -46,14 +46,14 @@ struct TaskActivityWidget: Widget {
                     .padding(.horizontal, 4)
                 }
             } compactLeading: {
-                AgentDisc(colour: context.attributes.colour, size: 18)
+                AgentDisc(attributes: context.attributes, state: context.state, size: 18)
             } compactTrailing: {
                 StandingWord(state: context.state).font(.caption.weight(.semibold)).monospacedDigit()
             } minimal: {
-                if context.state.ended { VerdictMark(state: context.state, size: 18) } else { AgentDisc(colour: context.attributes.colour, size: 18) }
+                if context.state.ended { VerdictMark(state: context.state, size: 18) } else { AgentDisc(attributes: context.attributes, state: context.state, size: 18) }
             }
             .widgetURL(Self.url(context.attributes))
-            .keylineTint(Color(hex: context.attributes.colour))
+            .keylineTint(Color(hex: AgentDisc.dark(context.attributes.colour)))
         }
     }
 
@@ -61,7 +61,7 @@ struct TaskActivityWidget: Widget {
     static func url(_ attributes: TaskActivityAttributes) -> URL? { URL(string: "invincible://task/\(attributes.task)") }
 }
 
-/// The Lock Screen's: the agent's orb, the task's title, who has it and how it stands in a line, each gate, and once it
+/// The Lock Screen's: the agent's mark, the task's title, who has it and how it stands in a line, each gate, and once it
 /// has ended its verdict's mark.
 struct LockScreenActivity: View {
     let attributes: TaskActivityAttributes
@@ -69,7 +69,7 @@ struct LockScreenActivity: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AgentDisc(colour: attributes.colour, size: 36)
+            AgentDisc(attributes: attributes, state: state, size: 36)
             VStack(alignment: .leading, spacing: 6) {
                 Text(attributes.title).font(.headline).lineLimit(2)
                 Text("\(Text(attributes.agentName).fontWeight(.semibold)) · \(Text(state.line).foregroundStyle(state.failed ? AnyShapeStyle(Danger.red) : AnyShapeStyle(.secondary)))")
@@ -145,19 +145,35 @@ struct VerdictMark: View {
     }
 }
 
-/// The agent's orb, as the app draws one before its field is ready: a soft disc of its own colour round a dark core.
+/// The agent's mark, still, as a row in the app draws it (AgentMark.swift): its colour and form as the app gave them, how
+/// its task stands in its shape. One an app from before the marks started (no form) is a disc of its orb's colour.
 struct AgentDisc: View {
-    let colour: String
+    let attributes: TaskActivityAttributes
+    let state: TaskActivityState
     let size: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let tint = Color(hex: colour)
-        ZStack {
-            Circle().fill(RadialGradient(colors: [tint, tint.opacity(0.55), tint.opacity(0.15)], center: .center, startRadius: 0, endRadius: size / 2))
-            Circle().fill(Color.black.opacity(0.55)).frame(width: size * 0.28, height: size * 0.28)
+        Group {
+            if let form = attributes.form, (0..<AgentMark.forms).contains(form), let color = AgentMark.palette.firstIndex(where: { $0.forms.light == attributes.colour }) {
+                let colors = AgentMark.colors(color, state: state.markState, theme: scheme == .dark ? .dark : .light)
+                let geometry = AgentMark.geometry(AgentMark(color: color, form: form), seed: 0, state: state.markState, size: Double(size), t: nil, since: nil)
+                ZStack {
+                    ForEach(Array(AgentMark.paths(geometry, side: size).enumerated()), id: \.offset) { _, slat in
+                        Path(slat.path).fill(Color(hex: slat.key ? colors.key : colors.body))
+                    }
+                }
+            } else {
+                Circle().fill(Color(hex: attributes.colour))
+            }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+
+    /// A mark's colour on a dark page (the Dynamic Island's): its dark form; one from before the marks as it is.
+    static func dark(_ colour: String) -> String {
+        AgentMark.palette.first { $0.forms.light == colour }?.forms.dark ?? colour
     }
 }
 

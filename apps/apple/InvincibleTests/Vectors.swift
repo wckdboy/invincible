@@ -59,22 +59,6 @@ struct Vectors: Decodable {
         let approvalProof: String
     }
 
-    /// An agent's orb's colours (core's avatar.ts): the 24 tints and their names, agents' colours from their handles and
-    /// saved avatars, handles' seeds, blends and the nearest tints.
-    struct AgentOrbs: Decodable {
-        struct Colors: Decodable { let tint: String; let light: String; let deep: String; let second: String; let chosen: Bool }
-        struct Agent: Decodable { let id: String; let avatar: JSONValue?; let colors: Colors }
-        struct Seed: Decodable { let id: String; let seed: UInt32 }
-        struct Blend: Decodable { let from: String; let to: String; let t: Double; let blend: String }
-        struct Nearest: Decodable { let color: String; let at: Int }
-        let tints: [String]
-        let names: [String]
-        let agents: [Agent]
-        let seeds: [Seed]
-        let blends: [Blend]
-        let nearest: [Nearest]
-    }
-
     struct AgentsSection: Decodable {
         struct Row: Decodable { let id: String; let line: String; let needs: Bool; let expression: String?; let state: String }
         struct Beside: Decodable { let line: String; let state: String; let beside: String }
@@ -402,7 +386,6 @@ struct Vectors: Decodable {
     let requests: [Request]
     let canonical: [Canonical]
     let pairing: Pairing
-    let agentOrbs: AgentOrbs
     let agents: AgentsSection
     let unread: Unread
     let rooms: Rooms

@@ -162,7 +162,8 @@ Without a dev node each UI test says it was skipped, unverified.
 ## A task's proof on the Lock Screen
 
 A Live Activity and the Dynamic Island (I10; core's `live-activity.ts`): the app starts one when you give a task from the
-phone or open one in hand (`App/LiveActivities.swift`), and it shows the agent's orb in its colour, the task's title (given
+phone or open one in hand (`App/LiveActivities.swift`), and it shows the agent's mark, still, how the task stands in its
+shape, the task's title (given
 on the phone: it never goes to Apple), each gate's state, the reviewer when it answers, then the verdict, kept a quarter of
 an hour once the task ends. While the app is in front it updates the activity itself from the task's trail
 (`TaskActivityState.of`, held to the web lib's `activityOf` by the vectors' `liveActivities`); otherwise the node does,

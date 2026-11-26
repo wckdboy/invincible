@@ -60,6 +60,20 @@ struct TaskActivityState: Codable, Hashable, Sendable {
     }
 }
 
+extension TaskActivityState {
+    /// How its agent's mark stands beside it, still, as a Live Activity is (MarkState): at work while it runs or is reviewed,
+    /// asking you when it was cut short for you, pale while queued; once it ended, its bottom slat red and loose where it
+    /// went wrong, else at rest.
+    var markState: MarkState {
+        switch phase {
+        case "queued": .queued
+        case "interrupted": .needs
+        case "running", "review": .working
+        default: failed ? .failed : .done
+        }
+    }
+}
+
 #if os(iOS)
 /// A task's Live Activity, as the app starts it: what doesn't change (given on this device: its title never goes to Apple,
 /// and the node's pushes carry none) and how it stands.
@@ -68,8 +82,10 @@ struct TaskActivityAttributes: ActivityAttributes {
     /// The task, by id: a tap opens its thread.
     let task: String
     let title: String
-    /// Its agent's name, and its orb's colour (six hex digits, "#rrggbb").
+    /// Its agent's name, and its mark: its colour (its light form, "#rrggbb", one of the eight) and its form (0 to 11). One
+    /// an app from before the marks started has no form, and its colour is its orb's: it is drawn as a disc of it.
     let agentName: String
     let colour: String
+    var form: Int? = nil
 }
 #endif

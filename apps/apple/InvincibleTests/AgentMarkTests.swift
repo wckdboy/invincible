@@ -152,6 +152,29 @@ struct AgentMarkTests {
         #expect(still(.needs).slats.first?.slide == 5 && still(.needs).slats.first?.key == true)
         #expect(still(.failed).slats.last?.drop == 8 && still(.failed).slats.last?.turn == 10)
     }
+
+    @Test func aTasksLiveActivityShowsHowItStandsInItsAgentsMark() {
+        let at = 1_764_000_000_000.0
+        let of = { (phase: String, verdict: String?) in TaskActivityState(phase: phase, gates: [], review: nil, verdict: verdict, gate: nil, at: at).markState }
+        #expect(of("queued", nil) == .queued)
+        #expect(of("running", nil) == .working && of("review", nil) == .working)
+        #expect(of("interrupted", nil) == .needs)
+        for verdict in ["failed", "rejected", "gave-up"] { #expect(of("ended", verdict) == .failed, "\(verdict)") }
+        for verdict in ["proven", "reviewed", "stopped", "unverified"] { #expect(of("ended", verdict) == .done, "\(verdict)") }
+    }
+
+    #if os(iOS)
+    @Test func aLiveActivityAnAppFromBeforeTheMarksStartedStillReads() throws {
+        // Its attributes as the app before the marks wrote them: no form, its colour its orb's (drawn as a disc of it).
+        let old = try JSONDecoder().decode(TaskActivityAttributes.self, from: Data(##"{"task":"task-1","title":"Ship it","agentName":"Ada","colour":"#3abeff"}"##.utf8))
+        #expect(old.form == nil && old.colour == "#3abeff")
+        // As this app writes them: its mark's colour (its light form) and its form, read back the same.
+        let mark = AgentMark.of(id: "ada", profile: nil)
+        let now = TaskActivityAttributes(task: "task-1", title: "Ship it", agentName: "Ada", colour: AgentMark.palette[mark.color].forms.light, form: mark.form)
+        let again = try JSONDecoder().decode(TaskActivityAttributes.self, from: JSONEncoder().encode(now))
+        #expect(again.form == mark.form && again.colour == now.colour)
+    }
+    #endif
 }
 
 /// The mark as it is drawn (AgentMarkView): its slats in its colour with the slots between them clear, nothing outside its

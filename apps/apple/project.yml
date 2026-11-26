@@ -92,6 +92,9 @@ targets:
     sources:
       - path: InvincibleWidgets
       - path: Invincible/Core/TaskActivity.swift
+      # The agent's mark, drawn still beside its task (AgentMark reads an agent's avatar, a JSONValue).
+      - path: Invincible/Core/AgentMark.swift
+      - path: Invincible/Core/JSONValue.swift
     info:
       path: InvincibleWidgets/Info.plist
       properties:
