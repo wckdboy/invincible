@@ -93,6 +93,8 @@ export interface HandoffsDeps {
   grantTtlSecs?: number;
   /** How long a stop waits for the runner's answer before the call itself is cancelled (tests: less; STOP_WAIT_MS). */
   stopWaitMs?: number;
+  /** The longest a hand-off's call lasts (its deadline), and so its run's grant (tests: less; HAND_CALL_MS). */
+  handCallMs?: number;
 }
 
 const ENDED = new Set(["done", "failed", "stopped", "interrupted"]);
@@ -100,6 +102,11 @@ const ENDED = new Set(["done", "failed", "stopped", "interrupted"]);
 const TRAIL_KEEP = 2_000;
 /** How long a stop waits for the runner to say the work stopped, before the call itself is cancelled. */
 const STOP_WAIT_MS = 15_000;
+/**
+ * The longest a hand-off's call lasts, waiting for your approval there included: its deadline, past which the runner
+ * stops the work, and the longest its run's grant is renewed. A task the agents there give no clock of their own.
+ */
+export const HAND_CALL_MS = 24 * 3_600_000;
 /** How long a run's link (the run's key to its node's) lasts at most; it is signed again as the grant renews. */
 const LINK_TTL = RUN_GRANT_TTL;
 /** A link is signed again this long before it would end (or its grant's token would). */
@@ -227,12 +234,10 @@ export class Handoffs implements FabricTools {
 
   /** A node revoked here: what it ran for this node stops being followed, its runs' grants end, and what it gave here stops. */
   revoked(device: string): void {
-    for (const row of this.rows().filter((r) => r.node === device && r.phase !== "ended")) {
-      this.calls.get(row.id)?.call.cancel();
-      this.end(row.id, { status: "interrupted", error: "the node it ran on was revoked" });
-    }
+    // (Ending each cancels its call.)
+    for (const row of this.rows().filter((r) => r.node === device && r.phase !== "ended")) this.end(row.id, { status: "interrupted", error: "the node it ran on was revoked" });
     for (const run of [...this.runs.values()].filter((r) => r.giver === device)) {
-      this.team?.stop(run.task);
+      this.team?.stop(run.task, "The node that handed it over was revoked.");
       run.inv.fail(3, "the node that handed this task over was revoked");
     }
   }
@@ -271,7 +276,7 @@ export class Handoffs implements FabricTools {
       .run(id, node.id, node.name, title, input.goal, JSON.stringify(gates), JSON.stringify(tools), nonce, this.now());
     const args: HandArgs = { handoff: id, nonce, goal: input.goal, title, gates, tools, ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}), ...(input.agent ? { agent: input.agent } : {}) };
     // Signed by this node's device key, as its HTTPS request would be: its transport key alone hands nothing over.
-    const call = client.call(endpoint.address, FABRIC.hand, await this.deps.fabric.seal(LINK_PATHS.hand, args), { input: true });
+    const call = client.call(endpoint.address, FABRIC.hand, await this.deps.fabric.seal(LINK_PATHS.hand, args), { input: true, deadlineMs: this.deps.handCallMs ?? HAND_CALL_MS });
     this.calls.set(id, { call, renew: null });
     void this.follow(id, node, call);
     return this.view(this.row(id)!);
@@ -285,13 +290,18 @@ export class Handoffs implements FabricTools {
         if (!parsed?.success) continue;
         const said = parsed.data;
         if (said.kind === "accepted") {
+          // Taken once: a runner that says it again is heard once (its first run key stands, and the one grant to it).
+          if (this.row(id)?.run) continue;
           this.set(id, { phase: "following", task: said.task, agent: JSON.stringify(said.agent), run: said.run, status: "queued" });
           await this.grant(id, call);
         } else if (said.kind === "proposed") {
           // Beyond your grant there: it waits for your approval on that node, and is taken (accepted) once you give it.
           this.set(id, { phase: "following", task: said.task, agent: JSON.stringify(said.agent), status: "proposed", waits: said.why });
-        } else if (said.kind === "state") this.set(id, { status: said.status });
-        else {
+        } else if (said.kind === "state") {
+          this.set(id, { status: said.status });
+          // Its run is over there: its grant ends now, whatever the call does (it goes on for the proof alone).
+          if (ENDED.has(said.status)) this.release(id);
+        } else {
           n++;
           if (this.closed) return;
           this.deps.db.query("INSERT OR REPLACE INTO fabric_handed_trail (handoff, n, at, text) VALUES (?, ?, ?, ?)").run(id, n, said.at, said.text);
@@ -315,6 +325,7 @@ export class Handoffs implements FabricTools {
       const statement = refusal ? null : (result!.proof as { statement: ProofStatement }).statement;
       const proof = refusal ? { state: "refused", why: refusal } : { state: "checked", verified: statement!.verified, proof: statement!.proof, ended: statement!.ended, attestation: result!.proof };
       this.end(id, {
+        ended: true,
         status: statement?.status ?? status,
         proof: JSON.stringify(proof),
         output: typeof result?.task?.output === "string" ? result.task.output.slice(0, 20_000) : "",
@@ -324,8 +335,21 @@ export class Handoffs implements FabricTools {
     } catch (error) {
       const e = error as SidecarError;
       const stopped = this.row(id)?.stop_asked_at != null || e.kind === "cancelled";
+      // (Ending it here cancels its call: the work there stops, as it would for any end its result didn't bring.)
       this.end(id, { status: stopped ? "stopped" : "interrupted", error: stopped ? null : `the link to ${node.name} failed: ${String(e.message ?? e).slice(0, 300)}` });
     }
+  }
+
+  /** Its run is over there: its grant is renewed no more and revoked now, while the call goes on for the proof. */
+  private release(id: string): void {
+    const held = this.calls.get(id);
+    if (held?.renew) clearInterval(held.renew);
+    if (held) held.renew = null;
+    const row = this.row(id);
+    const client = this.deps.fabric.sidecar.client;
+    if (!row?.grant_id) return;
+    this.set(id, { grant_id: null, tokens: "[]" });
+    if (client) void client.revoke({ grant: row.grant_id }).catch((error: Error) => this.deps.log(`fabric: ${id}'s grant wasn't revoked: ${error.message}`));
   }
 
   /** The run's grant: minted once the runner says the run's key, sent in on the call, renewed at half its life. */
@@ -345,6 +369,8 @@ export class Handoffs implements FabricTools {
       void (async () => {
         const live = this.row(id);
         const sidecar = this.deps.fabric.sidecar.client;
+        // Never past its call's deadline: the grant ends with the longest the hand-off may last.
+        if (live && this.now() - live.created_at >= (this.deps.handCallMs ?? HAND_CALL_MS)) return this.release(id);
         if (!live || live.phase === "ended" || !live.grant_id || !sidecar) return;
         try {
           const renewed = await sidecar.renew(live.grant_id, ttl);
@@ -359,13 +385,18 @@ export class Handoffs implements FabricTools {
     held.renew.unref?.();
   }
 
-  /** It ended here: its grant ends with it (revoked, so its next call is refused), and nothing more is followed. */
-  private end(id: string, fields: Partial<Omit<Row, "id">>): void {
+  /**
+   * It ended here: its grant ends with it (revoked, so its next call is refused), and nothing more is followed. Any end
+   * its call's own result didn't bring (`ended`) cancels the call, so the work there stops too.
+   */
+  private end(id: string, fields: Partial<Omit<Row, "id">> & { ended?: boolean }): void {
+    const { ended, ...rest } = fields;
     const row = this.row(id);
     if (!row || row.phase === "ended") return;
-    this.set(id, { ...fields, phase: "ended", ended_at: this.now() });
+    this.set(id, { ...rest, phase: "ended", ended_at: this.now() });
     const held = this.calls.get(id);
     this.calls.delete(id);
+    if (!ended) held?.call.cancel();
     if (held?.renew) clearInterval(held.renew);
     const client = this.deps.fabric.sidecar.client;
     if (row.grant_id && client) void client.revoke({ grant: row.grant_id }).catch((error: Error) => this.deps.log(`fabric: ${id}'s grant wasn't revoked: ${error.message}`));

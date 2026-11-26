@@ -501,9 +501,13 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   loopback about 25 ms over Q-AMP, 32 ms over HTTPS), and its calls under way at that node end. A run's key is cut off
   by revoking its grant at the giver's sidecar: its next call is refused (about 10 ms on loopback, most of it the
   sidecar's durable write). Tests: `fabric.e2e.test.ts`, `fabric-handoff.e2e.test.ts`.
-- **Grants never outlive their task.** Renewed at half their life while the hand-off lives, revoked when it ends; a giver
-  that dies renews nothing, so its grants end within 300 s. Test: `fabric-handoff.e2e.test.ts` (4 s grants, past their
-  first token's end and after the task).
+- **Grants never outlive their task** (the review's L1). Minted once, when the task is taken (a second `accepted` is
+  ignored); renewed at half their life while the run lives there; revoked the moment the runner says the task ended,
+  even with the call still open; never renewed past the call's deadline (24 h). An end the call's result didn't bring
+  cancels the call, so a follower that failed never leaves work running there that its giver can't stop. A giver that
+  dies renews nothing, so its grants end within 300 s. Tests: `fabric-grant-life.test.ts` (the review's proofs of
+  concept, each failing before the fix), `fabric-handoff.e2e.test.ts` (4 s grants, past their first token's end and
+  after the task).
 - **The sidecar and its socket.** The sidecar holds no secret but the node's transport key (Ed25519, given on its stdin,
   never the device key, which stays in the daemon). Its socket is 0600 in a 0700 directory, same-user only (Q-AMP's own
   checks), and whoever can connect has the node's transport (its connections and its grants' minting, not its link

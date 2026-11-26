@@ -108,8 +108,16 @@ transport keys carries all of it:
 
    The giver keeps the trail: 2,000 lines, each 4,000 characters at most.
 4. **The run's grant.** Where the task was given some of the giver's tools, the giver mints a grant from its transport
-   key, renews it at half its life while the hand-off lives, sends it and each renewal in on the call
-   (`{kind: "chain", chain}`), and revokes it when the task ends. The grant:
+   key once the task is taken (its first `accepted`; any after it are ignored), renews it at half its life while the
+   run lives there, and sends it and each renewal in on the call (`{kind: "chain", chain}`). It follows the task, not
+   the call:
+   - revoked the moment the runner says the task ended (`state` done, failed, stopped or interrupted), even if the call
+     stays open for its proof;
+   - renewed no longer than the call's deadline (24 h, waiting for your approval included);
+   - and any end its result didn't bring (a failure here, a revoked node, a lost link) cancels the call, so the work
+     there stops too.
+
+   The grant:
    - is for the run's key (`aud`), for `/tool/invincible/agent`;
    - has the giver as its subject;
    - is held to the hand-off by its policy, `[["==", ".task", "<handoff>"]]`;
