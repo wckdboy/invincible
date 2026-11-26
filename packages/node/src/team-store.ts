@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, closeSync, existsSync, openSync } from "node:fs";
-import { AttachmentRef, findSecrets, randomId, readAlike, redact } from "@invincible/core";
+import { AttachmentRef, findSecrets, HANDOFF_MIN_USD, randomId, readAlike, redact } from "@invincible/core";
 import { isOrbProfile, type AvatarActivity } from "@invincible/core/avatar";
 import { type AgentMark, assignMark, isMarkProfile, joinOrder, markOf, markProfile, type MarkProfile, readMarkProfile, snapColor } from "@invincible/core/agent-mark";
 import { z } from "zod";
@@ -726,11 +726,12 @@ export class TeamStore {
   }
   /**
    * What one node has handed here (its tasks' givenBy, `node:<id>`): how many wait for you, are queued or are running
-   * now, and what those it handed under your grant since `since` were given to spend (each one's budget, the most it may).
+   * now, and what those it handed under your grant since `since` count against its day (each one's budget, the most it
+   * may spend, or HANDOFF_MIN_USD if that is more: core's handoffCounts).
    */
   handed(by: string, since: number): { atOnce: number; given: number } {
     const atOnce = this.db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM team_jobs WHERE kind = 'task' AND status IN ('proposed','queued','running') AND json_extract(data, '$.givenBy') = ?").get(by)!.n;
-    const given = this.db.query<{ usd: number | null }, [string, number]>("SELECT SUM(json_extract(data, '$.budgetUsd')) AS usd FROM team_jobs WHERE kind = 'task' AND json_extract(data, '$.givenBy') = ? AND json_extract(data, '$.proposedBy') IS NULL AND created_at > ?").get(by, since)!.usd ?? 0;
+    const given = this.db.query<{ usd: number | null }, [number, string, number]>("SELECT SUM(MAX(COALESCE(json_extract(data, '$.budgetUsd'), 0), ?)) AS usd FROM team_jobs WHERE kind = 'task' AND json_extract(data, '$.givenBy') = ? AND json_extract(data, '$.proposedBy') IS NULL AND created_at > ?").get(HANDOFF_MIN_USD, by, since)!.usd ?? 0;
     return { atOnce, given };
   }
   /** The tasks other nodes handed here that haven't ended (waiting for you, queued, running, or cut off by a crash), by id. */

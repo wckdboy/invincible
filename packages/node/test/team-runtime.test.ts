@@ -6,7 +6,7 @@ import { costOf, moneyPrices, newNodeIdentity, type ExecResult, type Prices, typ
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invincible/agents";
-import { harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
+import { HANDED_GATE_SECONDS, harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
 import type { SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
 import type { TaskAccount } from "@invincible/core";
 
@@ -1696,4 +1696,23 @@ test("a task nothing was said to keeps its trail as it was: no steer and no judg
 test("a steer's line on the trail: yours as You, your agent's as Your agent, its words after", () => {
   expect(progress({ type: "steered", step: 4, by: "owner", text: "Use the new schema." })).toBe("Steered · You: Use the new schema.");
   expect(progress({ type: "steered", step: 0, by: "primary", text: "Keep the old reader.\nIt still has users." })).toBe("Steered · Your agent: Keep the old reader.\nIt still has users.");
+});
+
+test("a task another node handed over has its gates bounded in all, every round counted (its gates are that node's commands); yours as before", async () => {
+  // Its gate takes 600 s each time it runs and fails: 600 s before the work, what is left after it, then none.
+  const slow = (timeouts: number[]): TeamRuntimeDeps["exec"] => async (_m, command, timeoutSec) => {
+    if (!command.includes("bun test required-check")) return result();
+    timeouts.push(timeoutSec);
+    return result({ exitCode: 1, stdout: "required behavior failed", durationMs: 600_000 });
+  };
+  const script = () => [say("1. Build."), say("DONE\nWorks."), say("DONE\nWorks now."), say("DONE\nTrust me.")];
+  const handedTimeouts: number[] = [];
+  const handed = fixture(script(), { exec: slow(handedTimeouts) });
+  const outcome = await handed.runtime.executeTask(member, { ...task, givenBy: `node:n_${"A".repeat(43)}` }, handed.context);
+  expect(outcome.verified).toBe(false);
+  expect(handedTimeouts).toEqual([TEAM_COMMAND_SECONDS, HANDED_GATE_SECONDS - 600]);
+  const yoursTimeouts: number[] = [];
+  const yours = fixture(script(), { exec: slow(yoursTimeouts) });
+  await yours.runtime.executeTask(member, task, yours.context);
+  expect(yoursTimeouts).toEqual([TEAM_COMMAND_SECONDS, TEAM_COMMAND_SECONDS, TEAM_COMMAND_SECONDS, TEAM_COMMAND_SECONDS]);
 });

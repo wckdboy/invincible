@@ -204,11 +204,14 @@ export const HANDOFF_DAY_MS = 86_400_000;
 export const HANDED_AT_ONCE = 8;
 /** What a hand-off that names no budget is given under your grant: what your agent may give a task on its own yes ($3), or less if the day has less left. */
 export const HANDOFF_DEFAULT_USD = TEAM_LIMITS.ownTaskUsd;
+/** What each hand-off under your grant counts against its day at least, whatever smaller budget it asks for (and keeps). */
+export const HANDOFF_MIN_USD = 0.1;
 
 /**
  * Whether your grant takes a hand-off at once, and with what budget: the one asked for, or, when none was,
- * HANDOFF_DEFAULT_USD (or what is left of the day, if less). `given`: what the tasks this pair handed under it in the
- * last day were given. Otherwise why it waits for your approval.
+ * HANDOFF_DEFAULT_USD (or what is left of the day, if less). Each counts at least HANDOFF_MIN_USD against the day, so
+ * the day bounds how many there are as well as what they spend. `given`: what the tasks this pair handed under it in
+ * the last day count (handoffCounts). Otherwise why it waits for your approval.
  */
 export function handoffUnder(terms: HandoffTerms | null, ask: { agent: string | null; tools: readonly string[]; budgetUsd?: number }, given: number): { budgetUsd: number } | { beyond: string } {
   if (!terms) return { beyond: "you haven't granted that node hand-offs here" };
@@ -217,9 +220,17 @@ export function handoffUnder(terms: HandoffTerms | null, ask: { agent: string | 
   if (extra.length) return { beyond: `your grant gives its runs ${terms.tools.join(", ") || "none of its tools"}, not ${extra.join(", ")}` };
   const left = Math.floor((terms.budgetUsdPerDay - given) * 100) / 100;
   const budgetUsd = ask.budgetUsd ?? Math.min(HANDOFF_DEFAULT_USD, left);
-  if (budgetUsd <= 0 || budgetUsd > left + 1e-9) return { beyond: `it would pass your grant's $${terms.budgetUsdPerDay} a day ($${given.toFixed(2)} given in the last 24 hours)` };
+  if (budgetUsd <= 0 || handoffCounts(budgetUsd) > left + 1e-9) {
+    const why = `it would pass your grant's $${terms.budgetUsdPerDay} a day ($${given.toFixed(2)} given in the last 24 hours)`;
+    // (It would have fitted by its own amount: what decided is the least each one counts.)
+    const least = budgetUsd > 0 && budgetUsd <= left + 1e-9;
+    return { beyond: least ? `${why}: each hand-off counts at least $${HANDOFF_MIN_USD.toFixed(2)}` : why };
+  }
   return { budgetUsd };
 }
+
+/** What a hand-off with this budget counts against its grant's day. */
+export const handoffCounts = (budgetUsd: number): number => Math.max(budgetUsd, HANDOFF_MIN_USD);
 
 /** You, granting one node hand-offs to another's agents (each by its name or id): its terms, given once for the pair. */
 export const HandoffGrantInput = z.strictObject({

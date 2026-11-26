@@ -620,3 +620,43 @@ describe("contract first: where no gate fails before the work, the planner write
     }
   });
 });
+
+describe("a bound on all of a run's gates together (gateSeconds: a handed task's, another node's commands)", () => {
+  /** A run whose two gates each take 6 s, failing before the work and passing after; what each was given is kept. */
+  async function bounded(gateSeconds: number | undefined) {
+    const given: { command: string; timeoutSec: number }[] = [];
+    const runs = new Map<string, number>();
+    const asked: Record<RunRole, string[]> = { planner: ["1. Do it.\nDone when: it is done."], engineer: [sh("echo fixed > calc.txt"), "DONE\nFixed."], reviewer: ["PASS\nLooks right."] };
+    const outcome = await runLoop(
+      { goal: "make it so", environment: "a test sandbox", gates: ["slow-a", "slow-b"], gatesFirst: true, maxRevisions: 0, commandTimeoutSec: 900, ...(gateSeconds !== undefined ? { gateSeconds } : {}) },
+      {
+        ask: async (role) => ({ text: asked[role].shift() ?? "DONE", model: `test/${role}` }),
+        exec: async (command, timeoutSec) => {
+          if (command.startsWith("slow-")) given.push({ command, timeoutSec });
+          const nth = (runs.get(command) ?? 0) + 1;
+          runs.set(command, nth);
+          return { exitCode: command.startsWith("slow-") && nth === 1 ? 1 : 0, stdout: "ok\n", stderr: "", durationMs: command.startsWith("slow-") ? 6_000 : 5, truncated: false };
+        },
+      },
+    );
+    return { outcome, given };
+  }
+
+  test("each gate gets what is left of it, and once it is spent the rest aren't run: the work isn't done", async () => {
+    const { outcome, given } = await bounded(10);
+    // Before the work: the first gets its 900 s cut to the 10 s of the bound, the second the 4 s left; after it, none ran.
+    expect(given).toEqual([
+      { command: "slow-a", timeoutSec: 10 },
+      { command: "slow-b", timeoutSec: 4 },
+    ]);
+    expect(outcome.gates?.map((g) => g.exitCode)).toEqual([-1, -1]);
+    expect(outcome.gates?.[0]?.excerpt).toContain("Not run: this task's gates have had the 10 s they may take in all.");
+    expect(outcome.status).not.toBe("done");
+  });
+
+  test("without one, each gate has its command's time, every round, as before", async () => {
+    const { outcome, given } = await bounded(undefined);
+    expect(given.map((g) => g.timeoutSec)).toEqual([900, 900, 900, 900]);
+    expect(outcome.status).toBe("done");
+  });
+});

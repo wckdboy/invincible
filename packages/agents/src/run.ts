@@ -149,6 +149,12 @@ export interface RunOptions {
    */
   gatesFirst?: boolean;
   /**
+   * The most all of this run's gates may take together, in seconds, every round counted (each still at most
+   * commandTimeoutSec): a handed task's, whose gates are another node's commands. Once it is spent a gate isn't run, and
+   * doesn't pass. Absent: each gate has its command's time, every round.
+   */
+  gateSeconds?: number;
+  /**
    * When the engineer runs out of commands having run some (or a coding agent out of its time or its budget, or failed
    * on its every model, having done something), put the work as it stands to the gates and the reviewer anyway: it may
    * have finished and never said so, and what they pass is done whoever claimed it. Default off: a run out of commands
@@ -662,7 +668,7 @@ const digestsOf = (stdout: string): Map<string, string> =>
 /* ---------- prompts ---------- */
 
 /** Options with their defaults applied (a fixed plan and a custom review stay optional). */
-type Resolved = Required<Omit<RunOptions, "plan" | "review" | "agent" | "engram" | "budgetUsd">> & Pick<RunOptions, "plan" | "review" | "agent" | "engram" | "budgetUsd">;
+type Resolved = Required<Omit<RunOptions, "plan" | "review" | "agent" | "engram" | "budgetUsd" | "gateSeconds">> & Pick<RunOptions, "plan" | "review" | "agent" | "engram" | "budgetUsd" | "gateSeconds">;
 
 /**
  * Contract first (RunOptions.contract): what the planner is asked for before the engineer begins, when no gate fails
@@ -1230,6 +1236,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     ...(options.review ? { review: options.review } : {}),
     ...(options.agent ? { agent: options.agent } : {}),
     ...(options.budgetUsd !== undefined && options.budgetUsd > 0 ? { budgetUsd: options.budgetUsd } : {}),
+    ...(options.gateSeconds !== undefined ? { gateSeconds: Math.max(0, options.gateSeconds) } : {}),
     // (Checked here, before a prompt or a file is made of it.)
     ...(options.engram !== undefined ? { engram: engramProject(options.engram) } : {}),
   };
@@ -1480,20 +1487,27 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
    */
   // (Timed as the gates' stage, wherever a gate runs: RunTiming.)
   const runGate = (gate: Gate, rules: readonly NamedRule[]): Promise<{ result: GateResult; seen: string }> => within("gates", () => gateNow(gate, rules));
+  /** What the gates have taken so far, every round counted (RunOptions.gateSeconds bounds it). */
+  let gateSecondsUsed = 0;
   const gateNow = async (gate: Gate, rules: readonly NamedRule[]): Promise<{ result: GateResult; seen: string }> => {
     check();
     let ran: ExecResult;
     const found = tripOf(rules, gate.command);
+    // Each gets what is left of the bound on all of them, at most its command's time; none runs once it is spent.
+    const limit = o.gateSeconds === undefined ? o.commandTimeoutSec : Math.min(o.commandTimeoutSec, Math.floor(o.gateSeconds - gateSecondsUsed));
     if (found) {
       await trip(found, gate.command, steps, true);
       if (found.does === "halt") throw new Halted(found, gate.command);
       ran = { ...NOT_RUN, stdout: refusal(found) };
+    } else if (limit < 1) {
+      ran = { ...NOT_RUN, stdout: `Not run: this task's gates have had the ${o.gateSeconds} s they may take in all.` };
     } else {
       try {
-        ran = await deps.exec(gate.command, o.commandTimeoutSec);
+        ran = await deps.exec(gate.command, limit);
       } catch (error) {
         ran = { exitCode: -1, stdout: "", stderr: `The sandbox could not run this: ${(error as Error).message}`, durationMs: 0, truncated: false };
       }
+      gateSecondsUsed += ran.durationMs / 1000;
     }
     const seen = observation(ran);
     return { result: { ...gate, exitCode: ran.exitCode, durationMs: ran.durationMs, excerpt: clip(seen.split("\n").slice(1).join("\n"), 600, 300) }, seen };
