@@ -1,4 +1,4 @@
-import { GENERIC_NOTIFICATION, isConversationId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@invincible/core/notify-payload";
+import { GENERIC_NOTIFICATION, isConversationId, isNotifyTaskId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@invincible/core/notify-payload";
 import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBadgeMessage, readBadgeState, showBadge } from "./lib/badge.ts";
 
 /*
@@ -157,13 +157,16 @@ sw.addEventListener("fetch", (event) => {
 interface OpenTarget {
   open: NotifyOpen;
   conversation?: string;
+  /** An agent's task (with open "task"): its own thread. */
+  task?: string;
 }
 
 function readTarget(data: unknown): OpenTarget {
-  const d = (data && typeof data === "object" ? data : {}) as { open?: unknown; conversation?: unknown };
+  const d = (data && typeof data === "object" ? data : {}) as { open?: unknown; conversation?: unknown; task?: unknown };
   const open = typeof d.open === "string" && (NOTIFY_OPENS as readonly string[]).includes(d.open) ? (d.open as NotifyOpen) : "inbox";
   const conversation = open === "chat" && typeof d.conversation === "string" && isConversationId(d.conversation) ? d.conversation : undefined;
-  return { open, ...(conversation ? { conversation } : {}) };
+  const task = open === "task" && typeof d.task === "string" && isNotifyTaskId(d.task) ? d.task : undefined;
+  return { open, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}) };
 }
 
 async function showPush(event: PushEventLike): Promise<void> {
@@ -237,7 +240,7 @@ async function openFromNotification(data: unknown): Promise<void> {
   // The page you're looking at, else any that's open.
   const page = pages.find((p) => p.visibilityState === "visible") ?? pages[0];
   if (page) {
-    page.postMessage({ type: "invincible:open", open: target.open, conversation: target.conversation ?? null });
+    page.postMessage({ type: "invincible:open", open: target.open, conversation: target.conversation ?? null, ...(target.task ? { task: target.task } : {}) });
     try {
       await page.focus?.();
       return;

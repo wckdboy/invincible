@@ -67,6 +67,36 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
   };
 }
 
+describe("an agent's task", () => {
+  test("is told when it ends that was in hand here, by its verdict and cost, opening the task; never its title; once", async () => {
+    let version = 1;
+    let tasks = [{ id: "task-abcdefghijkl", status: "running", word: "", cost: "", ship: false }];
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => tasks } } });
+    h.service.lookAtTasks();
+    await h.look();
+    expect(h.sent).toEqual([]); // in hand: nothing to say
+    tasks = [{ id: "task-abcdefghijkl", status: "done", word: "Proven", cost: "$0.31", ship: true }];
+    // Nothing read while the team hasn't changed.
+    h.service.lookAtTasks();
+    await h.look();
+    expect(h.sent).toEqual([]);
+    version = 2;
+    h.service.lookAtTasks();
+    await h.look();
+    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "finished", title: "Your agent's task: Proven", body: "Proven · $0.31. Its changes are ready to ship.", open: "task", task: "task-abcdefghijkl", ship: true }]);
+    version = 3;
+    h.service.lookAtTasks();
+    await h.look();
+    expect(h.sent).toHaveLength(1);
+    // One never seen in hand here is old news.
+    tasks.push({ id: "task-bbbbbbbbbbbb", status: "failed", word: "Failed", cost: "", ship: false });
+    version = 4;
+    h.service.lookAtTasks();
+    await h.look();
+    expect(h.sent).toHaveLength(1);
+  });
+});
+
 describe("a run you started", () => {
   test("is told when it ends, as it ended, with your own goal; one you stopped isn't news", async () => {
     const h = harness();

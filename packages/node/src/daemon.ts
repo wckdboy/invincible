@@ -2,8 +2,11 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, decodeHlc, type NodeIdentity, screenSessionView } from "@invincible/core";
-import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, pinLegacyKeys, refusedKeysOf, windowsOf } from "@invincible/models";
+import { canonical, decodeHlc, moneyPrices, type NodeIdentity, pricesOf, screenSessionView } from "@invincible/core";
+import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, windowsOf } from "@invincible/models";
+// The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
+import { costWords, factsOfRecord, verdictOf } from "../../../apps/web/src/lib/steps.ts";
+import { taskActions } from "../../../apps/web/src/lib/task-card.ts";
 import { UsageStore } from "./usage.ts";
 import { cloudflareNatives } from "./cloudflare.ts";
 import { gmailNatives, outlookNatives } from "./mail.ts";
@@ -594,6 +597,17 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       turns,
       chats,
       runs,
+      // Agents' tasks, each said once it ends by its verdict and cost (the apps' words), with whether it can be shipped.
+      tasks: {
+        version: () => team.store.version(),
+        list: () => {
+          const prices = moneyPrices(pricesOf(store), PLAN_PROVIDERS);
+          return team.store.tasks().map((t) => {
+            const ended = t.status === "done" || t.status === "failed";
+            return { id: t.id, status: t.status, word: ended ? (verdictOf(t, factsOfRecord(t.record))?.word ?? "ended") : "", cost: ended ? costWords(t, prices) : "", ship: ended && taskActions(t).includes("ship") };
+          });
+        },
+      },
     },
     ledger,
     log,

@@ -35,6 +35,7 @@ import {
   planNotifications,
   pushService,
   runItem,
+  taskItem,
   questionItem,
   readNotifyPayload,
   readNotifyPrefs,
@@ -775,4 +776,37 @@ test("an Apple push key notifies the iPhone app, sh.invincible.bot, unless it na
   const key = { key: `${"-".repeat(5)}BEGIN PRIVATE KEY${"-".repeat(5)}FAKEFORTESTS${"-".repeat(5)}END PRIVATE KEY${"-".repeat(5)}`, keyId: "KEY0000001", teamId: "TEAM000001" };
   expect(ApplePushKeyInput.parse(key).topic).toBe("sh.invincible.bot");
   expect(ApplePushKeyInput.parse({ ...key, topic: "org.example.app" }).topic).toBe("org.example.app");
+});
+
+describe("an agent's task that ended: told by its verdict, opening the task", () => {
+  const id = "task-abcdefghijkl";
+  test("its verdict and cost, never its title; Ship it where its work can be shipped; one you stopped isn't news", () => {
+    expect(taskItem({ id, status: "done", word: "Proven", cost: "$0.31 · 4m 12s", ship: true })).toMatchObject({
+      key: `task:${id}`, kind: "finished", title: "Your agent's task: Proven", body: "Proven · $0.31 · 4m 12s. Its changes are ready to ship.", open: "task", task: id, ship: true, tier: "soon",
+    });
+    expect(taskItem({ id, status: "failed", word: "Failed · gate 2", cost: "", ship: false })).toMatchObject({ body: "Failed · gate 2. Its proof is in the app.", open: "task", task: id });
+    expect(taskItem({ id, status: "failed", word: "Failed", cost: "", ship: false })!.ship).toBeUndefined();
+    expect(taskItem({ id, status: "stopped", word: "Stopped", cost: "", ship: false })).toBeNull();
+    expect(taskItem({ id, status: "running", word: "", cost: "", ship: false })).toBeNull();
+    expect(taskItem({ id: "../etc", status: "done", word: "Proven", cost: "", ship: false })).toBeNull();
+  });
+
+  test("its payload opens the task, ship only with a task, and a page's address is the task's own thread", () => {
+    const one = notifyMessage([taskItem({ id, status: "done", word: "Proven", cost: "$0.31", ship: true })!]);
+    expect(one).toMatchObject({ open: "task", task: id, ship: true });
+    expect(readNotifyPayload(one)).toEqual(one);
+    expect(readNotifyPayload({ ...one, task: "task-../../x" })).toBeNull();
+    expect(readNotifyPayload({ ...one, open: "inbox" })).toBeNull();
+    // Ship goes with a task alone; a task's place without one opens as the device can (its agents).
+    const { task: _task, ...noTask } = one!;
+    expect(readNotifyPayload(noTask)).toBeNull();
+    const { ship: _ship, ...bare } = noTask;
+    expect(readNotifyPayload(bare)).toMatchObject({ open: "task" });
+    expect(notifyUrl({ open: "task", task: id })).toBe(`/#/task/${id}`);
+    expect(notifyUrl({ open: "chat", conversation: "cv_1234567890123456789012" })).toBe("/#/chat?c=cv_1234567890123456789012");
+    // Several tasks at once open the agents, where every task is.
+    const two = notifyMessage([taskItem({ id, status: "done", word: "Proven", cost: "", ship: false })!, taskItem({ id: "task-bbbbbbbbbbbb", status: "failed", word: "Failed", cost: "", ship: false })!]);
+    expect(two).toMatchObject({ open: "overview" });
+    expect(two!.task).toBeUndefined();
+  });
 });

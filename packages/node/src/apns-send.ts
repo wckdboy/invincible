@@ -69,7 +69,7 @@ export async function appleProviderToken(key: ApplePushKey, issuedAt: number): P
 }
 
 /** The notification's buttons, as the app registers them: an approval answered there (approve and decline), or declined. */
-export const APPLE_CATEGORY = { approve: "approval", decline: "approval-decline" } as const;
+export const APPLE_CATEGORY = { approve: "approval", decline: "approval-decline", ship: "ship" } as const;
 
 /**
  * What the iPhone app is sent: Apple's part (the alert, how it interrupts, the thread it joins, the buttons it shows) and
@@ -78,11 +78,11 @@ export const APPLE_CATEGORY = { approve: "approval", decline: "approval-decline"
  * iOS shows it in the list without lighting the screen or sounding, and a Focus or a Scheduled Summary holds it.
  */
 export function applePayload(payload: NotifyPayload, delivery?: Pick<PushDelivery, "urgency">): string {
-  const category = payload.action ? (payload.approvable ? APPLE_CATEGORY.approve : APPLE_CATEGORY.decline) : null;
+  const category = payload.action ? (payload.approvable ? APPLE_CATEGORY.approve : APPLE_CATEGORY.decline) : payload.ship ? APPLE_CATEGORY.ship : null;
   const quiet = delivery?.urgency === "low" || isQuietKind(payload.kind);
   return JSON.stringify({
     aps: { alert: { title: payload.title, body: payload.body }, ...(quiet ? {} : { sound: "default" }), "interruption-level": quiet ? "passive" : "active", "thread-id": payload.kind, ...(category ? { category } : {}) },
-    invincible: { v: 1, kind: payload.kind, open: payload.open, tag: payload.tag, ...(payload.conversation ? { conversation: payload.conversation } : {}), ...(payload.action ? { action: payload.action } : {}) },
+    invincible: { v: 1, kind: payload.kind, open: payload.open, tag: payload.tag, ...(payload.conversation ? { conversation: payload.conversation } : {}), ...(payload.task ? { task: payload.task, ...(payload.ship ? { ship: true } : {}) } : {}), ...(payload.action ? { action: payload.action } : {}) },
   });
 }
 

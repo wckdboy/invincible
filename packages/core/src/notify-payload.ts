@@ -7,18 +7,22 @@
 export const NOTIFY_KINDS = ["needs-you", "approval", "finished", "question", "told"] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 
-/** Where a notification opens the app. A fixed list: a payload can't name anything else. */
-export const NOTIFY_OPENS = ["inbox", "chat", "overview", "settings"] as const;
+/** Where a notification opens the app. A fixed list: a payload can't name anything else. A device that doesn't know a
+ * place opens its own default (the agents), never nothing. */
+export const NOTIFY_OPENS = ["inbox", "chat", "overview", "settings", "task"] as const;
 export type NotifyOpen = (typeof NOTIFY_OPENS)[number];
 
 export const NOTIFY_TITLE_MAX = 60;
 export const NOTIFY_BODY_MAX = 140;
 const CONVERSATION = /^cv_[A-Za-z0-9_-]{22}$/;
+/** An agent's task (core's TeamTaskId). */
+const TASK = /^task-[a-z0-9_-]{12}$/;
 /** An action waiting for your answer (the outbox's own random id: it names nothing it is about). */
 const ACTION = /^a_[A-Za-z0-9_-]{22}$/;
 const TAG = /^[A-Za-z0-9._:-]{1,64}$/;
 /** A kept chat's id, and a notification's tag, as a payload may carry them. */
 export const isConversationId = (id: string): boolean => CONVERSATION.test(id);
+export const isNotifyTaskId = (id: string): boolean => TASK.test(id);
 export const isNotifyTag = (tag: string): boolean => TAG.test(tag);
 
 export interface NotifyPayload {
@@ -30,6 +34,10 @@ export interface NotifyPayload {
   open: NotifyOpen;
   /** A kept chat to open (with `open: "chat"`). */
   conversation?: string;
+  /** An agent's task to open (with `open: "task"`), and whether its work can be shipped from the notification itself
+   * (proven or verified work with changes nobody shipped yet: Ship it, behind the device's own check of you). */
+  task?: string;
+  ship?: boolean;
   /** The same thing told again replaces its notification rather than stacking. */
   tag: string;
   /**
@@ -67,12 +75,14 @@ export function notifyClean(text: string, max: number): string {
 export function readNotifyPayload(raw: unknown): NotifyPayload | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const p = raw as Record<string, unknown>;
-  const allowed = new Set(["v", "kind", "title", "body", "open", "conversation", "tag", "action", "approvable"]);
+  const allowed = new Set(["v", "kind", "title", "body", "open", "conversation", "task", "ship", "tag", "action", "approvable"]);
   if (Object.keys(p).some((key) => !allowed.has(key))) return null;
   if (p.v !== 1 || typeof p.kind !== "string" || !KINDS.has(p.kind)) return null;
   if (typeof p.title !== "string" || typeof p.body !== "string" || typeof p.tag !== "string" || !TAG.test(p.tag)) return null;
   if (typeof p.open !== "string" || !(NOTIFY_OPENS as readonly string[]).includes(p.open)) return null;
   if (p.conversation !== undefined && (typeof p.conversation !== "string" || !CONVERSATION.test(p.conversation) || p.open !== "chat")) return null;
+  if (p.task !== undefined && (typeof p.task !== "string" || !TASK.test(p.task) || p.open !== "task")) return null;
+  if (p.ship !== undefined && (typeof p.ship !== "boolean" || p.task === undefined)) return null;
   if (p.action !== undefined && (typeof p.action !== "string" || !ACTION.test(p.action) || p.kind !== "approval")) return null;
   if (p.approvable !== undefined && (typeof p.approvable !== "boolean" || p.action === undefined)) return null;
   const title = notifyClean(p.title, NOTIFY_TITLE_MAX);
@@ -85,13 +95,15 @@ export function readNotifyPayload(raw: unknown): NotifyPayload | null {
     body,
     open: p.open as NotifyOpen,
     ...(p.conversation ? { conversation: p.conversation as string } : {}),
+    ...(p.task ? { task: p.task as string, ...(p.ship === true ? { ship: true } : {}) } : {}),
     tag: p.tag,
     ...(p.action ? { action: p.action as string, approvable: p.approvable === true } : {}),
   };
 }
 
-/** The address a notification opens, within the app's own origin. */
-export const notifyUrl = (payload: Pick<NotifyPayload, "open" | "conversation">): string => `/#/${payload.open}${payload.conversation ? `?c=${payload.conversation}` : ""}`;
+/** The address a notification opens, within the app's own origin (a task's own thread: the web app's #/task/<id>). */
+export const notifyUrl = (payload: Pick<NotifyPayload, "open" | "conversation" | "task">): string =>
+  payload.open === "task" && payload.task ? `/#/task/${payload.task}` : `/#/${payload.open}${payload.conversation ? `?c=${payload.conversation}` : ""}`;
 
 /** A kept chat named in the app's address by a notification ("#/chat?c=cv_…"), or null. */
 export function conversationFromHash(hash: string): string | null {

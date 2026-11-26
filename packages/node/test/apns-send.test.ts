@@ -101,6 +101,11 @@ describe("a notification to the iPhone app", () => {
     });
     expect(JSON.parse(applePayload({ ...PAYLOAD, action, approvable: false })).aps.category).toBe("approval-decline");
     expect(JSON.parse(applePayload(PAYLOAD)).aps.category).toBeUndefined();
+    // A task's work that can be shipped: Ship it on the notification (behind Face ID in the app), and the task it opens.
+    const ship = JSON.parse(applePayload({ ...PAYLOAD, kind: "finished", open: "task", task: "task-abcdefghijkl", ship: true }));
+    expect(ship.aps.category).toBe("ship");
+    expect(ship.invincible).toMatchObject({ open: "task", task: "task-abcdefghijkl", ship: true });
+    expect(JSON.parse(applePayload({ ...PAYLOAD, kind: "finished", open: "task", task: "task-abcdefghijkl" })).aps.category).toBeUndefined();
   });
 
   test("anything that looks like a secret never leaves: the general notification goes instead", async () => {

@@ -362,7 +362,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       "message",
       (event: MessageEvent) => {
         const open = readOpenMessage(event.data);
-        if (open) ctx.navigate(open.route, open.conversation ? { conversation: open.conversation } : {});
+        if (open) ctx.navigate(open.route, open.conversation ? { conversation: open.conversation } : open.task ? { task: open.task } : {});
         else if ((event.data as { type?: string } | null)?.type === "invincible:push-changed") void syncPush(base.api);
       },
       { signal: lifetime.signal },

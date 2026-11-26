@@ -128,6 +128,9 @@ export interface NotifyItem {
   body: string;
   open: NotifyOpen;
   conversation?: string;
+  /** An agent's task it is about (with `open: "task"`), and whether its work can be shipped from the notification. */
+  task?: string;
+  ship?: boolean;
   /** Scopes a device must hold to be told (what it could see in the app anyway). */
   needs: string[];
   /** An approval's action, answered from the notification itself (Decline alone when it can't be approved there). */
@@ -344,6 +347,29 @@ export function turnItem(t: { id: string; conversation: string; state: "done" | 
   };
 }
 
+/**
+ * An agent's task that ended, said by its verdict and what it cost (`word`: the apps' verdict, "Proven", "Reviewed, not
+ * proven", "Failed · gate 2"…), never its title or goal (your words, or an agent's): the app opens the task, where its
+ * proof is. Work that can be shipped says so, and an iPhone offers Ship it on the notification itself, behind Face ID.
+ * One stopped by you isn't news.
+ */
+export function taskItem(t: { id: string; status: string; word: string; cost: string; ship: boolean }): NotifyItem | null {
+  if (!/^task-[a-z0-9_-]{12}$/.test(t.id) || (t.status !== "done" && t.status !== "failed")) return null;
+  const said = [t.word, t.cost].filter(Boolean).join(" · ");
+  return {
+    key: `task:${t.id}`,
+    kind: "finished",
+    alert: false,
+    title: notifyClean(`Your agent's task: ${t.word}`, NOTIFY_TITLE_MAX),
+    body: notifyClean(`${said}. ${t.ship ? "Its changes are ready to ship." : "Its proof is in the app."}`, NOTIFY_BODY_MAX),
+    open: "task",
+    task: t.id,
+    ...(t.ship ? { ship: true } : {}),
+    needs: ["chat"],
+    ...placed({ from: "run" }),
+  };
+}
+
 const RUN_ENDS: Record<string, string> = { done: "Run done", unverified: "Run ended unverified", "gave-up": "Run gave up", failed: "Run failed" };
 
 /** A run you started that has ended, said as it ended. One you stopped yourself isn't news. Never its goal (your words). */
@@ -485,6 +511,7 @@ export function notifyMessage(items: readonly NotifyItem[], salt = ""): NotifyPa
       body: notifyClean(item.body, NOTIFY_BODY_MAX),
       open: item.open,
       ...(item.conversation ? { conversation: item.conversation } : {}),
+      ...(item.task ? { task: item.task, ...(item.ship ? { ship: true } : {}) } : {}),
       tag: tagOf(item.key, salt),
       ...(item.action && item.kind === "approval" && !news ? { action: item.action.id, approvable: item.action.approvable } : {}),
     };
@@ -501,12 +528,13 @@ export function notifyMessage(items: readonly NotifyItem[], salt = ""): NotifyPa
   // One place when they all open the same one; otherwise the Inbox, where what needs you is.
   const opens = new Set(items.map((item) => item.open));
   const open = opens.size === 1 ? items[0]!.open : "inbox";
+  // (Several tasks at once: the agents, where every task is; one place is one task.)
   return {
     v: 1,
     kind: news ? quietKind() : "summary",
     title: items.some((item) => item.alert) ? "Your agent: alert" : `Your agent: ${items.length} things`,
     body: notifyClean(`${body.charAt(0).toUpperCase()}${body.slice(1)}.`, NOTIFY_BODY_MAX),
-    open: open === "chat" ? "overview" : open,
+    open: open === "chat" || open === "task" ? "overview" : open,
     tag: tagOf(`summary:${news ? "news" : "now"}:${items[0]!.key}`, salt),
   };
 }

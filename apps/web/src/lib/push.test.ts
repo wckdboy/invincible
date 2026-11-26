@@ -51,6 +51,10 @@ describe("a tapped notification, as the service worker tells an open page", () =
     const chat = "cv_1234567890123456789012";
     expect(readOpenMessage({ type: "invincible:open", open: "inbox", conversation: null })).toEqual({ route: "inbox" });
     expect(readOpenMessage({ type: "invincible:open", open: "chat", conversation: chat })).toEqual({ route: "chat", conversation: chat });
+    // An agent's task: its own thread, when the task reads as one.
+    expect(readOpenMessage({ type: "invincible:open", open: "task", task: "task-abcdefghijkl" })).toEqual({ route: "task", task: "task-abcdefghijkl" });
+    expect(readOpenMessage({ type: "invincible:open", open: "task", task: "<script>" })).toEqual({ route: "task" });
+    expect(readOpenMessage({ type: "invincible:open", open: "inbox", task: "task-abcdefghijkl" })).toEqual({ route: "inbox" });
     // A chat only goes with the chat page, and only when it reads as one.
     expect(readOpenMessage({ type: "invincible:open", open: "overview", conversation: chat })).toEqual({ route: "overview" });
     expect(readOpenMessage({ type: "invincible:open", open: "chat", conversation: "<script>" })).toEqual({ route: "chat" });

@@ -38,6 +38,7 @@ import {
   remindersMessage,
   secretItem,
   tagOf,
+  taskItem,
   testMessage,
   turnItem,
 } from "@invincible/core";
@@ -94,6 +95,9 @@ export interface NotifySources {
   turns: { running(): LiveTurn[]; view(turn: LiveTurn, watchable: boolean): { watchers: number } };
   chats: { summary(id: string): KeptSummary | null };
   runs: { list(): RunView[]; onChange(fn: () => void): () => void };
+  /** The agents' tasks, each with its verdict and cost in words once it has ended (taskItem's), read only when the team
+   * has changed since (`version`). */
+  tasks?: { version(): string; list(): { id: string; status: string; word: string; cost: string; ship: boolean }[] };
 }
 
 /** What sends: browsers' push services (push-send.ts) and Apple's, for the iPhone app (apns-send.ts), by the subscription. */
@@ -185,6 +189,9 @@ export class NotifyService {
   private readonly turns = new Map<string, { watchers: number }>();
   /** Runs of yours seen in hand, by the run they belong to. */
   private readonly runs = new Set<string>();
+  /** Agents' tasks seen in hand here, and the team's version when they were last looked at. */
+  private readonly tasksInHand = new Set<string>();
+  private tasksSeen: string | null = null;
   private keyProblem: string | null = null;
   private tagSalt: string | null = null;
   /** When each device's presence was last written, and from which zone (so every request doesn't write it). */
@@ -199,7 +206,10 @@ export class NotifyService {
   start(): void {
     if (this.stopped || this.timer) return;
     this.stopRuns = this.o.sources.runs.onChange(() => this.lookAtRuns());
-    this.poll = setInterval(() => this.lookAtTurns(), TURN_POLL_MS);
+    this.poll = setInterval(() => {
+      this.lookAtTurns();
+      this.lookAtTasks();
+    }, TURN_POLL_MS);
     if (this.o.tickMs !== false) this.timer = setInterval(() => void this.tick(), this.o.tickMs ?? 15_000);
   }
 
@@ -266,6 +276,29 @@ export class NotifyService {
     if (!item) return;
     this.o.db.addPending(item);
     this.nudge();
+  }
+
+  /**
+   * An agent's task that was in hand here and has ended: told by its verdict and cost, opening the task (taskItem). Read
+   * only when the team changed; one never seen in hand here is old news.
+   */
+  lookAtTasks(): void {
+    const tasks = this.o.sources.tasks;
+    if (this.stopped || !tasks) return;
+    const version = tasks.version();
+    if (version === this.tasksSeen) return;
+    this.tasksSeen = version;
+    for (const task of tasks.list()) {
+      if (task.status === "running" || task.status === "queued") {
+        this.tasksInHand.add(task.id);
+        continue;
+      }
+      if (!this.tasksInHand.delete(task.id)) continue;
+      const item = taskItem(task);
+      if (!item) continue;
+      this.o.db.addPending(item);
+      this.nudge();
+    }
   }
 
   /** A run you run (from a terminal) that was in hand and has ended. With effort: once every attempt has. */
