@@ -98,6 +98,8 @@ export interface Row {
   verdict: Verdict;
   /** A speed metric of a strict suite: slower beyond noise is a regression, not only past 2×. */
   strict?: true;
+  /** The bar it is held to (Suite.held), when it is past it: a regression whatever its baseline says. */
+  held?: number;
 }
 
 export interface Comparison {
@@ -128,6 +130,8 @@ export interface CompareOptions {
   strict?: { noiseFloor: number };
   /** Its timings are compared as measured (Suite.asMeasured): never scaled by the machines' calibrations. */
   asMeasured?: boolean;
+  /** Bars (Suite.held): a metric past its own fails the run, whatever its baseline (speed's, as speed fails: not under --ci). */
+  held?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -138,6 +142,17 @@ export interface CompareOptions {
  */
 export function compare(run: Scorecard, baseline: Scorecard | null, options: CompareOptions): Comparison {
   const rows: Row[] = [];
+  const push = rows.push.bind(rows);
+  // A bar is absolute: a number past it is a regression, judged or not, new or not.
+  rows.push = (...added: Row[]) =>
+    push(
+      ...added.map((row) => {
+        const bar = options.held?.[row.metric.id];
+        if (bar === undefined || row.verdict === "gone" || (row.metric.kind === "speed" && options.qualityOnly)) return row;
+        const past = row.metric.better === "higher" ? row.metric.value < bar : row.metric.value > bar;
+        return past ? { ...row, verdict: "regressed" as const, held: bar } : row;
+      }),
+    );
   let note: string | null = null;
   if (!baseline) note = "no baseline recorded: nothing is judged (bun run bench --update-baseline records one)";
   else if (baseline.seed !== run.seed) note = `the baseline was recorded with seed ${baseline.seed}: other inputs, so nothing is judged`;
@@ -214,6 +229,7 @@ export function verdictWords(row: Row): string {
     case "slower":
       return "slower";
     case "regressed":
+      if (row.held !== undefined) return `REGRESSED (${m.better === "higher" ? "below" : "above"} its bar of ${number(row.held)})`;
       return m.kind === "speed" ? (row.strict ? `REGRESSED (slower than its baseline, beyond ±${Math.round((row.noise ?? 0) * 100)} %)` : `REGRESSED (over ${SPEED_FAIL_FACTOR}× slower)`) : "REGRESSED";
     case "new":
       return "new";

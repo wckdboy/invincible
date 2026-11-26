@@ -29,6 +29,9 @@ and exits non-zero when something got worse.
     by the machine's calibration (`Pace` in `bench/lib.ts`). A difference inside the noise band (25 %, or 1.5 times the
     two runs' spreads added, whichever is more) is no change; slower beyond it is reported, and fails only past 2×,
     never under `--ci`. A strict suite (the desktop's) fails on any number worse than its baseline beyond its band.
+- **A suite may hold bars** (`Suite.held`): a number past its bar fails the run whatever its baseline says, so what a
+  change reached isn't lost while the baseline still holds an older state (a speed's bar fails as speed does: never
+  under `--ci`).
 - **Baselines are recorded on purpose**, one file a suite in `bench/baseline/`, reviewed like code. Only
   `--update-baseline` writes one.
 - **Nothing is retried.** A slow timing is reported slow; a failure failed.

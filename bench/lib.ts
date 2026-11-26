@@ -180,6 +180,12 @@ export interface Suite {
    */
   strict?: { noiseFloor: number };
   /**
+   * Bars its numbers must hold, by metric id, whatever its baseline says: a count of passes at least this, a count of
+   * failures at most this. A number past its bar fails the run (a speed's, as speed fails: never under --ci). For what
+   * a change reached and mustn't lose, while the baseline still holds an older state.
+   */
+  held?: Readonly<Record<string, number>>;
+  /**
    * Its timings are of other processes (a VM, a browser in it, Docker), not of this one's own arithmetic: recorded as
    * measured, never brought to the machine's pace, and compared as measured, never scaled by a calibration.
    */

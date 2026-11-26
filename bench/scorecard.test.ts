@@ -147,6 +147,31 @@ describe("a strict suite (the desktop's): a number worse than its baseline fails
   });
 });
 
+describe("a suite's bars (Suite.held): a number past its bar fails the run, whatever its baseline says", () => {
+  test("a count of passes below its bar fails though its baseline is lower still, and the report says which bar", () => {
+    // (C0's baseline: the editor, the naive way, 0 of 5; it reached 5 of 5, and must stay there.)
+    const baseline = card([quality("editor.naive", 0, "higher"), quality("editor.careful", 0, "higher")]);
+    const dropped = compare(card([quality("editor.naive", 0, "higher"), quality("editor.careful", 5, "higher")]), baseline, { ...DEFAULT, held: { "editor.naive": 5 } });
+    expect(dropped.rows.map((r) => [r.metric.id, r.verdict])).toEqual([["editor.naive", "regressed"], ["editor.careful", "better"]]);
+    expect(dropped.failed).toBe(true);
+    expect(verdictWords(dropped.rows[0]!)).toBe("REGRESSED (below its bar of 5)");
+    // At its bar it is judged against its baseline as ever.
+    expect(verdicts(card([quality("editor.naive", 5, "higher")]), card([quality("editor.naive", 0, "higher")]), { ...DEFAULT, held: { "editor.naive": 5 } })).toEqual({ "editor.naive": "better" });
+  });
+
+  test("a lower-is-better number above its bar fails; a bar holds with no baseline, or a new metric, and under --ci", () => {
+    const held = { held: { stale: 0, settled: 5 } };
+    const stale = compare(card([quality("stale", 1)]), card([quality("stale", 2)]), { ...DEFAULT, ...held });
+    expect(stale.rows[0]!.verdict).toBe("regressed");
+    expect(verdictWords(stale.rows[0]!)).toBe("REGRESSED (above its bar of 0)");
+    expect(compare(card([quality("settled", 4, "higher")]), null, { ...DEFAULT, ...held }).failed).toBe(true);
+    expect(verdicts(card([quality("settled", 4, "higher")]), card([]), { ...DEFAULT, ...held })).toEqual({ settled: "regressed" });
+    expect(compare(card([quality("settled", 4, "higher")]), card([quality("settled", 4, "higher")]), { ...DEFAULT, qualityOnly: true, ...held }).failed).toBe(true);
+    // A bar on speed is held as speed is: under --ci it is reported, never failed.
+    expect(compare(card([speed("boot", 4000)]), card([speed("boot", 3900)]), { ...DEFAULT, qualityOnly: true, held: { boot: 3900 } }).failed).toBe(false);
+  });
+});
+
 describe("baselines and files", () => {
   test("a default run's baseline keeps the full-only numbers the old one held; a full run's replaces them", () => {
     const old = card([quality("a", 1), quality("full.b", 2), quality("dropped", 3)]);

@@ -144,7 +144,7 @@ async function main(): Promise<number> {
       writeScorecard(OUT_DIR, card);
       result.scorecard = card;
       const baseline = readScorecard(BASELINE_DIR, name);
-      result.comparison = compare(card, baseline, { ...options, ...(suite.strict ? { strict: suite.strict } : {}), ...(suite.asMeasured ? { asMeasured: true } : {}) });
+      result.comparison = compare(card, baseline, { ...options, ...(suite.strict ? { strict: suite.strict } : {}), ...(suite.asMeasured ? { asMeasured: true } : {}), ...(suite.held ? { held: suite.held } : {}) });
       if (values["update-baseline"]) {
         writeScorecard(BASELINE_DIR, nextBaseline(card, baseline, full));
         result.baselineWritten = true;
