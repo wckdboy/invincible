@@ -1,5 +1,5 @@
 import type { ActionView, ConnectorRequestView, FleetView, LoopDraftView, MemoryView, NoticeView, PairingView, QuestionView, ScreenSessionView, SecretRequestView } from "@invincible/core";
-import type { LiveEvent, LiveTopic } from "@invincible/core/live";
+import { type LiveEvent, livePath, type LiveTopic } from "@invincible/core/live";
 import type { TeamSnapshot } from "@invincible/core/team";
 import { type Api, ApiError } from "./api.ts";
 import type { Live } from "./context.ts";
@@ -11,9 +11,10 @@ import { signal } from "./ui/signal.ts";
  * What the shell shows everywhere: fleet health, the inbox (pairing requests, secret requests, actions waiting for your
  * answer, the heartbeat's notices, …) and the team (the agents, their rooms and work: the roster's rows and every
  * timeline read the one snapshot). The node's live stream (lib/live-link.ts, core's live.ts) says which of them changed,
- * as it changes, and only that is read again; nothing is asked for while nothing changes. While the stream is down (the
- * node away or restarting, an older node without it), each is asked for every FALLBACK_MS instead, and the stream is
- * opened again. Nothing at all while the app is hidden; it catches up the moment it's visible again.
+ * as it changes, and only that is read again; nothing is asked for while nothing changes. Opened again (a stall, the app
+ * shown again), it says what changed since it left off, and only that is read. While the stream is down (the node away
+ * or restarting, an older node without it), each is asked for every FALLBACK_MS instead, and the stream is opened
+ * again. Nothing at all while the app is hidden; it catches up the moment it's visible again.
  */
 
 /** While the stream is down, what the shell shows everywhere is asked for this often. */
@@ -38,7 +39,8 @@ const after: After = (ms, run) => {
  */
 export function openLink(api: Api): LiveLink {
   const link = liveLink({
-    open: (signal, alive) => api.listen<LiveEvent>("/api/live", signal, alive),
+    // (Signed over its path and query as sent: a cursor holds nothing a URL escapes.)
+    open: (signal, alive, since) => api.listen<LiveEvent>(livePath(since), signal, alive),
     refused: (error) => error instanceof ApiError && (error.status === 401 || error.status === 403 || error.status === 404),
     after,
     now: () => Date.now(),
@@ -337,9 +339,9 @@ export function startLive(api: Api, can: (scope: AnyScope) => boolean, events: L
   followers.follow(["fleet"], () => refreshFleet(), FALLBACK_MS, GAP_MS, "later");
   followers.follow(INBOX, (changed) => (changed ? Promise.all(changed.map((topic) => inboxPart[topic]?.())) : refreshInbox()), FALLBACK_MS, GAP_MS, "later");
   link.attach({
-    up: (_topics, at) => {
+    up: (_topics, at, changed) => {
       streaming.set(true);
-      followers.up(at);
+      followers.up(at, changed);
     },
     changed: (topics) => followers.changed(topics),
     down: () => {

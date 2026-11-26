@@ -5,8 +5,8 @@ import { type FirstRead, Followers, GAP_MS, HELLO_WAIT_MS, type LinkHandlers, li
 /*
  * The node's live stream as the app keeps it (live-link.ts): open while the app is shown, opened again when it ends
  * (at once after a long one, backing off after failures, never on a timer once the node refused it), taken for dead
- * when it says nothing; and what the app reads, run once when it comes up, then only for what changed, polled only
- * while it is down.
+ * when it says nothing, and opened again from where it left off; and what the app reads, run once when it comes up
+ * (resumed: only what changed since, never read, or owed), then only for what changed, polled only while it is down.
  */
 
 /** A clock in hand: `advance` runs what comes due, in order. */
@@ -39,9 +39,9 @@ function clock() {
 
 /** Streams the test opens and feeds: each `open` is one, with its events pushed and its end or failure said. */
 function streams() {
-  const opened: { push(event: LiveEvent): void; beat(): void; end(): void; fail(error: unknown): void; signal: AbortSignal }[] = [];
+  const opened: { push(event: LiveEvent): void; beat(): void; end(): void; fail(error: unknown): void; signal: AbortSignal; since: string | null }[] = [];
   let refuseWith: unknown = null;
-  const open = (signal: AbortSignal, alive: () => void): AsyncIterable<LiveEvent> => {
+  const open = (signal: AbortSignal, alive: () => void, since: string | null): AsyncIterable<LiveEvent> => {
     const queue: (LiveEvent | { end: true } | { fail: unknown })[] = [];
     let wake: (() => void) | null = null;
     const put = (item: (typeof queue)[number]) => {
@@ -50,7 +50,7 @@ function streams() {
     };
     signal.addEventListener("abort", () => put({ fail: new DOMException("aborted", "AbortError") }));
     const refusal = refuseWith;
-    opened.push({ push: (event) => (alive(), put(event)), beat: () => alive(), end: () => put({ end: true }), fail: (error) => put({ fail: error }), signal });
+    opened.push({ push: (event) => (alive(), put(event)), beat: () => alive(), end: () => put({ end: true }), fail: (error) => put({ fail: error }), signal, since });
     return {
       async *[Symbol.asyncIterator]() {
         if (refusal) throw refusal;
@@ -74,7 +74,7 @@ function link() {
   const s = streams();
   const told: string[] = [];
   const handlers: LinkHandlers = {
-    up: (topics) => told.push(`up ${topics.join(",")}`),
+    up: (topics, _at, changed) => told.push(`up ${topics.join(",")}${changed ? ` changed:${changed.join(",")}` : ""}`),
     changed: (topics) => told.push(`changed ${topics.join(",")}`),
     down: () => told.push("down"),
   };
@@ -85,6 +85,9 @@ function link() {
 
 const hello = (...topics: LiveTopic[]): LiveEvent => ({ type: "hello", topics });
 const changed = (...topics: LiveTopic[]): LiveEvent => ({ type: "changed", topics });
+/** A node's of today: where things stand with each, and with a hello opened from a cursor, what changed since. */
+const helloAt = (at: string, topics: LiveTopic[], since?: LiveTopic[]): LiveEvent => ({ type: "hello", topics, at, ...(since ? { changed: since } : {}) });
+const changedAt = (at: string, ...topics: LiveTopic[]): LiveEvent => ({ type: "changed", topics, at });
 
 describe("the stream, kept open", () => {
   test("its hello says what it tells of, and each change after is passed on", async () => {
@@ -218,6 +221,87 @@ describe("the stream, kept open", () => {
   });
 });
 
+describe("the stream, opened again from where it left off", () => {
+  test("it is opened again from the last cursor its node gave, a hello's or a change's; that hello says only what changed since", async () => {
+    const { c, s, told, l } = link();
+    l.start();
+    expect(s.last().since).toBeNull();
+    s.last().push(helloAt("b00t.4", ["actions", "notices"]));
+    s.last().push(changedAt("b00t.5", "actions"));
+    await c.flush();
+    s.last().end();
+    await c.advance(RETRY_FIRST_MS);
+    expect(s.last().since).toBe("b00t.5");
+    s.last().push(helloAt("b00t.7", ["actions", "notices"], ["notices"]));
+    await c.flush();
+    // Nothing changed since: nothing to read but the stream.
+    s.last().end();
+    await c.advance(2 * RETRY_FIRST_MS);
+    expect(s.last().since).toBe("b00t.7");
+    s.last().push(helloAt("b00t.7", ["actions", "notices"], []));
+    await c.flush();
+    expect(told).toEqual(["up actions,notices", "changed actions", "up actions,notices changed:notices", "up actions,notices changed:"]);
+  });
+
+  test("hidden and shown again, it opens from where it left off; renewed as it went silent, too", async () => {
+    const { c, s, l } = link();
+    l.start();
+    s.last().push(helloAt("b00t.3", ["fleet"]));
+    await c.flush();
+    l.stop();
+    l.start();
+    expect(s.last().since).toBe("b00t.3");
+    s.last().push(helloAt("b00t.3", ["fleet"], []));
+    await c.advance(SILENT_MS);
+    await c.advance(RETRY_FIRST_MS);
+    expect(s.opened.length).toBe(3);
+    expect(s.last().since).toBe("b00t.3");
+  });
+
+  test("with no cursor from its node (an older node) or one that isn't one, it opens afresh, and a stream opened afresh is read as fresh", async () => {
+    const { c, s, told, l } = link();
+    l.start();
+    s.last().push(hello("fleet"));
+    await c.flush();
+    // Each ends soon after it opened, and is opened again after its wait (a second, then twice as long each time).
+    let wait = RETRY_FIRST_MS;
+    const again = async () => {
+      s.last().end();
+      await c.advance(wait);
+      wait = Math.min(wait * 2, RETRY_MAX_MS);
+    };
+    await again();
+    expect(s.last().since).toBeNull();
+    for (const notOne of ["a b", "", "b00t.1?x=1", "x".repeat(65)]) {
+      s.last().push(helloAt(notOne, ["fleet"]));
+      await c.flush();
+      await again();
+      expect([notOne, s.last().since]).toEqual([notOne, null]);
+    }
+    // (What a hello says changed means nothing from a stream not opened from a cursor.)
+    s.last().push(helloAt("b00t.2", ["fleet"], []));
+    await c.flush();
+    expect(told.at(-1)).toBe("up fleet");
+  });
+
+  test("a hello that tells of other topics than the stream before it (the device's scopes changed) is read as a fresh one", async () => {
+    const { c, s, told, l } = link();
+    l.start();
+    s.last().push(helloAt("b00t.1", ["actions", "secretRequests"]));
+    await c.flush();
+    s.last().end();
+    await c.advance(RETRY_FIRST_MS);
+    expect(s.last().since).toBe("b00t.1");
+    s.last().push(helloAt("b00t.2", ["actions"], []));
+    // And what one says changed is held to what it tells of.
+    s.last().end();
+    await c.advance(2 * RETRY_FIRST_MS);
+    s.last().push(helloAt("b00t.3", ["actions"], ["actions", "pairings"]));
+    await c.flush();
+    expect(told).toEqual(["up actions,secretRequests", "up actions", "up actions changed:actions"]);
+  });
+});
+
 describe("what the app reads", () => {
   function followers() {
     const c = clock();
@@ -301,6 +385,108 @@ describe("what the app reads", () => {
     f.down();
     await c.advance(60_000);
     expect(runs).toEqual(["underway"]);
+  });
+
+  test("resumed, only what changed since runs, with what never read; what nothing changed of runs not at all", async () => {
+    const { c, f, runs, follow } = followers();
+    follow("inbox", ["actions", "notices"], 15_000);
+    follow("fleet", ["fleet"], 15_000);
+    follow("team", ["team"], 2_000, "later");
+    await c.advance(1_000);
+    f.up(c.now(), ["notices", "pairings"]);
+    await c.advance(GAP_MS);
+    expect(runs.sort()).toEqual(["inbox notices", "team"]);
+    runs.length = 0;
+    f.up(c.now(), []);
+    await c.advance(60_000);
+    expect(runs).toEqual([]);
+  });
+
+  test("what the app's going to the background called off is owed, and runs once the stream is up again, resumed or not", async () => {
+    const { c, f, runs, follow } = followers();
+    follow("inbox", ["actions"], 15_000, "owner", 2_000);
+    follow("fleet", ["fleet"], 15_000, "owner", 2_000);
+    f.up(c.now());
+    await c.advance(100);
+    // Told of a change it waits its gap to read, and the app hidden before it did.
+    f.changed(["actions"]);
+    f.off();
+    await c.advance(10_000);
+    expect(runs).toEqual([]);
+    f.up(c.now(), []);
+    await c.advance(GAP_MS);
+    expect(runs).toEqual(["inbox actions"]);
+  });
+
+  test("told of a change while the app is hidden (a read asked again), it is owed, and runs once the stream is up again", async () => {
+    const { c, f, runs, follow } = followers();
+    follow("notices", ["notices"], 15_000);
+    f.off();
+    f.changed(["notices"]);
+    await c.advance(60_000);
+    expect(runs).toEqual([]);
+    f.up(c.now(), []);
+    await c.advance(GAP_MS);
+    expect(runs).toEqual(["notices notices"]);
+  });
+
+  test("a run that failed is owed: never tried again on its own, run again once the stream is up again, with what changes meanwhile", async () => {
+    const c = clock();
+    const f = new Followers(c.after, c.now);
+    const runs: (readonly LiveTopic[] | null)[] = [];
+    let failing = true;
+    f.follow(["actions", "notices"], (changed) => {
+      runs.push(changed);
+      if (failing) return Promise.reject(new Error("the node is away"));
+    }, 15_000, GAP_MS, "owner");
+    f.up(c.now());
+    await c.advance(GAP_MS);
+    f.changed(["actions"]);
+    await c.advance(60_000);
+    expect(runs).toEqual([["actions"]]);
+    failing = false;
+    f.up(c.now(), []);
+    await c.advance(GAP_MS);
+    expect(runs).toEqual([["actions"], ["actions"]]);
+    // Paid: nothing owed now.
+    f.up(c.now(), []);
+    await c.advance(60_000);
+    expect(runs).toHaveLength(2);
+    // Owed and told of another change: both in the one run.
+    failing = true;
+    f.changed(["actions"]);
+    await c.advance(GAP_MS);
+    failing = false;
+    f.changed(["notices"]);
+    await c.advance(GAP_MS);
+    expect(runs.at(-1)).toEqual(["notices", "actions"]);
+  });
+
+  test("a run under way when the stream comes up again that then fails runs once more at once: nothing else would read it", async () => {
+    const c = clock();
+    const f = new Followers(c.after, c.now);
+    const runs: (readonly LiveTopic[] | null)[] = [];
+    let finish: (ok: boolean) => void = () => {};
+    f.follow(["actions"], (changed) => {
+      runs.push(changed);
+      return new Promise<void>((resolve, reject) => (finish = (ok) => (ok ? resolve() : reject(new Error("the network went")))));
+    }, 15_000, GAP_MS, "owner");
+    f.up(c.now());
+    await c.advance(GAP_MS);
+    f.changed(["actions"]);
+    await c.flush();
+    // Its read hangs on the network that went; the stream renewed meanwhile says nothing changed since (it told this).
+    await c.advance(1_000);
+    f.up(c.now(), []);
+    await c.flush();
+    expect(runs).toEqual([["actions"]]);
+    finish(false);
+    await c.advance(GAP_MS);
+    expect(runs).toEqual([["actions"], ["actions"]]);
+    // Once: one that fails again is owed, as any is.
+    finish(false);
+    await c.advance(60_000);
+    expect(runs).toHaveLength(2);
   });
 
   test("off (the app hidden), nothing runs, whatever changes; one that stopped following is never run", async () => {

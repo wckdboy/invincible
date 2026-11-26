@@ -8,7 +8,8 @@ import { startLive } from "./live.ts";
  * What the shell shows everywhere, kept by the node's live stream (live.ts): read once when the stream comes up, then
  * only what it says changed, each through its own route; at rest the app asks the node for nothing. Before it, the app
  * asked for ten things every 3 to 15 seconds whether anything had changed or not (about 82 requests a minute). While
- * the stream is down, a slow poll every 15 s keeps it all fresh instead.
+ * the stream is down, a slow poll every 15 s keeps it all fresh instead. Opened again from where it left off, only what
+ * changed since is read.
  */
 
 const listeners = new Map<string, () => void>();
@@ -87,7 +88,9 @@ function app() {
   const link: LiveLink = { start: () => void calls.push("start"), stop: () => void calls.push("stop"), retry: () => void calls.push("retry"), attach: (h) => void (handlers = h), up: false };
   const live = startLive(api, () => true, { onNewPairing: () => {}, onNewAction: () => {} }, { link, after: c.after, now: c.now });
   const stream = {
-    up: (...topics: LiveTopic[]) => handlers!.up(topics, c.now()),
+    up: (...topics: LiveTopic[]) => handlers!.up(topics, c.now(), null),
+    /** Up again, opened from where the last left off: these changed since. */
+    resumed: (...changed: LiveTopic[]) => handlers!.up([], c.now(), changed),
     changed: (...topics: LiveTopic[]) => handlers!.changed(topics),
     down: () => handlers!.down(),
   };
@@ -181,6 +184,43 @@ describe("what the shell shows, kept by the node's live stream", () => {
     asked.length = 0;
     await c.advance(60_000);
     expect(asked).toEqual([]);
+    live.stop();
+  });
+
+  test("opened again from where it left off: with nothing changed since, nothing is read; with something, that alone", async () => {
+    const { c, asked, live, stream } = app();
+    stream.up();
+    await c.advance(1_000);
+    asked.length = 0;
+    // A stall: the link renewed, nothing changed meanwhile.
+    stream.resumed();
+    await c.advance(60_000);
+    expect(asked).toEqual([]);
+    expect(live.streaming.value).toBe(true);
+    stream.resumed("notices");
+    await c.advance(1_000);
+    expect(asked).toEqual(["/api/notices"]);
+    live.stop();
+  });
+
+  test("a read that failed just before the app was hidden is read once the stream is up again, though nothing changed since", async () => {
+    const { c, asked, failing, live, stream } = app();
+    stream.up();
+    await c.advance(1_000);
+    asked.length = 0;
+    failing.add("/api/notices");
+    stream.changed("notices");
+    await c.advance(1_000);
+    expect(asked).toEqual(["/api/notices"]);
+    page.hidden = true;
+    listeners.get("visibilitychange")!();
+    await c.advance(60_000);
+    expect(asked).toEqual(["/api/notices"]);
+    page.hidden = false;
+    listeners.get("visibilitychange")!();
+    stream.resumed();
+    await c.advance(1_000);
+    expect(asked).toEqual(["/api/notices", "/api/notices"]);
     live.stop();
   });
 

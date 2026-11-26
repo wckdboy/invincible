@@ -1,4 +1,4 @@
-import { LIVE_BEAT_MS, type LiveEvent, type LiveTopic } from "@invincible/core/live";
+import { LIVE_BEAT_MS, LIVE_CURSOR, type LiveEvent, type LiveTopic } from "@invincible/core/live";
 
 /*
  * The node's live stream, kept open while the app is shown (core's live.ts): it says which of what the app shows
@@ -8,14 +8,22 @@ import { LIVE_BEAT_MS, type LiveEvent, type LiveTopic } from "@invincible/core/l
  * second later, then twice as long each time, up to half a minute. One the node refuses (an older node without it, a
  * device that may not read it, a revoked one) is opened again only when told to: the app shown again, the network
  * back. One that says nothing at all for SILENT_MS (the node beats every LIVE_BEAT_MS) is taken for dead and opened
- * again.
+ * again. Each is opened from where the last left off: the last cursor its node gave (a hello's or a change's `at`),
+ * and that hello says what changed since (core's live.ts). It is trusted only from a stream opened from a cursor whose
+ * hello tells of the same topics as the stream before it; otherwise the device's scopes changed, and it is read as a
+ * fresh hello.
  *
- * Followers are what the app reads, each for its topics. When the stream comes up, each whose last read began before
- * the stream said hello runs once (what it shows may be from before the node was telling of changes); one read since
- * can't have missed anything. Then each runs only when one of its topics changes. While the stream is down (no hello
+ * Followers are what the app reads, each for its topics. When a fresh stream comes up, each whose last read began
+ * before the stream said hello runs once (what it shows may be from before the node was telling of changes); one read
+ * since can't have missed anything. When a resumed one comes up, only those whose topics changed since run, with any
+ * that never read and any owed a run: one its run failed, one the app's going to the background called off, or one
+ * told of a change meanwhile. Then each runs only when one of its topics changes. While the stream is down (no hello
  * within HELLO_WAIT_MS, or it can't be opened) each runs at once and then every so often, at its own interval, as the
  * app did before there was a stream. A follower runs one at a time: what comes meanwhile is merged into one more run
- * after it, and runs come no closer together than its gap.
+ * after it, and runs come no closer together than its gap. A run that failed is owed, never tried again by itself (a
+ * node refusing it would be asked again and again): it is run with the follower's next, and when the stream is up
+ * again. One that was under way when the stream came up again (a read hung on a network that went) and then failed
+ * runs once more at once, as nothing else would read it.
  */
 
 /** Runs `run` after `ms`; returns how to call it off. */
@@ -34,8 +42,11 @@ export const STEADY_MS = 30_000;
 export const GAP_MS = 500;
 
 export interface LinkOptions {
-  /** Opens the stream: its events as they come; `alive` is called on everything that arrives, its beats too. */
-  open(signal: AbortSignal, alive: () => void): AsyncIterable<LiveEvent>;
+  /**
+   * Opens the stream (from `since`, the last cursor its node gave, when there is one: core's livePath): its events as
+   * they come; `alive` is called on everything that arrives, its beats too.
+   */
+  open(signal: AbortSignal, alive: () => void, since: string | null): AsyncIterable<LiveEvent>;
   /** A failure that is the node's refusal: not tried again on a timer. */
   refused(error: unknown): boolean;
   after: After;
@@ -44,8 +55,11 @@ export interface LinkOptions {
 
 /** Who hears where the stream stands. */
 export interface LinkHandlers {
-  /** It is open, since `at` (when it said hello), and tells of these topics: read now what was read before then. */
-  up(topics: LiveTopic[], at: number): void;
+  /**
+   * It is open, since `at` (when it said hello), and tells of these topics: read now what was read before then; or,
+   * resumed (`changed`), only what changed since the last stream left off (and what was never read, or is owed).
+   */
+  up(topics: LiveTopic[], at: number, changed: LiveTopic[] | null): void;
   changed(topics: LiveTopic[]): void;
   /** It isn't open, and hasn't been for a while (or can't be): ask for what is shown on a timer until it is. */
   down(): void;
@@ -72,6 +86,8 @@ export function liveLink(o: LinkOptions): LiveLink {
   /** When the open stream said hello. */
   let upAt = 0;
   let topics: LiveTopic[] = [];
+  /** The last cursor the node gave (a hello's or a change's): the next stream is opened from it. */
+  let cursor: string | null = null;
   /** Down has been said since it was last up. */
   let saidDown = false;
   let delay = RETRY_FIRST_MS;
@@ -83,14 +99,15 @@ export function liveLink(o: LinkOptions): LiveLink {
     cancel?.();
     return null;
   };
-  const goUp = (told: LiveTopic[]) => {
+  const goUp = (told: LiveTopic[], changed: LiveTopic[] | null) => {
     isUp = true;
     upAt = o.now();
     saidDown = false;
     downing = off(downing);
     topics = told;
-    handlers?.up(told, upAt);
+    handlers?.up(told, upAt, changed);
   };
+  const keep = (at: unknown): string | null => (typeof at === "string" && LIVE_CURSOR.test(at) ? at : null);
   const goDown = () => {
     downing = off(downing);
     if (isUp || saidDown || !running) return;
@@ -111,6 +128,7 @@ export function liveLink(o: LinkOptions): LiveLink {
     const controller = new AbortController();
     current = controller;
     let helloAt: number | null = null;
+    const since = cursor;
     watch(controller);
     waitForHello();
     void (async () => {
@@ -119,13 +137,21 @@ export function liveLink(o: LinkOptions): LiveLink {
         const alive = () => {
           if (current === controller) watch(controller);
         };
-        for await (const event of o.open(controller.signal, alive)) {
+        for await (const event of o.open(controller.signal, alive, since)) {
           if (current !== controller) break;
           if (event.type === "hello") {
             helloAt = o.now();
-            goUp(Array.isArray(event.topics) ? event.topics : []);
+            const told = Array.isArray(event.topics) ? event.topics : [];
+            // What changed since, trusted from a stream opened from a cursor that tells of what the last told of.
+            const same = told.length === topics.length && told.every((topic) => topics.includes(topic));
+            const changed = since !== null && same && Array.isArray(event.changed) ? event.changed.filter((topic) => told.includes(topic)) : null;
+            cursor = keep(event.at);
+            goUp(told, changed);
           } else if (event.type === "changed") {
-            if (isUp && Array.isArray(event.topics)) handlers?.changed(event.topics);
+            if (isUp && Array.isArray(event.topics)) {
+              cursor = keep(event.at) ?? cursor;
+              handlers?.changed(event.topics);
+            }
           } else if (event.type === "bye") break;
         }
       } catch (error) {
@@ -178,7 +204,8 @@ export function liveLink(o: LinkOptions): LiveLink {
     },
     attach(next) {
       handlers = next;
-      if (isUp) next.up(topics, upAt);
+      // (Read as a fresh hello: what changed before it was told to whoever was attached then.)
+      if (isUp) next.up(topics, upAt, null);
       else if (saidDown) next.down();
     },
     get up() {
@@ -190,14 +217,19 @@ export function liveLink(o: LinkOptions): LiveLink {
 /** What a follower runs: `changed` names its topics that changed, or is null when everything is to be read. */
 export type FollowerRun = (changed: readonly LiveTopic[] | null) => unknown;
 
+/** What a follower is asked to read: nothing, everything, or these topics. */
+type Wanted = Set<LiveTopic> | "all" | null;
+const merged = (a: Wanted, b: Wanted): Wanted => (a === "all" || b === "all" ? "all" : a === null ? b : b === null ? a : new Set([...a, ...b]));
+
 /**
  * `run`, one at a time: what is asked for meanwhile is merged into one more run after it, never closer than `gapMs` to
- * the last (`last`: when it last ran before this, if it did).
+ * the last (`last`: when it last ran before this, if it did). A run that failed (its promise rejected), or was called
+ * off before it ran (`shelve`), is owed: run with the next, never by itself.
  */
-export function paced(run: FollowerRun, gapMs: number, after: After, now: () => number, last = -Infinity): { want(topics: readonly LiveTopic[] | null): void; cancel(): void } {
+export function paced(run: FollowerRun, gapMs: number, after: After, now: () => number, last = -Infinity): { want(topics: readonly LiveTopic[] | null): void; owe(topics: readonly LiveTopic[]): void; shelve(): void; cancel(): void; readonly owed: boolean } {
   let running = false;
-  /** null: nothing; "all": everything; otherwise these. */
-  let wanted: Set<LiveTopic> | "all" | null = null;
+  let wanted: Wanted = null;
+  let owed: Wanted = null;
   let waiting: (() => void) | null = null;
   const go = (): void => {
     if (running || wanted === null || waiting) return;
@@ -209,13 +241,17 @@ export function paced(run: FollowerRun, gapMs: number, after: After, now: () => 
       });
       return;
     }
-    const changed = wanted === "all" ? null : [...wanted];
+    const taking = merged(wanted, owed);
+    const changed = taking === "all" ? null : [...taking!];
     wanted = null;
+    owed = null;
     running = true;
     last = now();
     void Promise.resolve()
       .then(() => run(changed))
-      .catch(() => {})
+      .catch(() => {
+        owed = merged(owed, taking);
+      })
       .finally(() => {
         running = false;
         go();
@@ -223,13 +259,26 @@ export function paced(run: FollowerRun, gapMs: number, after: After, now: () => 
   };
   return {
     want(topics) {
-      wanted = topics === null || wanted === "all" ? "all" : new Set([...(wanted ?? []), ...topics]);
+      wanted = merged(wanted, topics === null ? "all" : new Set(topics));
       go();
     },
-    cancel() {
+    owe(topics) {
+      owed = merged(owed, new Set(topics));
+    },
+    shelve() {
+      owed = merged(owed, wanted);
       wanted = null;
       waiting?.();
       waiting = null;
+    },
+    cancel() {
+      wanted = null;
+      owed = null;
+      waiting?.();
+      waiting = null;
+    },
+    get owed() {
+      return owed !== null;
     },
   };
 }
@@ -254,6 +303,8 @@ export type FirstRead = "owner" | "later";
 export class Followers {
   private readonly all = new Set<Follower>();
   private mode: "off" | "up" | "down" = "off";
+  /** How many times the stream has come up. */
+  private ups = 0;
 
   constructor(
     private readonly after: After,
@@ -273,7 +324,14 @@ export class Followers {
       pace: paced(
         (changed) => {
           follower.since = this.now();
-          return run(changed);
+          const ups = this.ups;
+          return Promise.resolve()
+            .then(() => run(changed))
+            .catch((error: unknown) => {
+              // Up again while it read, so nothing else will read it: it reads once more (once: a second failure is owed).
+              if (this.mode === "up" && this.ups !== ups) follower.pace.want(changed);
+              throw error;
+            });
         },
         gapMs,
         this.after,
@@ -294,21 +352,36 @@ export class Followers {
     };
   }
 
-  /** The stream is up, since `at`: each that last read before then runs once now; then each runs when its topics change. */
-  up(at: number): void {
+  /**
+   * The stream is up, since `at`. Fresh (`changed` null): each that last read before then runs once now. Resumed: only
+   * those of whose topics something changed since, those that never read, and those owed a run. Then each runs when
+   * its topics change.
+   */
+  up(at: number, changed: readonly LiveTopic[] | null = null): void {
     this.mode = "up";
+    this.ups += 1;
     for (const follower of this.all) {
       follower.timer?.();
       follower.timer = null;
-      if (follower.since < at) follower.pace.want(null);
+      if (changed === null) {
+        if (follower.since < at) follower.pace.want(null);
+        else if (follower.pace.owed) follower.pace.want([]);
+        continue;
+      }
+      const mine = changed.filter((topic) => follower.topics.has(topic));
+      if (follower.since === -Infinity) follower.pace.want(null);
+      else if (mine.length || follower.pace.owed) follower.pace.want(mine);
     }
   }
 
+  /** These changed: each that follows one of them runs (while the app is hidden, it is owed a run instead). */
   changed(topics: readonly LiveTopic[]): void {
-    if (this.mode !== "up") return;
+    if (this.mode === "down") return;
     for (const follower of this.all) {
       const mine = topics.filter((topic) => follower.topics.has(topic));
-      if (mine.length) follower.pace.want(mine);
+      if (!mine.length) continue;
+      if (this.mode === "up") follower.pace.want(mine);
+      else follower.pace.owe(mine);
     }
   }
 
@@ -321,13 +394,13 @@ export class Followers {
     }
   }
 
-  /** Nothing runs: the app is hidden. */
+  /** Nothing runs: the app is hidden. What was asked for and hadn't run is owed. */
   off(): void {
     this.mode = "off";
     for (const follower of this.all) {
       follower.timer?.();
       follower.timer = null;
-      follower.pace.cancel();
+      follower.pace.shelve();
     }
   }
 
