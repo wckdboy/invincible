@@ -349,6 +349,8 @@ export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "e
 /** A task's progress line for one step of its run. Each starts with its step's mark, which the agent's avatar reads (taskStep). */
 export function progress(event: RunEvent): string {
   switch (event.type) {
+    // How a run ended is the task's verdict, beside its proof: its trail says nothing of it (it said a bare "finished").
+    case "finished": return "";
     case "plan": return `Plan · ${event.text}`;
     case "command": return `Running · ${event.command}`;
     case "observation": return `Exit ${event.exitCode} · ${event.output}`;
@@ -377,7 +379,8 @@ export function progress(event: RunEvent): string {
     case "audit": return `Audit · ${{ on: "on its task", steer: "steered", stop: "stopped the work", unread: "no answer that could be read: the work goes on" }[event.verdict]}${event.note ? `\n${event.note}` : ""}`;
     // Your words, or your agent's, where the work took them (RunDeps.steers): every client reads whose they were from this line.
     case "steered": return `Steered · ${event.by === "owner" ? "You" : "Your agent"}: ${event.text}`;
-    default: return event.type;
+    // (Every step a run tells of has its words above; one it may tell of later is named, as before, until it has some.)
+    default: return (event as { type: string }).type;
   }
 }
 
@@ -743,7 +746,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           if (event.type === "baseline") proof.before = event.results.map((g) => g.exitCode);
           else if (event.type === "gated") proof.after = event.results.map((g) => g.exitCode);
           else if (event.type === "review") proof.review = event.verdict;
-          ctx.emit(progress(event));
+          // (A step with nothing to say, a run's end, writes no line: the task's verdict says how it ended.)
+          const said = progress(event);
+          if (said) ctx.emit(said);
           if (steps.on && event.type === "command") steps.command = event.command;
           else if (steps.on && event.type === "observation") keepStep(event.step);
         },

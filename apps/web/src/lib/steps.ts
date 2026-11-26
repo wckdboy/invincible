@@ -94,6 +94,9 @@ function read(text: string): Line {
     case "Plan": return { kind: "plan", text: [said, body].filter(Boolean).join("\n") };
     case "Running": return { kind: "command", command: [said, body].filter(Boolean).join("\n") };
     case "Thinking": return { kind: "thought" };
+    // A run's end, said bare by the runner before 26 November 2026: it says nothing, and the task's verdict says how it ended.
+    case "finished": if (!said && !body) return { kind: "thought" };
+      break;
     case "Submitted for review": return { kind: "submitted", summary: said };
     case "Gates before the work": return { kind: "baseline", exits: [said, ...rest].map((line) => /^\d+\. exit (-?\d+) · /.exec(line)?.[1]).filter((exit): exit is string => exit !== undefined).map(Number) };
   }

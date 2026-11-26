@@ -9,6 +9,12 @@ const EDIT = "edit 'packages/link/sync.ts' <<'END'\n-  retry()\n+  resume()\nEND
 const WRITE = "cat > 'packages/link/resume.ts' <<'END'\nexport const resume = 1;\nEND";
 
 describe("a task's work, folded", () => {
+  test("an ended task's work says nothing of its end: no bare 'finished' step (its verdict says how it ended)", () => {
+    // (Trails written before 26 November 2026 end with the runner's bare "finished": every ended task's thread showed it.)
+    expect(stepGroups(trail("Running · bun test", "Exit 0 · 4 pass", "finished")).map((g) => g.text)).toEqual(["Ran bun test"]);
+  });
+
+
   test("steps alike in a row fold into one line; the plan, each gate, the review and the runner's notes stand alone", () => {
     const groups = stepGroups(trail(
       "Plan · 1. read the link\n2. make it resume",
