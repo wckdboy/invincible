@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanSkillText, plainLine, plainStream, plainText } from "../src/index.ts";
+import { cleanSkillText, codePointLabel, plainLine, plainStream, plainText, visibleText } from "../src/index.ts";
 
 /* Words as written, with nothing in them that hides, reorders or steers (plain.ts). */
 
@@ -54,5 +54,36 @@ describe("plain text", () => {
 
   test("a skill's text is kept by the same rule", () => {
     expect(cleanSkillText).toBe(plainLine);
+  });
+});
+
+/* What a person must see exactly (an operation that waits for their approval): what can't be seen is shown, never taken out. */
+describe("visible text", () => {
+  test("everything plain text takes out or changes is shown in its place as its code point, and nothing else is", () => {
+    const points = [...Array.from({ length: 0x3200 }, (_, i) => i), 0xfeff, 0xffa0, 0xe0001, 0xe0041, 0xe007f];
+    for (const point of points) {
+      const char = String.fromCodePoint(point);
+      if (char === "\n" || (point >= 0xd800 && point <= 0xdfff)) continue;
+      const line = `x${char}y`;
+      if (plainText(line) !== line) expect([point.toString(16), visibleText(line).text]).toEqual([point.toString(16), `x${codePointLabel(char)}y`]);
+    }
+    expect(visibleText("a b\nc").text).toBe("a b\nc");
+  });
+
+  test("a space that isn't a plain one is shown too: a tab, a no-break space, the other widths", () => {
+    for (const point of [0x09, 0xa0, 0x1680, 0x2000, 0x2007, 0x200a, 0x202f, 0x205f, 0x3000]) {
+      const char = String.fromCodePoint(point);
+      expect(visibleText(`a${char}b`)).toEqual({ text: `a${codePointLabel(char)}b`, hidden: [char] });
+    }
+    expect(codePointLabel("\u202e")).toBe("⟨U+202E⟩");
+    expect(codePointLabel("\u{e0041}")).toBe("⟨U+E0041⟩");
+  });
+
+  test("what it shows can't be acted on or misread: no character of it is hidden, each hidden one is named once, in order", () => {
+    const shown = visibleText("rm -rf /tmp/old\u202e /\u200b\u001b[2J\u202e\r\n");
+    expect(shown.text).toBe("rm -rf /tmp/old⟨U+202E⟩ /⟨U+200B⟩⟨U+001B⟩[2J⟨U+202E⟩⟨U+000D⟩\n");
+    expect(shown.hidden).toEqual(["\u202e", "\u200b", "\u001b", "\r"]);
+    expect(plainText(shown.text)).toBe(shown.text);
+    for (const words of ["Åse D'Arcy", "研究員 は 調べる", "naïve café 🙂", "a < b && c > d"]) expect(visibleText(words)).toEqual({ text: words, hidden: [] });
   });
 });
