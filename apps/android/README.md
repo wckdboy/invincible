@@ -23,6 +23,16 @@ with no tab bar: Home (`ui/Home.kt`) is its orb, its name, the line at a glance 
 needs you with each answer in place, the work by attention, and its message box docked. A task opens as a thread of its
 own (`ui/TaskScreen.kt`). A tablet (720 dp and wider) has the panes: the sidebar (`ui/Sidebar.kt`) beside the page.
 
+**Notifications** come at once through a UnifiedPush distributor of yours (ntfy, Sunup), encrypted to this phone so its
+push server can't read them; with none, the phone collects them from the node over its own signed connection, every
+fifteen minutes or so as Android allows and each time the app comes to the front. Collecting goes on beside a
+distributor too: what its server refuses (Android may not let a distributor connect from the background, and ntfy's
+then answers 507) is kept on the node for this phone, and Settings says why. A tap opens the very place: a task's own
+thread, the chat, the Inbox. An approval carries Approve… (its own card, the whole request in front of you) and
+Decline, a task whose work can be shipped carries Ship it…, and each works only behind the phone's unlock. One about
+what the app shows that moment comes without a sound or a pop-up. On an emulator against the dev node, through
+ntfy.sh: 98–346 ms from the node to the phone (median 176 ms, five tests).
+
 What it keeps on the phone: its pairing, its device key (in the Keystore, never readable), your notification choices,
 and the last team it saw, so it shows your agents at once however slow the connection (`app/KeptTable.kt`): only what
 the rows read, never an agent's instructions or a task's brief, in the app's own storage, never backed up, and replaced
