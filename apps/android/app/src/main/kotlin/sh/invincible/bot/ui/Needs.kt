@@ -4,6 +4,8 @@ package sh.invincible.bot.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +21,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +42,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -56,139 +62,149 @@ import sh.invincible.bot.core.string
 import sh.invincible.bot.core.Primary
 
 /*
- * What needs you, each with its answer in place (your words, 26 November 2026, after OpenMausBot's best idea: "Needs
- * you" with every card's buttons inline, never a trip to another page to answer): an approval's Allow once and Deny, a
- * proposal's Approve and Decline, work cut short's Resume, an agent you paused that work waits behind. What takes more than
- * a tap (comparing a device's code, typing a key, a service's question with fields) opens the Inbox's own card for it in a
- * sheet, over the page. The Inbox is still where all of it is, with its history. The web's views/needs.ts.
+ * What needs you, decisions only (the iPhone's Decisions, I9): each with its one answer in place, the rest a long press
+ * away (or a screen reader's actions), the whole of it a tap (its card or its sheet, over the page, or its task). Home
+ * shows the first three and how many more; Needs you (the Inbox) shows every one, and the news beside them. What it
+ * noticed (a notice, a fact about you) is news, not a decision: in the Inbox, counted nowhere. An answer is a grey pill,
+ * never a filled button: a screen has one filled button at most, and Home has none. The web's views/needs.ts.
  */
 
-/** One thing that needs you: what it is (for its key) and how it is drawn. */
-private class Need(val key: String, val draw: @Composable () -> Unit)
-
-/** How many things need you, as the items below count them (the primary's at-a-glance line says it). */
-fun needsCount(app: AppModel, work: Work.Attended, now: Long = System.currentTimeMillis()): Int {
-    val inbox = app.inbox.value
-    return inbox.actions.count { (it["expires"].long ?: Long.MAX_VALUE) > now } +
-        work.needs.count { it.word != "Allow?" } +
-        inbox.pairings.size + inbox.keys.size + inbox.questions.count { (it["expires"].long ?: Long.MAX_VALUE) > now } +
-        inbox.screens.size + inbox.notices.size + inbox.facts.size
-}
+/** One decision that waits on you: what leads it, who asks, what ([code]: its first part a name in mono, as a key's
+ * is), its one answer in place (null: none you can give here), the rest, and what a tap on it opens. */
+private class Decision(val key: String, val lead: Lead, val who: String, val what: String, val code: String? = null, val answer: Answer?, val rest: List<Answer>, val open: () -> Unit)
 
 /**
- * Everything that needs you, as items with their answers in place, in a card of its own (amber, only when something
- * waits): each task row that needs you (its agent's asks under it), then what is no task's. [openTask] opens a task's
- * thread, [openInbox] the Inbox, [watch] a Mac it is using.
+ * What needs you, decisions only, as the one count counts them (AppModel.needsYou): each approval once (an agent's under
+ * its task's name), each task only you can move on, devices, keys, questions and asks to use a machine. Home shows the
+ * first [limit] and "N more" ([openAll]: Needs you). [openTask] opens a task's thread, [watch] a machine it is using.
  */
 @Composable
-fun NeedsCard(app: AppModel, work: Work.Attended, openTask: (String) -> Unit, openInbox: () -> Unit, watch: (String) -> Unit) {
+fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit) {
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
+    val count by app.needsYou.collectAsState()
     val brand = LocalBrand.current
     val scope = rememberCoroutineScope()
     var said by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf<Set<String>>(emptySet()) }
     var sheet by remember { mutableStateOf<Pair<String, @Composable () -> Unit>?>(null) }
-    fun act(block: suspend () -> Unit) = scope.launch {
-        try {
-            block()
-            said = null
-        } catch (e: NodeError) {
-            said = e.message
+    var confirming by remember { mutableStateOf<Json?>(null) }
+    fun act(key: String, block: suspend () -> Unit) {
+        busy = busy + key
+        scope.launch {
+            try {
+                block()
+                said = null
+            } catch (e: NodeError) {
+                said = e.message
+            } finally {
+                busy = busy - key
+            }
         }
     }
-    fun control(body: Json) = act {
+    fun control(key: String, body: Json) = act(key) {
         app.client?.post("/api/team/control", body)
         app.refresh()
     }
     val asker = askerIn(table)
     val now = System.currentTimeMillis()
-    val waiting = inbox.actions.filter { (it["expires"].long ?: Long.MAX_VALUE) > now }
-    val items = ArrayList<Need>()
+    fun card(a: Json) {
+        sheet = "${a["connector"].string}.${a["tool"].string}" to @Composable { Approval(a, asker(a["by"].string ?: "")) { approve -> act("a:${a["id"].string}") { app.decide(a["id"].string!!, approve) }; sheet = null } }
+    }
+    fun approval(a: Json, row: Work.Row?): Decision {
+        val kind = a["class"].string
+        val key = "a:${a["id"].string}"
+        val target = "${a["connector"].string}.${a["tool"].string} ${a["target"].string ?: ""}".trim()
+        return Decision(
+            key,
+            if (row != null) Lead.Agent(row) else Lead.Icon(ShieldIcon),
+            if (row != null) "${row.agentName} · ${row.title}" else "${asker(a["by"].string ?: "")} asks",
+            listOfNotNull(kind?.replaceFirstChar { it.uppercase() }, target).joinToString(" · "),
+            // A delete is answered only in its whole card; anything else asks once before it is sent.
+            answer = Answer(if (kind == "delete") "Review…" else "Allow once") { if (kind == "delete") card(a) else confirming = a },
+            rest = listOf(Answer("Deny", danger = true) { act(key) { app.decide(a["id"].string!!, false) } }, Answer("More") { card(a) }),
+            open = { card(a) },
+        )
+    }
+    val waiting = inbox.actions
+    val decisions = ArrayList<Decision>()
     val shown = HashSet<String>()
     for (row in work.needs) {
         if (row.word == "Allow?") {
             for (a in waiting.filter { Roster.agentOfCaller(it["by"].string ?: "") == row.agent }) {
                 shown += a["id"].string ?: ""
-                items += Need("a:${a["id"].string}") {
-                    AskItem(a, row, asker(a["by"].string ?: ""), decide = { approve -> act { app.decide(a["id"].string!!, approve) } }, more = {
-                        sheet = "${a["connector"].string}.${a["tool"].string}" to @Composable { Approval(a, asker(a["by"].string ?: "")) { approve -> act { app.decide(a["id"].string!!, approve) }; sheet = null } }
-                    })
-                }
+                decisions += approval(a, row)
             }
             continue
         }
-        val open = Answer("Open", primary = false) { openTask(row.id) }
-        items += Need("t:${row.id}") {
-            when (row.word) {
-                "Approve?" -> Item(Lead.Agent(row), "${row.agentName} proposes", row.title, listOf(Answer("Approve") { control(Json.obj("task" to row.id, "action" to "approve")) }, Answer("Decline", primary = false) { control(Json.obj("task" to row.id, "action" to "stop")) }, open))
-                "Interrupted" -> Item(Lead.Agent(row), "${row.agentName} · interrupted", row.title, listOf(Answer("Resume") { control(Json.obj("task" to row.id, "action" to "resume")) }, open))
-                "Agent paused" -> Item(Lead.Agent(row), "${row.agentName} is paused", row.title, listOf(Answer("Resume ${row.agentName}") { control(Json.obj("agent" to row.agent, "action" to "resume")) }, open))
-                else -> Item(Lead.Agent(row), row.agentName, row.title, listOf(open))
-            }
+        val key = "t:${row.id}"
+        val open = { openTask(row.id) }
+        decisions += when (row.word) {
+            "Approve?" -> Decision(key, Lead.Agent(row), "${row.agentName} proposes", row.title, answer = Answer("Approve") { control(key, Json.obj("task" to row.id, "action" to "approve")) }, rest = listOf(Answer("Decline", danger = true) { control(key, Json.obj("task" to row.id, "action" to "stop")) }), open = open)
+            "Interrupted" -> Decision(key, Lead.Agent(row), "${row.agentName} · interrupted", row.title, answer = Answer("Resume") { control(key, Json.obj("task" to row.id, "action" to "resume")) }, rest = emptyList(), open = open)
+            "Agent paused" -> Decision(key, Lead.Agent(row), "${row.agentName} is paused", row.title, answer = Answer("Resume") { control(key, Json.obj("agent" to row.agent, "action" to "resume")) }, rest = emptyList(), open = open)
+            else -> Decision(key, Lead.Agent(row), row.agentName, row.title, answer = null, rest = emptyList(), open = open)
         }
     }
-    for (a in waiting.filter { (it["id"].string ?: "") !in shown }) {
-        items += Need("a:${a["id"].string}") {
-            AskItem(a, null, asker(a["by"].string ?: ""), decide = { approve -> act { app.decide(a["id"].string!!, approve) } }, more = {
-                sheet = "${a["connector"].string}.${a["tool"].string}" to @Composable { Approval(a, asker(a["by"].string ?: "")) { approve -> act { app.decide(a["id"].string!!, approve) }; sheet = null } }
-            })
-        }
+    for (a in waiting.filter { (it["id"].string ?: "") !in shown }) decisions += approval(a, null)
+    for (p in inbox.pairings) {
+        val name = p["name"].string ?: "A device"
+        val compare = { sheet = "$name asks to join" to @Composable { Pairing(p) { approve -> act("p:${p["device"].string}") { app.answerPairing(p["invite"].string!!, p["device"].string!!, approve) }; sheet = null } } }
+        decisions += Decision("p:${p["invite"].string}:${p["device"].string}", Lead.Icon(PlusIcon), if (p["kind"].string == "node") "A machine asks to join" else "A device asks to join", name, answer = Answer("Compare…", onClick = compare), rest = emptyList(), open = compare)
     }
-    for (p in inbox.pairings) items += Need("p:${p["invite"].string}:${p["device"].string}") {
-        Item(Lead.Icon(PlusIcon), "A device asks to join", p["name"].string ?: "A device", listOf(Answer("Compare codes…") {
-            sheet = "${p["name"].string ?: "A device"} asks to join" to @Composable { Pairing(p) { approve -> act { app.answerPairing(p["invite"].string!!, p["device"].string!!, approve) }; sheet = null } }
-        }))
-    }
-    for (k in inbox.keys) items += Need("k:${k["name"].string}") {
-        Item(Lead.Icon(KeyIcon), "${asker(k["requestedBy"].string ?: "")} asks for a key", k["purpose"].string ?: "", code = k["name"].string, answers = listOf(Answer("Add it…") {
+    for (k in inbox.keys) {
+        val add = {
             sheet = "A key for ${k["name"].string}" to @Composable {
-                KeyAsked(k, asker(k["requestedBy"].string ?: ""), seal = { value -> act { app.sealKey(k["name"].string!!, value, k["provider"].string) }; sheet = null }, dismiss = { act { app.dismissKey(k["name"].string!!) }; sheet = null })
+                KeyAsked(k, asker(k["requestedBy"].string ?: ""), seal = { value -> act("k:${k["name"].string}") { app.sealKey(k["name"].string!!, value, k["provider"].string) }; sheet = null }, dismiss = { act("k:${k["name"].string}") { app.dismissKey(k["name"].string!!) }; sheet = null })
             }
-        }))
+        }
+        decisions += Decision("k:${k["name"].string}", Lead.Icon(KeyIcon), "${asker(k["requestedBy"].string ?: "")} asks for a key", k["purpose"].string ?: "", code = k["name"].string, answer = Answer("Add…", onClick = add), rest = emptyList(), open = add)
     }
-    for (q in inbox.questions.filter { (it["expires"].long ?: Long.MAX_VALUE) > now }) items += Need("q:${q["id"].string}") {
-        Item(Lead.Icon(PlugIcon), "${q["label"].string ?: q["server"].string ?: "A service"} asks", q["message"].string ?: "", listOf(Answer("Answer…") {
-            sheet = "${q["label"].string ?: "A service"} asks" to @Composable { Question(q) { accept, content -> act { app.answerQuestion(q["id"].string!!, accept, content) }; sheet = null } }
-        }))
+    for (q in inbox.questions.filter { (it["expires"].long ?: Long.MAX_VALUE) > now }) {
+        val label = q["label"].string ?: q["server"].string ?: "A service"
+        val answer = { sheet = "$label asks" to @Composable { Question(q) { accept, content -> act("q:${q["id"].string}") { app.answerQuestion(q["id"].string!!, accept, content) }; sheet = null } } }
+        decisions += Decision("q:${q["id"].string}", Lead.Icon(PlugIcon), "$label asks", q["message"].string ?: "", answer = Answer("Answer…", onClick = answer), rest = emptyList(), open = answer)
     }
-    for (s in inbox.screens) items += Need("s:${s["id"].string}") {
+    for (s in inbox.screens) {
         val allowed = s["state"].string == "allowed"
         val name = s["nodeName"].string ?: "a Mac"
-        Item(Lead.Icon(MonitorIcon), if (allowed) "${Primary.name} is using $name" else "${Primary.name} asks to use $name", s["why"].string ?: "", listOf(Answer(if (allowed) "See it…" else "Answer…") {
-            sheet = name to @Composable { MacSession(s, answer = { allow -> act { app.decideScreen(s["id"].string!!, allow) }; sheet = null }, end = { act { app.endScreen(s["id"].string!!) }; sheet = null }, watch = { sheet = null; s["node"].string?.let(watch) }) }
-        }))
+        val see = { sheet = name to @Composable { MacSession(s, answer = { allow -> act("s:${s["id"].string}") { app.decideScreen(s["id"].string!!, allow) }; sheet = null }, end = { act("s:${s["id"].string}") { app.endScreen(s["id"].string!!) }; sheet = null }, watch = { sheet = null; s["node"].string?.let(watch) }) } }
+        decisions += Decision("s:${s["id"].string}", Lead.Icon(MonitorIcon), if (allowed) "${Primary.name} is using $name" else "${Primary.name} asks to use $name", s["why"].string ?: "", answer = Answer(if (allowed) "See it…" else "Answer…", onClick = see), rest = emptyList(), open = see)
     }
-    for (n in inbox.notices) items += Need("n:${n["key"].string}") {
-        Item(Lead.Icon(if (n["severity"].string == "info") InfoIcon else AlertIcon), "Noticed", n["title"].string ?: "", listOf(Answer("Dismiss", primary = false) { act { app.dismissNotice(n["key"].string!!) } }, Answer("Read", primary = false, onClick = openInbox)))
-    }
-    for (f in inbox.facts) items += Need("f:${f["id"].string}") {
-        Item(Lead.Icon(ReviewIcon), "${Primary.name} noticed about you", (f["text"].string ?: "").lineSequence().first(), listOf(Answer("Keep or drop…") {
-            sheet = "A fact about you" to @Composable { Fact(f, keep = { words -> act { app.keepFact(f["id"].string!!, words) }; sheet = null }, drop = { act { app.dropFact(f["id"].string!!) }; sheet = null }) }
-        }))
-    }
-    if (items.isEmpty()) return
-    val shape = MaterialTheme.shapes.large
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Space.margin, vertical = Space.s2)
-            .clip(shape)
-            .border(BorderStroke(1.dp, brand.needs.copy(alpha = 0.45f)), shape)
-            .background(brand.needs.copy(alpha = 0.05f)),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = Space.s4, end = Space.s4, top = Space.s3, bottom = Space.s1).semantics(mergeDescendants = true) { heading() },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Space.s2),
-        ) {
-            Dot(brand.needs)
-            Text("Needs you · ${items.size}", style = Type.section, color = brand.needs)
+    if (decisions.isEmpty()) return
+    Column(Modifier.fillMaxWidth()) {
+        // (The one count, as Home's line says it: the decisions below are the same ones.)
+        SectionHead("Needs you", count.takeIf { it > 0 } ?: decisions.size, tone = brand.needs)
+        said?.let { Text(it, style = Type.meta, color = brand.danger, modifier = Modifier.padding(horizontal = Space.margin)) }
+        decisions.take(limit).forEachIndexed { i, d ->
+            if (i > 0) Hairline(inset = Space.margin + 32.dp + Space.s3)
+            key(d.key) { DecisionRow(d, d.key in busy) }
         }
-        said?.let { Text(it, style = Type.meta, color = brand.failed, modifier = Modifier.padding(horizontal = Space.s4)) }
-        items.forEachIndexed { i, need ->
-            if (i > 0) Hairline(inset = Space.s4)
-            key(need.key) { need.draw() }
+        if (decisions.size > limit) {
+            Hairline(inset = Space.margin)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = openAll)
+                    .semantics(mergeDescendants = true) { role = androidx.compose.ui.semantics.Role.Button }
+                    .heightIn(min = Space.touch)
+                    .padding(horizontal = Space.margin, vertical = Space.s3),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("${decisions.size - limit} more", style = Type.rowTitle, modifier = Modifier.weight(1f))
+                Icon(ChevronIcon, null, Modifier.size(16.dp), tint = brand.quiet)
+            }
         }
+        Hairline(inset = Space.margin)
+    }
+    confirming?.let { a ->
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            title = { Text("Approve and send?") },
+            text = { Text("${a["connector"].string}.${a["tool"].string} on ${a["target"].string ?: "its target"}, once, as soon as you approve. It can't be called back, and if it fails it isn't retried.") },
+            confirmButton = { TextButton(onClick = { confirming = null; act("a:${a["id"].string}") { app.decide(a["id"].string!!, true) } }) { Text("Approve and send") } },
+            dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },
+        )
     }
     sheet?.let { (title, body) ->
         ModalBottomSheet(onDismissRequest = { sheet = null }, sheetState = rememberFullSheet(), containerColor = MaterialTheme.colorScheme.surface) {
@@ -200,14 +216,78 @@ fun NeedsCard(app: AppModel, work: Work.Attended, openTask: (String) -> Unit, op
     }
 }
 
+/**
+ * A decision as a row: what leads it, who asks (quiet) and what (in weight, two lines at most), and its one answer as a
+ * grey pill. A tap opens the whole of it; a long press, or a screen reader's actions, the rest (Deny, Decline, More).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun DecisionRow(d: Decision, busy: Boolean) {
+    val brand = LocalBrand.current
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = d.open, onLongClick = if (d.rest.isNotEmpty()) ({ menu = true }) else null)
+                .semantics(mergeDescendants = true) {
+                    role = androidx.compose.ui.semantics.Role.Button
+                    if (d.rest.isNotEmpty()) customActions = d.rest.map { r -> androidx.compose.ui.semantics.CustomAccessibilityAction(r.label) { r.onClick(); true } }
+                }
+                .heightIn(min = 64.dp)
+                .padding(horizontal = Space.margin, vertical = Space.s3),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s3),
+        ) {
+            Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+                when (val lead = d.lead) {
+                    is Lead.Agent -> AgentOrb(lead.row.agent, lead.row.avatar, 28.dp)
+                    is Lead.Icon -> Box(Modifier.size(32.dp).clip(CircleShape).background(brand.ink.copy(alpha = 0.06f)), contentAlignment = Alignment.Center) {
+                        Icon(lead.icon, null, Modifier.size(16.dp), tint = brand.quiet)
+                    }
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(d.who, style = Type.meta, color = brand.quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    androidx.compose.ui.text.buildAnnotatedString {
+                        d.code?.let { withStyle(androidx.compose.ui.text.SpanStyle(fontFamily = Type.mono.fontFamily)) { append(it) }; if (d.what.isNotEmpty()) append(" · ") }
+                        append(d.what)
+                    },
+                    style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            d.answer?.let { a -> AnswerPill(a.label, a.onClick, enabled = !busy) }
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            for (r in d.rest) DropdownMenuItem(text = { Text(r.label, color = if (r.danger) brand.danger else brand.ink) }, onClick = { menu = false; r.onClick() })
+        }
+    }
+}
+
+/** An answer in place: a grey pill in the ink (the iPhone's), never a filled button. */
+@Composable
+internal fun AnswerPill(label: String, onClick: () -> Unit, enabled: Boolean = true) {
+    val brand = LocalBrand.current
+    androidx.compose.material3.FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = brand.ink.copy(alpha = 0.08f), contentColor = brand.ink),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+        modifier = Modifier.heightIn(min = 40.dp),
+    ) { Text(label, style = Type.word.copy(fontSize = 15.sp), maxLines = 1) }
+}
+
 /** What leads an item: its agent's orb (still), or an icon for what is no task's. */
 private sealed interface Lead {
     class Agent(val row: Work.Row) : Lead
     class Icon(val icon: ImageVector) : Lead
 }
 
-/** An answer on an item: its words, filled or not, and what it does. One tap each. */
-private class Answer(val label: String, val primary: Boolean = true, val onClick: () -> Unit)
+/** An answer: its words, whether it says no to something (in red where it is listed), and what it does. */
+private class Answer(val label: String, val danger: Boolean = false, val onClick: () -> Unit)
 
 @Composable
 private fun Who(lead: Lead, text: String) {
@@ -219,30 +299,6 @@ private fun Who(lead: Lead, text: String) {
             }
         }
         Text(text, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun Answers(answers: List<Answer>) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
-        for (a in answers) ActionButton(a.label, a.onClick, primary = a.primary)
-    }
-}
-
-/** An item: who it is from, what it is ([code]: its first part a name set in mono, as a key's is), and its answers. */
-@Composable
-private fun Item(lead: Lead, who: String, what: String, answers: List<Answer>, code: String? = null) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.s4, vertical = Space.s3), verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-        Who(lead, who)
-        if (what.isNotEmpty() || code != null) Text(
-            androidx.compose.ui.text.buildAnnotatedString {
-                code?.let { withStyle(androidx.compose.ui.text.SpanStyle(fontFamily = Type.mono.fontFamily)) { append(it) }; if (what.isNotEmpty()) append(" · ") }
-                append(what)
-            },
-            style = Type.body,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Answers(answers)
     }
 }
 

@@ -105,7 +105,8 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
             }
         }
     }
-    val needs = work?.let { needsCount(app, it) } ?: 0
+    // (The one count of what needs you, as every place says it: AppModel.needsYou.)
+    val needs by app.needsYou.collectAsState()
     val glance = work?.let { Work.atAGlance(it.working, needs, table.primary.line) } ?: Work.Glance(table.primary.line, false)
     // Its orb: at work while it answers the chat you left, before the node has said so; else where it stands.
     val standing = if (live) AgentState.WORKING else table.primary.state
@@ -128,7 +129,7 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
                 }
                 return@LazyColumn
             }
-            item(key = "needs") { NeedsCard(app, work, openTask = { nav.go(Nav.task(it)) }, openInbox = { nav.go("inbox") }, watch = { nav.go("mac:$it") }) }
+            item(key = "needs") { NeedsYou(app, work, openTask = { nav.go(Nav.task(it)) }, openAll = { nav.go("inbox") }, watch = { nav.go("mac:$it") }) }
             item(key = "work-head") {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s2)) {
                     Text("Work", style = Type.title, modifier = Modifier.padding(start = Space.margin, end = Space.margin, top = Space.s4).semantics { heading() })

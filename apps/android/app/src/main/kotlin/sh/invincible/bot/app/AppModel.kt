@@ -33,6 +33,7 @@ import sh.invincible.bot.core.NodeClient
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Reach
 import sh.invincible.bot.core.Roster
+import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.RosterRow
 import sh.invincible.bot.core.Price
 import sh.invincible.bot.core.ProjectName
@@ -122,7 +123,8 @@ data class Table(
      * empty Inbox while the node is away), so it is never taken for the node's word; otherwise its last team is drawn
      * again with what's new.
      */
-    fun after(team: Snapshot?, turns: Json?, asks: List<Ask>, waiting: Int, now: Long, tasks: List<TeamTask>? = null): Table {
+    /** After a look at the node: [needs] is what needs you, the one count (AppModel.needsYou), as the primary's line says it. */
+    fun after(team: Snapshot?, turns: Json?, asks: List<Ask>, needs: Int, now: Long, tasks: List<TeamTask>? = null): Table {
         if (team == null && asOf != null) return this
         val snapshot = team ?: this.snapshot
         val work = if (team != null) tasks ?: emptyList() else this.tasks
@@ -130,7 +132,7 @@ data class Table(
         val primary = Roster.primaryNow(
             turns = (turns?.let { it["turns"].list } ?: emptyList()).map { it["title"].string },
             runs = emptyList(),
-            needs = Roster.primaryNeeds(waiting, asks, snapshot?.agents?.map { it.id } ?: emptyList()),
+            needs = needs,
             unread = unread.map { it["title"].string },
         )
         return Table(snapshot, snapshot?.let { Roster.rows(it, asks, now) } ?: emptyList(), primary, unread, turns?.get("chats")?.text() ?: chats, tasks = work)
@@ -194,6 +196,10 @@ class AppModel(context: Context) {
     /** The primary's name has been asked for this session (whoami). */
     private var primaryAsked = false
 
+    /** What needs you, the one count every place says (Work.needsCount): decisions only, each once. */
+    private val _needsYou = MutableStateFlow(0)
+    val needsYou: StateFlow<Int> = _needsYou.asStateFlow()
+
     /** Whether the node is reached (its live stream up): null until it is first known, false while it can't be. */
     private val _online = MutableStateFlow<Boolean?>(null)
     val online: StateFlow<Boolean?> = _online.asStateFlow()
@@ -254,8 +260,9 @@ class AppModel(context: Context) {
         val node = _paired.value ?: return
         val kept = runCatching { KeptTable.read(Json.parse(keptFile.readText()), node) }.getOrNull() ?: return
         val snapshot = runCatching { Snapshot.of(kept.team) }.getOrNull() ?: return
-        val needs = Roster.primaryNeeds(kept.waiting, kept.asks, snapshot.agents.map { it.id })
-        val primary = Roster.primaryNow(turns = kept.turns, runs = emptyList(), needs = needs, unread = kept.unread.map { it["title"].string })
+        // (What needs you is one count everywhere: as it was kept, until the node has answered.)
+        _needsYou.value = kept.waiting
+        val primary = Roster.primaryNow(turns = kept.turns, runs = emptyList(), needs = kept.waiting, unread = kept.unread.map { it["title"].string })
         _table.value = Table(snapshot, Roster.rows(snapshot, kept.asks, System.currentTimeMillis()), primary, kept.unread, asOf = kept.at, tasks = TeamTask.all(kept.team))
     }
 
@@ -332,6 +339,9 @@ class AppModel(context: Context) {
         projectsAsked = false
         _prices.value = null
         _fleet.value = null
+        _needsYou.value = 0
+        // (What each route last answered is the forgotten node's: none of it is drawn for the next.)
+        answers.clear()
         primaryAsked = false
         chat.reset()
     }
@@ -569,10 +579,18 @@ class AppModel(context: Context) {
         val turnsJson = answers["/api/turns"]
         val asks = inbox.actions.map { Ask(it["by"].string ?: "", it["connector"].string, it["tool"].string) }
         val teamJson = answers[TEAM]
-        val table = _table.value.after(teamJson?.let(Snapshot::of), turnsJson, asks, inbox.count, System.currentTimeMillis(), teamJson?.let(TeamTask::all))
+        val now = System.currentTimeMillis()
+        val team = teamJson?.let(Snapshot::of)
+        val tasks = teamJson?.let(TeamTask::all)
+        // What needs you, one count for every place: the work's own rows that only you can move on, and what waits beside.
+        val drawn = team ?: _table.value.snapshot
+        val work = drawn?.let { Work.attended(it.agents, tasks ?: _table.value.tasks, it.seen, _projects.value, asks, now) }
+        val needs = Work.needsCount(inbox.actions.size, work?.needs ?: emptyList(), inbox.pairings.size, inbox.keys.size, inbox.questions.map { it["expires"].long }, inbox.screens.size, now)
+        if (needs != _needsYou.value) _needsYou.value = needs
+        val table = _table.value.after(team, turnsJson, asks, needs, now, tasks)
         if (table != _table.value) _table.value = table
         // (What the node said of the team just now is kept for the next time the app opens: KeptTable.)
-        teamJson?.let { team -> keep(team, turnsJson, asks, inbox.count) }
+        teamJson?.let { kept -> keep(kept, turnsJson, asks, needs) }
     }
 
     /** What the work's names, a task's cost and the machine chip read, asked beside the rest and far less often. */

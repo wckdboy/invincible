@@ -413,6 +413,17 @@ object Work {
 
     /** What waits in the Inbox beyond the task rows that ask for it: its count, less the approvals a needs row stands for
      * (its agent asking for your approval as its task runs). */
+    /**
+     * What needs you, decisions only, counted one way for every place that says how many (Home's line and its Needs you,
+     * the Inbox's badge, the primary's line among the agents, the sidebar, the kept agents): every approval waiting once,
+     * each task only you can move on (an agent asking for your approval is that approval's), devices asking to join, keys
+     * asked for, a service's question while it can be answered ([questionsUntil]: when each stops), and asks to use a
+     * machine. What the node noticed (a notice, a fact about you) is news, not a decision: shown in the Inbox, counted
+     * nowhere. (The iPhone's Session.needsCount.)
+     */
+    fun needsCount(approvals: Int, needs: List<Row>, pairings: Int, keys: Int, questionsUntil: List<Long?>, screens: Int, now: Long): Int =
+        approvals + needs.count { it.word != "Allow?" } + pairings + keys + questionsUntil.count { (it ?: Long.MAX_VALUE) > now } + screens
+
     fun inboxBeyond(inbox: Int, asks: List<Ask>, needs: List<Row>): Int {
         val asking = needs.filter { it.word == "Allow?" }.map { it.agent }.toSet()
         return maxOf(0, inbox - asks.count { asking.contains(Roster.agentOfCaller(it.by) ?: "") })

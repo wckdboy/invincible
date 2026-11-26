@@ -38,7 +38,7 @@ class TableTest {
     @Test fun aKeptAgentsStaysAsItWasKeptWhileTheNodeCantSayWhoSitsThere() {
         val kept = kept()
         // The node away: no team, no approvals, nothing waiting, no chats. What was kept is what's drawn, and it says so.
-        val after = kept.after(team = null, turns = null, asks = emptyList(), waiting = 0, now = now)
+        val after = kept.after(team = null, turns = null, asks = emptyList(), needs = 0, now = now)
         assertSame(kept, after)
         assertEquals(Roster.primaryNow(turns = listOf("Release notes"), runs = emptyList(), needs = 3), after.primary)
         assertEquals(listOf("Asks for approval: forge.post", "engineer"), after.rows.map { it.line })
@@ -46,16 +46,16 @@ class TableTest {
     }
 
     @Test fun theNodesAnswerForTheTeamReplacesIt() {
-        val after = kept().after(team = team, turns = turns, asks = emptyList(), waiting = 0, now = now)
+        val after = kept().after(team = team, turns = turns, asks = emptyList(), needs = 0, now = now)
         assertNull(after.asOf)
         assertEquals(listOf("engineer", "engineer"), after.rows.map { it.line })
         assertEquals(turns["chats"]?.text(), after.chats)
     }
 
     @Test fun anAgentsTheNodeDrewIsDrawnAgainFromItsLastTeamWithWhatsNew() {
-        val drawn = kept().after(team = team, turns = turns, asks = emptyList(), waiting = 0, now = now)
+        val drawn = kept().after(team = team, turns = turns, asks = emptyList(), needs = 0, now = now)
         // The team couldn't be read this time, but the approvals could: its last team, with Ada asking.
-        val after = drawn.after(team = null, turns = null, asks = asking, waiting = 1, now = now)
+        val after = drawn.after(team = null, turns = null, asks = asking, needs = 1, now = now)
         assertNull(after.asOf)
         assertEquals(listOf("Asks for approval: forge.post", "engineer"), after.rows.map { it.line })
         assertEquals(turns["chats"]?.text(), after.chats)

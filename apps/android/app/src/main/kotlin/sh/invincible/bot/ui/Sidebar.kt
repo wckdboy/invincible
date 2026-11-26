@@ -62,6 +62,7 @@ private var doneOpenSide by mutableStateOf(false)
 fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, collapse: () -> Unit) {
     val table by app.table.collectAsState()
     val inbox by app.inbox.collectAsState()
+    val needsYou by app.needsYou.collectAsState()
     val paired by app.paired.collectAsState()
     val fleet by app.fleet.collectAsState()
     val live by app.chat.live.collectAsState()
@@ -112,10 +113,10 @@ fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, colla
                 item { Text(if (app.problem.value != null) "The work can't be read just now." else "Asking your node…", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.s4)) }
                 return@LazyColumn
             }
-            val beyond = Work.inboxBeyond(inbox.count, app.asks(), work.needs)
-            val needs = work.needs.size + beyond
-            if (needs > 0) {
-                item(key = "needs-head") { SectionHead("Needs you", needs, brand.needs) }
+            // (What needs you, the one count Home says too: the rows that need you, and what waits beside them.)
+            val beyond = Work.inboxBeyond(needsYou - work.needs.count { it.word != "Allow?" }, app.asks(), work.needs)
+            if (needsYou > 0 || work.needs.isNotEmpty()) {
+                item(key = "needs-head") { SectionHead("Needs you", needsYou, brand.needs) }
                 if (beyond > 0) item(key = "inbox") {
                     Row(
                         Modifier
@@ -152,7 +153,7 @@ fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, colla
                     WorkRow(row, { nav.open(Nav.task(row.id)) }, face = 16.dp, current = row.id == current, inset = Space.s4)
                 }
             }
-            if (work.empty && needs == 0) item(key = "empty") {
+            if (work.empty && needsYou == 0) item(key = "empty") {
                 Text("No tasks yet. Each task you or ${Primary.name} give an agent is a row here: what needs you first, then what is new, at work, and done.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.s4))
             }
         }
