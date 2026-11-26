@@ -57,7 +57,7 @@ export interface TaskRun {
   /** Where an agent would have asked its eyes (a model's call). */
   looks: number;
   /** Through the loop: its model calls (each a turn), the toolset's actions, its other commands, its tokens (the calls its provider said nothing of, apart), and whether every request offered the toolset and every turn came back as the toolset's. */
-  loop?: { calls: number; actions: number; commands: number; usage: Usage; unknown: number; shape: string | null; ms: number };
+  loop?: { calls: number; actions: number; commands: number; said?: string[]; usage: Usage; unknown: number; shape: string | null; ms: number };
 }
 
 /** What each task asks of an agent, as its goal: done on the screen, the point being the desktop. */
@@ -379,7 +379,7 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     pass = false;
     why = `it passed its gate, but not in the toolset's shape: ${shape}`;
   }
-  return { task, policy, run, pass, why, actedMs, commands, looks, ...(through ? { loop: { calls: through.calls, actions: through.actions, commands: through.commands, usage: through.usage, unknown: counted.unknown ?? 0, shape, ms: Math.round(through.ms) } } : {}) };
+  return { task, policy, run, pass, why, actedMs, commands, looks, ...(through ? { loop: { calls: through.calls, actions: through.actions, commands: through.commands, ...(policy === "model" ? { said: through.said } : {}), usage: through.usage, unknown: counted.unknown ?? 0, shape, ms: Math.round(through.ms) } } : {}) };
 }
 
 /**

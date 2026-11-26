@@ -38,6 +38,8 @@ test("the stand-in drives a task through the loop in the toolset's own shape: se
   const run = await viaLoop(GOALS.form(""), loopAsk(ctx, counted), vm.exec, counted);
   expect([run.error, run.outcome?.status]).toEqual([null, "done"]);
   expect([run.calls, run.actions, run.commands]).toEqual([3, 14, 0]);
+  // What it ran, as said: the toolset's actions as the VM's desktop commands.
+  expect(run.said.slice(0, 3)).toEqual(["desktop key ctrl+l", "desktop type http://127.0.0.1:8000/form.html", "desktop key Return"]);
   expect(vm.ran).toEqual([
     "desktop key ctrl+l",
     "desktop type http://127.0.0.1:8000/form.html",

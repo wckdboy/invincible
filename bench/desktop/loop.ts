@@ -1,4 +1,4 @@
-import { type ChatMessage, type ClientCall, type ExecResult, newNodeIdentity, type Usage } from "../../packages/core/src/index.ts";
+import { type ChatMessage, type ClientCall, type ExecResult, newNodeIdentity, redact, type Usage } from "../../packages/core/src/index.ts";
 import { foundFleet, LedgerStore, Vault } from "../../packages/ledger/src/index.ts";
 import { chat, type ModelsContext } from "../../packages/models/src/index.ts";
 import { COMPUTER_MEMBERS } from "../../packages/agents/src/engineer-tools.ts";
@@ -40,6 +40,8 @@ export interface LoopRun {
   /** The toolset's actions that ran, and the other commands. */
   actions: number;
   commands: number;
+  /** Each command it ran, as said (an action as its desktop command), redacted and cut short: what a run did. */
+  said: string[];
   /** The calls' tokens, as the provider counted them (the stand-in's are none). */
   usage: Usage;
   ms: number;
@@ -193,5 +195,5 @@ export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command:
   }
   const commands = events.filter((e): e is Extract<RunEvent, { type: "command" }> => e.type === "command").map((e) => e.command);
   const actions = commands.filter((c) => COMPUTER_MEMBERS.has(c.split(" ")[1] ?? "") && c.startsWith("desktop ")).length;
-  return { outcome, error, calls: counted.calls, actions, commands: commands.length - actions, usage: counted.usage, ms: performance.now() - t0 };
+  return { outcome, error, calls: counted.calls, actions, commands: commands.length - actions, said: commands.map((c) => redact(c).slice(0, 200)), usage: counted.usage, ms: performance.now() - t0 };
 }
