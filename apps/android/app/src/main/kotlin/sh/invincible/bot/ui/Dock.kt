@@ -54,6 +54,8 @@ fun MessageDock(
     lead: (@Composable () -> Unit)? = null,
     before: (@Composable () -> Unit)? = null,
     after: (@Composable () -> Unit)? = null,
+    /** A second way to send what's written, by its words, beside the send (shown once something is written). */
+    also: Pair<String, (String) -> Boolean>? = null,
     send: (String) -> Boolean,
 ) {
     val brand = LocalBrand.current
@@ -100,6 +102,9 @@ fun MessageDock(
             FilledIconButton(onClick = ::deliver, enabled = enabled && text.isNotBlank()) { Icon(SendIcon, contentDescription = "Send") }
         }
         after?.invoke()
+        }
+        also?.takeIf { text.isNotBlank() && enabled }?.let { (label, go) ->
+            androidx.compose.material3.TextButton(onClick = { if (go(text.trim())) text = "" }, modifier = Modifier.padding(start = Space.s2)) { Text(label) }
         }
         hint?.let { Text(it, style = Type.small, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = Space.s4, top = Space.s1)) }
     }

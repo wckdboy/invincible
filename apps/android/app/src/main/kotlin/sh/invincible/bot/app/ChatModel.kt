@@ -4,6 +4,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import sh.invincible.bot.core.Composer
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.Live
 import sh.invincible.bot.core.LookNote
@@ -58,6 +59,58 @@ class ChatModel(private val app: AppModel) {
     private val _chats = MutableStateFlow<List<Json>>(emptyList())
     val chats: StateFlow<List<Json>> = _chats.asStateFlow()
 
+    // ---- while it works: steered, queued, asked on the side (the web's lib/turns.ts and chat-queue.ts) ----
+
+    /** A message of yours queued behind this chat on the node: its id there, its words, the device it came from. */
+    data class Queued(val id: Long, val text: String, val by: String?)
+
+    private val _queue = MutableStateFlow<List<Queued>>(emptyList())
+    /** What you queued behind this chat, as the node holds it, and why it is held when it is (core's QueueHold). */
+    val queue: StateFlow<List<Queued>> = _queue.asStateFlow()
+    private val _held = MutableStateFlow<String?>(null)
+    val held: StateFlow<String?> = _held.asStateFlow()
+
+    private val _steering = MutableStateFlow<List<String>>(emptyList())
+    /** Messages sent to steer it that haven't reached it yet. */
+    val steering: StateFlow<List<String>> = _steering.asStateFlow()
+
+    private val _notice = MutableStateFlow<Pair<String, String>?>(null)
+    /** What became of something you sent while it worked, or why a change didn't go: a title and its words. */
+    val notice: StateFlow<Pair<String, String>?> = _notice.asStateFlow()
+
+    private val _returned = MutableStateFlow<String?>(null)
+    /** Words that go back into the message box (they didn't reach it, or weren't sent). */
+    val returned: StateFlow<String?> = _returned.asStateFlow()
+
+    /** A side question, answered apart: its question, its answer as it comes, its id once the node named it. */
+    data class Aside(val question: String, val answer: String = "", val id: String? = null, val asking: Boolean = true, val problem: String? = null)
+
+    private val _aside = MutableStateFlow<Aside?>(null)
+    val aside: StateFlow<Aside?> = _aside.asStateFlow()
+
+    /** A message can be queued behind this chat: the node keeps it (a new chat, once its first answer is kept). */
+    val canQueue: Boolean get() = _conversation.value != null
+
+    fun dismissNotice() {
+        _notice.value = null
+    }
+
+    fun returnedTaken() {
+        _returned.value = null
+    }
+
+    private fun readQueue(view: Json?) {
+        _queue.value = view["queue"].list.mapNotNull { q -> q["id"].long?.let { Queued(it, q["text"].string ?: "", q["by"].string) } }
+        _held.value = view["held"].string
+    }
+
+    private fun forgetQueue() {
+        _queue.value = emptyList()
+        _held.value = null
+        _steering.value = emptyList()
+        _notice.value = null
+    }
+
     private var watch: Job? = null
     /** How the stream watched now is taken for dead at once (null: none is watched). */
     private var quiet: (() -> Unit)? = null
@@ -96,6 +149,7 @@ class ChatModel(private val app: AppModel) {
     /** A new chat: nothing on screen until you write. */
     fun fresh() {
         leave()
+        forgetQueue()
         _conversation.value = null
         _title.value = null
         _bubbles.value = emptyList()
@@ -105,6 +159,7 @@ class ChatModel(private val app: AppModel) {
     /** A kept chat, as the node holds it, and its turn in it if it's still answering. */
     fun open(id: String) {
         leave()
+        forgetQueue()
         _conversation.value = id
         _problem.value = null
         app.launch { read(id, attach = true) }
@@ -128,6 +183,7 @@ class ChatModel(private val app: AppModel) {
                     look = m["look"].let { l -> l["note"].string?.let { LookNote(l["set"].long ?: 0L, it) } },
                 )
             }
+            readQueue(view)
             if (view["unread"].bool == true) runCatching { c.post("/api/conversations/seen", Json.obj("id" to id)) }
             val running = view["turn"]
             if (attach && running != null && running != Json.Null && running["watchable"].bool != false) {
@@ -193,6 +249,9 @@ class ChatModel(private val app: AppModel) {
                 if (watch === collecting) {
                     _live.value = false
                     turn = null
+                    _steering.value = emptyList()
+                    // How it ended may have held what's queued, or sent the next of it: the queue as the node holds it now.
+                    app.launch { rereadQueue() }
                 }
             }
         }
@@ -251,7 +310,152 @@ class ChatModel(private val app: AppModel) {
             "stopped" -> finish("stopped", if (e["reason"].string == "you") null else "Stopped (${e["reason"].string})")
             "error" -> finish("failed", e["error"].string ?: "It couldn't answer.")
             "done" -> finish("done")
+            // A steer of yours reached it: no longer on its way.
+            "steer" -> e["text"].string?.let { t -> _steering.value = _steering.value.toMutableList().also { it.remove(t) } }
+            // Messages of yours that hadn't reached it when its turn ended: queued first and held, or back in the box.
+            "undelivered" -> {
+                val texts = e["texts"].list.mapNotNull { it.string }
+                val queued = e["queued"].bool == true
+                _steering.value = emptyList()
+                _notice.value = Composer.undelivered(texts.size, queued)
+                if (!queued && texts.isNotEmpty()) _returned.value = texts.joinToString("\n\n")
+            }
         }
+    }
+
+    /** The queue behind the chat on screen, as the node holds it now (its next may have begun: attached to then). */
+    private suspend fun rereadQueue() {
+        val id = _conversation.value ?: return
+        val c = app.client ?: return
+        val view = runCatching { c.post("/api/conversations/get", Json.obj("id" to id))["conversation"] }.getOrNull() ?: return
+        if (_conversation.value != id) return
+        readQueue(view)
+        val running = view["turn"]
+        if (!_live.value && running != null && running != Json.Null && running["watchable"].bool != false) running["id"].string?.let { attachTo(it) }
+    }
+
+    /**
+     * What's in the box while it works: steered into the turn under way (it's told at its next safe point), or queued on
+     * the node behind the chat (sent when it's done). A queue asked of a chat the node doesn't keep steers. True: it went
+     * from the box (what didn't go comes back to it).
+     */
+    fun deliver(how: Composer.Action, text: String): Boolean {
+        val words = text.trim()
+        val c = app.client ?: return false
+        if (words.isEmpty()) return false
+        val action = if (how == Composer.Action.QUEUE && !canQueue) Composer.Action.STEER else how
+        _notice.value = null
+        app.launch {
+            try {
+                if (action == Composer.Action.QUEUE) {
+                    val view = c.post("/api/conversations/queue", Json.obj("conversation" to _conversation.value, "text" to words, "role" to "planner"))
+                    readQueue(view)
+                    // It'd finished meanwhile, so its turn came at once: watched from here.
+                    if (view["started"].let { it != null && it != Json.Null } && !_live.value) rereadQueue()
+                } else {
+                    val t = turn
+                    if (t == null) {
+                        _returned.value = words
+                        _notice.value = "Not sent yet" to Composer.JUST_STARTING
+                        return@launch
+                    }
+                    c.post("/api/turns/steer", Json.obj("turn" to t, "text" to words))
+                    _steering.value = _steering.value + words
+                }
+            } catch (e: NodeError) {
+                // It finished while you typed: it's simply your next message.
+                if (e.status == 409 && action == Composer.Action.STEER && !_live.value) send(words)
+                else {
+                    _returned.value = words
+                    _notice.value = "Not sent" to (e.message ?: "")
+                }
+            }
+        }
+        return true
+    }
+
+    /** A change to the queue (the web's queueActions): the queue as the node holds it after, or why it wasn't made. */
+    private fun changeQueue(path: String, body: Json) {
+        val c = app.client ?: return
+        if (_conversation.value == null) {
+            _notice.value = "Not changed" to Composer.NOT_KEPT
+            return
+        }
+        app.launch {
+            try {
+                readQueue(c.post(path, body))
+                // Send now and Resume may have started a turn (or steered the one under way).
+                if (!_live.value) rereadQueue()
+            } catch (e: NodeError) {
+                _notice.value = "Not changed" to (e.message ?: "")
+                rereadQueue()
+            }
+        }
+    }
+
+    fun editQueued(id: Long, text: String) = changeQueue("/api/conversations/queue/edit", Json.obj("conversation" to _conversation.value, "id" to id, "text" to text.trim()))
+    fun removeQueued(id: Long) = changeQueue("/api/conversations/queue/remove", Json.obj("conversation" to _conversation.value, "id" to id))
+    /** Everything queued behind this chat, discarded. */
+    fun discardQueue() = changeQueue("/api/conversations/queue/remove", Json.obj("conversation" to _conversation.value))
+    /** One queued message now: it steers the turn under way, or starts as a turn at once. */
+    fun sendQueued(id: Long) = changeQueue("/api/conversations/queue/send", Json.obj("conversation" to _conversation.value, "id" to id))
+    /** A held queue goes on. */
+    fun resumeQueue() = changeQueue("/api/conversations/queue/resume", Json.obj("conversation" to _conversation.value))
+
+    /**
+     * A side question (the web's chat-aside.ts): answered apart, from what this chat holds and what its turn has said and
+     * done so far, without its tools, and added to nothing unless brought back. About the kept chat, or the turn running in
+     * a chat the node doesn't keep yet.
+     */
+    fun askAside(question: String) {
+        val q = question.trim()
+        val c = app.client ?: return
+        val about = _conversation.value?.let { "conversation" to it } ?: turn?.let { "turn" to it }
+        if (about == null) {
+            _notice.value = Composer.NOTHING_YET
+            return
+        }
+        if (q.isEmpty()) {
+            _aside.value = Aside("", asking = false)
+            return
+        }
+        _aside.value = Aside(q)
+        app.launch {
+            try {
+                c.events("/api/turns/aside", Json.obj(about, "question" to q)).collect { e ->
+                    val now = _aside.value ?: return@collect
+                    when (e["type"].string) {
+                        "aside" -> _aside.value = now.copy(id = e["id"].string)
+                        "text" -> _aside.value = now.copy(answer = now.answer + (e["text"].string ?: ""))
+                        "error" -> _aside.value = now.copy(problem = e["error"].string ?: Composer.ASIDE_FAILED)
+                    }
+                }
+            } catch (e: NodeError) {
+                _aside.value = _aside.value?.copy(problem = e.message ?: Composer.ASIDE_FAILED)
+            } finally {
+                _aside.value = _aside.value?.copy(asking = false)
+            }
+        }
+    }
+
+    /** The side question and its answer, brought back: the turn under way is steered with them, or they join the chat. */
+    fun bringBack() {
+        val c = app.client ?: return
+        val id = _aside.value?.id ?: return
+        app.launch {
+            try {
+                val how = c.post("/api/turns/aside/bring", Json.obj("aside" to id))["how"].string ?: "kept"
+                _aside.value = null
+                _notice.value = Composer.broughtBack(how) to ""
+                if (!_live.value) _conversation.value?.let { read(it, attach = true) }
+            } catch (e: NodeError) {
+                _aside.value = _aside.value?.copy(problem = "${Composer.BRING_BACK_FAILED}: ${e.message}")
+            }
+        }
+    }
+
+    fun closeAside() {
+        _aside.value = null
     }
 
     /** Stop its answer on the node (leaving the screen never does). */

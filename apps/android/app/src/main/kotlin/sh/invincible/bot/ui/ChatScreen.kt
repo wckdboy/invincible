@@ -56,6 +56,7 @@ import sh.invincible.bot.core.bool
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.string
 import sh.invincible.bot.core.Primary
+import androidx.compose.ui.text.withStyle
 
 /**
  * The primary's chat: its face and what it's doing at the top, the conversation, and a box to write in. Its answer comes in
@@ -237,6 +238,27 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
     }
     val textFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri -> uri?.let { u -> add { Attachments.text(context, u) } } }
     LaunchedEffect(offered) { offered?.let { text = it.second } }
+    // Words that didn't reach it, or weren't sent while it worked: back in the box.
+    val returned by app.chat.returned.collectAsState()
+    LaunchedEffect(returned) {
+        val back = returned ?: return@LaunchedEffect
+        text = if (text.isBlank()) back else "$text\n\n$back"
+        app.chat.returnedTaken()
+    }
+    // While it works the box stays open: Return (the send) steers it, Queue keeps the words for after this turn, and
+    // "/btw …" asks on the side (the web's sendMessage, the vectors' composer).
+    fun steerOrQueue(how: sh.invincible.bot.core.Composer.Action) {
+        sh.invincible.bot.core.Composer.aside(text)?.let { question ->
+            app.chat.askAside(question)
+            text = ""
+            return
+        }
+        if (files.isNotEmpty()) {
+            said = sh.invincible.bot.core.Composer.FILES_WAIT
+            return
+        }
+        if (app.chat.deliver(how, text)) text = ""
+    }
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = Space.s3, vertical = Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
         if (files.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
@@ -252,10 +274,11 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
             }
         }
         said?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
+        QueuePanel(app)
         // As the iPhone's: a paperclip, a rounded field that grows to six lines, and a round send, or stop while it answers.
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
             androidx.compose.foundation.layout.Box(Modifier.padding(bottom = 4.dp)) {
-                androidx.compose.material3.IconButton(onClick = { menu = true }, enabled = !live && !sending) { Icon(AttachIcon, contentDescription = "Attach") }
+                androidx.compose.material3.IconButton(onClick = { menu = true }, enabled = !sending) { Icon(AttachIcon, contentDescription = "Attach, or ask on the side") }
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     androidx.compose.material3.DropdownMenuItem(text = { Text("A photo") }, onClick = {
                         menu = false
@@ -265,12 +288,16 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
                         menu = false
                         textFile.launch("text/*")
                     })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Ask on the side") }, onClick = {
+                        menu = false
+                        app.chat.askAside("")
+                    })
                 }
             }
             androidx.compose.material3.TextField(
                 value = text,
                 onValueChange = { text = it },
-                placeholder = { Text("Message ${Primary.name}") },
+                placeholder = { Text(if (live) sh.invincible.bot.core.Composer.placeholder(app.chat.canQueue) else "Message ${Primary.name}") },
                 maxLines = 6,
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
                 colors = androidx.compose.material3.TextFieldDefaults.colors(
@@ -282,8 +309,19 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
                 modifier = Modifier.weight(1f),
             )
             if (live) {
+                // Stop, and once you've written something, Queue (for after this turn) and Steer (now, at its next safe point).
                 androidx.compose.material3.FilledTonalIconButton(onClick = app.chat::stop, modifier = Modifier.padding(bottom = 4.dp)) {
                     Icon(StopIcon, contentDescription = "Stop ${Primary.name} answering")
+                }
+                if (text.isNotBlank()) {
+                    if (app.chat.canQueue && sh.invincible.bot.core.Composer.aside(text) == null) {
+                        androidx.compose.material3.FilledTonalIconButton(onClick = { steerOrQueue(sh.invincible.bot.core.Composer.Action.QUEUE) }, modifier = Modifier.padding(bottom = 4.dp)) {
+                            Icon(ClockIcon, contentDescription = "Queue it for after this turn")
+                        }
+                    }
+                    androidx.compose.material3.FilledIconButton(onClick = { steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) }, modifier = Modifier.padding(bottom = 4.dp)) {
+                        Icon(SendIcon, contentDescription = if (sh.invincible.bot.core.Composer.aside(text) != null) "Ask on the side" else "Steer it")
+                    }
                 }
             } else {
                 androidx.compose.material3.FilledIconButton(
@@ -311,6 +349,101 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
                     },
                 ) { Icon(SendIcon, contentDescription = if (sending) "Sending" else "Send") }
             }
+        }
+    }
+}
+
+/**
+ * What waits above the message box while it works (the web's chat-queue.ts, in its words: Composer): what became of
+ * something you sent, steers on their way to it, and what you queued behind the chat, each with Send now, Edit and
+ * Remove; a held queue says why, with Resume and Discard. And a side question, asked apart, with Bring back.
+ */
+@Composable
+private fun QueuePanel(app: AppModel) {
+    val chat = app.chat
+    val notice by chat.notice.collectAsState()
+    val steering by chat.steering.collectAsState()
+    val queue by chat.queue.collectAsState()
+    val held by chat.held.collectAsState()
+    val live by chat.live.collectAsState()
+    val aside by chat.aside.collectAsState()
+    val brand = LocalBrand.current
+    var editing by remember { mutableStateOf<sh.invincible.bot.app.ChatModel.Queued?>(null) }
+    var edited by remember { mutableStateOf("") }
+    if (notice != null || steering.isNotEmpty() || queue.isNotEmpty()) {
+        Column(Modifier.fillMaxWidth().padding(vertical = Space.s1), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
+            notice?.let { (title, detail) ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(title, style = Type.word)
+                        if (detail.isNotEmpty()) Text(detail, style = Type.meta, color = brand.quiet)
+                    }
+                    TextButton(onClick = chat::dismissNotice) { Text("OK") }
+                }
+            }
+            if (steering.isNotEmpty()) {
+                Text(sh.invincible.bot.core.Composer.steering(steering.size), style = Type.word)
+                for (t in steering) Text(t, style = Type.meta, color = brand.quiet, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (queue.isNotEmpty()) {
+                val (count, rest) = sh.invincible.bot.core.Composer.queueHead(queue.size, held, live)
+                Text(androidx.compose.ui.text.buildAnnotatedString {
+                    withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)) { append(count) }
+                    append(rest)
+                }, style = Type.meta)
+                if (held != null) Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                    AnswerPill("Resume", chat::resumeQueue)
+                    TextButton(onClick = chat::discardQueue) { Text("Discard", color = brand.danger) }
+                }
+                for (q in queue) {
+                    Column(Modifier.padding(start = Space.s3)) {
+                        Text(q.text + (q.by?.let { " · from $it" } ?: ""), style = Type.meta, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
+                            TextButton(onClick = { chat.sendQueued(q.id) }) { Text("Send now") }
+                            TextButton(onClick = { edited = q.text; editing = q }) { Text("Edit") }
+                            TextButton(onClick = { chat.removeQueued(q.id) }) { Text("Remove") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    editing?.let { q ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text("Edit the queued message") },
+            text = { androidx.compose.material3.OutlinedTextField(value = edited, onValueChange = { edited = it }, maxLines = 6) },
+            confirmButton = { TextButton(enabled = edited.isNotBlank(), onClick = { chat.editQueued(q.id, edited); editing = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } },
+        )
+    }
+    aside?.let { a -> AsideSheet(app, a, working = live) }
+}
+
+/** Ask on the side (the web's chat-aside.ts): the question, its answer apart from the chat as it comes, and Bring back. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AsideSheet(app: AppModel, a: sh.invincible.bot.app.ChatModel.Aside, working: Boolean) {
+    val brand = LocalBrand.current
+    var question by remember(a.question) { mutableStateOf(a.question) }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = app.chat::closeAside, containerColor = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = Space.margin).padding(bottom = Space.s6), verticalArrangement = Arrangement.spacedBy(Space.s3)) {
+            Text("Ask on the side", style = Type.title)
+            Text(sh.invincible.bot.core.Composer.asideNote(working), style = Type.meta, color = brand.quiet)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = question,
+                    onValueChange = { question = it },
+                    placeholder = { Text(sh.invincible.bot.core.Composer.asidePlaceholder(working)) },
+                    maxLines = 6,
+                    modifier = Modifier.weight(1f),
+                )
+                AnswerPill("Ask", { app.chat.askAside(question) }, enabled = question.isNotBlank() && !(a.asking && a.question.isNotEmpty()))
+            }
+            if (a.asking && a.question.isNotEmpty() && a.answer.isEmpty()) Text(sh.invincible.bot.core.Composer.ASIDE_ANSWERING, style = Type.meta, color = brand.quiet)
+            if (a.answer.isNotEmpty()) Markdown(a.answer)
+            a.problem?.let { Text(it, style = Type.meta, color = brand.danger) }
+            if (a.id != null && a.answer.isNotEmpty() && !a.asking) AnswerPill("Bring back", app.chat::bringBack)
         }
     }
 }

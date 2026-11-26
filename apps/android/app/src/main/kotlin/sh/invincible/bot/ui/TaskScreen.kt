@@ -227,17 +227,35 @@ fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolea
                 }
             }
             if (running) LiveLine(trail.entries, stop = { scope.launch { control(app, task.id, "stop") } })
+            // While it runs: Steer this task (it's told at its next safe point, and its proof is judged against your steer
+            // too), or Queue for after it (a task given to the same agent once this one ends). Otherwise a word to its room.
+            val running = task.status == "running"
             MessageDock(
-                placeholder = "Tell $name…",
+                placeholder = if (running) "Steer this task…" else "Tell $name…",
                 key = "task:${task.id}",
-                hint = when (task.status) { "running" -> "$name answers once this work ends"; "queued" -> "$name answers before starting on it"; else -> null },
+                hint = when (task.status) { "running" -> "Steered, $name is told at its next safe point"; "queued" -> "$name answers before starting on it"; else -> null },
+                also = if (running) "Queue for after it" to { words: String ->
+                    scope.launch {
+                        try {
+                            app.client?.post("/api/team/tasks", Json.obj("room" to task.room, "assignee" to task.assignee, "title" to words.lineSequence().first().take(200), "goal" to words, "dependsOn" to listOf(task.id)))
+                            problem = null
+                            app.refresh()
+                        } catch (e: NodeError) {
+                            problem = e.message
+                        }
+                    }
+                    true
+                } else null,
             ) { words ->
                 scope.launch {
                     try {
-                        app.client?.post("/api/team/messages", Json.obj("room" to task.room, "text" to words))
+                        if (running) app.client?.post("/api/team/steer", Json.obj("task" to task.id, "text" to words))
+                        else app.client?.post("/api/team/messages", Json.obj("room" to task.room, "text" to words))
+                        problem = null
                         room = app.client?.post("/api/team/room", Json.obj("id" to task.room)) ?: room
                         list.toEnd()
                     } catch (e: NodeError) {
+                        // (Its own words: it has ended, or has been steered as many times as one task takes.)
                         problem = e.message
                     }
                 }
@@ -571,6 +589,7 @@ private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(word, style = Type.rowTitle.copy(fontWeight = FontWeight.SemiBold), color = if (failed) brand.danger else brand.ink)
                 why?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (task.steered) Text("Judged against its brief and your steer.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         for (c in caveats) Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {

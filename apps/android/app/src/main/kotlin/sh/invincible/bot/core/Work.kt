@@ -52,6 +52,8 @@ data class TeamTask(
     val models: List<String> = emptyList(),
     /** Each time you stepped in on it, by how. */
     val interventions: Map<String, Int> = emptyMap(),
+    /** It was steered while it ran (POST /api/team/steer): its proof was judged against its brief and the steer. */
+    val steered: Boolean = false,
 ) {
     /** What its run came to, once it ended in the agent's hands: when it began and ended, how, its model calls, and what
      * proves it (null: a record from before the runner kept that). */
@@ -110,6 +112,7 @@ data class TeamTask(
                 outcome = j["outcome"].string,
                 models = j["models"].list.mapNotNull { it.string },
                 interventions = j["interventions"].fields.mapNotNull { (k, v) -> v.int?.let { k to it } }.toMap(),
+                steered = j["steers"].list.isNotEmpty(),
             )
         }
 
