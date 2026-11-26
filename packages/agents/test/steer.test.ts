@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ClientCall, ExecResult } from "@invincible/core";
+import { readBridge } from "../src/acp.ts";
+import { type AgentDriver, type AgentEvent, STEER_WAIT_MS } from "../src/harnesses.ts";
 import { auditQuestion, reviewQuestion, type RunEvent, type RunOptions, type RunRole, type RunSteer, runLoop, steersSaid } from "../src/run.ts";
 
 /*
@@ -186,5 +188,127 @@ describe("what is said of a steer", () => {
     const asked = auditQuestion({ goal: "write the parser", plan: "p", gates: [], steps: [], steers });
     expect(asked).toContain("Its task: write the parser\nWhile it worked, it was told this, in order:\n1. The owner, at step 4: Use the new schema.\nIts task is what these left it.");
     expect(auditQuestion({ goal: "g", plan: "p", gates: [], steps: [], steers: [] })).toBe(auditQuestion({ goal: "g", plan: "p", gates: [], steps: [] }));
+  });
+});
+
+/**
+ * A coding agent at work, look by look: `looks[i]` are the events its i-th look reads (a session in the first), and
+ * `during(i)` runs as that look is made (a steer said then). Its last look finds it ended of itself. Each look moves the
+ * run's clock `minutes`.
+ */
+function harness(looks: object[][], reviewer: string[], during: (look: number, held: ReturnType<typeof inbox>) => void = () => {}, minutes = 1) {
+  const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
+  const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
+  const events: RunEvent[] = [];
+  const prompts: string[] = [];
+  const asked: string[] = [];
+  const held = inbox();
+  let looked = 0;
+  let stopped = 0;
+  let now = 1_000_000;
+  const run = runLoop(
+    { goal: "write the parser", environment: "a test sandbox", agent: { driver, models: [{ provider: "p", model: "m" }], workdir: "/work" } },
+    {
+      ask: async (role, messages) => {
+        if (role === "reviewer") asked.push(messages.at(-1)!.content);
+        const text = queues[role].shift();
+        if (text === undefined) throw new Error(`the ${role} ran out of script`);
+        return { text, model: `test/${role}` };
+      },
+      exec: async (command) => {
+        const prompt = /printf %s '([A-Za-z0-9+/=]+)' \| base64 -d > \/work\/\.agent\/prompt\.md/.exec(command)?.[1];
+        if (prompt) {
+          prompts.push(Buffer.from(prompt, "base64").toString("utf8"));
+          return ok("");
+        }
+        if (command.startsWith("stat -c")) return ok("0\n");
+        if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+          const lines = looks[looked] ?? [];
+          during(looked, held);
+          looked += 1;
+          now += minutes * 60_000;
+          const alive = looked < looks.length;
+          return ok(JSON.stringify({ alive, exit: alive ? null : 0, next: looked * 10, lines: [JSON.stringify(lines)] }));
+        }
+        return ok("");
+      },
+      stopAgent: async () => void (stopped += 1),
+      emit: (event) => events.push(event),
+      sleep: async () => {},
+      now: () => now,
+      steers: held.steers,
+    },
+  );
+  const steeredEvents = () => events.filter((e): e is Extract<RunEvent, { type: "steered" }> => e.type === "steered");
+  return { run, prompts, asked, held, stopped: () => stopped, looked: () => looked, steeredEvents };
+}
+
+const tool = (n: number, id?: string) => ({ type: "tool", tool: "bash", input: `step ${n}`, output: "ok", ok: true, ...(id ? { id } : {}) });
+const call = (id: string) => ({ type: "call", id });
+const SESSION = { type: "session", id: "ses_1" };
+
+describe("a steer of a coding agent's run", () => {
+  test("between its tool calls, its run is ended and its own session is told; the reviewer judges the work against it", async () => {
+    const q = harness(
+      [[SESSION, tool(1)], [tool(2)], [tool(3)], [tool(4)], [tool(5)]],
+      ["PASS\nIt reads the new schema."],
+      (look, held) => (look === 1 ? held.say({ by: "owner", text: "Use the new schema." }) : undefined),
+    );
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.stopped()).toBe(1);
+    expect(q.prompts).toHaveLength(2);
+    expect(q.prompts[1]).toBe("The owner says, while you work: Use the new schema.\n\nTake that up from where you are: the run asks for it now, and the independent reviewer judges the work against it. Then end with a short summary and the evidence.");
+    expect(q.steeredEvents()).toEqual([{ type: "steered", step: 2, by: "owner", text: "Use the new schema." }]);
+    expect(q.asked[0]).toContain("1. The owner, at step 2: Use the new schema.");
+  });
+
+  test("a tool call it is in finishes first: the run is ended only once that call has ended", async () => {
+    const q = harness(
+      [[SESSION, tool(1, "c1")], [call("c2")], [], [tool(2, "c2")], [tool(3)]],
+      ["PASS\nIt holds."],
+      (look, held) => (look === 1 ? held.say({ by: "owner", text: "Use the new schema." }) : undefined),
+    );
+    expect((await q.run).status).toBe("done");
+    // Said at the second look, while its second call ran: taken at the fourth, once that call had ended.
+    expect(q.steeredEvents()).toEqual([{ type: "steered", step: 2, by: "owner", text: "Use the new schema." }]);
+    expect(q.stopped()).toBe(1);
+    expect(q.prompts[1]).toContain("The owner says, while you work: Use the new schema.");
+  });
+
+  test(`a call that runs past ${STEER_WAIT_MS / 60_000} minutes doesn't hold a steer back for ever`, async () => {
+    const q = harness(
+      [[SESSION, call("c1")], [], [], [], [], [], [tool(1, "c1")]],
+      ["PASS\nIt holds."],
+      (look, held) => (look === 0 ? held.say({ by: "owner", text: "Use the new schema." }) : undefined),
+      5,
+    );
+    expect((await q.run).status).toBe("done");
+    expect(q.steeredEvents().map((e) => e.step)).toEqual([0]);
+    expect(q.stopped()).toBe(1);
+  });
+
+  test("words that wait as it ends of itself are said in its session before its gates and its review", async () => {
+    const q = harness(
+      [[SESSION, tool(1)], [tool(2)]],
+      ["PASS\nIt reads the new schema."],
+      (look, held) => (look === 1 ? held.say({ by: "primary", text: "Use the new schema." }) : undefined),
+    );
+    // The second run (in its own session) is the stand-in's looks again: it ends at once, and then it is judged.
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.prompts).toHaveLength(2);
+    expect(q.prompts[1]).toContain("The primary, which leads this work for the owner, says while you work: Use the new schema.");
+    expect(q.asked).toHaveLength(1);
+    expect(q.asked[0]).toContain("1. The primary, which leads the work for the owner, at step 2: Use the new schema.");
+  });
+});
+
+describe("a call as a bridge says it (the VM's words are data)", () => {
+  test("by its id alone; one with no id, or an id that isn't a short string, is nothing; a tool's end keeps its id only when it is one", () => {
+    expect(readBridge(JSON.stringify({ type: "call", id: "toolu_1", tool: "Bash", input: "rm -rf /" }))).toEqual([{ type: "call", id: "toolu_1" }]);
+    for (const id of [undefined, "", 7, "x".repeat(257), { a: 1 }]) expect(readBridge(JSON.stringify({ type: "call", id }))).toEqual([]);
+    expect(readBridge(JSON.stringify({ type: "tool", tool: "Bash", input: "ls", output: "a", ok: true, id: "toolu_1" }))).toEqual([{ type: "tool", tool: "Bash", input: "ls", output: "a", ok: true, id: "toolu_1" }]);
+    expect(readBridge(JSON.stringify({ type: "tool", tool: "Bash", input: "ls", output: "a", ok: true, id: 3 }))).toEqual([{ type: "tool", tool: "Bash", input: "ls", output: "a", ok: true }]);
   });
 });

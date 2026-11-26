@@ -118,10 +118,12 @@ class Client:
             item = self.tools.setdefault(ident, {})
             if kind == "tool_call":
                 item["input"] = value_text(update["rawInput"]) if "rawInput" in update else content_text(update.get("content"))
+                # Said as it begins: a steer waits for a call the agent is in.
+                emit("call", id=ident[:256])
             item.update({k: v for k, v in update.items() if v is not None})
             if item.get("status") in ("completed", "failed"):
                 self.completed.add(ident)
-                emit("tool", tool=str(item.get("title") or item.get("kind") or "tool")[:200],
+                emit("tool", id=ident[:256], tool=str(item.get("title") or item.get("kind") or "tool")[:200],
                      input=item.get("input", "")[:2000],
                      output=(value_text(item["rawOutput"]) if "rawOutput" in item else content_text(update.get("content")))[:4000],
                      ok=item["status"] == "completed")
@@ -329,6 +331,9 @@ export const notesServer = (project: string) => {
   return { name: "engram", command, args, env: Object.entries(ENGRAM_ENV).map(([name, value]) => ({ name, value })) };
 };
 
+/** A tool call's id as a bridge passes it on (the agent's own: a string of its, kept short); never shown, only paired. */
+const callId = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 256;
+
 /** One line a bridge in the sandbox printed: its normalised event, checked and redacted (the sandbox's words are data). */
 export function readBridge(line: string): AgentEvent[] {
   let e: any;
@@ -338,8 +343,10 @@ export function readBridge(line: string): AgentEvent[] {
   if (e.type === "text" && typeof e.text === "string") return [{ type: "text", text: redact(e.text) }];
   if (e.type === "error" && typeof e.message === "string") return [{ type: "error", message: redact(e.message) }];
   if (e.type === "tool" && [e.tool, e.input, e.output].every((v) => typeof v === "string") && typeof e.ok === "boolean") {
-    return [{ type: "tool", tool: redact(e.tool), input: redact(e.input), output: redact(e.output), ok: e.ok }];
+    return [{ type: "tool", tool: redact(e.tool), input: redact(e.input), output: redact(e.output), ok: e.ok, ...(callId(e.id) ? { id: e.id as string } : {}) }];
   }
+  // A call that began: only its id, which pairs it with its end (runAgent: a steer waits for it).
+  if (e.type === "call" && callId(e.id)) return [{ type: "call", id: e.id }];
   if (e.type === "tokens" && [e.input, e.output].every((v) => Number.isSafeInteger(v) && v >= 0)) return [{ type: "tokens", input: e.input, output: e.output }];
   if (e.type === "retry" && Number.isSafeInteger(e.attempt) && e.attempt > 0 && typeof e.error === "string") return [{ type: "retry", attempt: e.attempt, error: redact(e.error), waitMs: Number.isSafeInteger(e.waitMs) && e.waitMs >= 0 ? e.waitMs : 0 }];
   return [];

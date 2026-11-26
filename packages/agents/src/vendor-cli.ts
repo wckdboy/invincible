@@ -289,12 +289,14 @@ class Reader:
                     emit("text", text=clip(self.said, 24000))
                 elif block.get("type") == "tool_use" and isinstance(block.get("id"), str) and len(self.calls) < 512:
                     self.calls[block["id"]] = (str(block.get("name") or "tool"), block.get("input"))
+                    # Said as it begins: a steer waits for a call it is in.
+                    emit("call", id=block["id"][:256])
         elif kind == "user":
             for block in blocks(e):
                 ident = block.get("tool_use_id")
                 call = self.calls.pop(ident, None) if block.get("type") == "tool_result" and isinstance(ident, str) else None
                 if call:
-                    emit("tool", tool=call[0][:200], input=clip(call_input(call[1]), 2000),
+                    emit("tool", id=ident[:256], tool=call[0][:200], input=clip(call_input(call[1]), 2000),
                          output=clip(text_of(block.get("content")), 4000), ok=block.get("is_error") is not True)
         elif kind == "rate_limit_event":
             info = e.get("rate_limit_info")
@@ -356,6 +358,8 @@ def through_gateway(env, base, token, model):
 # You’ve, and the day too when it isn't today: "at Nov 23rd, 2026 8:11 PM", by this VM's clock). Said as Claude Code's
 # is, without the offers around it, and when it resets in UTC where it gave a time.
 LIMIT = re.compile("You['’]ve hit your usage limit")
+# The items that are calls of its: the start of each is said, as its end is.
+CALLS = ("command_execution", "file_change", "mcp_tool_call", "web_search")
 RECONNECT = re.compile(r"Reconnecting\.\.\. (\d{1,3})/\d{1,3}(?: \((.*)\))?$", re.S)
 AGAIN = re.compile(r"try again at (?:([A-Z][a-z]{2}) (\d{1,2})(?:st|nd|rd|th), (\d{4}) )?(\d{1,2}):(\d{2}) ([AP]M)")
 
@@ -392,25 +396,32 @@ class Reader:
         kind = e.get("type")
         if kind == "thread.started" and isinstance(e.get("thread_id"), str):
             self.session = e["thread_id"]
+        elif kind == "item.started" and isinstance(e.get("item"), dict):
+            # A call said as it begins (not a message): a steer waits for a call it is in.
+            item = e["item"]
+            if item.get("type") in CALLS and isinstance(item.get("id"), str):
+                emit("call", id=item["id"][:256])
         elif kind == "item.completed" and isinstance(e.get("item"), dict):
             item = e["item"]
             what = item.get("type")
+            # Its end names it, where it has an id.
+            ident = {"id": item["id"][:256]} if isinstance(item.get("id"), str) else {}
             self.answered()
             if what == "agent_message" and isinstance(item.get("text"), str) and item["text"].strip():
                 emit("text", text=clip(item["text"], 24000))
             elif what == "command_execution":
                 emit("tool", tool="shell", input=clip(as_text(item.get("command", "")), 2000),
-                     output=clip(as_text(item.get("aggregated_output", "")), 4000), ok=item.get("exit_code") == 0)
+                     output=clip(as_text(item.get("aggregated_output", "")), 4000), ok=item.get("exit_code") == 0, **ident)
             elif what == "file_change":
                 changes = [c for c in item["changes"] if isinstance(c, dict)] if isinstance(item.get("changes"), list) else []
                 emit("tool", tool="edit", input=clip("\n".join(str(c.get("kind", "change")) + " " + str(c.get("path", "")) for c in changes), 2000),
-                     output="", ok=item.get("status") == "completed")
+                     output="", ok=item.get("status") == "completed", **ident)
             elif what == "mcp_tool_call":
                 emit("tool", tool=(str(item.get("server", "mcp")) + "." + str(item.get("tool", "tool")))[:200],
                      input=clip(as_text(item.get("arguments", "")), 2000),
-                     output=clip(text_of(item.get("result")) or as_text(item.get("error") or ""), 4000), ok=item.get("status") == "completed")
+                     output=clip(text_of(item.get("result")) or as_text(item.get("error") or ""), 4000), ok=item.get("status") == "completed", **ident)
             elif what == "web_search":
-                emit("tool", tool="web_search", input=clip(as_text(item.get("query", "")), 2000), output="", ok=True)
+                emit("tool", tool="web_search", input=clip(as_text(item.get("query", "")), 2000), output="", ok=True, **ident)
         elif kind == "turn.completed":
             self.finished, self.trouble = True, ""
             emit("tokens", input=count(e.get("usage"), "input_tokens"), output=count(e.get("usage"), "output_tokens"))

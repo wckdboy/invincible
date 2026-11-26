@@ -43,7 +43,10 @@ export const agentModelName = (model: AgentModel): string => (model.own ? "its o
 export type AgentEvent =
   | { type: "session"; id: string }
   | { type: "text"; text: string }
-  | { type: "tool"; tool: string; input: string; output: string; ok: boolean }
+  /** A tool call that ended (`id`: the call's, where its stream names it, ending its `call`). */
+  | { type: "tool"; tool: string; input: string; output: string; ok: boolean; id?: string }
+  /** A tool call that began, by its id, where its stream says so: a steer waits for it to end (runAgent). */
+  | { type: "call"; id: string }
   | { type: "tokens"; input: number; output: number }
   | { type: "error"; message: string }
   /** The tool asking a provider again by itself after a refusal: which try this is, why, and how long it waits first. */
@@ -191,8 +194,11 @@ export interface AgentRunDeps {
 }
 
 export interface AgentRun {
-  /** `spent`: its budget was spent, and it was stopped as at its deadline. `audited`: its audit ended this run (`input.audit`). */
-  status: "finished" | "failed" | "timeout" | "stopped" | "spent" | "audited";
+  /**
+   * `spent`: its budget was spent, and it was stopped as at its deadline. `audited`: its audit ended this run
+   * (`input.audit`). `steered`: a steer of yours, or your agent's, ended it between its tool calls (`input.steer`).
+   */
+  status: "finished" | "failed" | "timeout" | "stopped" | "spent" | "audited" | "steered";
   /** The agent's last words: its own account of what it did. */
   summary: string;
   /** Tool calls it made. */
@@ -209,6 +215,13 @@ export interface AgentRun {
  * taken as no news, so its task waited on a run that had ended, with an audit paid for every quarter of an hour.
  */
 export const UNREAD_LIMIT_MS = 5 * 60_000;
+
+/**
+ * How long a steer waits for a tool call a coding agent is in (its `call` with no end yet) before its run is ended all
+ * the same: a call whose end its stream never names must not hold your words back for ever. A tool's own command in its
+ * VM is killed at TEAM_COMMAND_SECONDS (15 minutes), so a call that runs longer has lost its way.
+ */
+export const STEER_WAIT_MS = 15 * 60_000;
 
 /** Prints {alive, exit, next, lines} for the events written since byte `offset`. */
 const POLL = `${AGENT_PROCESS_PY}
@@ -241,15 +254,17 @@ print(json.dumps({"alive": alive, "exit": exit_code, "next": nxt, "lines": lines
  * One run of a coding agent: write its message, start it in the background (its own
  * process group, so it outlives the command that started it and can be stopped as a
  * whole), follow its events until it ends, the deadline passes, its budget is spent
- * (`spent`, asked at each look) or you stop it.
+ * (`spent`, asked at each look), a steer ends it (`steer`, asked at a look between its tool calls) or you stop it.
  */
 export async function runAgent(
   driver: AgentDriver,
-  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<boolean> },
+  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<boolean>; steer?: () => boolean | Promise<boolean> },
   deps: AgentRunDeps,
 ): Promise<AgentRun> {
   const now = deps.now ?? Date.now;
   const run: AgentRun = { status: "finished", summary: "", steps: 0, session: input.session, tokens: { input: 0, output: 0 } };
+  /** The tool calls it began and hasn't ended, as its stream says (`call`, ended by the `tool` with its id), and since when. */
+  const open = new Map<string, number>();
   const runId = randomId(12);
   let launched = false;
   let stopping: Promise<void> | undefined;
@@ -317,6 +332,12 @@ export async function runAgent(
             if (changed) await deps.session?.(event.id);
             continue;
           }
+          // (Bounded: a stream that names more calls than any run makes is a stream that can't be believed about them.)
+          if (event.type === "call") {
+            if (open.size < 512 && !open.has(event.id)) open.set(event.id, now());
+            continue;
+          }
+          if (event.type === "tool" && event.id !== undefined) open.delete(event.id);
           if (event.type === "text") run.summary = event.text;
           if (event.type === "tool") run.steps += 1;
           if (event.type === "tokens") {
@@ -343,6 +364,13 @@ export async function runAgent(
       if (await input.spent?.()) {
         await stop();
         return { ...run, status: "spent", error: "its budget was spent" };
+      }
+      // A steer ends this run only between its tool calls (one it is in finishes first, for up to STEER_WAIT_MS), so its
+      // own session can be told: the caller says what comes of it.
+      const between = [...open.values()].every((since) => now() - since >= STEER_WAIT_MS);
+      if (between && (await input.steer?.())) {
+        await stop();
+        return { ...run, status: "steered", error: "it was steered" };
       }
       // An audit, when one is due, may end this run (RunOptions.audit): the caller says what comes of it.
       if (await input.audit?.()) {

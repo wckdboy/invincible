@@ -1514,7 +1514,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
 
   /** A coding agent does the work; each review it doesn't pass continues its session. */
   const agentWork = async (agent: NonNullable<Resolved["agent"]>): Promise<RunOutcome> => {
-    const deadline = agent.minutes === undefined ? Infinity : Date.now() + agent.minutes * 60_000;
+    // (On the run's own clock, as each look at it is: deps.now, which is Date.now outside a test.)
+    const deadline = agent.minutes === undefined ? Infinity : clock() + agent.minutes * 60_000;
     const trail: Step[] = [];
     let warned = false;
     audits.at = clock();
@@ -1537,6 +1538,22 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       audited = found;
       return true;
     };
+    /** Steers taken at a look (RunDeps.steers), said to its own session once its run has ended there. */
+    let heard: RunSteer[] = [];
+    /**
+     * At each look at the agent between its tool calls (runAgent waits out a call it is in): steers waiting end this run,
+     * so its own session can be told them, as an audit's steer is. With no session to tell yet they wait where they are.
+     */
+    const steerNow = async (): Promise<boolean> => {
+      if (!(live ?? session)) return false;
+      const got = await takeSteers(steps);
+      heard = [...heard, ...got];
+      return got.length > 0;
+    };
+    /** The steers the next run's message carries: said again if that run fails on its model before it could take them up. */
+    let carried = "";
+    /** What a coding agent is told of steers in its session, and what to do once they are done. */
+    const steerPrompt = (steers: readonly RunSteer[]): string => `${steersSaid(steers, o.unreviewed)} Then end with a short summary and the evidence.`;
     /**
      * Its budget, at each look at the agent: its own calls through the gateway count as it makes them (deps.spentUsd).
      * Past four fifths it is said once; spent, it is said and the agent is stopped. It can't be told to wrap up mid-run.
@@ -1590,7 +1607,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       worked = agentModelName(model);
       const run = await runAgent(
         agent.driver,
-        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow },
+        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers ? { steer: steerNow } : {}) },
         {
           exec: deps.exec,
           stopAgent: deps.stopAgent,
@@ -1600,6 +1617,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           },
           signal: deps.signal,
           sleep: pause,
+          now: clock,
           event: (event) => {
             if (event.type === "text") emit({ type: "thought", step: steps, text: event.text, model: `${agent.driver.name} · ${agentModelName(model)}` });
             if (event.type === "retry") emit({ type: "retry", role: "engineer", attempt: event.attempt, error: redact(event.error), waitMs: event.waitMs });
@@ -1615,6 +1633,14 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       );
       session = run.session ?? session;
       if (run.status === "stopped") return finish({ status: "stopped", summary: "Stopped at your request." });
+      // (Its message reached a run that went on: what it carried needn't be said again.)
+      if (run.status !== "failed") carried = "";
+      // Ended by a steer of yours, or your agent's, between its tool calls: taken up in its own session.
+      if (run.status === "steered") {
+        prompt = carried = steerPrompt(heard);
+        heard = [];
+        continue;
+      }
       // Ended by its audit's steer: taken up in its own session.
       if (run.status === "audited" && audited) {
         const found: { verdict: AuditVerdict; note: string } = audited;
@@ -1633,7 +1659,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         current += 1;
         const next = agent.models[current]!;
         emit({ type: "retry", role: "engineer", attempt: current, error: `${agentModelName(model)}: ${run.error ?? "failed"}`.slice(0, 300), waitMs: 0 });
-        if (session) prompt = `Your last run stopped with an error (${(run.error ?? "").split("\n").find(Boolean) ?? "unknown"}); you're now on ${agentModelName(next)}. Continue the run from where you left off.`;
+        if (session) prompt = `Your last run stopped with an error (${(run.error ?? "").split("\n").find(Boolean) ?? "unknown"}); you're now on ${agentModelName(next)}. Continue the run from where you left off.${carried ? `\n\n${carried}` : ""}`;
         continue;
       }
       if (run.status !== "finished") {
@@ -1650,15 +1676,30 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         }
         return finish({ status: "gave-up", summary: gaveUp, ...(review ? { review } : {}) });
       }
+      // Words that waited as it ended of itself are said in its own session before it is judged.
+      const waiting = session ? await takeSteers(steps) : [];
+      if (waiting.length) {
+        prompt = carried = steerPrompt(waiting);
+        continue;
+      }
       // The reviewer sees the latest commands; every one of them is in the ledger.
       const verdict = await submit(run.summary || "(the agent ended without a summary)", trail.slice(-40));
       judged = trail.length;
       review = verdict.notes || undefined;
-      if (verdict.verdict === "pass") return finish({ status: "done", summary: run.summary, review: verdict.notes || undefined });
-      // (Sent back with its budget spent, it isn't taken up again: the reviewer's word stands.)
-      if (revisions >= o.maxRevisions || !session || (await spentNow())) return finish({ status: "unverified", summary: run.summary, review: verdict.notes });
-      revisions += 1;
-      prompt = sentBack(verdict, "verify it, then end with a short summary and the evidence.");
+      // Words that came while it was judged come before its end, as for the engineer's own loop (said in its session).
+      const late = session ? await takeSteers(steps) : [];
+      if (verdict.verdict === "pass") {
+        if (!late.length) return finish({ status: "done", summary: run.summary, review: verdict.notes || undefined });
+        prompt = carried = `${passedBut(late)} end with a short summary and the evidence: the work is judged again.`;
+        continue;
+      }
+      // (Sent back with its budget spent, it isn't taken up again: the reviewer's word stands. A steer that came once its
+      // revisions were spent gives it one more round.)
+      if ((revisions >= o.maxRevisions && !late.length) || !session || (await spentNow())) return finish({ status: "unverified", summary: run.summary, review: verdict.notes });
+      if (revisions < o.maxRevisions) revisions += 1;
+      prompt = `${sentBack(verdict, "verify it, then end with a short summary and the evidence.")}${late.length ? `\n\n${steersSaid(late, o.unreviewed)}` : ""}`;
+      // (Only a message that carries steers is said again after a model's failure: one without is what it always was.)
+      carried = late.length ? prompt : "";
     }
   };
 

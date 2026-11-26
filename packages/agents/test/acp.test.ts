@@ -96,7 +96,10 @@ describe("any ACP agent as an agent's harness", () => {
     const result = await box.run(["--provider", "gateway-provider", "--model", "test-model"]);
     expect({ exit: result.exit, stderr: result.stderr }).toEqual({ exit: 0, stderr: "" });
     expect(result.events.filter((e) => e.type === "tool")).toHaveLength(200);
-    expect(result.events.filter((e) => e.type !== "tool")).toEqual([{ type: "text", text: "Done, and checked." }, { type: "tokens", input: 0, output: 0 }]);
+    // Each call said as it began, and its end naming it.
+    expect(result.events.filter((e) => e.type === "call")).toHaveLength(200);
+    expect(result.events.filter((e) => e.type === "tool").every((e) => e.type === "tool" && typeof e.id === "string")).toBe(true);
+    expect(result.events.filter((e) => e.type !== "tool" && e.type !== "call")).toEqual([{ type: "text", text: "Done, and checked." }, { type: "tokens", input: 0, output: 0 }]);
     const trace = box.trace();
     // Started as you named it, with its arguments.
     expect(trace.find((m) => m.argv)?.argv).toEqual(["acp", "--flag"]);

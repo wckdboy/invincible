@@ -106,12 +106,14 @@ describe("a driver and the notes store", () => {
   // list: each one's text with those put back hashes to its pin from before, so nothing else changed. And again that
   // day, when the product's own name in them (its gateway's error words, its ACP client's name, OpenCode's session title)
   // came to be Invincible, and the old theme's word for an agent became agent: word for word against the text before,
-  // nothing else differs.
+  // nothing else differs. And again that day, when the Claude Code, Codex and ACP bridges (Hermes' among them) came to
+  // say each tool call as it begins and to name it at its end, so a steer waits for a call an agent is in: each one's
+  // text with exactly those lines taken out hashes to its pin from before (OpenCode's is as it was).
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
-    hermes: "bda176b38dd85803402b48ca52c796b08a0701a78a27eb753084feb047eee34e",
-    claude: "fa019317cf7c349083a1be670c2d6c96e8047e6cf1e831d3bb6bdd9fa78f8234",
-    codex: "36a54570657d25d9cbe6c56901974b073bab3acbea17e755f7ce19e135cffc1a",
+    hermes: "91daad81e7e298606abf3e1974f9b26adfa3cb50841073baed40aa037e32c5ec",
+    claude: "019a8c1ae8c4a33f00a9e0a17e23d22749e357b20f37b61e3c5e4f6672524958",
+    codex: "ef08b762ee2cf0ba57b4462478de4f7de832c34288a248c4f7b5bab3d9f77283",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

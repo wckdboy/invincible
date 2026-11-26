@@ -296,7 +296,9 @@ describe("Claude Code, on its own sign-in", () => {
     expect({ exit: run.exit, stderr: run.stderr }).toEqual({ exit: 0, stderr: "" });
     expect(run.events).toEqual([
       { type: "session", id: SESSION },
-      { type: "tool", tool: "Bash", input: "echo invincible-probe", output: "invincible-probe", ok: true },
+      // (A call is said as it begins, and its end names it: a steer waits for a call it is in.)
+      { type: "call", id: "toolu_FAKE000001" },
+      { type: "tool", tool: "Bash", input: "echo invincible-probe", output: "invincible-probe", ok: true, id: "toolu_FAKE000001" },
       { type: "text", text: "done" },
       { type: "tokens", input: 4 + 14500 + 34948, output: 82 },
     ]);
@@ -459,7 +461,8 @@ describe("Codex, on its own sign-in", () => {
     expect(run.events).toEqual([
       { type: "session", id: SESSION },
       { type: "text", text: "I’ll run the command once." },
-      { type: "tool", tool: "shell", input: "/bin/bash -lc 'echo invincible-probe'", output: "invincible-probe\n", ok: true },
+      { type: "call", id: "item_1" },
+      { type: "tool", tool: "shell", input: "/bin/bash -lc 'echo invincible-probe'", output: "invincible-probe\n", ok: true, id: "item_1" },
       { type: "text", text: "done" },
       { type: "tokens", input: 45951, output: 49 },
     ]);
@@ -487,7 +490,7 @@ describe("Codex, on its own sign-in", () => {
     const run = await vm("codex").run(OWN, "edits and a failing command");
     expect(run.exit).toBe(0);
     const tools = run.events.filter((event) => event.type === "tool");
-    expect(tools[0]).toEqual({ type: "tool", tool: "edit", input: "update /work/repo/calc.py\nadd /work/repo/test_calc.py", output: "", ok: true });
+    expect(tools[0]).toEqual({ type: "tool", tool: "edit", input: "update /work/repo/calc.py\nadd /work/repo/test_calc.py", output: "", ok: true, id: "item_1" });
     expect(tools[1]).toMatchObject({ tool: "shell", input: "/bin/bash -lc 'cat /work/.secrets'", ok: false });
     expect(JSON.stringify(run.events)).not.toContain(FAKE_SIGN_IN);
     expect(JSON.stringify(run.events)).not.toContain(FAKE_SIGNED_TOKEN);

@@ -141,7 +141,8 @@ describe("Hermes ACP driver", () => {
     expect({ exit: first.exit, stderr: first.stderr }).toEqual({ exit: 0, stderr: "" });
     expect(first.events).toEqual([
       { type: "session", id: "hermes-test-session" },
-      { type: "tool", tool: "terminal: test", input: "python3 test.py", output: "passed", ok: true },
+      { type: "call", id: "new" },
+      { type: "tool", tool: "terminal: test", input: "python3 test.py", output: "passed", ok: true, id: "new" },
       { type: "text", text: "New answer." },
       { type: "tokens", input: 10, output: 4 },
     ]);
@@ -264,7 +265,8 @@ describe("Hermes and the notes store", () => {
     expect(first.events).toEqual([
       { type: "text", text: "Hermes refused a session with the notes store's MCP server: this run has no notes store" },
       { type: "session", id: "hermes-test-session" },
-      { type: "tool", tool: "terminal: test", input: "python3 test.py", output: "passed", ok: true },
+      { type: "call", id: "new" },
+      { type: "tool", tool: "terminal: test", input: "python3 test.py", output: "passed", ok: true, id: "new" },
       { type: "text", text: "New answer." },
       { type: "tokens", input: 10, output: 4 },
     ]);
