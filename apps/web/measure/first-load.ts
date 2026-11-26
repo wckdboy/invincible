@@ -95,8 +95,6 @@ if (!existsSync(CHROME)) throw new Error(`No Chrome found. Set CHROME to a Chrom
 
 // The node's key goes to a file in the temp home, never to the OS keychain.
 process.env.GALAHAD_KEYSTORE = "file";
-// Nor does it read the MCP library's index from mcp.galahad.sh unless told to (GALAHAD_MCP_INDEX): the reviewed list stays.
-process.env.GALAHAD_MCP_INDEX ??= "off";
 const tmp = mkdtempSync(join(tmpdir(), "galahad-web-measure-"));
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 

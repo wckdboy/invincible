@@ -17,8 +17,6 @@ import {
   findSecrets,
   isMcpTool,
   MAX_CLOCK_DRIFT_MS,
-  MCP_ALONE,
-  MCP_TOOL_CLASSES,
   MAX_ORDER_DAYS,
   mayCall,
   type NativeName,
@@ -30,7 +28,6 @@ import {
   ownApproval,
   randomId,
   redact,
-  reviewedMcp,
   toolDigest,
 } from "@galahad/core";
 import {
@@ -610,10 +607,6 @@ export class ConnectorService {
       header?: string;
       only?: string[];
       classes?: Record<string, ConnectorManifest["tools"][string]["class"]>;
-      /** The reviewed library's proposal for its tools (core MCP_TOOL_CLASSES). */
-      proposed?: readonly (readonly [string, ConnectorManifest["tools"][string]["class"]])[];
-      /** Galahad's alone and private (core MCP_ALONE): only he and the agents you allow may call it. */
-      alone?: boolean;
     },
   ): Promise<{ server: string | null; tools: number; needsKey: boolean; needsSignIn?: boolean } & MergeReport> {
     let url: URL;
@@ -627,11 +620,6 @@ export class ConnectorService {
     }
     const previous = installedConnector(this.o.store, id);
     if (previous && !previous.mcp) throw new ConnectorCallError(409, `${id} is a request-template connector, not an MCP server`);
-    // A server on the reviewed list is held to its review however it comes in: by its id or its address, listed again,
-    // or listed by itself once you've signed in (its classes after yours; Galahad's alone where the list says so).
-    const reviewed = reviewedMcp(url.toString());
-    const proposed = input.proposed ?? (reviewed && Object.hasOwn(MCP_TOOL_CLASSES, reviewed.id) ? MCP_TOOL_CLASSES[reviewed.id] : undefined);
-    const alone = input.alone ?? (reviewed ? MCP_ALONE.has(reviewed.id) : false);
     const same = previous && previous.origin === url.origin && previous.mcp!.path === (url.pathname || "/");
     const auth =
       input.auth === "none"
@@ -654,8 +642,8 @@ export class ConnectorService {
       // Another address is another server: nothing carries over.
       tools: same ? previous!.tools : {},
       // Yours alone stays so, with the agents you allowed, however it is installed again.
-      ...(previous?.access ? { access: previous.access } : alone ? { access: { only: "galahad" as const, allowed: [] } } : {}),
-      ...(alone || previous?.private ? { private: true } : {}),
+      ...(previous?.access ? { access: previous.access } : {}),
+      ...(previous?.private ? { private: true } : {}),
     };
     const base = ConnectorManifest.safeParse(draft);
     if (!base.success) throw new ConnectorCallError(400, base.error.issues.map((i) => `${i.path.join(".") || "connector"}: ${i.message}`).join("; "));
@@ -689,7 +677,7 @@ export class ConnectorService {
       }
       throw new ConnectorCallError(502, `${base.data.label} unreachable: ${redact(String((error as Error).message ?? error))}`);
     }
-    const { tools: merged, report } = mergeMcpTools(discovered.tools, same ? previous!.tools : {}, { ...(only ? { only } : {}), ...(input.classes ? { classes: input.classes } : {}), ...(proposed ? { proposed } : {}) });
+    const { tools: merged, report } = mergeMcpTools(discovered.tools, same ? previous!.tools : {}, { ...(only ? { only } : {}), ...(input.classes ? { classes: input.classes } : {}) });
     if (Object.keys(merged).length > 64) {
       throw new ConnectorCallError(413, `${base.data.label} has ${Object.keys(merged).length} tools; install up to 64 with only (the ones you need)`);
     }

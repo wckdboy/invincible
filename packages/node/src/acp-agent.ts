@@ -4,8 +4,7 @@ import { randomId, redact, routes } from "@galahad/core";
 
 /*
  * Galahad as an ACP agent (the Agent Client Protocol: JSON-RPC 2.0, a message a line, over stdin and stdout), for any
- * harness that runs ACP agents: Buzz's buzz-acp, which makes an agent a member of a Buzz community (docs/BUZZ.md), and
- * editors and workbenches that run any ACP agent. Each prompt is answered by Galahad on his node, through the chat route
+ * harness that runs ACP agents: editors and workbenches that run any ACP agent. Each prompt is answered by Galahad on his node, through the chat route
  * with an arm token of its own (least privilege: what he does there outward asks you on a card, as for any agent); his
  * words stream back as `agent_message_chunk`s, his tools as `tool_call`s. A session keeps its own exchange in memory
  * (an arm keeps no chat in your history), so a thread's follow-ups are answered in its light.
@@ -19,24 +18,13 @@ export const ACP_VERSION = 1;
 /** At most this many messages of a session's exchange go with each prompt (the newest), and this many characters of them. */
 const SESSION_MESSAGES = 24;
 const SESSION_CHARS = 200_000;
-/** A longer message keeps its beginning and its end: an editor's request comes first in its prompt, Buzz's last in its turn. */
+/** A longer message keeps its beginning and its end: an editor's request comes first in its prompt, a harness's may come last. */
 const MESSAGE_CHARS = 64_000;
 /** A line longer than this is refused unread: no JSON-RPC message of this protocol is near it. */
 const LINE_LIMIT = 2_000_000;
 
 /** One answer of Galahad's to these messages, as the node streams it (the chat route, with the arm's token). */
 export type AskGalahad = (messages: ChatMessage[], signal: AbortSignal) => AsyncIterable<ChatStreamEvent>;
-
-/**
- * Where an answer goes besides the client, for a harness that shows an agent's words to nobody (Buzz: posted where it
- * was asked, buzz.ts). Without one, the client shows them.
- */
-export interface Delivery {
-  /** What Galahad is asked, for a turn's words: what he is told of where he answers, and the turn. */
-  frame(turn: string): string;
-  /** A turn's answer once it has ended (never a cancelled one's): his words, and whether he was cut off by a failure. */
-  deliver(answer: { text: string; failed: boolean }, turn: string): Promise<void>;
-}
 
 interface Session {
   messages: ChatMessage[];
@@ -89,7 +77,6 @@ export interface AcpAgentOptions {
   write: (line: string) => void;
   /** What happened, for whoever runs it (stderr): never the conversation's words. */
   log?: (message: string) => void;
-  delivery?: Delivery;
 }
 
 /** The agent's side of the protocol: feed it each line read from the client; it answers through `write`. */
@@ -107,28 +94,23 @@ export function acpAgent(o: AcpAgentOptions) {
     if (session.running) return failed(id, -32600, "a prompt is under way in this session: cancel it first");
     const text = promptText(params.prompt);
     if (!text) return failed(id, -32602, "the prompt has no words");
-    session.messages.push({ role: "user", content: bounded(o.delivery ? o.delivery.frame(text) : text) });
+    session.messages.push({ role: "user", content: bounded(text) });
     const running = new AbortController();
     session.running = running;
     /** What goes into the session's exchange: his words, and why he stopped short if he did. */
     let said = "";
-    /** His words alone, to deliver. */
-    let spoke = "";
-    let cutOff = false;
     let stop: "end_turn" | "cancelled" = "end_turn";
     /** Why there is no answer, said where you asked in his words (never a raw provider error: redacted, a line). */
     const sayWhy = (message: string) => {
       const why = `Galahad couldn't answer: ${redact(message).split("\n", 1)[0]!.slice(0, 300)}`;
       const chunk = said ? `\n\n${why}` : why;
       said += chunk;
-      cutOff = true;
       update(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: chunk } });
     };
     try {
       for await (const event of o.ask(recent(session.messages), running.signal)) {
         if (event.type === "text") {
           said += event.text;
-          spoke += event.text;
           update(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: event.text } });
         } else if (event.type === "tool") {
           update(sessionId, { sessionUpdate: "tool_call", toolCallId: event.id, title: event.title || event.name, kind: "other", status: "in_progress", rawInput: { summary: event.input } });
@@ -146,10 +128,6 @@ export function acpAgent(o: AcpAgentOptions) {
     }
     if (running.signal.aborted) stop = "cancelled";
     if (said.trim()) session.messages.push({ role: "assistant", content: bounded(said) });
-    // Delivered before the turn is said to have ended, so the harness shows him working until it is.
-    if (stop === "end_turn" && o.delivery) {
-      await o.delivery.deliver({ text: spoke, failed: cutOff }, text).catch((error) => o.log?.(`not delivered: ${redact(String((error as Error).message ?? error)).slice(0, 300)}`));
-    }
     reply(id, { stopReason: stop });
   }
 
@@ -230,9 +208,9 @@ export function askNode(base: string, token: string): AskGalahad {
  * `galahad acp`: the protocol on stdin and stdout. Each line is taken as it comes, so a cancel is read while a prompt
  * runs; when the client closes stdin, what is under way is stopped and the process ends.
  */
-export async function runAcpAgent(o: { base: string; token: string; delivery?: Delivery }): Promise<void> {
+export async function runAcpAgent(o: { base: string; token: string }): Promise<void> {
   const log = (message: string) => process.stderr.write(`galahad acp: ${message}\n`);
-  const agent = acpAgent({ ask: askNode(o.base, o.token), write: (line) => process.stdout.write(`${line}\n`), log, ...(o.delivery ? { delivery: o.delivery } : {}) });
+  const agent = acpAgent({ ask: askNode(o.base, o.token), write: (line) => process.stdout.write(`${line}\n`), log });
   const running = new Set<Promise<void>>();
   const take = (line: string) => {
     const handled = agent.receive(line);

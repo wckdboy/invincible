@@ -14,7 +14,6 @@ import { signal } from "../ui/signal.ts";
 import { toast } from "../ui/toast.ts";
 import { CLASS_INFO } from "./activity.ts";
 import { classSelect, type McpDeps, mcpBadge, openAddMcp, refreshMcp, saveClasses, serverWords } from "./mcp.ts";
-import { mcpLibrarySection } from "./mcp-library.ts";
 import { loadOrders, openNewOrder, ordersChanged, renderOrders } from "./orders.ts";
 import { vaultChanged } from "./vault.ts";
 import { signInBlock } from "./sign-in.ts";
@@ -644,8 +643,6 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
   const addMcp = ctx.can("brain:write") ? button("Add an MCP server", { size: "sm", icon: "plus", onClick: () => openAddMcp(ctx, connectors, deps) }) : null;
   const installedSection = section("Installed", { actions: addMcp }, installedBox);
   const availableSection = section("Available", { id: "connectors-available" }, availableBox);
-  // The library of hosted MCP servers, searched on the node (mcp-library.ts).
-  const library = mcpLibrarySection(ctx, deps);
   // Chat apps: Telegram, through a bot of yours (chat-apps.ts).
   const chatApps = chatAppsSection(ctx);
   const read = ctx.can("mind:read");
@@ -704,10 +701,9 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
             ),
           ]),
     );
-    // (The library's servers are in the library, below; the ones Galahad ships, as cards.)
-    const shipped = available.filter((c) => c.kind !== "mcp");
-    replace(availableBox, ...shipped.map((c) => connectorCard(ctx, c, active, deps)));
-    availableSection.hidden = !shipped.length;
+    // The ones Galahad ships and the hosted MCP servers of the reviewed list, as cards.
+    replace(availableBox, ...available.map((c) => connectorCard(ctx, c, active, deps)));
+    availableSection.hidden = !available.length;
   }
 
   async function fetchOrders(): Promise<OrderView[] | null> {
@@ -770,18 +766,16 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
         chatApps.el,
         ordersSection,
         availableSection,
-        library.el,
         h("p", { class: "note" }, "A service of your own: describe it in a manifest and run ", h("span", { class: "mono" }, "galahad connector add --manifest file.json"), " on a node."),
       ),
     ),
   );
 
   // A connector installed answers whoever asked for it: their request leaves the Inbox at once.
-  scope.add(connectorsChanged.subscribe(() => (void refresh(), void ctx.live.refreshConnectorRequests(), library.refresh())));
+  scope.add(connectorsChanged.subscribe(() => (void refresh(), void ctx.live.refreshConnectorRequests())));
   scope.add(vaultChanged.subscribe(() => void refresh()));
   scope.add(ordersChanged.subscribe(() => void refreshOrders()));
   if (read) scope.interval(() => void refreshOrders(), 15_000);
   void refresh();
-  library.refresh();
   void chatApps.refresh();
 };

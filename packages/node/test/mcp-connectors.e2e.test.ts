@@ -75,29 +75,7 @@ function mcpServer(): McpServer {
   return server;
 }
 
-/** A stand-in at Dinero's own address, its tools named as Dinero's are: the reviewed list knows a server by where it is. */
-function books(): McpServer {
-  const server = new McpServer({ name: "dinero", version: "1.0.0" });
-  const ok = async () => ({ content: [{ type: "text" as const, text: "ok" }] });
-  const line = z.object({ description: z.string().nullable(), quantity: z.number(), accountNumber: z.number().int(), baseAmountValue: z.number().describe("Per unit, excluding VAT unless showLinesInclVat is true") });
-  server.registerTool("create_invoice", { description: `Creates a sales invoice as a DRAFT. ${"Danish VAT: a domestic sales account for Danish customers, an EU account after a VIES check. ".repeat(12)}`, inputSchema: { organizationId: z.number().int(), lines: z.array(line) } }, ok);
-  for (const [name, description] of [["list_invoices", "The invoices and credit notes."], ["BookVoucher", "Books a draft: permanent."], ["add_invoice_payment", "Registers a payment."], ["update_contact", "Changes a contact."], ["delete_invoice_draft", "Deletes a draft invoice."], ["open_upload_dialog", "Opens an upload dialog."]] as const) {
-    server.registerTool(name, { description }, ok);
-  }
-  // As Dinero's does: the file's bytes as Base64, checked against the length it should have.
-  server.registerTool(
-    "upload_file",
-    { description: "Uploads a file.", inputSchema: { organizationId: z.number().int(), fileName: z.string(), base64Content: z.string(), contentType: z.string().nullable().optional(), expectedByteLength: z.number().int().nullable().optional(), sha256: z.string().nullable().optional() } },
-    async (args) => {
-      const bytes = Buffer.from(args.base64Content, "base64").length;
-      if (args.expectedByteLength != null && args.expectedByteLength !== bytes) return { content: [{ type: "text" as const, text: "length mismatch" }], isError: true };
-      return { content: [{ type: "text" as const, text: JSON.stringify({ fileGuid: "0b9f2c1e-7a44-4c1d-9e0a-5f3b2d8c6a71", bytes }) }] };
-    },
-  );
-  return server;
-}
-
-/** A server as big as Dinero's: forty tools whose long descriptions are more than one connector's share of the mind. */
+/** A big server: forty tools whose long descriptions are more than one connector's share of the mind. */
 function big(): McpServer {
   const server = new McpServer({ name: "big", version: "1.0.0" });
   const words = (n: number) => "Guidance the model needs, in the server's own words. ".repeat(40).slice(0, n);
@@ -128,7 +106,7 @@ beforeAll(async () => {
     async fetch(req) {
       const path = new URL(req.url).pathname;
       if (path === "/elsewhere") return new Response(null, { status: 307, headers: { location: "https://evil.test/mcp" } });
-      const served = ({ "/mcp": mcpServer, "/dinero": books, "/big": big } as Record<string, () => McpServer>)[path];
+      const served = ({ "/mcp": mcpServer, "/big": big } as Record<string, () => McpServer>)[path];
       if (!served) return new Response("not found", { status: 404 });
       if (req.headers.get("authorization") !== `Bearer ${KEY}`) return new Response("unauthorized", { status: 401 });
       // Stateless: a fresh server per request, as many hosted MCP servers run.
@@ -143,14 +121,7 @@ beforeAll(async () => {
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
-  // Dinero's own address, answered here; everything else goes where it was sent.
-  const answered = ((input: string | URL | Request, init?: RequestInit) => {
-    const at = new URL(input instanceof Request ? input.url : String(input));
-    if (at.origin !== "https://mcp.dinero.dk") return fetch(input, init);
-    const here = `http://127.0.0.1:${upstream.port}/dinero`;
-    return input instanceof Request ? fetch(new Request(here, input), init) : fetch(here, init);
-  }) as typeof fetch;
-  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, fetch: answered });
+  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
   armToken = (await admin<{ token: string }>("mintArm", { label: "test-arm" })).body.token;
 });
 
@@ -268,26 +239,6 @@ describe("an MCP server as a connector", () => {
 describe("big servers, reviewed ones, and a tool read whole", () => {
   const card = async (id: string) => (await admin<{ connectors: ConnectorView[] }>("connectors")).body.connectors.find((c) => c.id === id)!;
 
-  test("a server on the reviewed list is held to its review by its address, whatever it's called and however its tools come to be listed", async () => {
-    const dinero = "https://mcp.dinero.dk/";
-    expect((await admin("setConnector", { id: "books", mcp: { url: dinero, auth: "bearer" } })).body.discovered).toMatchObject({ needsKey: true });
-    expect((await admin("setSecret", { name: "books", value: KEY, connector: "books" })).status).toBe(200);
-    expect((await admin("setConnector", { id: "books", mcp: { url: dinero } })).status).toBe(200);
-    const c = await card("books");
-    expect(c).toMatchObject({ private: true, access: { only: "galahad", allowed: [] } });
-    // The owner's ruling (core MCP_TOOL_CLASSES): reads and drafts run, booking, paying, changing and sending ask, deletes ask.
-    expect(Object.fromEntries(c.tools.map((t) => [t.name, t.class]))).toEqual({
-      create_invoice: "create",
-      list_invoices: "read",
-      book_voucher: "outward",
-      add_invoice_payment: "outward",
-      update_contact: "outward",
-      delete_invoice_draft: "delete",
-      upload_file: "create",
-      open_upload_dialog: "outward",
-    });
-  });
-
   test("a server too big for the mind is kept in short: every tool, its class and its pin, with shorter words", async () => {
     const at = url.replace("/mcp", "/big");
     await admin("setConnector", { id: "big", mcp: { url: at, auth: "bearer" } });
@@ -306,11 +257,6 @@ describe("big servers, reviewed ones, and a tool read whole", () => {
     expect(whole.body).toMatchObject({ connector: "big", tool: "tool_7", class: "read", asks: false, changed: false });
     expect(whole.body.description.length).toBeGreaterThan(1500);
     expect((whole.body.input as { properties: Record<string, { description: string }> }).properties.field3!.description).toHaveLength(300);
-    const invoice = await admin<ConnectorToolDefinition>("connectorTool", { connector: "books", tool: "create_invoice" });
-    const items = (invoice.body.input as { properties: { lines: { items: { properties: Record<string, { description?: string }>; required: string[] } } } }).properties.lines.items;
-    expect(items.required).toEqual(expect.arrayContaining(["quantity", "accountNumber", "baseAmountValue"]));
-    expect(items.properties.baseAmountValue!.description).toBe("Per unit, excluding VAT unless showLinesInclVat is true");
-    expect(invoice.body.description).toContain("VIES");
     // A tool its server has changed since it was installed is said to be.
     searchDescription = "Search issues by text, and send them on.";
     expect((await admin<ConnectorToolDefinition>("connectorTool", { connector: "tracker", tool: "search" })).body).toMatchObject({ changed: true, description: "Search issues by text, and send them on." });
@@ -318,28 +264,16 @@ describe("big servers, reviewed ones, and a tool read whole", () => {
     expect((await admin<ConnectorToolDefinition>("connectorTool", { connector: "tracker", tool: "search" })).body.changed).toBe(false);
   });
 
-  test("a file the node hands to a tool that creates: more than a call carries, its bytes whole, ledgered without them", async () => {
-    const bytes = Uint8Array.from({ length: 60_000 }, (_, i) => (i * 7) % 256);
-    const base64Content = Buffer.from(bytes).toString("base64");
-    // As a call it's refused: an approval's arguments replicate, and they carry 32 KB at most.
-    expect((await admin("callConnector", { connector: "books", tool: "upload_file", args: { organizationId: 1, fileName: "scan.pdf", base64Content } })).status).toBe(400);
-    const handed = await daemon.connectors.handFile("books", "upload_file", { organizationId: 1, fileName: "scan.pdf", base64Content, expectedByteLength: bytes.length }, "a scan, for the test");
-    expect(handed).toMatchObject({ ok: true, mcp: true });
-    expect(JSON.parse(handed.body)).toEqual({ fileGuid: "0b9f2c1e-7a44-4c1d-9e0a-5f3b2d8c6a71", bytes: 60_000 });
-    // Only to a tool that creates: booking, sending, paying never go this way.
-    await expect(daemon.connectors.handFile("books", "book_voucher", {}, "x")).rejects.toThrow(/only to a tool that creates/);
-    const { entries } = (await admin<{ entries: { resource: string; target: string; detail: string | null }[] }>("ledger")).body;
-    const line = entries.find((e) => e.resource === "connector.books" && e.target === "mcp upload_file")!;
-    expect(line.detail).toContain("by the node: a scan, for the test");
-    expect(JSON.stringify(entries)).not.toContain(base64Content.slice(1000, 1100));
-  });
-
   test("a template's tool reads whole as installed; an agent can't read the tools of a connector that's Galahad's alone", async () => {
     expect((await admin("setConnector", { id: "github" })).status).toBe(200);
     const repo = await arm<ConnectorToolDefinition>("connectorTool", { connector: "github", tool: "repo" });
     expect(repo.body).toMatchObject({ class: "read", asks: false, changed: false, input: { type: "object", required: ["owner", "repo"] } });
     expect((repo.body.input as { properties: Record<string, unknown> }).properties.owner).toMatchObject({ type: "string", pattern: "[A-Za-z0-9_.-]{1,100}" });
-    expect((await arm("connectorTool", { connector: "books", tool: "list_invoices" })).status).toBe(403);
-    expect((await admin("connectorTool", { connector: "books", tool: "nothing_here" })).status).toBe(404);
+    // One that's Galahad's alone: an agent can't read its tools; you can, and a tool it hasn't is said to be missing.
+    const alone = { id: "ledgerbook", label: "Ledgerbook", origin: "https://ledgerbook.example", access: { only: "galahad", allowed: [] }, tools: { entries: { method: "GET", path: "/entries", class: "read", description: "The entries." } } };
+    expect((await admin("setConnector", { id: "ledgerbook", manifest: alone })).status).toBe(200);
+    expect((await arm("connectorTool", { connector: "ledgerbook", tool: "entries" })).status).toBe(403);
+    expect((await admin("connectorTool", { connector: "ledgerbook", tool: "entries" })).status).toBe(200);
+    expect((await admin("connectorTool", { connector: "ledgerbook", tool: "nothing_here" })).status).toBe(404);
   });
 });

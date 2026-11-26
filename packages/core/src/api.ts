@@ -3,7 +3,6 @@ import { ATTACHMENT_LIMITS } from "./attachments.ts";
 import { AttachmentId, AttachmentName, AttachmentRef, AttachmentType } from "./attachment-ref.ts";
 export { AttachmentId, AttachmentName, AttachmentRef, AttachmentType };
 import { AgentLabel, ConnectorArgs, ToolName } from "./connectors.ts";
-import { MCP_AUTHS, MCP_CATEGORIES, type McpCategory, type McpIndexEntry } from "./mcp-index.ts";
 import { ActionId, ArtifactId, ConnectorId, LoopName, LoopStatus, NoticeKey, NoticeSeverity, SCREEN_SESSION_MAX_MINUTES, ScreenSessionId, THINKING_EFFORTS } from "./events.ts";
 import { Conclusion, InvestigationId, InvestigationStatus, PredictionOutcome, Preregistration } from "./investigations.ts";
 import { MAX_ORDER_DAYS, OrderId, OrderPattern } from "./orders.ts";
@@ -1086,15 +1085,6 @@ export const routes = {
   /** The owner's switch for self-action (on by default). It steers Galahad, so it's brain:write: never an agent's. */
   setSelfAction: { method: "POST", path: "/api/self-action", scope: "brain:write", input: z.strictObject({ on: z.boolean() }) },
   connectors: { method: "GET", path: "/api/connectors", scope: "mind:read", input: null },
-  /** The library of hosted MCP servers (Galahad's reviewed list and the index at mcp.galahad.sh): a page of what matches. */
-  connectorLibrary: { method: "POST", path: "/api/connectors/library", scope: "mind:read", input: z.strictObject({
-    q: z.string().max(200).optional(),
-    auth: z.enum(MCP_AUTHS as [McpIndexEntry["auth"], ...McpIndexEntry["auth"][]]).optional(),
-    category: z.enum(MCP_CATEGORIES).optional(),
-    sort: z.enum(["popular", "name", "updated"]).optional(),
-    offset: z.number().int().min(0).max(100_000).optional(),
-    limit: z.number().int().min(1).max(100).optional(),
-  }) },
   setConnector: {
     method: "POST",
     path: "/api/connectors",
@@ -1867,18 +1857,6 @@ export interface ConnectorToolView {
   /** read, create and modify run freely; outward and delete ask you. */
   asks: boolean;
   params: Record<string, { type: string; required: boolean; description: string | null; enum: string[] | null }>;
-}
-
-/** A server of the library, and whether it is installed here. */
-export interface McpLibraryView extends McpIndexEntry {
-  installed: boolean;
-}
-export interface ConnectorLibraryView {
-  entries: McpLibraryView[];
-  total: number;
-  categories: { name: McpCategory; count: number }[];
-  /** The index as this node last read it: where from (null: none is read), when, how many it holds, and why it couldn't be read, if so. */
-  index: { url: string | null; fetched: number | null; count: number; problem: string | null };
 }
 
 export interface ConnectorView {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import type { ConnectorLibraryView, ConnectorView, McpIndexEntry, RouteName } from "@galahad/core";
+import type { ConnectorView, RouteName } from "@galahad/core";
 import { routes } from "@galahad/core";
 import { installedConnector } from "@galahad/brain";
 import { foundFleet, MindStore } from "@galahad/mind";
@@ -34,10 +34,6 @@ let url: string;
 /** What the stand-in was asked: the client that registered, the sign-in your browser was sent to, each token asked for, each MCP request's Authorization. */
 const seen: { registered: Record<string, unknown> | null; authorize: URLSearchParams | null; token: URLSearchParams[]; mcp: string[] } = { registered: null, authorize: null, token: [], mcp: [] };
 
-/** What the stand-in index lists: a server that takes a key in a header of its own, and one you sign in to. */
-const indexed = (over: Partial<McpIndexEntry>): McpIndexEntry => ({ id: "acme-builds", label: "Acme Builds", description: "Builds and their logs.", url: "https://mcp.acme.example/mcp", site: "acme.example", category: "Developer tools", auth: "key", header: "X-API-Key", rank: 900, registry: "example.acme/mcp", updated: "2026-11-01T00:00:00Z", ...over });
-const INDEXED = [indexed({}), indexed({ id: "acme-tickets", label: "Acme Tickets", url: "https://tickets.acme.example/mcp", category: "Project management", auth: "oauth", header: undefined, rank: 901, description: "Tickets and boards." })];
-
 function issues(): McpServer {
   const server = new McpServer({ name: "issues", version: "2.0.0" });
   server.registerTool("list_issues", { description: "List your open issues.", inputSchema: { team: z.string().optional() }, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: "text", text: "3 open issues" }] }));
@@ -59,9 +55,6 @@ beforeAll(async () => {
       const at = new URL(req.url);
       const origin = at.origin;
       switch (at.pathname) {
-        // A stand-in for the index at mcp.galahad.sh (GALAHAD_MCP_INDEX).
-        case "/library.json":
-          return Response.json({ v: 1, generated: "2026-11-18T00:00:00Z", count: INDEXED.length, entries: INDEXED });
         case "/.well-known/oauth-protected-resource/mcp":
         case "/.well-known/oauth-protected-resource":
           return Response.json({ resource: `${origin}/mcp`, authorization_servers: [origin], scopes_supported: ["read"] });
@@ -104,7 +97,6 @@ beforeAll(async () => {
     },
   });
   url = `http://127.0.0.1:${upstream.port}/mcp`;
-  process.env.GALAHAD_MCP_INDEX = `http://127.0.0.1:${upstream.port}/library.json`;
   const { identity, keystore } = await home.createIdentity("file");
   const store = new MindStore(home.mindPath);
   const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
@@ -114,7 +106,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  delete process.env.GALAHAD_MCP_INDEX;
   await daemon?.stop();
   upstream?.stop(true);
   rmSync(root, { recursive: true, force: true });
@@ -179,40 +170,4 @@ test("the library: hosted MCP servers listed before they're added, and one added
   expect(added.body.discovered).toMatchObject({ needsSignIn: true, tools: 0 });
   expect(added.body.connector).toMatchObject({ installed: true, kind: "mcp", url: "https://mcp.linear.app/mcp", oauth: { provider: "mcp" }, key: "missing" });
   expect((await admin("setConnector", { id: "nothing-like-it" })).status).toBe(404);
-});
-
-test("the library: your company's books (Dinero) are added as Galahad's alone and private, and stay so when added again", async () => {
-  const added = await admin("setConnector", { id: "dinero" });
-  expect(added.status).toBe(200);
-  expect(added.body.connector).toMatchObject({ installed: true, kind: "mcp", url: "https://mcp.dinero.dk/", oauth: { provider: "mcp" }, private: true });
-  const stored = () => installedConnector(daemon.store, "dinero")!;
-  expect(stored()).toMatchObject({ access: { only: "galahad", allowed: [] }, private: true });
-  // A knight you allow may; added again, the one you allowed still may.
-  expect((await admin("setConnectorAccess", { id: "dinero", agent: "team.abc.bors", allow: true })).status).toBe(200);
-  expect((await admin("setConnector", { id: "dinero" })).status).toBe(200);
-  expect(stored().access).toEqual({ only: "galahad", allowed: ["team.abc.bors"] });
-});
-
-test("the library: the reviewed list and the index, searched; one added by its id takes its key, or signs in, as the index says", async () => {
-  const library = async (input: object) => (await admin<ConnectorLibraryView>("connectorLibrary", input)).body;
-  // The first ask starts the index's first read; the reviewed list answers meanwhile.
-  expect((await library({})).entries.length).toBeGreaterThan(0);
-  const end = Date.now() + 8000;
-  while (Date.now() < end && !(await library({})).index.count) await Bun.sleep(25);
-  const found = await library({ q: "acme" });
-  expect(found.index).toMatchObject({ count: 2, problem: null });
-  expect(found.entries.map((e) => e.id)).toEqual(["acme-builds", "acme-tickets"]);
-  expect((await library({ auth: "key" })).entries.map((e) => e.id)).toContain("acme-builds");
-  expect((await library({ category: "Project management", q: "acme" })).entries.map((e) => e.id)).toEqual(["acme-tickets"]);
-  // Reviewed ones lead an unsearched page.
-  expect((await library({ limit: 3 })).entries.every((e) => e.reviewed)).toBe(true);
-
-  // Added by its id, with nothing asked of the network: the key's header as the index says, then the sign-in.
-  const keyed = await admin("setConnector", { id: "acme-builds" });
-  expect(keyed.status).toBe(200);
-  expect(keyed.body.discovered).toMatchObject({ needsKey: true, tools: 0 });
-  expect(keyed.body.connector).toMatchObject({ installed: true, kind: "mcp", url: "https://mcp.acme.example/mcp", key: "missing" });
-  const signed = await admin("setConnector", { id: "acme-tickets" });
-  expect(signed.body.discovered).toMatchObject({ needsSignIn: true });
-  expect((await library({ q: "acme" })).entries.every((e) => e.installed)).toBe(true);
 });

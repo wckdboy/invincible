@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { type ActionView, type ArgValue, type ConnectorLibraryView, type ConnectorRequestView, type ConnectorToolDefinition, type ConnectorView, describeWake, type FindingView, GITHUB_WAKE_EVENTS, type LoopDraftView, type LoopRunView, type LoopTask, type LoopView, type LoopWake, type NoticeView, type OrderView, type RouteName, type SelfActionView, zonedParts } from "@galahad/core";
+import { type ActionView, type ArgValue, type ConnectorRequestView, type ConnectorToolDefinition, type ConnectorView, describeWake, type FindingView, GITHUB_WAKE_EVENTS, type LoopDraftView, type LoopRunView, type LoopTask, type LoopView, type LoopWake, type NoticeView, type OrderView, type RouteName, type SelfActionView, zonedParts } from "@galahad/core";
 import { CATALOG } from "@galahad/brain";
 
 /*
@@ -374,30 +374,6 @@ export async function connectorCommand(api: Api, sub: string | undefined, rest: 
       console.log(dim("\n  galahad connector add <id> · galahad connector tools <id> · galahad connector call <id>.<tool> --arg k=v"));
       const { requests } = await api.call<{ requests: ConnectorRequestView[] }>("connectorRequests").catch(() => ({ requests: [] as ConnectorRequestView[] }));
       if (requests.length) console.log(bold(`  ${requests.length} asked for by an agent: galahad connector requests`));
-      return;
-    }
-    case "library": {
-      // The library of hosted MCP servers: Galahad's reviewed list and the index at mcp.galahad.sh, searched.
-      const words = rest.join(" ").trim();
-      const asked = str(flags, "auth");
-      const auth = asked === undefined ? undefined : ({ "sign-in": "oauth", signin: "oauth", oauth: "oauth", key: "key", open: "none", none: "none" } as Record<string, string>)[asked];
-      if (asked !== undefined && !auth) throw new Error("--auth is sign-in, key or open");
-      const page = await api.call<ConnectorLibraryView>("connectorLibrary", {
-        ...(words ? { q: words } : {}),
-        ...(auth ? { auth } : {}),
-        ...(str(flags, "category") ? { category: str(flags, "category") } : {}),
-        ...(str(flags, "sort") ? { sort: str(flags, "sort") } : {}),
-        limit: Math.min(100, Number(str(flags, "limit") ?? 30)),
-      });
-      if (!page.entries.length) console.log(words ? `Nothing in the library matches "${words}".` : "The library is empty.");
-      for (const e of page.entries) {
-        const how = e.auth === "oauth" ? "sign in" : e.auth === "key" ? "a key" : "open";
-        console.log(`  ${bold(e.id.padEnd(28))} ${how.padEnd(8)} ${e.label}${e.reviewed ? dim(" · reviewed") : ""}${e.installed ? dim(" · installed") : ""}`);
-        console.log(`  ${" ".repeat(28)} ${dim(`${e.category} · ${new URL(e.url).host}${e.description ? ` · ${e.description.length > 90 ? `${e.description.slice(0, 89)}…` : e.description}` : ""}`)}`);
-      }
-      console.log(dim(`\n  ${page.total} in all${page.total > page.entries.length ? `, ${page.entries.length} shown (--limit)` : ""}. Add one: galahad connector add <id>`));
-      if (page.index.problem) console.log(dim(`  The index couldn't be read: ${page.index.problem}. The reviewed list is still here.`));
-      else if (page.index.url && page.index.fetched === null) console.log(dim("  The index is being read for the first time: ask again in a moment."));
       return;
     }
     case "requests": {

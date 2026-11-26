@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ChatStreamEvent } from "@galahad/core";
-import { ACP_VERSION, acpAgent, type Delivery, promptText } from "../src/acp-agent.ts";
+import { ACP_VERSION, acpAgent, promptText } from "../src/acp-agent.ts";
 
 /*
- * Galahad as an ACP agent, as a harness that runs ACP agents drives him (Buzz's buzz-acp, an editor): JSON-RPC a line
+ * Galahad as an ACP agent, as a harness that runs ACP agents drives him (an editor): JSON-RPC a line
  * at a time. The node's answer is a stand-in stream.
  */
 
-function client(answer: (messages: ChatMessage[], signal: AbortSignal) => AsyncIterable<ChatStreamEvent>, delivery?: Delivery) {
+function client(answer: (messages: ChatMessage[], signal: AbortSignal) => AsyncIterable<ChatStreamEvent>) {
   const out: any[] = [];
   const asked: ChatMessage[][] = [];
   const agent = acpAgent({
@@ -16,7 +16,6 @@ function client(answer: (messages: ChatMessage[], signal: AbortSignal) => AsyncI
       return answer(messages, signal);
     },
     write: (line) => out.push(JSON.parse(line)),
-    ...(delivery ? { delivery } : {}),
   });
   let next = 0;
   const call = async (method: string, params: object = {}) => {
@@ -90,36 +89,7 @@ describe("Galahad as an ACP agent", () => {
   });
 
   test("what a prompt carries is read as words: text, a resource's text, the rest named", () => {
-    expect(promptText([{ type: "text", text: "Look at this" }, { type: "resource", resource: { uri: "buzz://channel/eng", text: "a: hi\nb: ho" } }, { type: "image", data: "…" }])).toBe("Look at this\n\nbuzz://channel/eng:\na: hi\nb: ho\n\n(a image was attached, which Galahad can't read here)");
-  });
-
-  test("with a delivery (Buzz's), he is asked in its framing, and what he said is delivered before the turn ends: never a cancelled one's", async () => {
-    const delivered: { answer: { text: string; failed: boolean }; turn: string; answeredYet: boolean }[] = [];
-    let c: ReturnType<typeof client>;
-    const delivery: Delivery = {
-      frame: (turn) => `Where you are.\n\n${turn}`,
-      deliver: async (answer, turn) => void delivered.push({ answer, turn, answeredYet: c.out.some((m) => m.result?.stopReason) }),
-    };
-    let answer: (m: ChatMessage[], signal: AbortSignal) => AsyncIterable<ChatStreamEvent> = says({ type: "text", text: "It deploys " }, { type: "text", text: "with scripts/deploy.sh." }, { type: "done", ref: "p/m" });
-    c = client((m, signal) => answer(m, signal), delivery);
-    const { result: { sessionId } } = await c.call("session/new", { cwd: "/", mcpServers: [] });
-    expect((await c.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "<context>…</context> how do we deploy?" }] })).result).toEqual({ stopReason: "end_turn" });
-    expect(c.asked[0]).toEqual([{ role: "user", content: "Where you are.\n\n<context>…</context> how do we deploy?" }]);
-    expect(delivered).toEqual([{ answer: { text: "It deploys with scripts/deploy.sh.", failed: false }, turn: "<context>…</context> how do we deploy?", answeredYet: false }]);
-    // He couldn't answer: what is delivered is that, never the provider's words.
-    answer = says({ type: "error", error: "provider said 500" });
-    await c.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "Again?" }] });
-    expect(delivered.at(-1)!.answer).toEqual({ text: "", failed: true });
-    // Cancelled: nothing is delivered.
-    answer = async function* (_m, signal) {
-      yield { type: "text", text: "Half" } as ChatStreamEvent;
-      await new Promise((_, no) => signal.addEventListener("abort", () => no(new Error("aborted")), { once: true }));
-    };
-    const answering = c.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "Go" }] });
-    await Bun.sleep(5);
-    await c.notify("session/cancel", { sessionId });
-    expect((await answering).result).toEqual({ stopReason: "cancelled" });
-    expect(delivered.length).toBe(2);
+    expect(promptText([{ type: "text", text: "Look at this" }, { type: "resource", resource: { uri: "chat://channel/eng", text: "a: hi\nb: ho" } }, { type: "image", data: "…" }])).toBe("Look at this\n\nchat://channel/eng:\na: hi\nb: ho\n\n(a image was attached, which Galahad can't read here)");
   });
 
   test("a prompt too long to send whole keeps its beginning and its end, and a long exchange its newest messages", async () => {

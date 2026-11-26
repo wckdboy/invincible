@@ -206,15 +206,6 @@ describe("merging an MCP server's tools", () => {
     expect(again.report).toEqual({ added: ["new_thing"], changed: ["send_mail"], removed: ["drop_table"], skipped: 0 });
   });
 
-  test("the reviewed library's proposal comes after your choices and before the server's hints", () => {
-    const proposed = [["book*", "outward"], ["create*", "create"], ["get*", "read"]] as const;
-    const merged = mergeMcpTools([tool("BookVoucher", { readOnly: true }), tool("create_invoice"), tool("get_report", { destructive: true }), tool("other", { readOnly: true }), tool("create_contact")], {}, { proposed, classes: { create_contact: "outward" } });
-    expect(Object.fromEntries(Object.entries(merged.tools).map(([k, t]) => [k, t.class]))).toEqual({ book_voucher: "outward", create_invoice: "create", get_report: "read", other: "read", create_contact: "outward" });
-    // What you changed later stays, whatever the library proposes.
-    const yours = { ...merged.tools, create_invoice: { ...merged.tools.create_invoice!, class: "outward" as const } };
-    expect(mergeMcpTools([tool("create_invoice")], yours, { proposed }).tools.create_invoice!.class).toBe("outward");
-  });
-
   test("* sets the class of tools you don't name; only narrows what's installed", () => {
     const all = mergeMcpTools([tool("a"), tool("b"), tool("c")], {}, { classes: { "*": "read", c: "outward" }, only: ["a", "c"] });
     expect(Object.fromEntries(Object.entries(all.tools).map(([k, t]) => [k, t.class]))).toEqual({ a: "read", c: "outward" });

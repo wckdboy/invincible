@@ -18,7 +18,6 @@ import { lookTime } from "./looks.ts";
 import { BILAG_QUERY } from "./bilag.ts";
 import { runMcpServer } from "./mcp.ts";
 import { runAcpAgent } from "./acp-agent.ts";
-import { buzzCli, buzzDelivery } from "./buzz.ts";
 import { archiveCommand } from "./archive-cli.ts";
 import { keyAddCommand, keyElsewhereLine } from "./key-cli.ts";
 import { skillsCommand } from "./skills-cli.ts";
@@ -363,8 +362,6 @@ Notifications (he comes to you: Web Push to your own paired devices, encrypted t
 
 Connectors (manifests, not code: keys stay in the vault; outward and delete ask you)
   connector ls | connector tools <id> [tool] | connector rm <id>
-  connector library [words] [--auth sign-in|key|open] [--category "…"] [--sort popular|name|updated] [--limit 30]
-                                                  hosted MCP servers: Galahad's reviewed list and the index at mcp.galahad.sh
   connector add github|cloudflare|home-assistant [--origin url] | connector add --manifest file.json
   connector add github --owner <org>                    one more GitHub owner with its own token (github-<org>)
   connector add <id> --mcp <url> [--auth bearer|header:<name>|oauth] [--only a,b] [--class tool=read …]
@@ -420,10 +417,9 @@ Agents (MCP, ACP)
                                   give a coding agent Galahad's mind and sandboxes (least privilege)
   mcp --arm <label> [--tools a,b] the MCP server itself (stdio; started by the agent, not by you); --tools: those
                                   tools alone, of what the arm may use
-  acp install buzz [--label name] Galahad in a Buzz community: a credential that may only chat (nothing of yours in his
-                                  answers there), and how Buzz's harness runs him (docs/BUZZ.md)
-  acp --arm <label> [--buzz]      Galahad himself as an ACP agent (stdio; started by the harness, not by you); --buzz
-                                  posts each answer where it was asked, with Buzz's CLI
+  acp install [--label name]      a credential for an ACP client that may only chat (nothing of yours in his answers
+                                  there), and the command the client runs
+  acp --arm <label>               Galahad himself as an ACP agent (stdio; started by the client, not by you)
   arms | arms revoke <label>      list or revoke agent credentials
   qamp grant <did:key:z6Mk…> [--tools fleet,compute,place,ledger] [--ttl 1h]
                                   an agent on another of your machines (one that runs no node: Claude Code on a laptop)
@@ -631,9 +627,6 @@ async function main(): Promise<void> {
       steps: { type: "string" },
       arm: { type: "string" },
       apply: { type: "boolean" },
-      // `acp --buzz [--buzz-cli path]`: his answers posted to Buzz where each was asked (buzz.ts).
-      buzz: { type: "boolean" },
-      "buzz-cli": { type: "string" },
       every: { type: "string" },
       cron: { type: "string" },
       // A loop once: --at "2026-11-25 09:00" in its zone, or --in 2h from now.
@@ -1996,31 +1989,18 @@ Evidence: galahad artifact ${i!.artifact}`));
         const config = home.readConfig();
         const base = `http://127.0.0.1:${loadEnv().GALAHAD_PORT ?? config.port}`;
         const token = home.readArmToken(str("arm") ?? "acp");
-        let delivery;
-        if (flags.buzz) {
-          const cli = buzzCli(str("buzz-cli"));
-          if (!cli) fail(`galahad acp --buzz posts with Buzz's CLI, and ${str("buzz-cli") ?? "buzz"} isn't there: name it with --buzz-cli <path>`);
-          // The harness gives its agent the community's relay and its key in its environment, as it gives every agent.
-          if (!process.env.BUZZ_PRIVATE_KEY || !process.env.BUZZ_RELAY_URL) fail("galahad acp --buzz runs under Buzz's harness (buzz-acp), given BUZZ_RELAY_URL and BUZZ_PRIVATE_KEY in its environment: docs/BUZZ.md");
-          delivery = buzzDelivery({ cli: cli!, env: process.env, log: (message) => process.stderr.write(`galahad acp: ${message}\n`) });
-        }
-        await runAcpAgent({ base, token, ...(delivery ? { delivery } : {}) });
+        await runAcpAgent({ base, token });
         return;
       }
-      if (rest[0] !== "buzz") fail("usage: galahad acp install buzz [--label name]");
-      const label = str("label") ?? "buzz";
-      // A community is read by others: his answers there carry nothing of yours, and he can do nothing there but answer.
+      if (rest.length) fail("usage: galahad acp install [--label name]");
+      const label = str("label") ?? "acp";
+      // What an ACP client shows may be read by others: his answers there carry nothing of yours, and he can do nothing
+      // there but answer.
       const minted = await new Admin(home).call<{ token: string; info: { scopes: string[] } }>("mintArm", { label, scopes: ["chat"] });
       const tokenPath = home.writeArmToken(label, minted.token);
-      const args = [fileURLToPath(import.meta.url), "acp", "--arm", label, "--buzz", ...(flags.home ? ["--home", home.dir] : [])];
+      const args = [fileURLToPath(import.meta.url), "acp", "--arm", label, ...(flags.home ? ["--home", home.dir] : [])];
       console.log(`${bold(`Arm "${label}" ready`)} · scopes: ${minted.info.scopes.join(", ")}\n  token: ${tokenPath} (0600; never shown, never in chat)\n`);
-      console.log(
-        `Buzz's harness runs him, on this machine, given the agent's identity in its environment (docs/BUZZ.md):\n\n` +
-          `  BUZZ_RELAY_URL=wss://<your community>  BUZZ_PRIVATE_KEY=<the agent's key>  BUZZ_AUTH_TAG=<your attestation of it>\n` +
-          `  buzz-acp --agent-command ${process.execPath} --agent-args ${args.join(",")} \\\n` +
-          `    --respond-to owner-only --no-base-prompt --no-memory\n\n` +
-          `${dim("In Buzz Desktop on this machine: a new agent with that command and those arguments (comma-separated), answering you only.")}`,
-      );
+      console.log(`An ACP client runs him on this machine with this command and these arguments:\n\n  ${process.execPath} ${args.join(" ")}`);
       return;
     }
 

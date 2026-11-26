@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import type { ConnectorLibraryView, ConnectorRequestView, ConnectorView, RouteName } from "@galahad/core";
+import type { ConnectorRequestView, ConnectorView, RouteName } from "@galahad/core";
 import { connectorCommand } from "../src/loop-cli.ts";
 
 /* `galahad connector requests` and `connector dismiss` at a terminal, against what the node would answer. */
@@ -111,25 +111,3 @@ test("a hosted MCP server from the library at a terminal: added by its id, its s
   expect(out).not.toContain("app you registered");
 });
 
-test("the library at a terminal: words, the kind (sign-in, key, open) and a shelf asked of the node; each server with how it lets Galahad in", async () => {
-  const asked: { name: RouteName; input: unknown }[] = [];
-  const page: ConnectorLibraryView = {
-    entries: [
-      { id: "stripe", label: "Stripe", description: "Customers, payments, subscriptions and invoices.", url: "https://mcp.stripe.com", site: "stripe.com", category: "Commerce & payments", auth: "oauth", rank: 214, registry: "", updated: "", reviewed: true, installed: false },
-      { id: "acme-builds", label: "Acme Builds", description: "Builds.", url: "https://mcp.acme.example/mcp", site: "acme.example", category: "Developer tools", auth: "key", header: "X-API-Key", rank: 900, registry: "example.acme/mcp", updated: "", installed: true },
-    ],
-    total: 2,
-    categories: [],
-    index: { url: "https://mcp.galahad.sh/v1/library.json", fetched: 1, count: 1540, problem: null },
-  };
-  const api = { call: async <T,>(name: RouteName, input?: unknown) => (asked.push({ name, input }), page as T) };
-  const text = (await printed(() => connectorCommand(api, "library", ["pay", "ments"], { auth: "sign-in", category: "Commerce & payments", sort: "name" }))).join("\n");
-  expect(asked[0]).toEqual({ name: "connectorLibrary", input: { q: "pay ments", auth: "oauth", category: "Commerce & payments", sort: "name", limit: 30 } });
-  expect(text).toContain("stripe");
-  expect(text).toContain("sign in");
-  expect(text).toContain("reviewed");
-  expect(text).toContain("a key");
-  expect(text).toContain("installed");
-  expect(text).toContain("galahad connector add <id>");
-  await expect(connectorCommand(api, "library", [], { auth: "maybe" })).rejects.toThrow("--auth is sign-in, key or open");
-});

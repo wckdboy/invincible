@@ -9,7 +9,6 @@ import {
   findSecrets,
   isMcpTool,
   type Json,
-  libraryClass,
   localToolName,
   type McpTool,
   proposedClass,
@@ -293,8 +292,6 @@ export interface MergeOptions {
   only?: string[];
   /** Your class for a tool (by server or local name); "*" for every tool you don't name, including ones classified before. */
   classes?: Record<string, ConnectorManifest["tools"][string]["class"]>;
-  /** The reviewed library's proposal by tool name (core MCP_TOOL_CLASSES): after your choices, before the server's hints. */
-  proposed?: readonly (readonly [string, ConnectorManifest["tools"][string]["class"]])[];
 }
 
 export interface MergeReport {
@@ -330,7 +327,7 @@ export function mergeMcpTools(
     const local = old?.local ?? localToolName(tool.remote, taken);
     taken.add(local);
     // Yours, in order: this tool by name, "*" given now, what you chose before; else the reviewed library's, else the hints'.
-    const chosen = opts.classes?.[tool.remote] ?? opts.classes?.[local] ?? opts.classes?.["*"] ?? old?.tool.class ?? libraryClass(opts.proposed, tool.remote) ?? proposedClass(tool.hints);
+    const chosen = opts.classes?.[tool.remote] ?? opts.classes?.[local] ?? opts.classes?.["*"] ?? old?.tool.class ?? proposedClass(tool.hints);
     const description = findSecrets(tool.description).length ? "(the server's description was withheld: it looked like a key)" : tool.description;
     const hints = Object.keys(tool.hints).length ? { hints: tool.hints } : {};
     tools[local] = {

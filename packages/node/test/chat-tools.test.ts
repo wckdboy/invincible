@@ -607,7 +607,7 @@ describe("what he knows of you", () => {
     }
   });
 
-  test("an agent that may only chat (a community's, docs/BUZZ.md) is answered without what's yours: no fact you kept, no memory", async () => {
+  test("an agent that may only chat (an ACP client's) is answered without what's yours: no fact you kept, no memory", async () => {
     const admin = home.adminToken();
     const fact = (await (await call("remember", { text: "Signs off with initials only.", tags: ["about-you"] }, admin)).json()) as { id: string };
     const memory = (await (await call("remember", { text: "The staging server is called heron." }, admin)).json()) as { id: string };

@@ -20,7 +20,6 @@ export * from "./skills-input.ts";
 export * from "./bytes.ts";
 export * from "./canonical.ts";
 export * from "./connectors.ts";
-export * from "./mcp-index.ts";
 export * from "./mcp-library.ts";
 export * from "./crypto.ts";
 export * from "./decisions.ts";
