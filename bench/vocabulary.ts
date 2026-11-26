@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
  * where.
  *
  * Not looked at: that one section of docs/ARCHITECTURE.md, the licence and the notice, and the importer (which reads
- * the old system's home, in its words) under IMPORTER once it exists. A file that isn't text (it holds a NUL) is
- * skipped too.
+ * the old system's home, in its words) under IMPORTER, with its tests under IMPORTER_TESTS. A file that isn't text
+ * (it holds a NUL) is skipped too.
  *
  * The words are written here backwards, so this file says none of them itself.
  */
@@ -34,9 +34,11 @@ const PHRASES = [new RegExp(`\\b${backwards("dnuor")}[ _-]+${backwards("elbat")}
 /** The title before a name. */
 const TITLE = new RegExp(`\\b[Ss]${backwards("ri")}\\s+[A-Z][a-z]`, "g");
 
-/** Where the importer will live (docs/PLAN.md, Phase 4): it reads the old system's home, so it may say its words. */
+/** Where the importer lives (docs/PLAN.md, Phase 4), and its tests: it reads the old system's home, so they may say its words. */
 export const IMPORTER = "packages/node/src/import/";
+export const IMPORTER_TESTS = "packages/node/test/import/";
 const EXEMPT = new Set(["LICENSE", "NOTICE"]);
+const exempt = (path: string): boolean => EXEMPT.has(path) || path.startsWith(IMPORTER) || path.startsWith(IMPORTER_TESTS);
 /** docs/ARCHITECTURE.md's own section on where Invincible comes from: its heading's number. */
 const OWN_SECTION = /^## 10\. /;
 
@@ -70,7 +72,7 @@ export function wordsIn(line: string): string[] {
 
 /** Whether a tracked file is looked at, and which of its lines are (docs/ARCHITECTURE.md: all but its own section). */
 export function linesToRead(path: string, text: string): { line: number; text: string }[] {
-  if (EXEMPT.has(path) || path.startsWith(IMPORTER)) return [];
+  if (exempt(path)) return [];
   const lines = text.split("\n");
   const out: { line: number; text: string }[] = [];
   let inOwnSection = false;
@@ -86,7 +88,7 @@ export function linesToRead(path: string, text: string): { line: number; text: s
 export function findOldWords(files: readonly { path: string; text: string }[]): Finding[] {
   const findings: Finding[] = [];
   for (const file of files) {
-    if (!EXEMPT.has(file.path) && !file.path.startsWith(IMPORTER)) for (const word of wordsIn(file.path)) findings.push({ path: file.path, line: 0, word, text: file.path });
+    if (!exempt(file.path)) for (const word of wordsIn(file.path)) findings.push({ path: file.path, line: 0, word, text: file.path });
     if (file.text.includes("\0")) continue;
     for (const { line, text } of linesToRead(file.path, file.text)) {
       for (const word of wordsIn(text)) findings.push({ path: file.path, line, word, text: text.trim().slice(0, 160) });

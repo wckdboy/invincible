@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findOldWords, IMPORTER, NAMES, STEMS, trackedFiles, wordsIn } from "./vocabulary.ts";
+import { findOldWords, IMPORTER, IMPORTER_TESTS, NAMES, STEMS, trackedFiles, wordsIn } from "./vocabulary.ts";
 
 /*
  * The vocabulary check (vocabulary.ts) catches every word of the old theme however it is written, lets ordinary
@@ -57,8 +57,12 @@ describe("what it reads", () => {
     expect(one("docs/PLAN.md", doc).map((f) => f.line)).toEqual([3, 5, 7]);
   });
 
-  test("not the licence, the notice or the importer; nor a file that isn't text", () => {
-    for (const path of ["LICENSE", "NOTICE", `${IMPORTER}home.ts`]) expect(one(path, `${first} ${first}`)).toEqual([]);
+  test("not the licence, the notice, the importer or its tests; nor a file that isn't text", () => {
+    for (const path of ["LICENSE", "NOTICE", `${IMPORTER}home.ts`, `${IMPORTER_TESTS}import.test.ts`, `${IMPORTER_TESTS}${first}-fixture.ts`]) expect(one(path, `${first} ${first}`)).toEqual([]);
+    // Only those two folders: a file beside them, or in a folder that merely begins as one does, is read.
+    for (const path of ["packages/node/src/importer.ts", "packages/node/src/import-cli.ts", "packages/node/test/import.test.ts", "packages/node/test/imports/home.ts", "packages/core/test/import/home.ts"]) {
+      expect([path, one(path, first).length]).toEqual([path, 1]);
+    }
     expect(one("assets/icon.png", `\u0000PNG ${first}`)).toEqual([]);
     expect(one("README.md", `${first}`)).toEqual([{ path: "README.md", line: 1, word: first, text: first }]);
     // A file's name is read too, wherever it is.
