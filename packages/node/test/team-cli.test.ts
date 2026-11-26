@@ -291,6 +291,34 @@ test("agents ci says whether failing checks and reviews go back to the agent, an
   expect(asked).toHaveLength(before);
 });
 
+test("agents provision makes an agent's VM with a desktop unless --no-desktop, and says which it got", async () => {
+  const lines: string[] = [];
+  const asked: { name: RouteName; input: unknown }[] = [];
+  let image = "invincible/desktop:1";
+  const api = {
+    async call<T>(name: RouteName, input?: unknown): Promise<T> {
+      asked.push({ name, input });
+      return { workspace: { id: "0123456789", node: "host-one", network: "online", image } } as T;
+    },
+  };
+  const say = (line: string) => lines.push(line);
+  // The node gives it one when nothing is said: the command says nothing of a desktop.
+  await teamCommand(api, "provision", ["max"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "provisionAgent", input: { id: "max" } });
+  expect(lines.at(-1)).toBe("VM 0123456789 on host-one · with a desktop · it can reach the internet");
+  image = "invincible/sandbox:1";
+  await teamCommand(api, "provision", ["max"], { "no-desktop": true }, say);
+  expect(asked.at(-1)).toEqual({ name: "provisionAgent", input: { id: "max", desktop: false } });
+  expect(lines.at(-1)).toBe("VM 0123456789 on host-one · no desktop · it can reach the internet");
+  // Made without one though none was refused: its host makes none (a Mac), and it says so.
+  await teamCommand(api, "provision", ["max"], {}, say);
+  expect(lines.at(-1)).toBe("VM 0123456789 on host-one · no desktop: its host makes none (the ledger says why) · it can reach the internet");
+  // Asked for by name, it is refused where it can't be made (the node's to say); asked both ways, it is refused here.
+  await teamCommand(api, "provision", ["max"], { desktop: true }, say);
+  expect(asked.at(-1)).toEqual({ name: "provisionAgent", input: { id: "max", desktop: true } });
+  await expect(teamCommand(api, "provision", ["max"], { desktop: true, "no-desktop": true }, say)).rejects.toThrow(/not both/);
+});
+
 test("agents provision --remake has an agent's VM made again from its image as it is now, by its own route, and says what was kept", async () => {
   const lines: string[] = [];
   const asked: { name: RouteName; input: unknown }[] = [];

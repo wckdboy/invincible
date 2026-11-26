@@ -329,8 +329,11 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
   }
   if (sub === "provision") {
     // (Online unless you say `--network gateway`: what its VM can reach is set when it is made.)
-    const result = await api.call<{ workspace: { id: string; node: string; network?: string } }>("provisionAgent", { id: args[0], ...(string("on") ? { on: string("on") } : {}), ...(string("cpus") ? { cpus: Number(string("cpus")) } : {}), ...(string("mem") ? { memoryGb: Number(string("mem")) } : {}), ...(string("disk") ? { diskGb: Number(string("disk")) } : {}), ...(string("network") ? { network: string("network") } : {}), ...(flags.desktop ? { desktop: true } : {}) });
-    print(`VM ${result.workspace.id} on ${result.workspace.node}${flags.desktop ? " · with a desktop" : ""}${result.workspace.network ? ` · ${result.workspace.network === "online" ? "it can reach the internet" : "it reaches the model gateway only"}` : ""}`); return;
+    // (With a desktop unless --no-desktop: --desktop asks for one by name, and is refused where no host can make one.)
+    if (flags.desktop && flags["no-desktop"]) throw new Error("--desktop or --no-desktop, not both");
+    const result = await api.call<{ workspace: { id: string; node: string; network?: string; image?: string } }>("provisionAgent", { id: args[0], ...(string("on") ? { on: string("on") } : {}), ...(string("cpus") ? { cpus: Number(string("cpus")) } : {}), ...(string("mem") ? { memoryGb: Number(string("mem")) } : {}), ...(string("disk") ? { diskGb: Number(string("disk")) } : {}), ...(string("network") ? { network: string("network") } : {}), ...(flags.desktop ? { desktop: true } : flags["no-desktop"] ? { desktop: false } : {}) });
+    const hasDesktop = result.workspace.image?.includes("desktop");
+    print(`VM ${result.workspace.id} on ${result.workspace.node}${hasDesktop ? " · with a desktop" : flags["no-desktop"] ? " · no desktop" : " · no desktop: its host makes none (the ledger says why)"}${result.workspace.network ? ` · ${result.workspace.network === "online" ? "it can reach the internet" : "it reaches the model gateway only"}` : ""}`); return;
   }
   if (sub === "memory") {
     if (args.length > 1) await api.call("teamMemory", { id: args[0], text: args.slice(1).join(" ") });

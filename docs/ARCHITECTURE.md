@@ -206,7 +206,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
 - **Sandboxes:**
   - Kata microVMs on Linux and Apple containers on macOS;
   - one per run;
-  - a firewall that lets a run reach its node's bridge and nothing it wasn't granted.
+  - a firewall that lets a run reach its node's bridge and nothing it wasn't granted;
+  - **a desktop in every agent's VM** unless it is made without one (`--no-desktop`, the forms' **No desktop**): a
+    display, a browser, a terminal, an editor and the accessibility bus, which the agent operates with its `desktop`
+    command and you watch and take over (the owner's standard, 26 November 2026). A Mac makes none yet: there an
+    agent's VM is made without one, and the ledger says why. What it costs and how fast it is: the scorecard's desktop
+    suite ([BENCHMARKS.md](BENCHMARKS.md)).
 - **Shipping:** a run's verified changes become a pull request. Its CI and the review comments come back to the same
   task.
 - **Each agent's mark:** the Grille (core's `agent-mark.ts`; the look in DESIGN.md), the node's to give, once, as the

@@ -101,10 +101,11 @@ of its own; "agents" and "team" are the same command)
   agents changes <agent> [--task <id>] [--files]  what its latest task (or that one) changed: files, then the diff
   agents trail <task-id> [--follow]  what a task did, as it happened: its plan, each command and what it printed,
                                     the gates, the review; --follow keeps reading until the task has ended
-  agents provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--desktop]
+  agents provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--no-desktop]
                                     its VM: online (the default) it can reach the internet, gateway only the models;
-                                    --desktop: with a display, a window manager and a browser, for work that needs a
-                                    screen (at least 4 GB; in the VM, desktop help lists what operates it)
+                                    with a desktop (a display, a browser, a terminal and an editor, at least 4 GB; in
+                                    the VM, desktop help lists what operates it) unless --no-desktop; on a host that
+                                    makes none (a Mac), without one
   agents provision <id> --remake [--network online|gateway] [--desktop|--no-desktop]
                                     its VM made again from the image as it is now (a fix to the image, a newer tool):
                                     the same VM and everything in /work, a new container; not while it is working.

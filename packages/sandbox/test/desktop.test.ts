@@ -26,7 +26,8 @@ function machine(options: { running?: boolean; env?: Record<string, string> } = 
   mkdirSync(bin); mkdirSync(home); mkdirSync(run);
   // (One write a call: tools started in the background write at the same time as those that wait for them.)
   const tool = (name: string, body = "") => { writeFileSync(join(bin, name), `#!/bin/sh\nline=${name}; for a in "$@"; do line="$line [$a]"; done; printf '%s\\n' "$line" >> "$TRACE"\n${body}\n`); chmodSync(join(bin, name), 0o755); };
-  for (const name of ["Xvfb", "openbox", "chromium", "xdotool"]) tool(name);
+  for (const name of ["Xvfb", "openbox", "chromium", "xdotool", "xterm", "mousepad"]) tool(name);
+  tool("setsid", 'exec "$@"');
   // The display answers once it is "up": after Xvfb was asked for, or from the start.
   tool("xdpyinfo", options.running ? 'echo "  dimensions:    1280x800 pixels"' : 'grep -q "^Xvfb" "$TRACE" && echo "  dimensions:    1280x800 pixels" || exit 1');
   tool("scrot", 'for a in "$@"; do last=$a; done; printf PNG > "$last"');
@@ -77,15 +78,31 @@ describe("the desktop command", () => {
     expect(up.traced().some((line) => line.startsWith("Xvfb "))).toBe(false);
   }, 30_000);
 
-  test("a screenshot is a file it names, and the page in front can be read as text", () => {
+  test("a screenshot is a file it names, with the pointer drawn in, and the page in front can be read as text", () => {
     const m = machine({ running: true });
     const shot = m.ask("shot");
     expect(shot.code).toBe(0);
     expect(shot.out).toMatch(/\/shot-\d+\.png$/);
+    expect(m.traced().find((line) => line.startsWith("scrot "))).toMatch(/^scrot \[-o\] \[-p\] /);
     expect(readFileSync(shot.out, "utf8")).toBe("PNG");
     const named = join(m.run, "mine.png");
     expect(m.ask("shot", named)).toMatchObject({ code: 0, out: named });
     expect(m.ask("text")).toMatchObject({ code: 0, out: "Example Domain\nhttps://example.com/\nThis domain is for use in documentation examples." });
+  }, 30_000);
+
+  test("a terminal or an editor is started on the screen apart from the command that asked, which says so", () => {
+    const m = machine({ running: true });
+    expect(m.ask("app", "terminal")).toMatchObject({ code: 0, out: "Started the terminal (xterm)." });
+    expect(m.ask("app", "editor")).toMatchObject({ code: 0, out: "Started the editor (mousepad)." });
+    // (Started in the background: seen once each has begun, within a few seconds on a busy machine.)
+    const want = ["setsid [xterm] [-fa] [DejaVu Sans Mono] [-fs] [11] [-geometry] [100x30+120+80]", "setsid [mousepad]"];
+    const started = () => m.traced().filter((line) => line.startsWith("setsid "));
+    for (let i = 0; i < 300 && !want.every((line) => started().includes(line)); i++) Bun.sleepSync(10);
+    expect(started().sort()).toEqual([...want].sort());
+    const refused = m.ask("app", "calculator");
+    expect(refused.code).toBe(2);
+    expect(refused.err).toContain("desktop app <terminal|editor>");
+    expect(m.ask("help").out).toContain("desktop app <terminal|editor>");
   }, 30_000);
 
   test("what isn't a place on the screen, a key, or an address is refused before anything is touched", () => {
@@ -111,7 +128,7 @@ describe("looking at the screen", () => {
     expect(m.ask("look", "Where is the Sign in button?")).toMatchObject({ code: 0 });
     const asked = m.traced().filter((line) => /^(scrot|python3) /.test(line));
     // A fresh picture of the screen (a JPEG: a tenth of the size), then the question with it.
-    expect(asked[0]).toMatch(/^scrot \[-o\] \[.*\/look-\d+\.jpg\]$/);
+    expect(asked[0]).toMatch(/^scrot \[-o\] \[-p\] \[.*\/look-\d+\.jpg\]$/);
     expect(asked[1]).toMatch(/^python3 \[-\] \[look\] \[.*\/look-\d+\.jpg\] \[Where is the Sign in button\?\]$/);
     // Nothing of the token is ever an argument (the script reads it from its environment).
     expect(m.traced().join("\n")).not.toContain("gw_test-only");
@@ -130,10 +147,18 @@ describe("looking at the screen", () => {
 });
 
 describe("the desktop image", () => {
-  test("is the agents' image with a display, a window manager, a browser and the tools that operate them, and ends as the agent", () => {
+  test("is the agents' image with a display, a window manager, a browser, a terminal, an editor and the tools that operate them, and ends as the agent", () => {
     expect(dockerfile).toMatch(/^FROM invincible\/sandbox:1$/m);
     const installed = dockerfile.replace(/\\\n/g, " ");
-    for (const pkg of ["xvfb", "openbox", "chromium", "xdotool", "scrot", "x11-utils", "python3-websocket", "fonts-noto-cjk"]) expect(installed).toMatch(new RegExp(`apt-get install[^\\n]* ${pkg}( |$)`, "m"));
+    // C0 (26 November 2026) found no terminal and no editor on it: the terminal and editor tasks couldn't be done.
+    for (const pkg of ["xvfb", "openbox", "chromium", "xdotool", "scrot", "x11-utils", "python3-websocket", "fonts-noto-cjk", "xterm", "mousepad", "xclip", "at-spi2-core", "python3-pyatspi", "python3-xlib"]) expect(installed).toMatch(new RegExp(`apt-get install[^\\n]* ${pkg}( |$)`, "m"));
+    // Text is UTF-8 in the image's own environment: a raw exec there stopped at the first letter that isn't ASCII.
+    expect(dockerfile).toMatch(/^ENV LANG=C\.UTF-8$/m);
+    // No app's first-run or restore question: the seed is installed, compiled, and checked as the image is built.
+    expect(dockerfile).toContain("COPY seed/90_invincible-desktop.gschema.override /usr/share/glib-2.0/schemas/\n");
+    expect(dockerfile).toContain('"$(ls /usr/lib/*/glib-2.0/glib-compile-schemas)" /usr/share/glib-2.0/schemas');
+    expect(dockerfile).toMatch(/get_string\('session-restore'\); assert v == 'never'/);
+    expect(readFileSync(new URL("seed/90_invincible-desktop.gschema.override", context), "utf8")).toMatch(/^\[org\.xfce\.mousepad\.preferences\.file\]\nsession-restore='never'$/m);
     expect(dockerfile).toContain("COPY desktop /usr/local/bin/desktop\n");
     expect(dockerfile).toContain("RUN chmod 0755 /usr/local/bin/desktop\n");
     // Root only to install: the image is left as the agent's user, like the one it is made from.

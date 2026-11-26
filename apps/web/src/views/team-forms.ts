@@ -465,15 +465,15 @@ export function provisionVm(ctx: Ctx, person: Agent, done: (workspace: SandboxVi
   const memory = h("input", { class: "input", type: "number", min: 1, max: 256, step: 1, value: 4, required: true });
   const disk = h("input", { class: "input", type: "number", min: 1, max: 2048, step: 1, value: 20, required: true });
   const network = networkChoice(true);
-  const desktop = desktopChoice(false);
+  const desktop = desktopChoice(true);
   editor(ctx, `Workspace for ${person.name}`, "Provision a persistent microVM on a capable fleet node. Provisioning fails if a VM isn't available.", [
     field("Machine", host), h("div", { class: "team-form-grid" }, field("CPUs", cpus), field("Memory (GB)", memory), field("Disk (GB)", disk, { hint: "Requires the host's workspace helper. Otherwise disk is unlimited." })),
     field("It can reach", network, { hint: "Set when the VM is made. Online, it can fetch packages and sign a coding tool in to its own account; whatever is kept in the VM can then leave it." }),
     desktop.el,
     callout("info", "The workspace keeps its files between tasks. Model access goes through the gateway; keys stay outside the VM."),
   ], person.workspace ? "Check / provision VM" : "Provision VM", async () => {
-    const result = await ctx.api.post<{ agent: Agent; workspace: SandboxView | null }>("/api/team/provision", { id: person.id, ...(host.value ? { on: host.value } : {}), cpus: Number(cpus.value), memoryGb: Number(memory.value), diskGb: Number(disk.value), network: network.value, ...(desktop.box.checked ? { desktop: true } : {}) });
-    toast(result.workspace ? "Workspace ready" : "Workspace saved; checking status");
+    const result = await ctx.api.post<{ agent: Agent; workspace: SandboxView | null }>("/api/team/provision", { id: person.id, ...(host.value ? { on: host.value } : {}), cpus: Number(cpus.value), memoryGb: Number(memory.value), diskGb: Number(disk.value), network: network.value, ...(desktop.box.checked ? {} : { desktop: false }) });
+    toast(result.workspace ? "Workspace ready" : "Workspace saved; checking status", result.workspace && desktop.box.checked && !hasDesktop(result.workspace) ? { description: "Made without a desktop: its host makes none (a Mac). The ledger says why." } : undefined);
     done(result.workspace);
   });
 }
@@ -488,7 +488,7 @@ export function remakeVm(ctx: Ctx, person: Pick<Agent, "id" | "name">, workspace
     callout("info", "Everything in /work is kept: its repository, its files, a coding tool's own sign-in. Whatever is running in the VM ends, so this is refused while the agent is working."),
   ], "Make VM again", async () => {
     const result = await ctx.api.post<{ agent: Agent; workspace: SandboxView }>("/api/team/remake", { id: person.id, network: network.value, desktop: desktop.box.checked });
-    toast(desktop.box.checked ? "VM made again, with a desktop" : "VM made again");
+    toast(desktop.box.checked ? "VM made again, with a desktop" : "VM made again, with no desktop");
     done(result.workspace);
   });
 }
@@ -521,12 +521,15 @@ export function growVm(ctx: Ctx, person: Pick<Agent, "id" | "name">, workspace: 
   });
 }
 
-/** Whether an agent's VM has a desktop: chosen when it is made, or made again (from the desktop image, or the workshop's). */
-function desktopChoice(checked: boolean): { el: HTMLElement; box: HTMLInputElement } {
-  const box = h("input", { type: "checkbox", name: "desktop", checked });
+/**
+ * Whether an agent's VM has a desktop: every one does unless you say otherwise (the owner's standard, 26 November 2026),
+ * chosen when it is made or made again. `box` is checked for a desktop; what you tick is "No desktop".
+ */
+function desktopChoice(withDesktop: boolean): { el: HTMLElement; box: { readonly checked: boolean } } {
+  const none = h("input", { type: "checkbox", name: "no-desktop", checked: !withDesktop });
   return {
-    box,
-    el: h("div", { class: "stack", style: "gap:2px" }, h("label", { class: "row" }, box, h("span", {}, "A desktop: a screen, a window manager and a browser, for work that needs a screen")), h("p", { class: "tiny subtle" }, "Made from the desktop image (about 1.1 GB more), with at least 4 GB of memory. You can watch it, and take it over, from the Workspace.")),
+    box: { get checked() { return !none.checked; } },
+    el: h("div", { class: "stack", style: "gap:2px" }, h("label", { class: "row" }, none, h("span", {}, "No desktop")), h("p", { class: "tiny subtle" }, "Every agent's VM has a desktop unless you tick this: a screen, a browser, a terminal and an editor, with at least 4 GB of memory, that you can watch and take over from the Workspace. Without one it is a shell alone.")),
   };
 }
 

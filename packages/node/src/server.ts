@@ -2074,13 +2074,31 @@ export function createApp(ctx: AppContext) {
       const existing = await teamWorkspace(member, signal);
       if (existing) return existing;
       const chosen = member.workspaceNode ?? input.on;
-      // An agent's own VM: kept, and maybe given more (a host whose VMs grow live is leaned to); a desktop isn't made on a Mac.
-      const needs: SandboxNeeds = { network: input.network ?? "online", kept: true, ...(input.desktop ? { desktop: true } : {}) };
+      // An agent's own VM: kept, and maybe given more (a host whose VMs grow live is leaned to). With a desktop unless
+      // you say otherwise (the owner's standard, 26 November 2026); a Mac makes none, so where no host can and you didn't
+      // ask for one by name, it is made without, and the ledger says why.
+      let desktop = input.desktop ?? true;
+      const needsOf = (withDesktop: boolean): SandboxNeeds => ({ network: input.network ?? "online", kept: true, ...(withDesktop ? { desktop: true } : {}) });
       const hosts = candidates().filter((c) => c.online && c.caps?.sandbox?.vm);
       const pinned = chosen ? hosts.find((c) => c.device === resolveNode(chosen).id) : undefined;
-      const cannot = pinned ? sandboxRefusals([pinned], needs)[0] : undefined;
+      let without: string | null = null;
+      const fallBack = (why: string): void => {
+        desktop = false;
+        without = why;
+      };
+      let cannot = pinned ? sandboxRefusals([pinned], needsOf(desktop))[0] : undefined;
+      if (cannot && desktop && input.desktop === undefined && !sandboxRefusals([pinned!], needsOf(false))[0]) {
+        fallBack(`${cannot.name}: ${cannot.reason}`);
+        cannot = undefined;
+      }
       if (cannot) throw new HttpError(424, `this agent's VM host can't make it: ${cannot.reason}`);
-      const best = chosen ? pinned : sandboxHost(hosts, needs);
+      let best = chosen ? pinned : sandboxHost(hosts, needsOf(desktop));
+      if (!best && !chosen && desktop && input.desktop === undefined) {
+        const refused = sandboxRefusals(hosts, needsOf(true));
+        best = sandboxHost(hosts, needsOf(false));
+        if (best) fallBack(refused.map((r) => `${r.name}: ${r.reason}`).join(" · ") || "no host here makes a desktop");
+      }
+      const needs = needsOf(desktop);
       if (!best) {
         const refused = chosen ? [] : sandboxRefusals(hosts, needs);
         throw new HttpError(424, chosen ? "this agent's VM host is unavailable or lacks KVM/Kata" : refused.length ? `no VM host in this fleet can make it: ${refused.map((r) => `${r.name}: ${r.reason}`).join(" · ")}` : "no VM-capable host is online; enroll a Linux host with KVM and Kata, or a Mac with Apple's container");
@@ -2099,8 +2117,9 @@ export function createApp(ctx: AppContext) {
         // Online unless asked otherwise (the owner's word: agents can use the internet); the gateway is there either way.
         const made = await api.call<{ sandbox: SandboxView }>("createSandbox", { on: best.device, persistent: true, isolation: "vm", network: input.network ?? "online", run: armRun(agentLabel(id)), cpus: input.cpus ?? 1,
           // (A browser needs room: a desktop is never made with less than four.)
-          memoryGb: input.desktop ? Math.max(4, input.memoryGb ?? 4) : (input.memoryGb ?? 2), diskGb: input.diskGb ?? 20, ttlMinutes: 120, providers, ...(input.desktop ? { desktop: true } : {}) });
+          memoryGb: desktop ? Math.max(4, input.memoryGb ?? 4) : (input.memoryGb ?? 2), diskGb: input.diskGb ?? 20, ttlMinutes: 120, providers, ...(desktop ? { desktop: true } : {}) });
         sandbox = made.sandbox;
+        if (without) ctx.ledger?.({ class: "create", resource: "team.workspace", target: id, verdict: "allow", detail: `made without a desktop: no host that can make this VM makes one (${String(without).slice(0, 240)})` });
       }
       if (id === TEAM_PRIMARY) teamOf().setComputer({ node: best.device, id: sandbox.id });
       else teamOf().setWorkspace(id, { node: best.device, id: sandbox.id });
@@ -2772,9 +2791,8 @@ export function createApp(ctx: AppContext) {
     },
     provisionAgent: (input, p, req) => {
       ownerOnly(p);
-      // Its own computer has a desktop unless you say otherwise: it is its PC.
-      const asked = input.id === TEAM_PRIMARY && input.desktop === undefined ? { ...input, desktop: true } : input;
-      return longRunning(provisionTeam(input.id, asked, req.signal).then((workspace) => ({ agent: input.id === TEAM_PRIMARY ? null : teamMember(input.id), workspace })));
+      // A desktop unless you say otherwise, its own computer's as every agent's (provisionTeam).
+      return longRunning(provisionTeam(input.id, input, req.signal).then((workspace) => ({ agent: input.id === TEAM_PRIMARY ? null : teamMember(input.id), workspace })));
     },
     remakeAgent: (input, p, req) => {
       ownerOnly(p);

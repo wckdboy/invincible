@@ -16,7 +16,8 @@ desktop start                      bring up the display, the window manager and 
 desktop status | desktop stop
 desktop open <address>             open an address in the browser (http, https, file or about)
 desktop text                       the page in front, as text: its title, its address, what it says
-desktop shot [file.png]            a screenshot of the whole display; prints the file's path
+desktop app <terminal|editor>      start a terminal (xterm) or an editor (mousepad) on the screen
+desktop shot [file.png]            a screenshot of the whole display, the pointer drawn in; prints the file's path
 desktop look "<question>"          ask a model that can see what is on the screen, or where something
                                    is (it answers a place as x,y, to click or move to)
 desktop click <x> <y> [left|right|middle|double]
@@ -24,7 +25,8 @@ desktop move <x> <y>
 desktop scroll <up|down> [times]
 desktop type <text>                type text where the keyboard's focus is
 desktop key <key>...               press keys, e.g. Return, Tab, Escape, ctrl+l, ctrl+a, alt+Left
-The display is 1280 by 800; x runs right from 0, y runs down from 0.
+The display is 1280 by 800; x runs right from 0, y runs down from 0. The clipboard is xclip's
+(xclip -selection clipboard), and text everywhere is UTF-8.
 HELP
 }
 fail() { echo "desktop: $1" >&2; exit "${2:-1}"; }
@@ -150,14 +152,23 @@ case "$verb" in
     case "${1:-}" in http://* | https://* | file://* | about:*) ;; *) refuse "an address begins with http, https, file or about" ;; esac
     start && page navigate "$1" ;;
   text) start && page text ;;
+  app)
+    # (There is no taskbar to start one from: this starts it on the screen, apart from the command that asked.)
+    case "${1:-}" in
+      terminal) set -- terminal xterm -fa "DejaVu Sans Mono" -fs 11 -geometry 100x30+120+80 ;;
+      editor) set -- editor mousepad ;;
+      *) refuse "app starts a terminal or an editor: desktop app <terminal|editor>" ;;
+    esac
+    name=$1; shift
+    start && { setsid "$@" >"$RUN/app-$name.log" 2>&1 & } && echo "Started the $name ($1)." ;;
   shot)
     file=${1:-"$RUN/shot-$(date +%s)$$.png"}
-    start && scrot -o "$file" && echo "$file" ;;
+    start && scrot -o -p "$file" && echo "$file" ;;
   look)
     [ $# -ge 1 ] || refuse 'look takes a question: desktop look "<question>"'
     [ -n "${INVINCIBLE_EYES:-}" ] && [ -n "${INVINCIBLE_GATEWAY:-}" ] && [ -n "${INVINCIBLE_TOKEN:-}" ] || { echo "desktop: no model that can see is set for this VM (use desktop text to read a page, and desktop shot for a picture)" >&2; exit 3; }
     seen="$RUN/look-$(date +%s)$$.jpg"
-    start && scrot -o "$seen" && eyes look "$seen" "$*"
+    start && scrot -o -p "$seen" && eyes look "$seen" "$*"
     code=$?; rm -f "$seen"; exit "$code" ;;
   click)
     whole "${1:-}" && whole "${2:-}" || refuse "click takes two whole numbers: desktop click <x> <y> [left|right|middle|double]"

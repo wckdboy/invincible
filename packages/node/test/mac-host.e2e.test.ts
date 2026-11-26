@@ -130,8 +130,14 @@ describe("a node on a Mac with Apple's container", () => {
 
   test("an agent's VM is made on the Mac, and grown by pausing: the answer says it paused, and the ledger why", async () => {
     await api("saveAgent", { id: "ada", name: "ADA", role: "engineer" });
+    // A desktop is every agent's unless you say otherwise; a Mac makes none, so it is made without, and the ledger says why.
     const { workspace } = await api<{ workspace: SandboxView }>("provisionAgent", { id: "ada" });
-    expect(workspace).toMatchObject({ isolation: "vm", network: "online", ephemeral: false, cpus: 1, memoryGb: 2 });
+    expect(workspace).toMatchObject({ isolation: "vm", network: "online", ephemeral: false, cpus: 1, memoryGb: 2, image: "invincible/sandbox:1" });
+    const made = (await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "team.workspace" && e.target === "ada");
+    expect(made?.detail).toBe(`made without a desktop: no host that can make this VM makes one (mini: ${CONTAINER_CANNOT.desktop})`);
+    // Asked for by name, it is refused, saying why: never quietly made without.
+    await api("saveAgent", { id: "bea", name: "BEA", role: "engineer" });
+    await expect(api("provisionAgent", { id: "bea", desktop: true })).rejects.toThrow(CONTAINER_CANNOT.desktop);
     expect(fake.volumes.get(`${workspace.name}-work`)!.labels["dev.invincible.retained"]).toBe("1");
     const grown = await api<{ workspace: SandboxView; paused?: boolean }>("resizeAgent", { id: "ada", memoryGb: 4 });
     expect(grown).toMatchObject({ paused: true, workspace: { id: workspace.id, memoryGb: 4, status: "running" } });

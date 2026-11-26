@@ -64,3 +64,20 @@ test("the image installs that script where Debian's /etc/profile reads it, reada
   // Before the image drops to the agent's user: /etc is root's.
   expect(dockerfile.indexOf(`RUN chmod 0644 ${copied![1]}`)).toBeLessThan(dockerfile.indexOf("USER 1000:1000"));
 });
+
+/** The agents' desktop, made from the workshop: what its own Dockerfile adds to the environment. */
+const desktopDockerfile = readFileSync(new URL("desktop/Dockerfile", context), "utf8");
+
+test("the desktop image adds no PATH of its own: a login shell there has every tool the workshop's has, in the same order", () => {
+  expect(desktopDockerfile).not.toMatch(/^ENV PATH=/m);
+  // Its tools are where every login shell looks already.
+  expect(desktopDockerfile).toContain("COPY desktop /usr/local/bin/desktop\n");
+  expect(PROFILE_PATH.split(":")).toContain("/usr/local/bin");
+});
+
+test("its text is UTF-8 in a login shell too: the image sets LANG, and what every login shell reads leaves it as it is", async () => {
+  expect(desktopDockerfile).toMatch(/^ENV LANG=C\.UTF-8$/m);
+  const proc = Bun.spawn(["/bin/sh", "-c", '. "$1"; printf %s "$LANG"', "sh", script], { env: { PATH: PROFILE_PATH, HOME: "/work", LANG: "C.UTF-8" }, stdout: "pipe", stderr: "pipe" });
+  expect(await new Response(proc.stdout).text()).toBe("C.UTF-8");
+  expect(await proc.exited).toBe(0);
+});

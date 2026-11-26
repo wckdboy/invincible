@@ -1,0 +1,4 @@
+# The agents' desktop (sandbox/desktop/Dockerfile): no app asks a question as it starts.
+# Mousepad never offers to restore a session: a VM made again ends its apps without a goodbye, every time.
+[org.xfce.mousepad.preferences.file]
+session-restore='never'

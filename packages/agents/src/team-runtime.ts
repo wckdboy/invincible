@@ -615,7 +615,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const named = desktop ? (deps.eyes?.(agent) ?? null) : null;
       const sees = named && /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:\/-]+$/.test(named) && (!held || held.includes(named)) ? named : null;
       const looking = sees ? ' `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).' : "";
-      const screen = desktop ? " This VM has a desktop: a display (1280 by 800) and a browser, which you operate with the `desktop` command (open an address, read the page as text, take a screenshot, click, type, press keys). `desktop help` lists it." + looking : "";
+      const screen = desktop ? " This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it." + looking : "";
       // A temporary directory of the task's own, on the workspace: a sandbox's /tmp is mounted noexec, so a test that
       // writes a script there and runs it fails with exit 126 (and with it a gate that passes everywhere else).
       const temp = `/work/.tmp/${task.id}`;

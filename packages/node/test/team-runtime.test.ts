@@ -1197,7 +1197,7 @@ test("an agent whose VM has a desktop is told so, and how to operate it; one wit
     await f.runtime.executeTask(member, task, f.context);
     return String(f.bodies[1].messages.find((m: any) => m.role === "user").content);
   };
-  expect(await told(true)).toContain("This VM has a desktop: a display (1280 by 800) and a browser, which you operate with the `desktop` command (open an address, read the page as text, take a screenshot, click, type, press keys). `desktop help` lists it.");
+  expect(await told(true)).toContain("This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it.");
   expect(await told(false)).not.toContain("desktop");
 });
 

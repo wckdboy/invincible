@@ -576,11 +576,15 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   const made = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "sam" })).workspace;
   // An agent's VM can use the internet, by the owner's word: it is made online unless you say otherwise.
   expect(made.network).toBe("online");
+  // And with a desktop unless you say otherwise (the owner's standard, 26 November 2026), with room for its browser.
+  expect(made).toMatchObject({ image: "invincible/desktop:1", memoryGb: 4 });
   const ran = (id: string) => runs.find((args) => args[0] === "run" && args.some((arg) => arg.includes(id)))!;
   expect(ran(made.id).filter((arg, i, all) => all[i - 1] === "--network")).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
   await api("saveAgent", { id: "una", name: "UNA", role: "engineer" });
-  const kept = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "una", network: "gateway" })).workspace;
+  const kept = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "una", network: "gateway", desktop: false })).workspace;
   expect(kept.network).toBe("gateway");
+  // Without one when you say so: the workshop's image, and the memory asked for.
+  expect(kept).toMatchObject({ image: "invincible/sandbox:1", memoryGb: 2 });
   expect(ran(kept.id).filter((arg, i, all) => all[i - 1] === "--network")).toEqual([NETWORKS.gateway.name]);
   // Her VM is made again from its image as it is now, on your word: the same VM, and this time it may use the
   // internet, which nothing else can change about a microVM.
