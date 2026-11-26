@@ -1,4 +1,4 @@
-import { FABRIC_RUN_TOOLS, type FabricSettingView, type HandedView, HandoffGrantInput, type HandoffGrantView, HandTaskInput, plainLine } from "@invincible/core";
+import { FABRIC_RUN_TOOLS, type FabricSettingView, type FleetView, type HandedView, HandoffGrantInput, type HandoffGrantView, HandTaskInput, plainLine } from "@invincible/core";
 // The apps' own words for a verdict (the CLI reads them as the apps do).
 import { type ProofFacts, verdictOf } from "../../../apps/web/src/lib/steps.ts";
 import type { Api } from "./loop-cli.ts";
@@ -17,6 +17,28 @@ const bold = (s: string) => (tty ? `\x1b[1m${s}\x1b[0m` : s);
 
 export const HAND_USAGE = `usage: invincible hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools ${FABRIC_RUN_TOOLS.join(",")}] [--budget <usd>] [--title "…"] [--follow]
        invincible handed [<id> [--follow] | stop <id> | revoke <id>]`;
+
+/**
+ * `invincible status`'s lines for the fleet: each device, its state and the path to it, and why a peer is over HTTP.
+ * Names, capabilities and reasons are other devices' words (the ledger's, or a peer's error): each is printed plain.
+ */
+export function fleetStatusLines(fleet: FleetView): string[] {
+  const peers = new Map(fleet.peers.map((p) => [p.device, p]));
+  const lines = [`${bold(`Fleet ${plainLine(fleet.name)}`)}  ${dim(fleet.fleet.slice(0, 12))}  events=${fleet.events}  digest=${fleet.digest.slice(0, 10)}`];
+  for (const d of fleet.devices) {
+    const caps = d.caps as Record<string, any> | null;
+    const peer = peers.get(d.id);
+    // (Its path: Q-AMP through the sidecars, or HTTP with signed requests where Q-AMP can't be had: the API calls it "https".)
+    const path = peer?.path === "qamp" ? " q-amp" : peer?.path === "https" ? " http" : "";
+    const state = d.revokedAt ? "revoked" : d.id === fleet.self ? "this node" : d.kind === "client" ? "client" : peer?.online ? `online ${peer.rttMs}ms${path}` : "offline";
+    const summary = caps
+      ? plainLine(`${caps.os}/${caps.arch} ${caps.cores}c ${caps.memoryGb}GB${caps.gpu?.length ? ` gpu:${caps.gpu[0].name}` : ""}${caps.docker ? " docker" : ""}${caps.vm?.kvm ? " kvm" : ""}${caps.localModels?.some((r: any) => r.models.length) ? " local-ai" : ""}`)
+      : "";
+    lines.push(`  ${plainLine(d.name).padEnd(18)} ${d.kind.padEnd(6)} ${state.padEnd(20)} ${dim(summary)}`);
+    if (peer?.online && peer.path === "https" && peer.fallback) lines.push(`  ${" ".repeat(18)} ${dim(`over HTTP: ${plainLine(peer.fallback)}`)}`);
+  }
+  return lines;
+}
 
 /** A handed task's verdict, in the apps' words, from what the node that ran it signed (null: not ended yet). */
 export function handedVerdict(view: HandedView): { word: string; proven: boolean } | null {

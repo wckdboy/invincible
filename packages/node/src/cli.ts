@@ -22,7 +22,7 @@ import { keyAddCommand, keyElsewhereLine } from "./key-cli.ts";
 import { skillsCommand } from "./skills-cli.ts";
 import { ruleCommand } from "./rule-cli.ts";
 import { qampCommand } from "./qamp-cli.ts";
-import { fabricCommand, handCommand } from "./fabric-cli.ts";
+import { fabricCommand, fleetStatusLines, handCommand } from "./fabric-cli.ts";
 import { computeCommand, parseEffort } from "./compute-cli.ts";
 import { checkGates, githubConnector, githubRepo, investigateFromCli, runFromCli, shipBranch } from "./run-cli.ts";
 import { askCommand, runsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
@@ -1022,21 +1022,7 @@ Next:
     }
 
     case "status": {
-      const fleet = await new Admin(home).call<FleetView>("fleet");
-      const peers = new Map(fleet.peers.map((p) => [p.device, p]));
-      console.log(`${bold(`Fleet ${fleet.name}`)}  ${dim(fleet.fleet.slice(0, 12))}  events=${fleet.events}  digest=${fleet.digest.slice(0, 10)}`);
-      for (const d of fleet.devices) {
-        const caps = d.caps as Record<string, any> | null;
-        const peer = peers.get(d.id);
-        // (Its path: Q-AMP through the sidecars, or HTTP with signed requests where Q-AMP can't be had: the API calls it "https".)
-        const path = peer?.path === "qamp" ? " q-amp" : peer?.path === "https" ? " http" : "";
-        const state = d.revokedAt ? "revoked" : d.id === fleet.self ? "this node" : d.kind === "client" ? "client" : peer?.online ? `online ${peer.rttMs}ms${path}` : "offline";
-        const summary = caps
-          ? `${caps.os}/${caps.arch} ${caps.cores}c ${caps.memoryGb}GB${caps.gpu?.length ? ` gpu:${caps.gpu[0].name}` : ""}${caps.docker ? " docker" : ""}${caps.vm?.kvm ? " kvm" : ""}${caps.localModels?.some((r: any) => r.models.length) ? " local-ai" : ""}`
-          : "";
-        console.log(`  ${d.name.padEnd(18)} ${d.kind.padEnd(6)} ${state.padEnd(20)} ${dim(summary)}`);
-        if (peer?.online && peer.path === "https" && peer.fallback) console.log(`  ${" ".repeat(18)} ${dim(`over HTTP: ${peer.fallback}`)}`);
-      }
+      for (const line of fleetStatusLines(await new Admin(home).call<FleetView>("fleet"))) console.log(line);
       await statusLine(new Admin(home));
       return;
     }

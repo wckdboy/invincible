@@ -12,6 +12,7 @@ import {
   type NodeIdentity,
   onTailnetOrLoopback,
   OWNER_SCOPES,
+  plainLine,
   type PeerPath,
   type Presence,
   PushRequest,
@@ -374,7 +375,9 @@ export class Fabric implements SyncTransport {
   }
 
   /** It goes over HTTP for now, and why; Q-AMP is tried again after `fixedMs`, or a while longer each time (null). */
-  private notHere(peer: string, why: string, fixedMs: number | null): { unavailable: string } {
+  private notHere(peer: string, said: string, fixedMs: number | null): { unavailable: string } {
+    // (A peer's own words may be in it, kept for the Doctor and the status lines: one plain line, nothing hidden in it.)
+    const why = plainLine(said);
     this.paths.set(peer, { path: "https", why, at: this.now() });
     const prior = this.backoff.get(peer);
     const ms = fixedMs ?? (prior ? Math.min(prior.ms * 2, RETRY_MS.max) : RETRY_MS.first);
@@ -386,7 +389,7 @@ export class Fabric implements SyncTransport {
   unusable(peer: Device): string | null {
     const client = this.deps.sidecar.client;
     if (!client?.open) return `this node's sidecar isn't up (${this.deps.sidecar.why ?? this.deps.sidecar.state})`;
-    if (!this.peerEndpoint(peer)) return `${peer.name} has no Q-AMP endpoint in its profile (no sidecar there, or a node from before it)`;
+    if (!this.peerEndpoint(peer)) return `${plainLine(peer.name)} has no Q-AMP endpoint in its profile (no sidecar there, or a node from before it)`;
     const off = this.backoff.get(peer.id);
     if (off && off.until > this.now()) return `${this.paths.get(peer.id)?.why ?? "Q-AMP failed"} (tried again in ${Math.ceil((off.until - this.now()) / 1000)} s)`;
     return null;
@@ -429,7 +432,7 @@ export class Fabric implements SyncTransport {
       }
       if (error.kind === "cancelled") throw error;
       const refused = error.kind === "remote" && error.code !== null ? (NOT_HERE.get(error.code) ?? null) : null;
-      return this.notHere(peer.id, `Q-AMP to ${peer.name} failed: ${error.message.slice(0, 160)}`, refused);
+      return this.notHere(peer.id, `Q-AMP to ${peer.name} failed: ${plainLine(error.message).slice(0, 160)}`, refused);
     }
   }
 

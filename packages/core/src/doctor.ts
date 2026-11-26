@@ -6,6 +6,8 @@
  * No zod here: the PWA draws from this file. The route's input is checked in api.ts.
  */
 
+import { plainLine } from "./plain.ts";
+
 /** ok: well · needs-you: works, but something is yours to do · broken: doesn't work · skipped: not looked at this time (and why). */
 export const DOCTOR_STATES = ["ok", "needs-you", "broken", "skipped"] as const;
 export type DoctorState = (typeof DOCTOR_STATES)[number];
@@ -119,8 +121,9 @@ export function doctorLines(report: DoctorReport, style: DoctorStyle = PLAIN): s
       out.push("", style.head(DOCTOR_AREA_TITLES[area]));
     }
     const took = check.ms !== undefined && check.state !== "skipped" ? style.dim(` (${doctorTook(check.ms)})`) : "";
-    out.push(`  ${style.state(check.state, DOCTOR_STATE_WORDS[check.state].padEnd(9))} ${check.line}${took}`);
-    if (check.fix && check.state !== "ok") out.push(`            ${style.dim("→")} ${check.fix}`);
+    // (Another node's words may be in a line, a peer's error or its name: each is printed plain, nothing hidden in it.)
+    out.push(`  ${style.state(check.state, DOCTOR_STATE_WORDS[check.state].padEnd(9))} ${plainLine(check.line)}${took}`);
+    if (check.fix && check.state !== "ok") out.push(`            ${style.dim("→")} ${plainLine(check.fix)}`);
   }
   out.push("", style.head(doctorVerdict(report.tally)));
   return out;
