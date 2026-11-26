@@ -217,7 +217,7 @@ internal fun Question(q: Json, answer: (Boolean, Map<String, Any?>) -> Unit) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
             OutlinedButton(onClick = { answer(false, emptyMap()) }) { Text("Decline") }
-            Button(onClick = {
+            androidx.compose.material3.FilledTonalButton(colors = pillColors(), onClick = {
                 val content = q["fields"].list.associate { f ->
                     val name = f["name"].string!!
                     val v = values[name]
@@ -315,7 +315,7 @@ internal fun Fact(f: Json, keep: (String?) -> Unit, drop: () -> Unit) {
     Panel {
         Text(f["text"].string ?: "", style = MaterialTheme.typography.bodyLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = { keep(null) }) { Text("Keep") }
+            AnswerPill("Keep", { keep(null) })
             OutlinedButton(onClick = { rewording = true }) { Text("In my words") }
             TextButton(onClick = drop) { Text("Drop", color = LocalBrand.current.failed) }
         }

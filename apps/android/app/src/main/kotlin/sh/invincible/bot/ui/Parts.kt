@@ -132,9 +132,11 @@ fun Decision(no: String, yes: String, onNo: () -> Unit, onYes: () -> Unit, enabl
             enabled = enabled,
             shapes = ButtonShapes(ButtonGroupDefaults.connectedLeadingButtonShape, ButtonGroupDefaults.connectedLeadingButtonPressShape),
         ) { Text(no) }
-        Button(
+        // (An answer, among others on a page: a grey pill, never a filled button. A screen has one of those at most.)
+        androidx.compose.material3.FilledTonalButton(
             onClick = onYes,
             enabled = enabled,
+            colors = pillColors(),
             shapes = ButtonShapes(ButtonGroupDefaults.connectedTrailingButtonShape, ButtonGroupDefaults.connectedTrailingButtonPressShape),
         ) { Text(yes) }
     }

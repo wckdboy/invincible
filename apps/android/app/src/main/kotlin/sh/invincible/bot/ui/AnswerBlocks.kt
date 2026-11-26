@@ -254,7 +254,7 @@ fun PageCard(page: String) {
             Text("A page", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(title, style = MaterialTheme.typography.titleMediumEmphasized)
         }
-        Button(onClick = { open = true }) { Text("Open") }
+        AnswerPill("Open", { open = true })
     }
     if (open) PageView(page, title) { open = false }
 }

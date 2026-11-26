@@ -267,14 +267,17 @@ private fun DecisionRow(d: Decision, busy: Boolean) {
     }
 }
 
+/** An answer's colours: a grey pill in the ink (the iPhone's), never a filled button. */
+@Composable
+internal fun pillColors() = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = LocalBrand.current.ink.copy(alpha = 0.08f), contentColor = LocalBrand.current.ink)
+
 /** An answer in place: a grey pill in the ink (the iPhone's), never a filled button. */
 @Composable
 internal fun AnswerPill(label: String, onClick: () -> Unit, enabled: Boolean = true) {
-    val brand = LocalBrand.current
     androidx.compose.material3.FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
-        colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = brand.ink.copy(alpha = 0.08f), contentColor = brand.ink),
+        colors = pillColors(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
         modifier = Modifier.heightIn(min = 40.dp),
     ) { Text(label, style = Type.word.copy(fontSize = 15.sp), maxLines = 1) }

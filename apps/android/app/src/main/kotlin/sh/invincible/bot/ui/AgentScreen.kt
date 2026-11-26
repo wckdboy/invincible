@@ -331,7 +331,7 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
                 status == "proposed" -> Decision(no = "Decline", yes = "Start it", onNo = { control("stop") }, onYes = { control("approve") })
                 status == "queued" || status == "running" -> OutlinedButton(onClick = { control("stop") }) { Text("Stop", color = LocalBrand.current.failed) }
                 status == "done" && verified && t["changes"] != null && t["fix"] == null && shipped == null ->
-                    androidx.compose.material3.Button(onClick = { shipping = true }) { Text("Ship it") }
+                    AnswerPill("Ship it", { shipping = true })
                 status == "failed" || status == "stopped" || status == "interrupted" -> OutlinedButton(onClick = { control("resume") }) { Text("Resume") }
             }
         }

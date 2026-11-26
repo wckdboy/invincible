@@ -161,7 +161,7 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                     keyboardActions = KeyboardActions(onGo = { open() }),
                     modifier = Modifier.weight(1f),
                 )
-                Button(onClick = { open() }, enabled = Desktop.address(address) != null) { Text("Open") }
+                AnswerPill("Open", { open() }, enabled = Desktop.address(address) != null)
             }
             fun type() {
                 val text = typed
@@ -184,7 +184,7 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                     keyboardActions = KeyboardActions(onSend = { type() }),
                     modifier = Modifier.weight(1f),
                 )
-                Button(onClick = { type() }, enabled = typed.isNotEmpty()) { Text("Type") }
+                AnswerPill("Type", { type() }, enabled = typed.isNotEmpty())
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = hidden, onCheckedChange = { hidden = it })
