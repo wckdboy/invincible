@@ -510,6 +510,8 @@ struct Vectors: Decodable {
     let connectorStates: [ConnectorState]
     let threads: [Thread]
     let chats: ChatList
+    /// The message box while it works: steer or queue, a side question, what waits above it (lib/turns.ts): ComposerTests.
+    let composer: ComposerCases
     let markdown: [MarkdownCase]
     let blocks: BlockCases
     let timelines: Timelines
@@ -548,6 +550,35 @@ struct Vectors: Decodable {
         }
         let task: Task
         let verdict: Said?
+    }
+
+    struct ComposerCases: Decodable {
+        struct Action: Decodable { let busy: Bool; let enter: String; let modifier: Bool; let canQueue: Bool; let action: String }
+        struct Aside: Decodable { let text: String; let aside: String? }
+        struct Steering: Decodable { let count: Int; let line: String }
+        struct Head: Decodable { let queued: Int; let held: String?; let busy: Bool; let count: String; let rest: String }
+        struct Undelivered: Decodable { let texts: Int; let queued: Bool; let title: String; let detail: String }
+        struct Placeholder: Decodable { let canQueue: Bool; let words: String }
+        struct AsideNote: Decodable { let working: Bool; let note: String }
+        struct BroughtBack: Decodable { let how: String; let words: String }
+        struct Said: Decodable { let title: String; let detail: String }
+        let actions: [Action]
+        let asides: [Aside]
+        let steering: [Steering]
+        let heads: [Head]
+        let undelivered: [Undelivered]
+        let placeholders: [Placeholder]
+        let filesWait: String
+        let justStarting: String
+        let notKept: String
+        let asideNotes: [AsideNote]
+        let broughtBack: [BroughtBack]
+        let nothingYet: Said
+        struct AsidePlaceholder: Decodable { let working: Bool; let words: String }
+        let asidePlaceholders: [AsidePlaceholder]
+        let asideAnswering: String
+        let asideFailed: String
+        let bringBackFailed: String
     }
 
     struct Mark: Decodable {

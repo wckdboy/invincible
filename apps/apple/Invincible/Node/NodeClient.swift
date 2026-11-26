@@ -246,6 +246,11 @@ enum ChatEvent: Equatable, Sendable {
     case fallback(from: String, error: String)
     /// A message of yours reached it while it worked: what follows answers it, in the same turn.
     case steer(String)
+    /// Messages of yours that hadn't reached it when the turn ended: queued first and held in a kept chat, handed back
+    /// otherwise.
+    case undelivered(texts: [String], queued: Bool)
+    /// First in a side question's stream: its id, to bring it back by.
+    case aside(id: String)
     case stopped(reason: String)
     case error(String)
     case done(ref: String)
@@ -277,6 +282,8 @@ enum ChatEvent: Equatable, Sendable {
             let from: String?
             let reason: String?
             let error: String?
+            let texts: [String]?
+            let queued: Bool?
         }
         guard let frame = try? JSONDecoder().decode(Frame.self, from: Data(json.utf8)) else { return nil }
         switch (frame.type, frame) {
@@ -291,6 +298,8 @@ enum ChatEvent: Equatable, Sendable {
         case ("archive", let f): self = .archive(f.entries ?? [])
         case ("fallback", let f): self = .fallback(from: f.from ?? "", error: f.error ?? "")
         case ("steer", let f): guard let text = f.text else { return nil }; self = .steer(text)
+        case ("undelivered", let f): self = .undelivered(texts: f.texts ?? [], queued: f.queued ?? false)
+        case ("aside", let f): guard let id = f.id else { return nil }; self = .aside(id: id)
         case ("stopped", let f): self = .stopped(reason: f.reason ?? "")
         case ("error", let f): self = .error(f.error ?? "Something went wrong.")
         case ("done", let f): self = .done(ref: f.ref ?? "")

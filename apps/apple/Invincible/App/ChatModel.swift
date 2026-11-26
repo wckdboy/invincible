@@ -63,6 +63,16 @@ struct ChatRequest: Encodable, Sendable {
     var onScreen = false
     /// Told the id of the chat on screen when it is read, so what showed its answers there as new stops at once.
     var read: ((String) -> Void)?
+    /// What you queued behind this chat, kept on the node, and why it's held when it is (core's QueueHold).
+    private(set) var queue: [QueuedMessage] = []
+    private(set) var held: String?
+    /// Messages sent to steer it that haven't reached it yet (it's mid-tool, or mid-thought).
+    private(set) var steering: [String] = []
+    /// What became of something sent while it worked, said once above the message box: a message that didn't reach it,
+    /// or why one wasn't taken.
+    var notice: (title: String, detail: String)?
+    /// A message can be queued behind this chat: the node keeps it (a new chat, once its first answer is kept).
+    var canQueue: Bool { conversation != nil }
 
     var answering: Bool { live != nil }
     /// There is something to send (words, or a file that is up), and no file is still going up.
@@ -92,6 +102,7 @@ struct ChatRequest: Encodable, Sendable {
             let detail = try await client.post("/api/conversations/get", Get(id: id), as: Got.self).conversation
             (conversation, title, role, problem, turn) = (detail.id, detail.title, detail.role, nil, nil)
             thread = ChatThread(kept: detail.messages, role: detail.role)
+            (queue, held, steering) = (detail.queue ?? [], detail.held, [])
             unread = detail.unread == true
             markRead(with: client)
             // (A turn this device may not watch is refused if asked for: the chat shows as the node keeps it.)
@@ -160,6 +171,7 @@ struct ChatRequest: Encodable, Sendable {
         guard live == nil else { return }
         thread = ChatThread()
         (conversation, title, problem, role) = (nil, nil, nil, "planner")
+        (queue, held, steering, notice) = ([], nil, [], nil)
         opened = true
     }
 
@@ -201,6 +213,14 @@ struct ChatRequest: Encodable, Sendable {
                         if let kept { conversation = kept }
                     case .conversation(let id, let named):
                         (conversation, title) = (id, named)
+                    case .steer(let text):
+                        // A steer of yours reached it: no longer on its way.
+                        if let at = steering.firstIndex(of: text) { steering.remove(at: at) }
+                    case .undelivered(let texts, let queued):
+                        steering = []
+                        notice = ComposerWords.undelivered(texts: texts.count, queued: queued)
+                        // A chat kept nowhere has nowhere to queue them: the words come back to the box.
+                        if !queued { draft = ([draft] + texts).filter { !$0.isEmpty }.joined(separator: "\n\n") }
                     default: break
                     }
                     thread.apply(event)
@@ -217,7 +237,118 @@ struct ChatRequest: Encodable, Sendable {
             (live, turn, watching) = (nil, nil, nil)
             silence?.cancel()
             silence = nil
+            steering = []
+            // How it ended may have held what's queued, or sent the next of it: the queue as the node holds it now.
+            await rereadQueue(with: client)
         }
+    }
+
+    /// The queue behind the chat on screen, as the node holds it now (its next may have begun: attached to then).
+    func rereadQueue(with client: NodeClient) async {
+        guard let conversation else { return }
+        struct Get: Encodable { let id: String }
+        struct Got: Decodable { let conversation: ConversationDetail }
+        guard let detail = try? await client.post("/api/conversations/get", Get(id: conversation), as: Got.self).conversation, self.conversation == conversation else { return }
+        (queue, held) = (detail.queue ?? [], detail.held)
+        if live == nil, let running = detail.turn, running.watchable != false { attach(running.id, with: client) }
+    }
+
+    // MARK: Steer or queue, while it works (the PWA's sendMessage)
+
+    /// What's in the box, while it works: steered into the turn under way (it's told at its next safe point), or queued
+    /// on the node behind the chat (sent when it's done). With nothing running it is simply sent. `how`: a button's own
+    /// choice; otherwise Return's, by this device's choice and `modifier` for the other (ComposerWords.action).
+    func deliver(_ how: ComposerWords.Action? = nil, modifier: Bool = false, enter: ComposerWords.Enter, with client: NodeClient) {
+        let busy = live != nil
+        var action = how ?? ComposerWords.action(busy: busy, enter: enter, modifier: modifier, canQueue: canQueue)
+        guard busy, action != .send else { send(with: client); return }
+        if action == .queue, !canQueue { action = .steer }
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        // Files go with a message it answers from its start: not one handed it as it works, nor one queued.
+        guard outbox.carried.isEmpty else { notice = ("Not sent yet", ComposerWords.filesWait); return }
+        draft = ""
+        sent += 1
+        notice = nil
+        Task {
+            do {
+                if action == .queue, let conversation {
+                    struct Ask: Encodable { let conversation: String; let text: String; let role: String }
+                    let view = try await client.post("/api/conversations/queue", Ask(conversation: conversation, text: text, role: role), as: QueueView.self)
+                    (queue, held) = (view.queue, view.held)
+                    // It'd finished meanwhile, so its turn came at once: watched from here.
+                    if view.started != nil, live == nil { await rereadQueue(with: client) }
+                } else {
+                    guard let turn else { draft = text; notice = ("Not sent yet", ComposerWords.justStarting); return }
+                    struct Steer: Encodable { let turn: String; let text: String }
+                    _ = try await client.post("/api/turns/steer", Steer(turn: turn, text: text), as: JSONValue.self)
+                    steering.append(text)
+                }
+            } catch let error as NodeError where error.status == 409 && action == .steer {
+                // It finished while you typed: it's simply your next message.
+                await resume(with: client)
+                if live == nil {
+                    draft = text
+                    send(with: client)
+                } else {
+                    draft = text
+                    notice = ("Not sent", error.message)
+                }
+            } catch {
+                draft = text
+                notice = ("Not sent", error.localizedDescription)
+            }
+        }
+    }
+
+    /// A change to the queue (the PWA's queueActions): the queue as the node holds it after, or why it wasn't made.
+    private func changeQueue(_ path: String, _ body: some Encodable & Sendable, with client: NodeClient) async {
+        guard conversation != nil else { notice = ("Not changed", ComposerWords.notKept); return }
+        do {
+            let view = try await client.post(path, body, as: QueueView.self)
+            (queue, held) = (view.queue, view.held)
+            // Send now and Resume may have started a turn (or steered the one under way).
+            if live == nil { await rereadQueue(with: client) }
+        } catch {
+            notice = ("Not changed", error.localizedDescription)
+            await rereadQueue(with: client)
+        }
+    }
+
+    private struct QueueRef: Encodable, Sendable { let conversation: String; var id: Int? = nil; var text: String? = nil }
+
+    func editQueued(_ id: Int, text: String, with client: NodeClient) async {
+        guard let conversation else { return }
+        await changeQueue("/api/conversations/queue/edit", QueueRef(conversation: conversation, id: id, text: text), with: client)
+    }
+
+    func removeQueued(_ id: Int, with client: NodeClient) async {
+        guard let conversation else { return }
+        await changeQueue("/api/conversations/queue/remove", QueueRef(conversation: conversation, id: id), with: client)
+    }
+
+    /// Everything queued behind this chat, discarded.
+    func discardQueue(with client: NodeClient) async {
+        guard let conversation else { return }
+        await changeQueue("/api/conversations/queue/remove", QueueRef(conversation: conversation), with: client)
+    }
+
+    /// One queued message now: it steers the turn under way, or starts as a turn at once.
+    func sendQueued(_ id: Int, with client: NodeClient) async {
+        guard let conversation else { return }
+        await changeQueue("/api/conversations/queue/send", QueueRef(conversation: conversation, id: id), with: client)
+    }
+
+    /// A held queue goes on.
+    func resumeQueue(with client: NodeClient) async {
+        guard let conversation else { return }
+        await changeQueue("/api/conversations/queue/resume", QueueRef(conversation: conversation), with: client)
+    }
+
+    /// What a side question would be about: this kept chat, or the turn under way in a new one (nil: nothing yet).
+    var asideAbout: SideQuestion.About? {
+        if let conversation { return .conversation(conversation) }
+        return turn.map { .turn($0) }
     }
 
     /// Something came on the watch (a beat at least): it is alive for three more of the node's beats.
@@ -268,6 +399,7 @@ struct ChatRequest: Encodable, Sendable {
               self.conversation == conversation, live == nil, !loading else { return }
         title = detail.title
         unread = detail.unread == true
+        (queue, held) = (detail.queue ?? [], detail.held)
         markRead(with: client)
         // Shown again only where the node holds what isn't on screen (a send it never took stays, with why); its turn in it,
         // attached to when this device may watch it (one it may not is refused, so it isn't asked for again and again).

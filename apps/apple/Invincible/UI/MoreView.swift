@@ -10,6 +10,8 @@ struct MoreView<Leading: View>: View {
     let leading: Leading
     @State private var forgetting = false
     @State private var problem: String?
+    /// What Return does in the primary's chat while it works, on this device (the PWA's Settings → Chat).
+    @AppStorage("chat.enter") private var enter = ComposerWords.Enter.steer.rawValue
 
     init(app: AppModel, session: Session, places: Bool = true, @ViewBuilder leading: () -> Leading) {
         (self.app, self.session, self.places, self.leading) = (app, session, places, leading())
@@ -33,6 +35,19 @@ struct MoreView<Leading: View>: View {
                 NotificationsSection(session: session)
             }
             #endif
+            if session.can("chat") {
+                Section {
+                    Picker("Return while it works", selection: $enter) {
+                        Text("Steers it").tag(ComposerWords.Enter.steer.rawValue)
+                        Text("Queues it").tag(ComposerWords.Enter.queue.rawValue)
+                    }
+                    .accessibilityIdentifier("settings.enter")
+                } header: {
+                    SectionHead("Chat")
+                } footer: {
+                    PageNote("Steer: your message reaches it now, at its next safe point. Queue: it's kept on the node and sent when it's done. Each has its own button beside Stop; with a keyboard, ⌘-Return does the other.")
+                }
+            }
             if places, session.can("vault:read") || session.can("mind:read") {
                 Section {
                     if session.can("vault:read") {

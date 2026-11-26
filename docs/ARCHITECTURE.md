@@ -196,6 +196,8 @@ The models layer, carried (§10):
     two taps from Home; notifications and `invincible://` links that land on the exact task, agent, approval or chat.
   - Every client keeps up over the node's live stream (core's live.ts): nothing asked while nothing changes, a dead link
     told within three of the node's beats (4.5 s).
+  - While the primary answers, its chat's message box stays open: a message steers it or is queued on the node, a held
+    queue says why with Resume, and a side question is answered apart (lib/turns.ts, the apps held to its words).
   - Wide screens: three panes. Your agent pinned atop the work, a task's thread, and its details: the VM, the
     changes, the proof, the cost.
   - It was designed and measured in the last redesign before the carry (§10), and carried over without the old theme.

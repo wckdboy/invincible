@@ -6,6 +6,7 @@ import { openSheet } from "../ui/dialog.ts";
 import { h, replace } from "../ui/dom.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
 import { toast } from "../ui/toast.ts";
+import { ASIDE_ANSWERING, ASIDE_FAILED, asideNote, asidePlaceholder, BRING_BACK_FAILED, broughtBackWords } from "../lib/turns.ts";
 
 /*
  * A side question: something you ask about the work in hand without changing its
@@ -15,7 +16,7 @@ import { toast } from "../ui/toast.ts";
  */
 
 export function openAside(api: Api, about: { conversation: string } | { turn: string }, opts: { question?: string; working: boolean; onBroughtBack(): void }): void {
-  const input = h("textarea", { class: "textarea", rows: 2, maxlength: 4000, placeholder: opts.working ? "e.g. What is it waiting on?" : "e.g. Which file was that in?", "aria-label": "Your side question" }) as HTMLTextAreaElement;
+  const input = h("textarea", { class: "textarea", rows: 2, maxlength: 4000, placeholder: asidePlaceholder(opts.working), "aria-label": "Your side question" }) as HTMLTextAreaElement;
   input.value = opts.question ?? "";
   const answerBox = h("div", { class: "aside-answer", "aria-live": "polite" });
   const note = h("div", { role: "alert" });
@@ -31,9 +32,7 @@ export function openAside(api: Api, about: { conversation: string } | { turn: st
 
   const sheet = openSheet({
     title: "Ask on the side",
-    description: opts.working
-      ? "Answered apart, from this chat and what it's said and done so far in this turn. It doesn't change what it's doing, and it never sees it unless you bring it back."
-      : "Answered apart, from what this chat holds. It isn't added to the chat unless you bring it back.",
+    description: asideNote(opts.working),
     body: [input, note, answerBox],
     footer: [button("Close", { variant: "ghost", onClick: () => sheet.close() }), bring, ask],
     initialFocus: () => input,
@@ -55,7 +54,7 @@ export function openAside(api: Api, about: { conversation: string } | { turn: st
     const draw = (writing: boolean): void => {
       const body = h("div", { class: "md" });
       body.append(renderMarkdown(text));
-      replace(answerBox, writing && !text ? h("div", { class: "row tiny subtle" }, spinner("sm"), "Answering on the side…") : body);
+      replace(answerBox, writing && !text ? h("div", { class: "row tiny subtle" }, spinner("sm"), ASIDE_ANSWERING) : body);
     };
     draw(true);
     watching = new AbortController();
@@ -76,7 +75,7 @@ export function openAside(api: Api, about: { conversation: string } | { turn: st
     }
     if (failed) {
       aside = null;
-      return replace(note, callout("danger", failed, { title: "It couldn't answer on the side" }));
+      return replace(note, callout("danger", failed, { title: ASIDE_FAILED }));
     }
     draw(false);
     replace(ask, "Ask again");
@@ -89,11 +88,11 @@ export function openAside(api: Api, about: { conversation: string } | { turn: st
     try {
       const { how } = await api.post<{ how: "steered" | "kept" }>("/api/turns/aside/bring", { aside });
       sheet.close();
-      toast(how === "steered" ? "Brought back: it reaches it at its next safe point" : "Brought back: it's in the chat now");
+      toast(broughtBackWords(how));
       opts.onBroughtBack();
     } catch (error) {
       bring.disabled = false;
-      replace(note, callout("danger", errorMessage(error), { title: "Couldn't bring it back" }));
+      replace(note, callout("danger", errorMessage(error), { title: BRING_BACK_FAILED }));
     }
   }
 

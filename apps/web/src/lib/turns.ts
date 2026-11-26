@@ -1,6 +1,7 @@
 import type { AttachmentRef, ChatStreamEvent, StoredMessage } from "@invincible/core";
-import { type ChatNeeds, type ChatState, chatStateWords, type QueueHold } from "@invincible/core/turns";
+import { type ChatNeeds, type ChatState, chatStateWords, holdWords, type QueueHold } from "@invincible/core/turns";
 import { archiveStep, stepsOf } from "./chats.ts";
+import { plural } from "./text.ts";
 
 /*
  * Turns the node owns, as the app shows them. Pure functions (no DOM), unit-tested:
@@ -41,6 +42,61 @@ export function asideOf(text: string): string | null {
   const m = /^\s*\/(?:btw|aside)(?:\s+([\s\S]*))?$/i.exec(text);
   return m ? (m[1] ?? "").trim() : null;
 }
+
+/* ---------- what waits above the composer, in the words every app says (the apps' vectors) ---------- */
+
+/** The line over messages sent to steer it that haven't reached it yet (it's mid-tool, or mid-thought). */
+export function steeringLine(count: number): string {
+  return `On ${count === 1 ? "its" : "their"} way to it: it's told at its next safe point (a tool that's running finishes first)`;
+}
+
+/** The queue's head: how many, and what becomes of them; held, why, and that nothing goes until you resume. */
+export function queueHead(q: { queued: number; held: QueueHold | null; busy: boolean }): { count: string; rest: string } {
+  const count = plural(q.queued, "message");
+  if (q.held) return { count: `${count} held`, rest: `: ${holdWords(q.held)}. Nothing is sent until you resume.` };
+  return { count: `${count} queued`, rest: q.busy ? ": sent in order when it's done with this turn." : ": waiting for room on the node." };
+}
+
+/** Messages of yours that hadn't reached it when its turn ended: queued first and held in a kept chat, back in the box otherwise. */
+export function undeliveredWords(u: { texts: number; queued: boolean }): { title: string; detail: string } {
+  return u.queued
+    ? { title: `${plural(u.texts, "message")} didn't reach it before the turn ended`, detail: "Queued, first in line, and held until you resume." }
+    : { title: "Your message didn't reach it before the turn ended", detail: "It's back in the message box." };
+}
+
+/** The message box while it works: steer or queue, or steer alone where nothing can be kept (a temporary chat). */
+export const busyPlaceholder = (canQueue: boolean): string => (canQueue ? "Steer it, or queue what's next…" : "Steer it…");
+
+/** A steer sent before the node has said which turn it is. */
+export const JUST_STARTING = "It's only just starting: try again in a moment.";
+
+/** A queue's change asked of a chat the node doesn't keep (a temporary one). */
+export const NOT_KEPT = "This chat isn't kept, so nothing is queued behind it.";
+
+/** Why files didn't go with a message sent while it works: they go with one it answers from its start. */
+export const FILES_WAIT = "Files go with your next message, once it's done: wait for it, or stop it first.";
+
+/** A side question's note: what it's answered from, and that it changes nothing unless you bring it back. */
+export const asideNote = (working: boolean): string =>
+  working
+    ? "Answered apart, from this chat and what it's said and done so far in this turn. It doesn't change what it's doing, and it never sees it unless you bring it back."
+    : "Answered apart, from what this chat holds. It isn't added to the chat unless you bring it back.";
+
+/** What Bring back did: steered the turn under way, or joined the chat. */
+export const broughtBackWords = (how: "steered" | "kept"): string => (how === "steered" ? "Brought back: it reaches it at its next safe point" : "Brought back: it's in the chat now");
+
+/** What a side question's box suggests: about the work under way, or about what the chat holds. */
+export const asidePlaceholder = (working: boolean): string => (working ? "e.g. What is it waiting on?" : "e.g. Which file was that in?");
+
+/** While a side question's answer hasn't begun. */
+export const ASIDE_ANSWERING = "Answering on the side…";
+
+/** The titles of what went wrong with a side question: its answer, and bringing it back. */
+export const ASIDE_FAILED = "It couldn't answer on the side";
+export const BRING_BACK_FAILED = "Couldn't bring it back";
+
+/** A side question asked before there's anything to ask it about. */
+export const ASIDE_NOTHING_YET = { title: "Nothing to ask on the side yet", detail: "A side question is about a chat: ask something first." } as const;
 
 /* ---------- a chat's state at a glance ---------- */
 

@@ -36,7 +36,7 @@ import { againGoal, timeline, timelineTasks } from "../../web/src/lib/timeline.t
 import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, taskActions, taskBadge, taskEnd } from "../../web/src/lib/task-card.ts";
 import { agentModelChoices, agentModelsLine, agentRoleLine, agentRoles, agentWorksOn, removalPlan, teamSpeaker, agentId, toggleAgentModel } from "../../web/src/lib/team.ts";
 import { budgetFrom } from "../../web/src/lib/give.ts";
-import { applyEvent, beginTurn, endTurn, failTurn, keptDiffers, shownAgain, turnOf } from "../../web/src/lib/turns.ts";
+import { applyEvent, ASIDE_ANSWERING, ASIDE_FAILED, ASIDE_NOTHING_YET, asideNote, asideOf, asidePlaceholder, BRING_BACK_FAILED, beginTurn, broughtBackWords, busyPlaceholder, composerAction, endTurn, failTurn, FILES_WAIT, JUST_STARTING, keptDiffers, NOT_KEPT, queueHead, shownAgain, steeringLine, turnOf, undeliveredWords } from "../../web/src/lib/turns.ts";
 import { chatStateWords } from "../../../packages/core/src/turns.ts";
 import { atAGlance, attended, byAttention, doingNow, failedGate, inboxBeyond, inProject, NEW_FOR_MS, projectBadge, projectKey, seenOnOpen, shortSpan, spentSince, type Attended } from "../../web/src/lib/work.ts";
 import { commandKind, costWords, factsOfRecord, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, verdictOf, workedFor, workSummary } from "../../web/src/lib/steps.ts";
@@ -878,6 +878,33 @@ const chats = {
   changes,
 };
 
+// ---- the composer while it works: steer or queue, a side question, what waits above it (the PWA's lib/turns.ts) ----------
+const composer = {
+  actions: (["steer", "queue"] as const).flatMap((enter) =>
+    [false, true].flatMap((busy) => [false, true].flatMap((modifier) => [false, true].map((canQueue) => ({ busy, enter, modifier, canQueue, action: composerAction({ busy, enter, modifier, canQueue }) })))),
+  ),
+  asides: ["/btw how long will this take?", "  /aside   where is it?\nand why", "/btw", "/BTW Loud", "by the way /btw", "/btween us", "plain words"].map((text) => ({ text, aside: asideOf(text) })),
+  steering: [1, 2].map((count) => ({ count, line: steeringLine(count) })),
+  heads: [{ queued: 1, held: null, busy: true }, { queued: 3, held: null, busy: false }, ...(["stopped", "error", "restart", "device"] as const).map((held) => ({ queued: 2, held, busy: false }))].map((q) => ({ ...q, ...queueHead(q) })),
+  undelivered: [
+    { texts: 1, queued: true },
+    { texts: 2, queued: true },
+    { texts: 1, queued: false },
+    { texts: 3, queued: false },
+  ].map((u) => ({ ...u, ...undeliveredWords(u) })),
+  placeholders: [true, false].map((canQueue) => ({ canQueue, words: busyPlaceholder(canQueue) })),
+  filesWait: FILES_WAIT,
+  justStarting: JUST_STARTING,
+  notKept: NOT_KEPT,
+  asideNotes: [true, false].map((working) => ({ working, note: asideNote(working) })),
+  broughtBack: (["steered", "kept"] as const).map((how) => ({ how, words: broughtBackWords(how) })),
+  nothingYet: ASIDE_NOTHING_YET,
+  asidePlaceholders: [true, false].map((working) => ({ working, words: asidePlaceholder(working) })),
+  asideAnswering: ASIDE_ANSWERING,
+  asideFailed: ASIDE_FAILED,
+  bringBackFailed: BRING_BACK_FAILED,
+};
+
 // ---- an answer's words: Markdown read as the PWA reads it (lib/markdown.ts) -------------------------------------------
 const markdownCases = [
   "## What I found\n\nThree things stand out, and **one needs you**:\n\n1. The *release* is on track.\n2. CI on `main` is green: https://github.com/wckdboy/invincible/actions.\n3. ~~Friday~~ Monday is the new date.\n   - It moved for the review.\n\n> The gate held: nothing ships unreviewed.",
@@ -1297,6 +1324,7 @@ const vectors = {
   connectorStates,
   threads,
   chats,
+  composer,
   markdown,
   blocks,
   timelines,

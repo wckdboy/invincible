@@ -379,11 +379,17 @@ extension View {
     /// Return sends a message box's words from a keyboard you type on (a Mac's, an iPad's), and Shift- or Option-Return
     /// starts a new line. A keyboard on the screen is left as it is: its Return is a new line, and the arrow sends.
     func sendsOnReturn(_ send: @escaping () -> Void) -> some View {
+        sendsOnReturn(modified: { _ in send() })
+    }
+
+    /// The same, told whether ⌘ or Control was held with Return: while the primary works, Return does what this device
+    /// chose (steer or queue) and ⌘-Return the other (the PWA's Ctrl or ⌘ with Enter).
+    func sendsOnReturn(modified send: @escaping (Bool) -> Void) -> some View {
         onKeyPress(.return, phases: .down) { press in
             // A word an input method is still composing is its to finish.
             if Typing.composing { return .ignored }
             if !press.modifiers.isDisjoint(with: [.shift, .option]) { return Typing.newLine() ? .handled : .ignored }
-            send()
+            send(!press.modifiers.isDisjoint(with: [.command, .control]))
             return .handled
         }
     }

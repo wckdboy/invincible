@@ -193,7 +193,7 @@ struct ChatThread: Equatable, Sendable {
         case .stopped(let reason):
             turns[at].status = .stopped
             step(target, Step(text: Self.stopped[reason] ?? "Stopped", state: .warn))
-        case .turn, .conversation, .other:
+        case .turn, .conversation, .undelivered, .aside, .other:
             return false
         }
         return true

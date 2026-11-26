@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatStreamEvent, StoredMessage } from "@invincible/core";
-import { applyEvent, asideOf, beginTurn, composerAction, composerHint, connectorsAskedIn, endTurn, failTurn, keptDiffers, keysAskedIn, shownAgain, stateBadge, type Step, stopsIn, type Thread, type Turn, turnOf } from "./turns.ts";
+import { applyEvent, ASIDE_ANSWERING, ASIDE_FAILED, ASIDE_NOTHING_YET, asideNote, asidePlaceholder, BRING_BACK_FAILED, asideOf, beginTurn, broughtBackWords, busyPlaceholder, composerAction, composerHint, connectorsAskedIn, endTurn, failTurn, FILES_WAIT, JUST_STARTING, keptDiffers, keysAskedIn, NOT_KEPT, queueHead, shownAgain, stateBadge, steeringLine, type Step, stopsIn, type Thread, type Turn, turnOf, undeliveredWords } from "./turns.ts";
 
 const fresh = (): Thread => ({ turns: [], nextId: 1, target: null, base: null });
 const shape = (thread: Thread) => thread.turns.map((t) => [t.role, t.content, t.status]);
@@ -39,6 +39,46 @@ describe("what sending does while it works", () => {
     expect(asideOf("/btw")).toBe("");
     expect(asideOf("by the way /btw")).toBeNull();
     expect(asideOf("/btween us")).toBeNull();
+  });
+});
+
+describe("what waits above the composer, in the words every app says", () => {
+  test("steers on their way to it", () => {
+    expect(steeringLine(1)).toBe("On its way to it: it's told at its next safe point (a tool that's running finishes first)");
+    expect(steeringLine(2)).toBe("On their way to it: it's told at its next safe point (a tool that's running finishes first)");
+  });
+
+  test("the queue's head: how many, and what becomes of them", () => {
+    expect(queueHead({ queued: 1, held: null, busy: true })).toEqual({ count: "1 message queued", rest: ": sent in order when it's done with this turn." });
+    expect(queueHead({ queued: 3, held: null, busy: false })).toEqual({ count: "3 messages queued", rest: ": waiting for room on the node." });
+    expect(queueHead({ queued: 2, held: "stopped", busy: false })).toEqual({ count: "2 messages held", rest: ": you stopped it. Nothing is sent until you resume." });
+    expect(queueHead({ queued: 1, held: "restart", busy: true })).toEqual({ count: "1 message held", rest: ": the node restarted. Nothing is sent until you resume." });
+  });
+
+  test("messages that didn't reach it before its turn ended", () => {
+    expect(undeliveredWords({ texts: 2, queued: true })).toEqual({ title: "2 messages didn't reach it before the turn ended", detail: "Queued, first in line, and held until you resume." });
+    expect(undeliveredWords({ texts: 1, queued: false })).toEqual({ title: "Your message didn't reach it before the turn ended", detail: "It's back in the message box." });
+  });
+
+  test("the message box while it works, and what it can't take then", () => {
+    expect(busyPlaceholder(true)).toBe("Steer it, or queue what's next…");
+    expect(busyPlaceholder(false)).toBe("Steer it…");
+    expect(FILES_WAIT).toBe("Files go with your next message, once it's done: wait for it, or stop it first.");
+    expect(JUST_STARTING).toBe("It's only just starting: try again in a moment.");
+    expect(NOT_KEPT).toBe("This chat isn't kept, so nothing is queued behind it.");
+  });
+
+  test("a side question: what it's answered from, and what Bring back did", () => {
+    expect(asideNote(true)).toBe("Answered apart, from this chat and what it's said and done so far in this turn. It doesn't change what it's doing, and it never sees it unless you bring it back.");
+    expect(asideNote(false)).toBe("Answered apart, from what this chat holds. It isn't added to the chat unless you bring it back.");
+    expect(broughtBackWords("steered")).toBe("Brought back: it reaches it at its next safe point");
+    expect(broughtBackWords("kept")).toBe("Brought back: it's in the chat now");
+    expect(ASIDE_NOTHING_YET).toEqual({ title: "Nothing to ask on the side yet", detail: "A side question is about a chat: ask something first." });
+    expect(asidePlaceholder(true)).toBe("e.g. What is it waiting on?");
+    expect(asidePlaceholder(false)).toBe("e.g. Which file was that in?");
+    expect(ASIDE_ANSWERING).toBe("Answering on the side…");
+    expect(ASIDE_FAILED).toBe("It couldn't answer on the side");
+    expect(BRING_BACK_FAILED).toBe("Couldn't bring it back");
   });
 });
 

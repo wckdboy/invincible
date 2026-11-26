@@ -11,7 +11,7 @@ import { primaryNeeds } from "../lib/roster.ts";
 import { plural } from "../lib/text.ts";
 import { duration, relativeTime } from "../lib/time.ts";
 import { lookedWords } from "../lib/underway.ts";
-import { applyEvent, asideOf, beginTurn, composerAction, composerHint, connectorsAskedIn, endTurn, failTurn, keysAskedIn, shownAgain, stateBadge, type Step, type Thread, type Turn, turnOf } from "../lib/turns.ts";
+import { applyEvent, ASIDE_NOTHING_YET, asideOf, beginTurn, busyPlaceholder, composerAction, composerHint, connectorsAskedIn, endTurn, failTurn, FILES_WAIT, JUST_STARTING, keysAskedIn, NOT_KEPT, shownAgain, stateBadge, type Step, type Thread, type Turn, turnOf, undeliveredWords } from "../lib/turns.ts";
 import { awaySince, chatEnter, lastRole, markAwaySeen, openChatId, rememberOpenChat, rememberRole } from "../prefs.ts";
 import type { RoleSpec } from "../types.ts";
 import { badge, button, callout, copyText, dot, empty, skeletonRows, spinner } from "../ui/controls.ts";
@@ -281,11 +281,12 @@ function handle(w: Watching, event: ChatStreamEvent): void {
     if (at >= 0) steering.splice(at, 1);
   } else if (event.type === "undelivered") {
     steering = [];
-    if (event.queued) toast(`${plural(event.texts.length, "message")} didn't reach it before the turn ended`, { description: "Queued, first in line, and held until you resume." });
+    const said = undeliveredWords({ texts: event.texts.length, queued: event.queued });
+    if (event.queued) toast(said.title, { description: said.detail });
     else {
       // A temporary chat keeps nothing on the node: the words come back to the box.
       draft = [draft, ...event.texts].filter(Boolean).join("\n\n");
-      toast("Your message didn't reach it before the turn ended", { description: "It's back in the message box." });
+      toast(said.title, { description: said.detail });
     }
     emit(null);
     return;
@@ -569,7 +570,7 @@ export async function sendMessage(api: Api, raw: string, opts: { modifier?: bool
     return "sent";
   }
   // Files go with a message it answers from its start: not one handed it as it works, nor one queued.
-  if (files.length) return { problem: "Files go with your next message, once it's done: wait for it, or stop it first." };
+  if (files.length) return { problem: FILES_WAIT };
   try {
     if (action === "queue") {
       const view = await api.post<{ queue: QueuedMessage[]; held: QueueHold | null; started: TurnView | null }>("/api/conversations/queue", { conversation: current!.id, text, role });
@@ -581,7 +582,7 @@ export async function sendMessage(api: Api, raw: string, opts: { modifier?: bool
       return "queued";
     }
     const w = live;
-    if (!w?.id) return { problem: "It's only just starting: try again in a moment." };
+    if (!w?.id) return { problem: JUST_STARTING };
     await api.post("/api/turns/steer", { turn: w.id, text });
     steering.push(text);
     emit(null);
@@ -602,7 +603,7 @@ export async function sendMessage(api: Api, raw: string, opts: { modifier?: bool
 /** What you can do with your queue. Each resolves to a problem in words, or null. */
 export const queueActions = (api: Api) => {
   const run = async (path: string, body: object): Promise<string | null> => {
-    if (!current) return "This chat isn't kept, so nothing is queued behind it.";
+    if (!current) return NOT_KEPT;
     try {
       const view = await api.post<{ queue: QueuedMessage[]; held: QueueHold | null }>(path, { conversation: current.id, ...body });
       queue = view.queue;
@@ -680,7 +681,7 @@ function asideTarget(): { conversation: string } | { turn: string } | null {
 /** Ask on the side: answered apart, and part of nothing unless brought back. */
 export function openChatAside(api: Api, question = ""): void {
   const about = asideTarget();
-  if (!about) return void toast("Nothing to ask on the side yet", { description: "A side question is about a chat: ask something first.", tone: "warn" });
+  if (!about) return void toast(ASIDE_NOTHING_YET.title, { description: ASIDE_NOTHING_YET.detail, tone: "warn" });
   openAside(api, about, { question, working: live !== null, onBroughtBack: () => void sync(api) });
 }
 
@@ -1095,7 +1096,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     // The one Enter does is in ink.
     steerButton.classList.toggle("primary", !canQueue || enter === "steer");
     queueButton.classList.toggle("primary", canQueue && enter === "queue");
-    input.placeholder = busy ? (canQueue ? "Steer it, or queue what's next…" : "Steer it…") : "Ask your agent…";
+    input.placeholder = busy ? busyPlaceholder(canQueue) : "Ask your agent…";
     syncKeyAsks();
     syncConnectorAsks();
     panel.render({ queue, held, steering, busy, deadline: live?.deadline ?? null });
@@ -1189,7 +1190,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     // A side question typed into the box ("/btw …") is asked apart; it never becomes a message by accident.
     const aside = asideOf(text);
     if (aside !== null) {
-      if (!asideTarget()) return void toast("Nothing to ask on the side yet", { description: "A side question is about a chat: ask something first.", tone: "warn" });
+      if (!asideTarget()) return void toast(ASIDE_NOTHING_YET.title, { description: ASIDE_NOTHING_YET.detail, tone: "warn" });
       clear();
       openChatAside(ctx.api, aside);
       return;

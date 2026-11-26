@@ -1,7 +1,6 @@
-import { holdWords, type QueuedMessage, type QueueHold } from "@invincible/core/turns";
+import { type QueuedMessage, type QueueHold } from "@invincible/core/turns";
 import { findSecrets } from "@invincible/core/secret-scan";
-import { plural } from "../lib/text.ts";
-import { stopsIn } from "../lib/turns.ts";
+import { queueHead, steeringLine, stopsIn } from "../lib/turns.ts";
 import { button } from "../ui/controls.ts";
 import { h, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
@@ -120,21 +119,22 @@ export function queuePanel(actions: QueueActions, opts: { compact?: boolean } = 
           "div",
           { class: "chat-queue-steer", role: "status" },
           h("span", { class: "spinner", "aria-hidden": "true" }),
-          h("div", {}, h("div", { class: "tiny strong" }, `On ${state.steering.length === 1 ? "its" : "their"} way to it: it's told at its next safe point (a tool that's running finishes first)`), ...state.steering.map((text) => h("div", { class: "chat-queue-text" }, clip(text, opts.compact ? 90 : 220)))),
+          h("div", {}, h("div", { class: "tiny strong" }, steeringLine(state.steering.length)), ...state.steering.map((text) => h("div", { class: "chat-queue-text" }, clip(text, opts.compact ? 90 : 220)))),
         ),
       );
     }
     if (state.queue.length) {
+      const words = queueHead({ queued: state.queue.length, held: state.held, busy: state.busy });
       const head = state.held
         ? h(
             "div",
             { class: "chat-queue-head held", role: "status" },
             icon("pause", { size: 14 }),
-            h("span", { class: "grow" }, h("strong", {}, `${plural(state.queue.length, "message")} held`), `: ${holdWords(state.held)}. Nothing is sent until you resume.`),
+            h("span", { class: "grow" }, h("strong", {}, words.count), words.rest),
             button("Resume", { size: "sm", variant: "primary", icon: "play", onClick: () => act(actions.resume(), "Couldn't resume") }),
             button("Discard", { size: "sm", variant: "ghost", title: "Discard everything queued behind this chat", onClick: () => act(actions.discard(), "Couldn't discard them") }),
           )
-        : h("div", { class: "chat-queue-head" }, icon("clock", { size: 14 }), h("span", { class: "grow" }, h("strong", {}, `${plural(state.queue.length, "message")} queued`), state.busy ? ": sent in order when it's done with this turn." : ": waiting for room on the node."));
+        : h("div", { class: "chat-queue-head" }, icon("clock", { size: 14 }), h("span", { class: "grow" }, h("strong", {}, words.count), words.rest));
       parts.push(head, h("ol", { class: "chat-queue-list" }, ...state.queue.map((q) => row(q, state))));
     }
     if (state.busy) {

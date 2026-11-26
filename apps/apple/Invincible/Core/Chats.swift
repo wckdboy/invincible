@@ -38,6 +38,29 @@ struct ConversationDetail: Decodable, Sendable {
     let turn: TurnView?
     /// Something it answered in it hasn't been read yet, on any device.
     var unread: Bool? = nil
+    /// What you queued behind it, kept on the node, and why that is held when it is (absent from an older node's).
+    var queue: [QueuedMessage]? = nil
+    var held: String? = nil
+}
+
+/// A message of yours queued behind a kept chat (core's QueuedMessage): sent as its next turn when the one before it ends
+/// well; until then yours to change, remove, or send now.
+struct QueuedMessage: Decodable, Sendable, Equatable, Identifiable {
+    let id: Int
+    let text: String
+    /// The role it'll be asked as (nil: the chat's own).
+    var role: String? = nil
+    let at: Double
+    /// The device you queued it from, by name.
+    var by: String? = nil
+}
+
+/// What the node says of a chat's queue after each change to it (queue, edit, remove, send now, resume).
+struct QueueView: Decodable, Sendable {
+    let queue: [QueuedMessage]
+    let held: String?
+    /// The turn the change began at once (it'd finished meanwhile, or room came free).
+    var started: TurnView? = nil
 }
 
 /// A chat with an answer you haven't read yet, as `GET /api/turns` lists them (the newest answer first).

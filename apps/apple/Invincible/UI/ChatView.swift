@@ -18,6 +18,8 @@ struct ChatView: View {
     @Environment(\.composerWanted) private var composerWanted
     /// While you were away (PLAN #37), for the primary's own chat: asked once as it opens.
     @State private var away: AwayView?
+    /// A side question asked apart (its menu's Ask on the side…, or "/btw …" typed into the box).
+    @State private var aside: SideQuestion?
 
     init(session: Session, chat: ChatModel? = nil) {
         self.session = session
@@ -72,7 +74,9 @@ struct ChatView: View {
             VStack(spacing: Space.s2) {
                 // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait.
                 UnderwayBar(session: session, chat: chat)
-                Composer(chat: chat, client: session.client, composing: $composing)
+                // What waits above the box while it works: steers on their way, the queue, what became of a message.
+                QueuePanel(chat: chat, client: session.client)
+                Composer(chat: chat, client: session.client, composing: $composing, askAside: { openAside($0) })
             }
         }
         .screen("chat.screen")
@@ -90,7 +94,7 @@ struct ChatView: View {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: Space.s2) {
                     PrimaryOrb(size: 30, tone: session.primaryTone, mood: session.primaryMood)
-                    TimelineTitle(title: Primary.name, line: chat.title ?? session.primary.line, needs: chat.title == nil && session.primary.tone == .warn, alignment: .leading)
+                    TimelineTitle(title: Primary.name, line: chat.title ?? session.primary.line, needs: chat.title == nil && session.primary.tone == .warn, alignment: .leading, standing: chat.title == nil ? session.primaryStanding : nil)
                 }
             }
             #else
@@ -99,27 +103,6 @@ struct ChatView: View {
             }
             #endif
             ToolbarItemGroup(placement: .barTrailing) {
-                // Its own computer, once it has one (made from the web app or a terminal, as an agent's VM is).
-                if session.team?.computer != nil && session.can("sandbox") {
-                    Menu {
-                        Button {
-                            if let workspaceColumn { workspaceColumn.wrappedValue.toggle() } else { inFiles = true }
-                        } label: {
-                            Label("Its files", systemImage: "folder")
-                        }
-                        Button { watching = true } label: { Label("Its screen", systemImage: "display") }
-                        Button { inTerminal = true } label: { Label("Its terminal", systemImage: "apple.terminal") }
-                    } label: {
-                        Label("Its computer", systemImage: "desktopcomputer")
-                    }
-                    .accessibilityIdentifier("computer")
-                }
-                Button {
-                    listing = true
-                } label: {
-                    Label("Chats", systemImage: "clock.arrow.circlepath")
-                }
-                .accessibilityIdentifier("chats")
                 Button {
                     chat.startNew()
                     composing = true
@@ -127,6 +110,29 @@ struct ChatView: View {
                     Label("New chat", systemImage: "square.and.pencil")
                 }
                 .disabled(chat.answering || chat.thread.isEmpty)
+                // The rest in one menu (I10: one thing in full, the rest a tap further): its chats, and its own computer
+                // once it has one (made from the web app or a terminal, as an agent's VM is).
+                Menu {
+                    Button { listing = true } label: { Label("All chats", systemImage: "clock.arrow.circlepath") }
+                        .accessibilityIdentifier("chats")
+                    // Something about the work in hand, without changing its course (the PWA's Ask on the side…).
+                    Button { openAside("") } label: { Label("Ask on the side…", systemImage: "bubble.left") }
+                        .accessibilityIdentifier("chat.aside")
+                    if session.team?.computer != nil && session.can("sandbox") {
+                        Section("Its computer") {
+                            Button {
+                                if let workspaceColumn { workspaceColumn.wrappedValue.toggle() } else { inFiles = true }
+                            } label: {
+                                Label("Its files", systemImage: "folder")
+                            }
+                            Button { watching = true } label: { Label("Its screen", systemImage: "display") }
+                            Button { inTerminal = true } label: { Label("Its terminal", systemImage: "apple.terminal") }
+                        }
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis")
+                }
+                .accessibilityIdentifier("chat.more")
             }
             }
         }
@@ -137,6 +143,11 @@ struct ChatView: View {
             if let computer = session.team?.computer { AgentTerminalView(session: session, agent: VMSeat(computer: computer)) }
         }
         .sheet(isPresented: $inFiles) { WorkspaceView(session: session, id: "primary", name: Primary.name) }
+        .sheet(isPresented: .init(get: { aside != nil }, set: { if !$0 { aside = nil } })) {
+            if let aside {
+                AsideSheet(side: aside, client: session.client) { words in chat.notice = (words, "") }
+            }
+        }
         .sheet(isPresented: $listing) {
             ChatsView(session: session) { id in
                 listing = false
@@ -166,6 +177,15 @@ struct ChatView: View {
         }
     }
 
+    /// A side question, asked apart: about this kept chat, or the turn under way in a new one; nothing yet, said so.
+    private func openAside(_ question: String) {
+        guard let about = chat.asideAbout else {
+            chat.notice = ComposerWords.nothingYet
+            return
+        }
+        aside = SideQuestion(about: about, working: chat.answering, question: question)
+    }
+
     /// A new chat: the primary itself, as its orb (PrimaryHome.swift), what you might ask it, and what it asks you.
     private var welcome: some View {
         PrimaryWelcome(session: session) { text in
@@ -175,17 +195,17 @@ struct ChatView: View {
     }
 }
 
-/// While you were away (PLAN #37): what happened since this device last showed you, each line led by its state's
-/// colour (the PWA's too), and a press to say it's read.
+/// While you were away (PLAN #37): what happened since this device last showed you, each line led by its state's dot
+/// (the ink, grey, or red for what went wrong), between hairlines, and a press to say it's read.
 struct AwayCard: View {
     let away: AwayView
     let read: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
+            Divider()
             HStack(alignment: .firstTextBaseline) {
-                Text("While you were away").font(.subheadline.weight(.semibold))
-                Spacer()
+                SectionHead("While you were away")
                 Text(Date(timeIntervalSince1970: away.since / 1000), style: .relative).font(.caption).foregroundStyle(.secondary)
             }
             ForEach(away.lines, id: \.self) { line in
@@ -196,11 +216,10 @@ struct AwayCard: View {
             }
             HStack {
                 Spacer()
-                Button("Got it", action: read).font(.subheadline)
+                Button("Got it", action: read).font(.subheadline.weight(.semibold)).frame(minHeight: Metrics.touch)
             }
+            Divider()
         }
-        .padding(Space.s3)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: Metrics.cardRadius))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("While you were away")
     }
@@ -307,10 +326,23 @@ struct Composer: View {
     var sent: (() -> Void)? = nil
     /// What the empty box says.
     var prompt = "Message \(Primary.name)"
+    /// A side question typed into the box ("/btw …"): asked apart, never sent as a message (nil: not offered here).
+    var askAside: ((String) -> Void)? = nil
+    /// What Return does while it works, on this device (Settings → Chat; steer unless you chose otherwise).
+    @AppStorage("chat.enter") private var enter = ComposerWords.Enter.steer.rawValue
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var choice: ComposerWords.Enter { ComposerWords.Enter(rawValue: enter) ?? .steer }
+    /// While it works, a message can go: words, and no files (they go with a message it answers from its start).
+    private var ready: Bool { !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.outbox.carried.isEmpty && !chat.outbox.going }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
             OutboxLines(outbox: chat.outbox)
+            // At the accessibility sizes, Queue and Steer stand over the box, so it keeps its width.
+            if chat.answering, typeSize.isAccessibilitySize {
+                HStack(spacing: Space.s2) { busyButtons }
+            }
             field
         }
         .padding(.horizontal, Metrics.margin)
@@ -325,19 +357,21 @@ struct Composer: View {
                 AttachButton(outbox: chat.outbox, client: client)
                 // Made anew with each message sent: clearing a focused multi-line field can leave what was sent on
                 // screen, or let the keyboard put back what it still held (a word it was correcting, a dictation
-                // finishing). A new one is empty, and nothing late reaches it.
-                TextField(prompt, text: $chat.draft, axis: .vertical)
+                // finishing). A new one is empty, and nothing late reaches it. While it works it stays open: what you
+                // write steers it or is queued (the PWA's words for it).
+                TextField(chat.answering ? ComposerWords.placeholder(canQueue: chat.canQueue) : prompt, text: $chat.draft, axis: .vertical)
                     .plainField()
                     .id(chat.sent)
                     .lineLimit(1...6)
                     .focused(composing)
-                    .sendsOnReturn(send)
+                    .sendsOnReturn(modified: { send(modifier: $0) })
                     .padding(.horizontal, Space.s4)
                     // One line high, the field is 44 points: Apple's least for a thing to tap.
                     .padding(.vertical, 11)
                     .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
                     .accessibilityIdentifier("composer")
                 if chat.answering {
+                    if !typeSize.isAccessibilitySize { busyButtons }
                     Button {
                         chat.stop(with: client)
                     } label: {
@@ -346,14 +380,21 @@ struct Composer: View {
                     .buttonStyle(.glass)
                     .buttonBorderShape(.circle)
                     .accessibilityLabel("Stop \(Primary.name) answering")
+                    .accessibilityIdentifier("composer.stop")
+                } else if !chat.sendable {
+                    // Filled only while there is something to send (the same size either way, so nothing moves).
+                    Button {} label: { Image(systemName: "arrow.up").font(.body.weight(.bold)).frame(width: 30, height: 30) }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .disabled(true)
+                        .accessibilityLabel("Send")
+                        .accessibilityIdentifier("send")
                 } else {
-                    let empty = !chat.sendable
-                    Button(action: send) {
-                        Image(systemName: "arrow.up").font(.body.weight(.bold)).foregroundStyle(Prominent.label(dimmed: empty)).frame(width: 30, height: 30)
+                    Button { send() } label: {
+                        Image(systemName: "arrow.up").font(.body.weight(.bold)).foregroundStyle(Prominent.label()).frame(width: 30, height: 30)
                     }
                     .buttonStyle(.glassProminent)
                     .buttonBorderShape(.circle)
-                    .disabled(empty)
                     .accessibilityLabel("Send")
                     .accessibilityIdentifier("send")
                 }
@@ -361,9 +402,48 @@ struct Composer: View {
         }
     }
 
-    /// What's in the box, sent (by its button, or Return): never while it answers, and only words or files that are up.
-    private func send() {
-        guard !chat.answering, chat.sendable else { return }
+    /// While it works: Queue (where the chat is kept) and Steer, each its own button (the way on a phone); the one Return
+    /// does is in ink once there is something to send, the other in glass.
+    @ViewBuilder private var busyButtons: some View {
+        if chat.canQueue { busyButton("Queue", .queue, filled: ready && choice == .queue, hint: "Keep it on the node and send it when it's done") }
+        busyButton("Steer", .steer, filled: ready && (choice == .steer || !chat.canQueue), hint: "Tell it now: it reaches it at its next safe point")
+    }
+
+    @ViewBuilder private func busyButton(_ title: String, _ how: ComposerWords.Action, filled: Bool, hint: String) -> some View {
+        if filled {
+            Button { send(how: how) } label: {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Prominent.label()).frame(minHeight: 30).padding(.horizontal, Space.s1)
+            }
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.capsule)
+            .accessibilityHint(hint)
+            .accessibilityIdentifier("composer.\(how.rawValue)")
+        } else {
+            Button { send(how: how) } label: {
+                Text(title).font(.subheadline.weight(.medium)).frame(minHeight: 30).padding(.horizontal, Space.s1)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .disabled(!ready)
+            .accessibilityHint(hint)
+            .accessibilityIdentifier("composer.\(how.rawValue)")
+        }
+    }
+
+    /// What's in the box, by its button or Return: a side question typed into it is asked apart; while it works the
+    /// words steer it or are queued (`how`: a button's own; otherwise Return's, `modifier` for the other); otherwise
+    /// they are sent, with files that are up.
+    private func send(modifier: Bool = false, how: ComposerWords.Action? = nil) {
+        if let askAside, let question = ComposerWords.aside(chat.draft) {
+            chat.draft = ""
+            askAside(question)
+            return
+        }
+        if chat.answering {
+            chat.deliver(how, modifier: modifier, enter: choice, with: client)
+            return
+        }
+        guard chat.sendable else { return }
         let typing = composing.wrappedValue
         chat.send(with: client)
         // Shown elsewhere now (over the iPhone's home): the keyboard goes with this box.
@@ -404,6 +484,7 @@ private struct StepLine: View {
             }
         }
         .font(.caption)
-        .foregroundStyle(step.state == .warn || step.state == .error ? Color.danger : .secondary)
+        // Red only for a step that failed; a warning is said in the ink.
+        .foregroundStyle(step.state == .error ? AnyShapeStyle(Color.danger) : step.state == .warn ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
     }
 }

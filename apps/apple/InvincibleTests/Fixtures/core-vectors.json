@@ -24442,6 +24442,282 @@
       ]
     }
   },
+  "composer": {
+    "actions": [
+      {
+        "busy": false,
+        "enter": "steer",
+        "modifier": false,
+        "canQueue": false,
+        "action": "send"
+      },
+      {
+        "busy": false,
+        "enter": "steer",
+        "modifier": false,
+        "canQueue": true,
+        "action": "send"
+      },
+      {
+        "busy": false,
+        "enter": "steer",
+        "modifier": true,
+        "canQueue": false,
+        "action": "send"
+      },
+      {
+        "busy": false,
+        "enter": "steer",
+        "modifier": true,
+        "canQueue": true,
+        "action": "send"
+      },
+      {
+        "busy": true,
+        "enter": "steer",
+        "modifier": false,
+        "canQueue": false,
+        "action": "steer"
+      },
+      {
+        "busy": true,
+        "enter": "steer",
+        "modifier": false,
+        "canQueue": true,
+        "action": "steer"
+      },
+      {
+        "busy": true,
+        "enter": "steer",
+        "modifier": true,
+        "canQueue": false,
+        "action": "steer"
+      },
+      {
+        "busy": true,
+        "enter": "steer",
+        "modifier": true,
+        "canQueue": true,
+        "action": "queue"
+      },
+      {
+        "busy": false,
+        "enter": "queue",
+        "modifier": false,
+        "canQueue": false,
+        "action": "send"
+      },
+      {
+        "busy": false,
+        "enter": "queue",
+        "modifier": false,
+        "canQueue": true,
+        "action": "send"
+      },
+      {
+        "busy": false,
+        "enter": "queue",
+        "modifier": true,
+        "canQueue": false,
+        "action": "send"
+      },
+      {
+        "busy": false,
+        "enter": "queue",
+        "modifier": true,
+        "canQueue": true,
+        "action": "send"
+      },
+      {
+        "busy": true,
+        "enter": "queue",
+        "modifier": false,
+        "canQueue": false,
+        "action": "steer"
+      },
+      {
+        "busy": true,
+        "enter": "queue",
+        "modifier": false,
+        "canQueue": true,
+        "action": "queue"
+      },
+      {
+        "busy": true,
+        "enter": "queue",
+        "modifier": true,
+        "canQueue": false,
+        "action": "steer"
+      },
+      {
+        "busy": true,
+        "enter": "queue",
+        "modifier": true,
+        "canQueue": true,
+        "action": "steer"
+      }
+    ],
+    "asides": [
+      {
+        "text": "/btw how long will this take?",
+        "aside": "how long will this take?"
+      },
+      {
+        "text": "  /aside   where is it?\nand why",
+        "aside": "where is it?\nand why"
+      },
+      {
+        "text": "/btw",
+        "aside": ""
+      },
+      {
+        "text": "/BTW Loud",
+        "aside": "Loud"
+      },
+      {
+        "text": "by the way /btw",
+        "aside": null
+      },
+      {
+        "text": "/btween us",
+        "aside": null
+      },
+      {
+        "text": "plain words",
+        "aside": null
+      }
+    ],
+    "steering": [
+      {
+        "count": 1,
+        "line": "On its way to it: it's told at its next safe point (a tool that's running finishes first)"
+      },
+      {
+        "count": 2,
+        "line": "On their way to it: it's told at its next safe point (a tool that's running finishes first)"
+      }
+    ],
+    "heads": [
+      {
+        "queued": 1,
+        "held": null,
+        "busy": true,
+        "count": "1 message queued",
+        "rest": ": sent in order when it's done with this turn."
+      },
+      {
+        "queued": 3,
+        "held": null,
+        "busy": false,
+        "count": "3 messages queued",
+        "rest": ": waiting for room on the node."
+      },
+      {
+        "queued": 2,
+        "held": "stopped",
+        "busy": false,
+        "count": "2 messages held",
+        "rest": ": you stopped it. Nothing is sent until you resume."
+      },
+      {
+        "queued": 2,
+        "held": "error",
+        "busy": false,
+        "count": "2 messages held",
+        "rest": ": the turn before them failed. Nothing is sent until you resume."
+      },
+      {
+        "queued": 2,
+        "held": "restart",
+        "busy": false,
+        "count": "2 messages held",
+        "rest": ": the node restarted. Nothing is sent until you resume."
+      },
+      {
+        "queued": 2,
+        "held": "device",
+        "busy": false,
+        "count": "2 messages held",
+        "rest": ": the device that queued the next one is no longer paired, or may not see this chat. Nothing is sent until you resume."
+      }
+    ],
+    "undelivered": [
+      {
+        "texts": 1,
+        "queued": true,
+        "title": "1 message didn't reach it before the turn ended",
+        "detail": "Queued, first in line, and held until you resume."
+      },
+      {
+        "texts": 2,
+        "queued": true,
+        "title": "2 messages didn't reach it before the turn ended",
+        "detail": "Queued, first in line, and held until you resume."
+      },
+      {
+        "texts": 1,
+        "queued": false,
+        "title": "Your message didn't reach it before the turn ended",
+        "detail": "It's back in the message box."
+      },
+      {
+        "texts": 3,
+        "queued": false,
+        "title": "Your message didn't reach it before the turn ended",
+        "detail": "It's back in the message box."
+      }
+    ],
+    "placeholders": [
+      {
+        "canQueue": true,
+        "words": "Steer it, or queue what's next…"
+      },
+      {
+        "canQueue": false,
+        "words": "Steer it…"
+      }
+    ],
+    "filesWait": "Files go with your next message, once it's done: wait for it, or stop it first.",
+    "justStarting": "It's only just starting: try again in a moment.",
+    "notKept": "This chat isn't kept, so nothing is queued behind it.",
+    "asideNotes": [
+      {
+        "working": true,
+        "note": "Answered apart, from this chat and what it's said and done so far in this turn. It doesn't change what it's doing, and it never sees it unless you bring it back."
+      },
+      {
+        "working": false,
+        "note": "Answered apart, from what this chat holds. It isn't added to the chat unless you bring it back."
+      }
+    ],
+    "broughtBack": [
+      {
+        "how": "steered",
+        "words": "Brought back: it reaches it at its next safe point"
+      },
+      {
+        "how": "kept",
+        "words": "Brought back: it's in the chat now"
+      }
+    ],
+    "nothingYet": {
+      "title": "Nothing to ask on the side yet",
+      "detail": "A side question is about a chat: ask something first."
+    },
+    "asidePlaceholders": [
+      {
+        "working": true,
+        "words": "e.g. What is it waiting on?"
+      },
+      {
+        "working": false,
+        "words": "e.g. Which file was that in?"
+      }
+    ],
+    "asideAnswering": "Answering on the side…",
+    "asideFailed": "It couldn't answer on the side",
+    "bringBackFailed": "Couldn't bring it back"
+  },
   "markdown": [
     {
       "source": "## What I found\n\nThree things stand out, and **one needs you**:\n\n1. The *release* is on track.\n2. CI on `main` is green: https://github.com/wckdboy/invincible/actions.\n3. ~~Friday~~ Monday is the new date.\n   - It moved for the review.\n\n> The gate held: nothing ships unreviewed.",
