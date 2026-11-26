@@ -5,7 +5,8 @@ import XCTest
  * held to Budgets.json:
  *  - launch: from the process starting to Home's first frame with what it shows (the app's own probe, PerfProbe.swift:
  *    Apple's launch metric reports nothing on a simulator), the median of five;
- *  - at rest on Home: what it asks the node in a minute, and its CPU and memory while nothing changes;
+ *  - at rest on Home: what it asks the node in a minute, and its CPU and memory while nothing changes; and what it asks
+ *    in a minute with a stall in it (the node silent long enough that the app takes its stream for dead);
  *  - live: from something needing you on the node to Home's header counting it;
  *  - a dead link: how soon the app says it's reconnecting once the node goes silent (as a half-open connection does),
  *    and how soon it's back once the node can be reached again;
@@ -17,6 +18,7 @@ final class PerfTests: XCTestCase {
         let appStartToUsableMs: Double
         let appStartToUsableTargetMs: Double
         let requestsAtRestPerMinute: Double
+        let requestsThroughAStallPerMinute: Double
         let eventToScreenP95Ms: Double
         let deadLinkNoticedMs: Double
         let deadLinkBackMs: Double
@@ -85,16 +87,50 @@ final class PerfTests: XCTestCase {
     func testRequestsAtRest() throws {
         let node = try DevNode.named()
         let app = XCUIApplication()
+        let launched = try node.now()
         try app.openHome(node)
-        // Whatever opening asked for has been answered.
-        settle(10)
-        let since = try node.now()
+        // Whatever opening asked for has been answered, and the app has asked nothing more for a while (its stream aside).
+        let since = try node.quiet(since: launched)
         settle(60)
         let asked = try node.requests(since: since).requests
-        let byPath = Dictionary(grouping: asked, by: { $0.path.components(separatedBy: "?")[0] }).map { "\($0.value.count) \($0.key)" }.sorted()
+        let byPath = Self.byRoute(asked)
         report("requests-at-rest", ["perMinute": Double(asked.count)])
         print("PERF requests-at-rest by route: \(byPath.joined(separator: ", "))")
         XCTAssertLessThanOrEqual(Double(asked.count), try budgets.requestsAtRestPerMinute, "At rest the app asked the node \(asked.count) times in a minute: \(byPath)")
+    }
+
+    /// A minute at rest with a stall in it, as a busy Mac or a busy node makes one (26 November 2026: CI's Mac at a load
+    /// of 480 failed testRequestsAtRest): the node silent until the app takes its stream for dead (three beats) and opens
+    /// another, then reached again at once. The stream resumes, so the app asks nothing again but the stream; before, it
+    /// read every route again (13 requests). The link is cut as soon as the app has opened its new stream, not after a
+    /// fixed time: one cut longer could outlast the app's wait for the new stream's hello (HELLO_WAIT), which is the
+    /// stream being down, and every route read on a timer is what down means.
+    @MainActor
+    func testRequestsThroughAStall() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        let launched = try node.now()
+        try app.openHome(node)
+        let since = try node.quiet(since: launched)
+        let start = Date()
+        defer { _ = try? node.blackhole(false) }
+        settle(20)
+        let stalled = try node.blackhole(true)
+        let reopened = try node.held("/api/live", within: 30)
+        let lifted = try node.blackhole(false)
+        XCTAssertTrue(reopened, "The app didn't open its stream again within 30 s of a dead link")
+        settle(max(0, 60 - Date().timeIntervalSince(start)))
+        let asked = try node.requests(since: since).requests
+        let byPath = Self.byRoute(asked)
+        let load = Self.hostLoad()
+        report("requests-through-a-stall", ["perMinute": Double(asked.count), "stallMs": lifted - stalled, "hostLoad": load.average, "hostCores": Double(load.cores)])
+        print("PERF requests-through-a-stall by route: \(byPath.joined(separator: ", ")), stalled \(Int(lifted - stalled)) ms")
+        XCTAssertLessThanOrEqual(Double(asked.count), try budgets.requestsThroughAStallPerMinute, "Through a stall of \(Int(lifted - stalled)) ms the app asked the node \(asked.count) times in a minute: \(byPath) (the Mac's load \(String(format: "%.1f", load.average)) on \(load.cores) cores)")
+    }
+
+    /// How many times each route was asked, its query aside.
+    static func byRoute(_ asked: [DevNode.Request]) -> [String] {
+        Dictionary(grouping: asked, by: { $0.path.components(separatedBy: "?")[0] }).map { "\($0.value.count) \($0.key)" }.sorted()
     }
 
     @MainActor

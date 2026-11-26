@@ -26,6 +26,48 @@ struct DevNode {
     struct Requests: Decodable {
         let now: Double
         let requests: [Request]
+        /// What a dead link holds at the front now (blackhole on): each request as it came.
+        let waiting: [Waiting]?
+    }
+
+    struct Waiting: Decodable {
+        let at: Double
+        let method: String
+        let path: String
+    }
+
+    /// The live stream's own requests (`/api/live`, opened afresh or again from a cursor): open all the while.
+    static func isStream(_ path: String) -> Bool { path == "/api/live" || path.hasPrefix("/api/live?") }
+
+    /// Until the app's opening is answered and it has asked nothing more for `quiet` seconds, its open stream aside, from
+    /// what it sent since `since` (the dev node's clock, ms, taken before it was launched): the dev node's clock then, to
+    /// count from. Fails, saying what it saw, if the app isn't quiet within `within` seconds.
+    func quiet(since: Double, for quiet: TimeInterval = 3, within: TimeInterval = 90) throws -> Double {
+        let deadline = Date().addingTimeInterval(within)
+        var seen = try requests(since: since)
+        while true {
+            let asked = seen.requests.filter { !Self.isStream($0.path) }
+            let streaming = seen.requests.contains { Self.isStream($0.path) && $0.status == 200 }
+            if streaming, !asked.isEmpty, asked.allSatisfy({ $0.status != 0 }), let last = asked.map(\.at).max(), seen.now - last >= quiet * 1000 { return seen.now }
+            guard Date() < deadline else { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            seen = try requests(since: since)
+        }
+        let said = seen.requests.map { "+\(Int($0.at - since)) ms \($0.method) \($0.path) \($0.status)" }
+        XCTFail("The app wasn't quiet for \(Int(quiet)) s within \(Int(within)) s of opening (its stream open, all it asked answered); it asked: \(said)")
+        throw NotQuiet()
+    }
+
+    struct NotQuiet: Error {}
+
+    /// Until the dead link holds a request of the app's for `path` (its query aside): whether one came within `within` s.
+    func held(_ path: String, within: TimeInterval) throws -> Bool {
+        let deadline = Date().addingTimeInterval(within)
+        while Date() < deadline {
+            if try requests(since: 4e15).waiting?.contains(where: { $0.path == path || $0.path.hasPrefix(path + "?") }) == true { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return false
     }
 
     struct Poked: Decodable {

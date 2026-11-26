@@ -23,7 +23,8 @@
  * The app comes in through a front of the dev node's own (never a node's): every /api request it sends is counted, and
  * under /__dev/ it answers the UI tests (apps/apple/InvincibleUITests):
  *   GET  /__dev/invite             the invite link
- *   GET  /__dev/requests?since=ms  the app's requests since then: { now, requests: [{ at, method, path, status, ms }] }
+ *   GET  /__dev/requests?since=ms  the app's requests since then: { now, requests: [{ at, method, path, status, ms }],
+ *                                  waiting: [{ at, method, path }] } (waiting: what a dead link holds at the front now)
  *   POST /__dev/blackhole?on=1|0   a dead link while on: nothing goes through either way, as a half-open connection
  *   POST /__dev/poke               something that needs you, at once (a device asking to join): { label, at }
  *   GET  /__dev/tasks              the fixture's tasks by what they show: { working, failed, proven } (proven: --heavy's)
@@ -527,6 +528,8 @@ if (heavy) {
 const requests: { at: number; method: string; path: string; status: number; ms: number }[] = [];
 /** A dead link while on: nothing goes through either way, as a half-open connection carries nothing. */
 let blackhole = false;
+/** The app's requests a dead link holds at the front now, each as it came: said by /__dev/requests. */
+const waiting = new Set<{ at: number; method: string; path: string }>();
 let unblocked: (() => void)[] = [];
 const through = (): Promise<void> => (blackhole ? new Promise((go) => unblocked.push(go)) : Promise.resolve());
 const nodeOrigin = `http://127.0.0.1:${proxyPort}`;
@@ -558,7 +561,7 @@ const front = Bun.serve({
       }
       if (control === "requests") {
         const since = Number(url.searchParams.get("since") ?? 0);
-        return Response.json({ now: Date.now(), requests: requests.filter((r) => r.at >= since) });
+        return Response.json({ now: Date.now(), requests: requests.filter((r) => r.at >= since), waiting: [...waiting] });
       }
       if (control === "blackhole" && req.method === "POST") {
         blackhole = url.searchParams.get("on") === "1";
@@ -606,7 +609,12 @@ const front = Bun.serve({
       }
       return new Response("not found", { status: 404 });
     }
-    await through();
+    if (blackhole) {
+      const held = { at: Date.now(), method: req.method, path: url.pathname + url.search };
+      if (url.pathname.startsWith("/api/")) waiting.add(held);
+      await through();
+      waiting.delete(held);
+    }
     const entry = { at: Date.now(), method: req.method, path: url.pathname + url.search, status: 0, ms: 0 };
     if (url.pathname.startsWith("/api/")) requests.push(entry);
     const headers = new Headers(req.headers);
