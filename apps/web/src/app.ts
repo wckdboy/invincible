@@ -7,8 +7,6 @@ import { openLink } from "./live.ts";
 import { renderShell } from "./shell.ts";
 import type { WhoAmI } from "./types.ts";
 import { toast } from "./ui/toast.ts";
-import { readBankCallback } from "./lib/bank.ts";
-import { handBankCallback } from "./views/bank.ts";
 import { handShared } from "./views/chat.ts";
 import { isShare, readShare } from "./lib/share.ts";
 import { syncPush, takeDownWithdrawn } from "./views/notifications.ts";
@@ -52,13 +50,6 @@ function renderRefused(root: HTMLElement, error: ApiError): void {
   else renderRevoked(root);
 }
 
-/**
- * The bank's redirect back (/bank/callback?code=…&state=…): read once, then the code
- * leaves the address bar and history at once; the Bank page finishes it.
- */
-const bankReturn = location.pathname === "/bank/callback" ? readBankCallback(location.search) : null;
-if (bankReturn) history.replaceState(null, "", "/#/bank");
-
 /** Something shared from another app (Android's share sheet: lib/share.ts): read once, and the chat is where it lands. */
 const shared = location.pathname === "/" && isShare(location.search) ? readShare(location.search) : null;
 if (location.pathname === "/" && isShare(location.search)) history.replaceState(null, "", "/#/chat");
@@ -97,9 +88,6 @@ async function boot(): Promise<void> {
       return;
     }
   }
-  if (!identity?.enrolled && bankReturn) {
-    toast("This browser isn't paired with Galahad", { description: "It can't finish connecting the bank. Pair it first, then connect again from here.", duration: 0 });
-  }
   if (!identity?.enrolled) {
     // A pasted invite: the way an app on the Home Screen pairs (links open in the browser, not in it).
     renderWelcome(root, identity, (invite) => {
@@ -127,7 +115,6 @@ async function boot(): Promise<void> {
     }
     return;
   }
-  if (bankReturn) handBankCallback(bankReturn);
   if (shared) handShared(shared);
   // Notifications: the node's copy of this device's subscription is kept current (never asks, never turns on what you
   // turned off; one its push service dropped is made again). Begun before the views, whose card says he can't reach

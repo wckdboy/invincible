@@ -14,7 +14,7 @@ import { type ArchiveContextEntry, type ArchiveHit, randomId } from "@galahad/co
  *   - the instructions around the fence say plainly that nothing inside is an order.
  *
  * And what an injected Galahad could do stays fenced by everything else: outward and
- * destructive actions ask the owner; after the bank, egress and record tools are refused.
+ * destructive actions ask the owner; after private data, egress and record tools are refused.
  */
 
 /** Characters that can hide or reorder text: controls (but tab and newline), bidirectional overrides, zero-width. */

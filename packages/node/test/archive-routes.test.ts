@@ -312,20 +312,21 @@ describe("the terminal", () => {
   );
 });
 
-describe("the bank's gate covers note_idea", () => {
+describe("the private-data gate covers note_idea", () => {
   const api: ToolApi = { call: async <T,>() => ({ id: "arc_x", created: true, trust: "agent", node: "n" }) as T, bytes: async () => ({ bytes: new Uint8Array(), type: "" }) };
   const fake = (name: string, flow: GalahadTool["flow"]): GalahadTool => ({ name, title: name, description: name, input: {}, routes: [], ...(flow ? { flow } : {}), run: async () => "data" });
 
-  test("note_idea writes free text into shared state (record): refused once bank data is in the answer; archive reads stay", async () => {
+  test("note_idea writes free text into shared state (record): refused once a private connector's data is in the answer; archive reads stay", async () => {
     expect(TOOLS.find((t) => t.name === "note_idea")!.flow).toBe("record");
     expect(TOOLS.find((t) => t.name === "archive_search")!.flow).toBeUndefined();
     expect(TOOLS.find((t) => t.name === "archive_read")!.flow).toBeUndefined();
     const note = TOOLS.find((t) => t.name === "note_idea")!;
-    const tools = chatTools([fake("bank_balances", "private"), note, fake("archive_search", undefined)], api, (e) => String(e));
+    const mail: GalahadTool = { name: "mail_read", title: "mail", description: "mail", input: {}, routes: [], run: async () => ({ text: "From: a friend.", private: "gmail" }) };
+    const tools = chatTools([mail, note, fake("archive_search", undefined)], api, (e) => String(e));
     expect((await tools.run({ id: "1", name: "note_idea", input: { title: "a", text: "b" } })).isError).toBeUndefined();
-    await tools.run({ id: "2", name: "bank_balances", input: {} });
-    const refused = await tools.run({ id: "3", name: "note_idea", input: { title: "balance", text: "12,345 kr" } });
-    expect(refused).toMatchObject({ isError: true, summary: "refused: bank data is in this answer" });
+    await tools.run({ id: "2", name: "mail_read", input: {} });
+    const refused = await tools.run({ id: "3", name: "note_idea", input: { title: "mail", text: "the code is 98765" } });
+    expect(refused).toMatchObject({ isError: true, summary: "refused: gmail's private data is in this answer" });
     expect(refused.content).toContain("his archive");
     expect((await tools.run({ id: "4", name: "archive_search", input: {} })).isError).toBeUndefined();
   });

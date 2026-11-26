@@ -39,7 +39,7 @@ function turnRow(ctx: Ctx, t: TurnView, now: number, leave?: () => void): HTMLEl
       "div",
       { class: "grow" },
       h("div", { class: "row" }, h("span", { class: "strong small ellipsis" }, t.title ?? "A temporary chat"), t.steering ? badge(`${t.steering} on its way to him`, "info") : null),
-      h("div", { class: "meta" }, h("span", { class: "ellipsis" }, t.watchable ? (t.step ?? "Starting") : "May read the bank: not shown to this device"), h("span", { class: "tnum" }, meta)),
+      h("div", { class: "meta" }, h("span", { class: "ellipsis" }, t.watchable ? (t.step ?? "Starting") : "Started on another device: not shown on this one"), h("span", { class: "tnum" }, meta)),
     ),
     t.conversation && t.watchable ? button("Open", { size: "sm", onClick: () => (leave?.(), ctx.navigate("chat", { conversation: t.conversation! })) }) : null,
     stop,

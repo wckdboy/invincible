@@ -27,7 +27,7 @@ describe("a running turn in a line", () => {
     expect(turnLine(turn({ conversation: null, title: null, tools: 0, watchers: 2, steering: 1, step: null }), now)).toBe(
       "tn_aaaaaaaaaaaaaaaaaaaaaa · a temporary chat · planner · 3 min so far · starting · 1 of your messages waiting to reach him · 2 watching · stops by itself in 27 min",
     );
-    expect(turnLine(turn({ watchable: false, step: null, model: null, watchers: 1 }), now)).toContain("may read the bank: not shown to this device · 2 tools · 1 watching");
+    expect(turnLine(turn({ watchable: false, step: null, model: null, watchers: 1 }), now)).toContain("started on another device: not shown to this one · 2 tools · 1 watching");
   });
 });
 

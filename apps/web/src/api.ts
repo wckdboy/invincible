@@ -110,8 +110,6 @@ export const READING_POSTS: ReadonlySet<string> = new Set([
   "/api/away",
   "/api/heartbeat",
   "/api/usage",
-  "/api/bank/balances",
-  "/api/bank/transactions",
   "/api/artifacts/file",
   "/api/archive/search",
   "/api/archive/entry",

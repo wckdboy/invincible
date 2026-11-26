@@ -43,7 +43,7 @@ export interface TurnView {
   watchers: number;
   /** Messages of yours waiting for a safe point to reach him. */
   steering: number;
-  /** False: this device may not watch or steer it (it may read the bank, and this device may not). */
+  /** False: this device may not watch or steer it (a temporary chat's turn, started on another device). */
   watchable: boolean;
 }
 
@@ -73,7 +73,7 @@ export interface QueuedMessage {
 /**
  * Why a chat's queue is held (nothing is sent until you resume or discard): you stopped him;
  * the turn before it failed; the node restarted; the device that queued the next message is
- * no longer paired, may no longer chat, or may not see this chat (it read the bank since).
+ * no longer paired, or may no longer chat.
  */
 export type QueueHold = "stopped" | "error" | "restart" | "device";
 

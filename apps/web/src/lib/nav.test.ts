@@ -9,12 +9,12 @@ import { ALIASES, goToOf, hashOf, homeOf, keyedOf, landingOf, moreIndex, PLACES,
 const BEFORE: Record<string, [scope: AnyScope | null, alsoFor?: AnyScope]> = {
   overview: [null], inbox: [null], chat: ["chat"], team: ["chat"], projects: ["mind:read"], memory: ["mind:read"], skills: ["mind:read"],
   activity: ["mind:read"], loops: ["mind:read"], artifacts: ["mind:read"], archive: ["mind:read"], findings: ["mind:read"], trials: ["mind:read"],
-  fleet: ["mind:read"], sandboxes: ["sandbox", "fleet:admin"], vault: ["vault:read"], models: ["mind:read"], bank: ["bank:read"],
+  fleet: ["mind:read"], sandboxes: ["sandbox", "fleet:admin"], vault: ["vault:read"], models: ["mind:read"],
   connectors: ["mind:read"], settings: [null],
 };
 /** Places added since, each for any device that may chat (More for any). */
 const ADDED = ["more", "home", "task"];
-const OWNER: AnyScope[] = ["chat", "mind:read", "mind:write", "vault:read", "vault:write", "brain:write", "fleet:admin", "bank:read", "sandbox"];
+const OWNER: AnyScope[] = ["chat", "mind:read", "mind:write", "vault:read", "vault:write", "brain:write", "fleet:admin", "sandbox"];
 const device = (...scopes: AnyScope[]) => placesFor((scope) => scopes.includes(scope));
 const ids = (places: readonly { id: string }[]) => places.map((place) => place.id);
 const TASK = "task-abcdef012345";
@@ -29,7 +29,7 @@ describe("the app's places", () => {
   });
 
   test("what a device may see follows its scopes as it did", () => {
-    const sets: AnyScope[][] = [OWNER, [], ["chat"], ["mind:read"], ["chat", "mind:read"], ["fleet:admin"], ["sandbox"], ["vault:read"], ["bank:read"], ["chat", "mind:read", "vault:read"]];
+    const sets: AnyScope[][] = [OWNER, [], ["chat"], ["mind:read"], ["chat", "mind:read"], ["fleet:admin"], ["sandbox"], ["vault:read"], ["chat", "mind:read", "vault:read"]];
     for (const scopes of sets) {
       const before = Object.entries(BEFORE).filter(([, [scope, alsoFor]]) => scope === null || scopes.includes(scope) || (alsoFor !== undefined && scopes.includes(alsoFor))).map(([id]) => id);
       expect([scopes, ids(device(...scopes)).filter((id) => !ADDED.includes(id)).sort()]).toEqual([scopes, before.sort()]);

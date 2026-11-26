@@ -24,7 +24,6 @@ import { LocalDiskBackend } from "./archive/blobs.ts";
 import { ArchiveService } from "./archive/service.ts";
 import { backupDirFor, BackupRunner } from "./backups.ts";
 import { ArchiveStore } from "./archive/store.ts";
-import { BankService } from "./bank/service.ts";
 import { ChatStore } from "./chats.ts";
 import { TeamStore } from "./team-store.ts";
 import type { TeamService } from "./team.ts";
@@ -43,8 +42,6 @@ import { LoopRunner, loopRecords } from "./loops.ts";
 import { LoopDrafts } from "./loop-drafts.ts";
 import { ConnectorRequests } from "./connector-requests.ts";
 import { giveBack, reviewBack, wantsReviews } from "./ci-back.ts";
-import { BilagService } from "./bilag.ts";
-import { attachBilag, type BooksAttach, uploadBilag } from "./books.ts";
 import { CiWatch, shippedPulls } from "./ci-watch.ts";
 import { WakeWatcher } from "./wakes.ts";
 import { Questions } from "./questions.ts";
@@ -74,7 +71,6 @@ export interface Daemon {
   loops: LoopRunner;
   connectors: ConnectorService;
   artifacts: ArtifactStore;
-  bank: BankService;
   /** The archive: everything kept for good, and searched by words and meaning. */
   archive: ArchiveService;
   /** Compute: the census, this node's calibration and slots, the plan, effort. */
@@ -420,7 +416,6 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const compute = new ComputeService({ store, identity, nodeName: config.name, caps: () => caps, peers: () => sync.status(), governor, ledger, log, measure });
   computeService = compute;
   const artifacts = new ArtifactStore({ store, identity, dir: join(home.dir, "artifacts"), ledger });
-  const bank = new BankService({ dir: join(home.dir, "bank") });
   const chats = new ChatStore(join(home.dir, "chats.db"));
   // What you attach to your messages: kept while a kept chat or a room's message carries it (or a chat used it this
   // week), then removed.
@@ -474,13 +469,10 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const backups = new BackupRunner({ home: home.dir, dir: backupDirFor(home.dir, env.GALAHAD_BACKUP_DIR), log });
   if (env.GALAHAD_BACKUPS !== "off" && opts.backups !== false) backups.start();
 
-  // Checked at start (and before every bank call): a key or session readable by others keeps bank access off.
-  if (bank.status().configured && bank.problem()) log(`bank access is off: ${bank.problem()}`);
   // MCP servers' questions mid-call (questions.ts): each waits in your Inbox for you, and its call with it.
   const questions = new Questions({ log });
   const connectors = new ConnectorService({ store, vault, identity, local, ledger, log, fetch: opts.fetch, ask: (connector, params, signal) => questions.ask(connector, params, signal), ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}), natives: { "github.ship": shipNative(artifacts), "github.ship.update": shipNative(artifacts, true), ...gmailNatives, ...outlookNatives, ...cloudflareNatives }, repositories: () => team.store.teammates().flatMap((k) => (k.repository ? [k.repository] : [])) });
   const taskDeps: LoopTaskDeps = {
-    bank,
     store,
     vault,
     identity,
@@ -497,7 +489,6 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     fetch: opts.fetch,
     compute,
     spent: upkeepSpent,
-    local,
   };
   // This node's own upkeep of its compute, one look at a time: it measures itself when that's due.
   let upkeeping: Promise<unknown> | null = null;
@@ -676,19 +667,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     slack,
     questions,
     connectorRequests,
-    // Bilag from your mail to Google Drive, copied by the node itself (bilag.ts), read in this node's time zone.
-    bilag: new BilagService({ transfer: (connector, step) => connectors.transfer(connector, step), local, tz: () => Intl.DateTimeFormat().resolvedOptions().timeZone }),
-    // A bilag into Dinero by the node's own hands; attaching it to a payment's card is Galahad's to ask you.
-    books: (() => {
-      const deps = {
-        transfer: (connector: string, step: Parameters<typeof connectors.transfer>[1]) => connectors.transfer(connector, step),
-        handFile: (connector: string, tool: string, args: Record<string, ArgValue>, why: string) => connectors.handFile(connector, tool, args, why),
-        ask: (call: { connector: string; tool: string; args: Record<string, ArgValue>; why: string }) => connectors.call(call, { kind: "agent", by: GALAHAD_ARM }),
-      };
-      return { attach: (input: BooksAttach) => attachBilag(deps, input), upload: (input: { organizationId: number; file: string }) => uploadBilag(deps, input) };
-    })(),
     heartbeatCheck: () => lookAround(taskDeps),
-    bank,
     chats,
     uploads,
     turns,
@@ -842,7 +821,6 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     loops,
     connectors,
     artifacts,
-    bank,
     archive,
     compute,
     turns,
@@ -895,7 +873,6 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       await teamEnded;
       await qampStopped;
       await Promise.all(servers.map((s) => s.stop(true)));
-      bank.close();
       notifyDb.close();
       chats.close();
       team.store.close();

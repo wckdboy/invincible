@@ -16,7 +16,6 @@ export const SCOPES = [
   "fleet:admin", // invite, approve, revoke devices; decide approvals; dismiss notices (never an agent's)
   "sandbox", // create, use and destroy sandboxes on sandbox hosts
   "connect", // call connector tools (never their keys); outward and delete still ask
-  "bank:read", // your bank accounts' balances and transactions (read-only); granted per agent, never by default
 ] as const;
 
 export const Scope = z.enum(SCOPES);

@@ -285,8 +285,6 @@ export function artifactsAdapter(artifacts: Pick<ArtifactStore, "list" | "filesO
 
 /** Tools whose results are strangers' words: an answer that used one carries them. */
 const OUTSIDE_TOOLS = new Set(["web_search", "connector_tool", "connector_call", "sandbox_run", "sandbox_exec", "artifact_read", "archive_read", "archive_search", "recall", "decide"]);
-/** The bank's tools: a chat that called one is never archived (it's flagged, too; this is the second lock). */
-const BANK_TOOL = /^bank_/;
 
 export interface ChatSource {
   list(): ConversationSummary[];
@@ -296,8 +294,6 @@ export interface ChatSource {
 /**
  * Kept chats, once they've been quiet a while (an hour by default): each becomes an
  * entry, and if it goes on later, the new part becomes another, linked to the first.
- * A chat where Galahad read the bank is never archived, not any part of it from then
- * on (what was archived before he read it held no bank data).
  */
 export function chatsAdapter(chats: ChatSource, archive: ArchiveLookup, opts: { quietMs?: number; now?: () => number } = {}): ArchiveAdapter {
   const quiet = opts.quietMs ?? 60 * 60_000;
@@ -308,14 +304,13 @@ export function chatsAdapter(chats: ChatSource, archive: ArchiveLookup, opts: { 
       const settledBefore = now() - quiet;
       const candidates = chats
         .list()
-        .filter((c) => !c.bank && c.updatedAt <= settledBefore)
+        .filter((c) => c.updatedAt <= settledBefore)
         .map((c) => ({ key: `${pad(c.updatedAt)}:${c.id}`, item: c }));
       const { batch, more } = after(candidates, cursor, limit);
       const entries: IncomingEntry[] = [];
       for (const { item: summary } of batch) {
         const chat = chats.get(summary.id);
-        if (!chat || chat.bank) continue;
-        if (chat.messages.some((m) => m.steps.some((s) => s.kind === "tool" && BANK_TOOL.test(s.name)))) continue;
+        if (!chat) continue;
         const archived = archive.sourceIds("chats", `${chat.id}:`);
         const last = archived.map((s) => Number(s.split(":")[1])).filter(Number.isFinite).sort((a, b) => b - a)[0] ?? 0;
         const fresh = chat.messages.filter((m) => m.id > last && m.content.trim() && m.status !== "streaming");

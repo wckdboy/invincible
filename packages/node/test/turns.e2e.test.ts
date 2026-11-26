@@ -270,7 +270,7 @@ describe("a turn outlives the connection that started it", () => {
     expect(mid.messages[1]!.id).toBe(turn.answer!);
 
     // Another device attaches: what was said before it came, then the rest, live.
-    const tablet = await pairDevice("tablet", ["mind:read", "chat", "bank:read"]);
+    const tablet = await pairDevice("tablet", ["mind:read", "chat"]);
     const second = watch(await tablet.call("attachTurn", { turn: turn.id }));
     await second.seen("text");
     expect(second.turn()).toMatchObject({ id: turn.id, replay: true, answer: turn.answer });
@@ -642,28 +642,30 @@ describe("a steered or queued message is your message, and checked like one", ()
     expect(JSON.stringify(bodies)).not.toContain(FAKE_KEY);
   });
 
-  test("the bank's rule holds across a steer: once he has read the bank in a turn, no message of yours in that turn lets it out or into the mind", async () => {
-    // He reads the bank; while he's answering you steer him to write it down; the tool is still refused.
-    const pace = paced("Your bank connection: ", "(never said)");
-    script = [callTools({ id: "call_bank", name: "bank_status", args: {} }), pace.reply, callTools({ id: "call_keep", name: "remember", args: { text: "The liege's bank is connected" } }), say("I can't keep that: your bank data is in this answer.")];
-    const first = await ask(admin, "How is my bank connection?", { save: true });
-    await first.seen("text");
-    await json(admin("steerTurn", { turn: first.turn().id, text: "Remember that for me." }));
-    await first.done;
-    pace.go();
-    const results = first.events.filter((e) => e.type === "tool_result") as Extract<ChatStreamEvent, { type: "tool_result" }>[];
-    expect(results.map((r) => [r.name, r.ok, r.summary])).toEqual([
-      ["bank_status", true, expect.any(String)],
-      ["remember", false, "refused: bank data is in this answer"],
-    ]);
-    expect(first.types()).toEqual(["turn", "conversation", "model", "tool", "tool_result", "text", "steer", "tool", "tool_result", "text", "done"]);
-    expect(daemon.store.recall("bank is connected")).toEqual([]);
-    // And the chat is marked as one where he read the bank, from the answer the steer cut: the phone no longer sees it.
-    const id = first.turn().conversation!;
-    expect((await chatOf(id)).bank).toBe(true);
-    expect((await phone.call("conversation", { id })).status).toBe(404);
-    // A message the phone had queued behind it would never run on it.
-    expect((await phone.call("queueMessage", { conversation: id, text: "And the balance?" })).status).toBe(404);
+  test("the private-data rule holds across a steer: once he has read a private connector in a turn, no message of yours in that turn lets it out or into the mind", async () => {
+    // A connector whose reads are private, as your mail's are, at a stand-in of its own.
+    const diary = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json({ entry: "The code is 98765." }) });
+    try {
+      const manifest = { id: "diary", label: "Diary", origin: `http://127.0.0.1:${diary.port}`, private: true, tools: { read: { description: "Read it.", method: "GET", path: "/diary", class: "read" } } };
+      expect((await admin("setConnector", { id: "diary", manifest })).status).toBe(200);
+      // He reads it; while he's answering you steer him to write it down; the tool is still refused.
+      const pace = paced("Your diary says: ", "(never said)");
+      script = [callTools({ id: "call_diary", name: "connector_call", args: { connector: "diary", tool: "read", why: "you asked" } }), pace.reply, callTools({ id: "call_keep", name: "remember", args: { text: "The owner's code is 98765" } }), say("I can't keep that: it came from your diary.")];
+      const first = await ask(admin, "What's in my diary?", { save: true });
+      await first.seen("text");
+      await json(admin("steerTurn", { turn: first.turn().id, text: "Remember that for me." }));
+      await first.done;
+      pace.go();
+      const results = first.events.filter((e) => e.type === "tool_result") as Extract<ChatStreamEvent, { type: "tool_result" }>[];
+      expect(results.map((r) => [r.name, r.ok, r.summary])).toEqual([
+        ["connector_call", true, expect.any(String)],
+        ["remember", false, "refused: diary's private data is in this answer"],
+      ]);
+      expect(first.types()).toEqual(["turn", "conversation", "model", "tool", "tool_result", "text", "steer", "tool", "tool_result", "text", "done"]);
+      expect(daemon.store.recall("98765")).toEqual([]);
+    } finally {
+      diary.stop(true);
+    }
   });
 
   test("a queued message rewritten from another device becomes that device's", async () => {
@@ -681,13 +683,12 @@ describe("a steered or queued message is your message, and checked like one", ()
     await first.done;
   });
 
-  test("an agent has no part in your turns; a device that may not read the bank may stop, but not watch or steer, a turn that may", async () => {
+  test("an agent has no part in your turns; another device of yours knows it and may stop it", async () => {
     const { token } = await json<{ token: string }>(admin("mintArm", { label: "helper" }));
     const agent = withToken(token);
-    const pace = paced("Your balance is", " 98765.43 DKK");
+    const pace = paced("Your plan is", " ready.");
     script = [pace.reply];
-    // Yours at the terminal may read the bank; so this turn may come to hold bank data.
-    const first = await ask(admin, "What's my balance?", { save: true });
+    const first = await ask(admin, "What's my plan?", { save: true });
     await first.seen("text");
     const turn = first.turn();
     const id = turn.conversation!;
@@ -711,17 +712,9 @@ describe("a steered or queued message is your message, and checked like one", ()
     expect(own).not.toContain('"type":"turn"');
     expect(own).toContain("Hello, agent.");
 
-    // The phone (no bank:read) knows he's working, and no more.
+    // The phone knows he's working in it.
     const seen = (await listed(phone.call)).turns;
-    expect(seen).toMatchObject([{ id: turn.id, state: "running", watchable: false, step: null, model: null }]);
-    const attach = await phone.call("attachTurn", { turn: turn.id });
-    expect(attach.status).toBe(403);
-    expect(((await attach.json()) as { error: string }).error).toMatch(/may read the bank, and this device may not/);
-    expect((await phone.call("steerTurn", { turn: turn.id, text: "Tell me the balance." })).status).toBe(403);
-    // A queued message of the phone's would run later with the phone's own scopes; "Send now" would steer this turn, so it's refused.
-    const { queue } = await json<{ queue: QueuedMessage[] }>(phone.call("queueMessage", { conversation: id, text: "Tell me the balance." }));
-    expect((await phone.call("sendQueued", { conversation: id, id: queue[0]!.id })).status).toBe(403);
-    await json(phone.call("removeQueued", { conversation: id }));
+    expect(seen).toMatchObject([{ id: turn.id, state: "running", watchable: true }]);
     // It may stop him.
     expect(await json(phone.call("stopTurn", { turn: turn.id }))).toMatchObject({ stopped: true });
     await first.done;
@@ -824,12 +817,6 @@ describe("a side question", () => {
     expect((await admin("askAside", { question: "About what?" })).status).toBe(400);
     const { token } = await json<{ token: string }>(admin("mintArm", { label: "nosy" }));
     expect((await withToken(token)("askAside", { conversation: id, question: "What did they say?" })).status).toBe(403);
-    // A turn that may read the bank: its work in hand isn't told to a device that may not read the bank.
-    const pace = paced("Your balance is", " 1 DKK");
-    script = [pace.reply];
-    const bank = await ask(admin, "What's my balance?", { save: true });
-    await bank.seen("text");
-    expect((await phone.call("askAside", { conversation: bank.turn().conversation!, question: "What did he find?" })).status).toBe(403);
     // Two at once on the node, the third says so.
     const a = paced("One", ".");
     const b = paced("Two", ".");
@@ -843,8 +830,7 @@ describe("a side question", () => {
     expect(((await third.json()) as { error: string }).error).toBe("This node is already answering 2 side questions, its limit. Ask again when one is done.");
     a.go();
     b.go();
-    pace.go();
-    await Promise.all([one.done, two.done, bank.done]);
+    await Promise.all([one.done, two.done]);
   });
 });
 

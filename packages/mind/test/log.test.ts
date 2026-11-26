@@ -10,8 +10,8 @@ import { enrollDevice, foundFleet, MAX_WALKS, MindStore, PullState } from "../sr
 /*
  * What sync and the loops read on a timer is kept as events arrive, so it costs the same
  * at any log size. These hold it to what the log itself says, computed from scratch here:
- * after any delivery order, after a rebuild, and after migrating a replica written by the
- * store as it was before (fixtures/mind-v0.db).
+ * after any delivery order, after a rebuild, and after migrating a replica taken back to an
+ * older schema.
  */
 
 function rng(seed: number) {
@@ -549,9 +549,6 @@ describe("the cached state digest", () => {
 });
 
 describe("migrating a replica in place", () => {
-  const fixture = join(import.meta.dir, "fixtures", "mind-v0.db");
-  const expected = JSON.parse(readFileSync(join(import.meta.dir, "fixtures", "mind-v0.json"), "utf8"));
-
   function copyOf(path: string): { dir: string; path: string } {
     const dir = mkdtempSync(join(tmpdir(), "galahad-migrate-"));
     const copy = join(dir, "mind.db");
@@ -567,57 +564,6 @@ describe("migrating a replica in place", () => {
         .map((e) => `${e.id}:${e.raw}`)
         .join("\n"),
     );
-
-  test("a replica made by the store before schema versions opens with nothing lost or changed", () => {
-    const { dir, path } = copyOf(fixture);
-    try {
-      const raw = new Database(path);
-      expect(raw.query<{ user_version: number }, []>("PRAGMA user_version").get()!.user_version).toBe(0);
-      raw.close();
-      const store = new MindStore(path);
-      expect(store.schemaVersion()).toBe(6);
-      expect(store.fleet).toBe(expected.fleet);
-      expect(logHash(store)).toBe(expected.log);
-      expect(store.eventCount()).toBe(expected.eventCount);
-      expect(store.digest()).toBe(expected.digest);
-      expect(store.frontier()).toEqual(expected.frontier);
-      expect({ a: store.head(expected.devices.a), b: store.head(expected.devices.b), c: store.head(expected.devices.c) }).toEqual(expected.heads);
-      expect({
-        heartbeatOnB: store.lastSlot("heartbeat", expected.devices.b),
-        pollOnC: store.lastSlot("poll", expected.devices.c),
-        heartbeatOnA: store.lastSlot("heartbeat", expected.devices.a),
-      }).toEqual(expected.lastSlot);
-      expect(store.loopRuns(undefined, 1000).map((e) => e.id)).toEqual(expected.loopRuns);
-      expect(store.ledger(1000).map((e) => e.id)).toEqual(expected.ledger);
-      expect(store.db.query("SELECT id, reason FROM v_rejected ORDER BY id").all()).toEqual(expected.rejected);
-      expect(store.forks()).toEqual(expected.forks);
-      expect(store.pendingCount()).toBe(expected.pending);
-      expect(store.recall(undefined, 50).map((m) => m.id)).toEqual(expected.recall);
-      expectKeptMatchesLog(store);
-      // The forked node's chain is known to be broken, so its next events replay.
-      expect(store.db.query("SELECT device FROM v_chainbad").all()).toEqual([{ device: expected.devices.c }]);
-      store.close();
-
-      // Opening it again migrates nothing twice, and a rebuild agrees with what migration derived.
-      const again = new MindStore(path);
-      expect(again.digest()).toBe(expected.digest);
-      const derived = kept(again);
-      again.rebuild();
-      expect(again.digest()).toBe(expected.digest);
-      expect(kept(again)).toEqual(derived);
-      expect(logHash(again)).toBe(expected.log);
-
-      // And it syncs, hole-finding included, with a replica made today.
-      const fresh = new MindStore(":memory:");
-      fresh.expectFleet(expected.fleet);
-      pull(again, fresh);
-      expect(fresh.digest()).toBe(expected.digest);
-      expect(fresh.deviceDigests()).toEqual(again.deviceDigests());
-      again.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
 
   /** Undo version 1 by hand: exactly the schema the store had before it. */
   function downgrade(path: string): void {

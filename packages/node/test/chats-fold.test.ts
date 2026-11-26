@@ -43,7 +43,7 @@ describe("a chat's story", () => {
     const ids: number[] = [];
     for (let n = 0; n < 3; n++) {
       ids.push(chats.addUser(kept.id, `question ${n}`));
-      chats.finishAnswer(kept.id, chats.startAnswer(kept.id), { content: `answer ${n}`, model: null, steps: [], status: "done", error: null, bank: false });
+      chats.finishAnswer(kept.id, chats.startAnswer(kept.id), { content: `answer ${n}`, model: null, steps: [], status: "done", error: null });
     }
     expect(chats.told(kept.id)).toMatchObject({ story: null });
     expect(chats.told(kept.id).recent.map((m) => m.content)).toEqual(["question 0", "answer 0", "question 1", "answer 1", "question 2", "answer 2"]);

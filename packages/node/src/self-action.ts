@@ -13,7 +13,7 @@ import { OFFLINE_AFTER_MS } from "./heartbeat.ts";
  *            gate still decides a sandbox's removal), and recorded in the ledger
  *            as his own.
  *
- * Nothing here can reach a connector, the vault, devices, the roster, the bank or
+ * Nothing here can reach a connector, the vault, devices, the roster, or
  * anything that needs fleet:admin: the hands below are all it has.
  */
 

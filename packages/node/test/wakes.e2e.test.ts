@@ -133,18 +133,6 @@ describe("a loop woken by its webhook", () => {
     expect((await call("loopHook", { name: "nothing" })).status).toBe(404);
   });
 
-  test("a loop that copies bilag to Drive: taken as any loop is; run with no mail to wake it, it says what it copies and how to copy older mail's", async () => {
-    const set = await call("setLoop", { name: "books", schedule: "every 1d", task: { kind: "bilag", folder: "Regnskab" } });
-    expect(set.status).toBe(200);
-    expect((await call("setLoop", { name: "bad", schedule: "every 1d", task: { kind: "bilag", folder: "a/b" } })).status).toBe(400);
-    daemon.loops.runNow("books");
-    const [run] = await runsOf("books", 1);
-    expect(run).toMatchObject({ status: "ok", summary: "Nothing to copy: it copies the bilag in the mail that wakes it (to copy older mail's: galahad bilag copy)." });
-    // What has been copied, yours alone to read.
-    expect(await json(await call("bilag", undefined))).toEqual({ copied: 0, latest: [] });
-    await call("removeLoop", { name: "books" });
-  });
-
   test("a loop that tells you: each run a notice of its own with what woke it, the oldest beyond five gone", async () => {
     const set = await json<{ hookSecret: string }>(await call("setLoop", { name: "doorbell", schedule: "never", task: { kind: "tell", text: "Someone rang" }, wakes: [{ kind: "webhook" }], cooldownMs: 60_000 }));
     const body = JSON.stringify({ ring: 1 });

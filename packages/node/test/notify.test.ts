@@ -516,7 +516,7 @@ describe("tiers on the wire", () => {
 
   test("his looks that found what they looked for go to the digest; his questions are told quietly, three a day, the rest to the digest", async () => {
     const h = harness();
-    const turn = (id: string, over: Partial<Parameters<typeof turnItem>[0]> = {}) => turnItem({ id, conversation: "cv_1234567890123456789012", bank: false, state: "done", question: false, waiting: false, look: true, ...over })!;
+    const turn = (id: string, over: Partial<Parameters<typeof turnItem>[0]> = {}) => turnItem({ id, conversation: "cv_1234567890123456789012", state: "done", question: false, waiting: false, look: true, ...over })!;
     h.db.addPending(turn("t_look"));
     for (const id of ["t_q1", "t_q2", "t_q3", "t_q4"]) h.db.addPending(turn(id, { question: true }));
     await h.look();

@@ -7,7 +7,6 @@ import { findSecrets } from "@galahad/core/secret-scan";
  *
  *   - secret-shaped text is redacted (and the entry says what, and where);
  *   - key material and session files are refused outright (and the entry says so);
- *   - the bank never gets here: its chats are skipped at the source.
  */
 
 export interface Redaction {

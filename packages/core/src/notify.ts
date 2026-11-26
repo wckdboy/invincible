@@ -324,10 +324,10 @@ export function connectorItem(id: string): NotifyItem | null {
 
 /**
  * A chat turn that ended with nobody watching: finished, couldn't finish, or ended by asking you. Never the chat's title
- * (your first message, or the name you gave it): the app opens the chat. A chat where he read the bank is told only to
- * devices that may read the bank. One of his own looks that ended without needing you goes to the digest.
+ * (your first message, or the name you gave it): the app opens the chat. One of his own looks that ended without needing
+ * you goes to the digest.
  */
-export function turnItem(t: { id: string; conversation: string; bank: boolean; state: "done" | "error"; question: boolean; waiting: boolean; look?: boolean }): NotifyItem | null {
+export function turnItem(t: { id: string; conversation: string; state: "done" | "error"; question: boolean; waiting: boolean; look?: boolean }): NotifyItem | null {
   if (!isConversationId(t.conversation)) return null;
   const asks = t.state === "done" && t.question;
   const where = t.look ? "A chat he looked in again" : "A chat you left him working in";
@@ -339,7 +339,7 @@ export function turnItem(t: { id: string; conversation: string; bank: boolean; s
     body: notifyClean(t.state === "error" ? `${where} ended with an error. Nothing is retried.` : t.waiting ? `${where}: it waits on your answer in the Inbox.` : asks ? `${where} ends by asking you something.` : `${where} has his answer.`, NOTIFY_BODY_MAX),
     open: "chat",
     conversation: t.conversation,
-    needs: t.bank ? ["chat", "bank:read"] : ["chat"],
+    needs: ["chat"],
     ...placed({ from: "turn", look: !!t.look, question: asks, waiting: t.waiting }),
   };
 }
@@ -513,7 +513,7 @@ export function notifyMessage(items: readonly NotifyItem[], salt = ""): NotifyPa
 
 /**
  * A notification's tag from an item's key: the same finding told again replaces its old notification.
- * A digest, never the key itself: a key names what it's about ("bank-consent:…"), and a payload doesn't.
+ * A digest, never the key itself: a key names what it's about ("connector:…"), and a payload doesn't.
  * Keyed with the node's own salt, because a digest of the tag also travels in the clear as the message's
  * topic: without the salt a push service could try likely keys ("notice:loop:ci") against it.
  */

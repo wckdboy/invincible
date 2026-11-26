@@ -404,31 +404,6 @@ describe("standing orders", () => {
   });
 });
 
-describe("bytes the node moves itself (bilag.ts)", () => {
-  test("a read or a create on the connector's own origin, with its key, each one a line in the ledger; an address anywhere else goes nowhere", async () => {
-    const identity = newNodeIdentity();
-    const store = new MindStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "solo" });
-    const vault = new Vault(store, identity);
-    vault.set("forge", KEY, { provider: "forge", origin });
-    store.emit(identity, "connector.set", { id: "forge", manifest: manifest() });
-    const asked: string[] = [];
-    const fetch = (async (input: RequestInfo | URL) => {
-      asked.push(String(input));
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    }) as unknown as typeof globalThis.fetch;
-    const ledgered: { class: string; target: string; detail?: string }[] = [];
-    const service = new ConnectorService({ store, vault, identity, local: new Database(":memory:"), ledger: (e) => ledgered.push(e), log: () => {}, fetch });
-    const moved = await service.transfer("forge", { method: "GET", path: "/files/1", class: "read", why: "copy a bilag: f.pdf", max: 1024 });
-    expect([...moved.bytes]).toEqual([1, 2, 3]);
-    expect(asked).toEqual([`${origin}/files/1`]);
-    expect(ledgered).toEqual([expect.objectContaining({ class: "read", target: "GET /files/1", detail: "by the node: copy a bilag: f.pdf · 200, 3 bytes" })]);
-    await expect(service.transfer("forge", { method: "PUT", path: "https://elsewhere.example/upload", class: "create", why: "x", max: 1024 })).rejects.toThrow(/off Forge's origin/);
-    await expect(service.transfer("nothing-here", { method: "GET", path: "/x", class: "read", why: "x", max: 1024 })).rejects.toThrow(/no connector "nothing-here"/);
-    expect(asked).toHaveLength(1);
-  });
-});
-
 describe("the outbox survives a crash without sending twice", () => {
   test("a send that was in flight when the node died is reported, never retried", async () => {
     const identity = newNodeIdentity();

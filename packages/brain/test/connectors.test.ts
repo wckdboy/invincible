@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildRequest, ConnectorManifest, newNodeIdentity } from "@galahad/core";
 import { foundFleet, MindStore, Vault } from "@galahad/mind";
-import { CATALOG, type DiscoveredTool, excerpt, keyState, MAX_RESPONSE_BYTES, mergeMcpTools, sendConnectorRequest, transferConnectorBytes } from "../src/index.ts";
+import { CATALOG, type DiscoveredTool, excerpt, keyState, MAX_RESPONSE_BYTES, mergeMcpTools, sendConnectorRequest } from "../src/index.ts";
 
 function vault() {
   const identity = newNodeIdentity();
@@ -72,32 +72,6 @@ describe("GitHub: pull requests and CI", () => {
     const built = buildRequest(github, "pull.review", { owner: "o", repo: "r", number: 1, event: "REQUEST_CHANGES", body: "The migration drops a column the importer still reads." });
     expect(built).toMatchObject({ method: "POST", url: "https://api.github.com/repos/o/r/pulls/1/reviews" });
     expect(JSON.parse(built.body!)).toEqual({ event: "REQUEST_CHANGES", body: "The migration drops a column the importer still reads." });
-  });
-});
-
-describe("moving a file's bytes (the node's own work, which no model sees)", () => {
-  test("with the key where it was pinned, on the connector's origin alone, the bytes as they are, and an answer read whole", async () => {
-    const v = vault();
-    v.set("forge", KEY, { provider: "forge", origin: "https://api.forge.test" });
-    const body = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]);
-    const { seen, fetch } = recorder(async (req) => new Response(new Uint8Array(await req.arrayBuffer()), { status: 201, headers: { "content-type": "application/pdf", location: "https://api.forge.test/next" } }));
-    const moved = await transferConnectorBytes({ vault: v, fetch }, forge, { method: "POST", url: "https://api.forge.test/upload", headers: { "content-type": "application/pdf" }, body, max: 1024 });
-    expect(moved).toMatchObject({ ok: true, status: 201, contentType: "application/pdf", location: "https://api.forge.test/next" });
-    expect([...moved.bytes]).toEqual([...body]);
-    expect(seen[0]!.headers.get("authorization")).toBe(`Bearer ${KEY}`);
-    expect(seen[0]!.redirect).toBe("manual");
-  });
-
-  test("never off the connector's origin, never with a key pinned elsewhere; an answer over its limit is refused, not cut", async () => {
-    const v = vault();
-    v.set("forge", KEY, { provider: "forge", origin: "https://api.forge.test" });
-    const { seen, fetch } = recorder(() => new Response(new Uint8Array(4096)));
-    await expect(transferConnectorBytes({ vault: v, fetch }, forge, { method: "GET", url: "https://evil.test/steal", max: 1 << 20 })).rejects.toThrow(/off Forge's origin/);
-    await expect(transferConnectorBytes({ vault: v, fetch }, forge, { method: "GET", url: "https://api.forge.test/big", max: 1000 })).rejects.toThrow(/over 0 MB: not taken/);
-    expect(seen.map((r) => r.url)).toEqual(["https://api.forge.test/big"]);
-    const elsewhere = vault();
-    elsewhere.set("forge", KEY, { provider: "forge", origin: "https://api.other.test" });
-    await expect(transferConnectorBytes({ vault: elsewhere, fetch }, forge, { method: "GET", url: "https://api.forge.test/x", max: 1000 })).rejects.toThrow(/pinned to another origin/);
   });
 });
 

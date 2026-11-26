@@ -54,7 +54,6 @@ describe("the runner", () => {
       const kept = chats.summary(look.conversation)!;
       const spec: TurnSpec = {
         by: look.by,
-        bank: false,
         role: "planner",
         conversation: { id: kept.id, title: kept.title, project: kept.project },
         question: lookMessage(look, now),

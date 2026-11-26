@@ -63,7 +63,6 @@ const LIST = [
   { id: "vault", label: "Vault", icon: "vault", under: "keys", scope: "vault:read", key: "v", keywords: ["keys", "secrets", "api key"], about: "Sealed keys; no model ever sees one" },
   { id: "models", label: "Models", icon: "models", under: "keys", scope: "mind:read", key: "l", keywords: ["providers", "roster", "llm"], about: "Who answers: roles, models, providers" },
   { id: "connectors", label: "Connectors", icon: "plug", under: "keys", scope: "mind:read", key: "n", keywords: ["github", "cloudflare", "home assistant", "integrations", "services", "tools", "mcp", "standing orders", "install"], about: "Services and MCP servers he may call" },
-  { id: "bank", label: "Bank", icon: "bank", under: "keys", scope: "bank:read", key: "b", keywords: ["accounts", "balances", "transactions", "enable banking", "money", "finance"], about: "The bank connection, and who may read it" },
   { id: "settings", label: "Settings", icon: "settings", under: "device", scope: null, key: ",", keywords: ["preferences", "theme", "device", "notifications"], about: "Theme, notifications, this device" },
 ] as const satisfies readonly PlaceSpec[];
 

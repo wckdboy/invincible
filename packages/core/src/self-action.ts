@@ -6,7 +6,7 @@ import { LoopName } from "./events.ts";
  * that he acts on what's safe, reversible and internal, and asks about everything
  * else; this is that line written down. The allowlist is these kinds and nothing
  * more: each is typed, each is checked again against the state it's about just
- * before it runs, and anything else (outward, destructive of your data, the bank,
+ * before it runs, and anything else (outward, destructive of your data,
  * the vault, devices, the roster, anything that needs fleet:admin) stays a notice
  * or an approval. Every one is recorded in the ledger as his own
  * (resource SELF_ACTION_RESOURCE, quest SELF_ACTION_QUEST), and you can turn them

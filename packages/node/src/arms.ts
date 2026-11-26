@@ -50,7 +50,7 @@ export class ArmTokens {
     return { token, info: this.get(label)! };
   }
 
-  /** Change an arm's scopes and keep its token (granting bank:read, say). */
+  /** Change an arm's scopes and keep its token (granting connect, say). */
   grant(label: string, add: Scope[] = [], remove: Scope[] = []): ArmInfo {
     const current = this.get(label);
     if (!current) throw new Error(`no agent named ${label}`);

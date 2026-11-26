@@ -44,8 +44,6 @@ import {
   mergeMcpTools,
   type OAuthEndpoints,
   sendConnectorRequest,
-  type Transferred,
-  transferConnectorBytes,
 } from "@galahad/brain";
 import type { MindStore, Vault } from "@galahad/mind";
 import type { LedgerEntryInput } from "@galahad/sandbox";
@@ -266,61 +264,6 @@ export class ConnectorService {
       input: schema.length > 24_000 ? { note: `its schema is ${schema.length} characters; the first 24,000 follow`, schema: schema.slice(0, 24_000) } : (live.inputSchema ?? {}),
       changed: live.schema !== tool.schema,
     };
-  }
-
-  /**
-   * A file into an MCP server's tool, for the node's own work that no model sees (books.ts: a bilag from Drive into
-   * Dinero). Its bytes are more than a call's arguments carry (32 KB, because an approval's replicate), and no model
-   * types them out. Only a tool classed create, through the oath like any call, the request a line in the ledger
-   * without the bytes. Never an agent's: no route or tool reaches this.
-   */
-  async handFile(connector: string, tool: string, args: Record<string, ArgValue>, why: string): Promise<ConnectorResult> {
-    const manifest = this.manifest(connector);
-    let built: ReturnType<typeof buildMcpCall>;
-    try {
-      built = buildMcpCall(manifest, tool, args);
-    } catch (error) {
-      throw new ConnectorCallError(400, (error as Error).message);
-    }
-    if (built.class !== "create") throw new ConnectorCallError(403, `${manifest.label}'s ${tool} is ${built.class}: the node hands a file only to a tool that creates`);
-    // A key in the small arguments is refused as anywhere; the file's own bytes are no one's words.
-    if (argStrings(args).some((text) => text.length <= 8000 && findSecrets(text).length)) {
-      throw new ConnectorCallError(422, "an argument looks like a credential; connectors take keys from the vault, never from arguments");
-    }
-    const resource = `connector.${manifest.id}`;
-    const target = `mcp ${built.remote}`;
-    const decision = decide({ class: built.class, resource, target });
-    if (decision.verdict !== "allow") throw new ConnectorCallError(403, decision.verdict === "deny" ? decision.reason : `${manifest.label}: ${built.class} would ask`);
-    const result = await this.send(manifest, { ...built, target });
-    this.o.ledger({ class: built.class, resource, target, verdict: "allow", reason: decision.reason, detail: `by the node: ${why} · ${excerpt(result, 300)}`.slice(0, 2000) });
-    return result;
-  }
-
-  /**
-   * Bytes to or from a connector, for the node's own work that no model sees (bilag.ts): a read, a create, or a change
-   * to what it made (a bilag's name), through the oath like any call, and each one a line in the ledger. Never an
-   * agent's: no tool reaches this.
-   */
-  async transfer(connector: string, step: { method: "GET" | "POST" | "PUT" | "PATCH"; path: string; headers?: Record<string, string>; body?: Uint8Array | string; class: "read" | "create" | "modify"; why: string; max: number }): Promise<Transferred> {
-    const manifest = this.manifest(connector);
-    const origin = new URL(manifest.origin).origin;
-    // A path on the connector's own origin (its base path first), or a whole address there (a resumable upload's).
-    const url = step.path.startsWith("https://") ? new URL(step.path) : new URL(`${manifest.basePath ?? ""}${step.path}`, origin);
-    if (url.origin !== origin) throw new ConnectorCallError(400, `refusing a request off ${manifest.label}'s origin`);
-    const resource = `connector.${manifest.id}`;
-    const target = `${step.method} ${url.pathname}`.slice(0, 256);
-    const decision = decide({ class: step.class, resource, target });
-    if (decision.verdict !== "allow") throw new ConnectorCallError(403, decision.verdict === "deny" ? decision.reason : `${manifest.label}: ${step.class} would ask`);
-    const ctx = { vault: this.o.vault, ...(this.o.fetch ? { fetch: this.o.fetch } : {}), oauth: { save: this.keepRotated, ...(this.o.oauthEndpoints ? { endpoints: this.o.oauthEndpoints } : {}) } };
-    let moved: Transferred;
-    try {
-      moved = await transferConnectorBytes(ctx, manifest, { method: step.method, url: url.toString(), ...(step.headers ? { headers: step.headers } : {}), ...(step.body === undefined ? {} : { body: step.body }), max: step.max });
-    } catch (error) {
-      if (error instanceof ConnectorError) throw new ConnectorCallError(424, error.message);
-      throw new ConnectorCallError(502, `${manifest.label} unreachable: ${(error as Error).name === "TimeoutError" ? "timed out" : redact(String((error as Error).message ?? error))}`);
-    }
-    this.o.ledger({ class: step.class, resource, target, verdict: "allow", reason: decision.reason, detail: `by the node: ${step.why} · ${moved.status}, ${moved.bytes.length} bytes`.slice(0, 2000) });
-    return moved;
   }
 
   /** One that signs in keeps a rotated sign-in sealed and pinned as before. */

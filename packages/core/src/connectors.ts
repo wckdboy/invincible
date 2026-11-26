@@ -201,7 +201,7 @@ export const ConnectorManifest = z
     access: ConnectorAccess.optional(),
     /**
      * What it reads is yours alone (mail): once its data is in an answer, nothing that could carry it out of Galahad, or
-     * write it into the shared mind, runs for the rest of that answer, its own tools aside (as for the bank).
+     * write it into the shared mind, runs for the rest of that answer, its own tools aside.
      */
     private: z.boolean().optional(),
   })

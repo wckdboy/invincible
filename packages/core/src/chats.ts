@@ -8,8 +8,7 @@ import type { AnswerStatus, ChatNeeds, ChatState, QueuedMessage, QueueHold, Turn
  *
  * A conversation lives on the node that served it (a private database there): every
  * device and the terminal see the same history through that node, and deleting one
- * deletes it. Only you read it (never an agent), and a conversation where Galahad read
- * the bank is shown only to a device that may read the bank.
+ * deletes it. Only you read it (never an agent).
  *
  * A project is a workspace that every node knows (the mind, `project.set`): a name,
  * the instructions Galahad follows in its chats, an optional repository. Its chats and
@@ -124,8 +123,11 @@ export interface LookView {
 export const LOOK_LIMITS = { perChat: 10, perNode: 50, minMs: 60_000, aheadMs: 30 * 24 * 3_600_000, noteChars: 500, lateMs: 7 * 24 * 3_600_000 } as const;
 
 export const LookId = z.string().regex(/^lk_[A-Za-z0-9_-]{16}$/);
-/** What the answer that set a look held of yours (the bank, or a private connector's data): its turn starts holding it too. */
-export const LookHeld = z.union([z.strictObject({ what: z.literal("bank") }), z.strictObject({ what: z.literal("connector"), id: z.string().min(1).max(64) })]);
+/**
+ * What the answer that set a look held of yours (a private connector's data): its turn starts holding it too. `private`:
+ * something of yours whose source can't be read back, held as the strictest there is (no connector's tools excepted).
+ */
+export const LookHeld = z.union([z.strictObject({ what: z.literal("private") }), z.strictObject({ what: z.literal("connector"), id: z.string().min(1).max(64) })]);
 export type LookHeld = z.infer<typeof LookHeld>;
 /** When: in a while (45m, 2h, 1d), or at a wall-clock time in the zone of the turn it is set in. */
 export const LookWhen = { in: z.string().trim().regex(/^\d{1,5} ?[mhd]$/, "in minutes, hours or days: 45m, 2h, 1d"), at: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/, "a date and a time: 2026-11-25 09:00") };
@@ -168,8 +170,6 @@ export interface ConversationSummary {
   updatedAt: number;
   /** How many messages it holds. */
   count: number;
-  /** Galahad read the bank in it: shown only to devices that may read the bank. */
-  bank: boolean;
   /** Where it stands, at a glance (turns.ts): working, waiting on you, queued, stopped, failed or done. */
   state: ChatState;
   /** Messages of yours queued behind it, and why they're held (null: they go when the turn before them ends). */

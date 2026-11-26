@@ -166,14 +166,13 @@ describe("what a notification may say: fixed words only", () => {
     expect(connectorItem("call-0045-your-bank-is-locked")).toBeNull();
   });
 
-  test("a turn that ended unwatched: finished, couldn't finish, a question; never the chat's title; a bank chat only for devices that may read the bank", () => {
-    const base = { id: "t_1", conversation: "cv_1234567890123456789012", bank: false, state: "done" as const, question: false, waiting: false };
+  test("a turn that ended unwatched: finished, couldn't finish, a question; never the chat's title", () => {
+    const base = { id: "t_1", conversation: "cv_1234567890123456789012", state: "done" as const, question: false, waiting: false };
     expect(turnItem(base)).toMatchObject({ key: "turn:t_1", kind: "finished", title: "Galahad has finished", body: "A chat you left him working in has his answer.", open: "chat", conversation: "cv_1234567890123456789012", needs: ["chat"], tier: "soon" });
     expect(turnItem({ ...base, question: true })).toMatchObject({ kind: "question", title: "Galahad has a question for you", body: "A chat you left him working in ends by asking you something.", tier: "soon", model: true });
     expect(turnItem({ ...base, waiting: true })).toMatchObject({ body: "A chat you left him working in: it waits on your answer in the Inbox.", model: true });
     const failed = turnItem({ ...base, state: "error", question: true })!;
     expect(failed).toMatchObject({ kind: "finished", title: "Galahad couldn't finish", body: "A chat you left him working in ended with an error. Nothing is retried." });
-    expect(turnItem({ ...base, bank: true })!.needs).toEqual(["chat", "bank:read"]);
     expect(turnItem({ ...base, conversation: "not-a-chat" })).toBeNull();
     // His own look that found what it looked for: the digest's. One that ends asking you is told, quietly.
     expect(turnItem({ ...base, look: true })).toMatchObject({ tier: "digest", topic: "look", body: "A chat he looked in again has his answer." });
@@ -200,7 +199,7 @@ describe("what a notification may say: fixed words only", () => {
       questionItem({ id: "q_1", connector: "anna-mail", askedAt: 0, expires: now + 1 }, now)!,
       secretItem("anna-bank")!,
       connectorItem("cr_AAAAAAAAAAAAAAAAAAAAAA")!,
-      ...[false, true].flatMap((look) => [turnItem({ id: "t", conversation: "cv_1234567890123456789012", bank: false, state: "done", question: false, waiting: false, look })!, turnItem({ id: "t", conversation: "cv_1234567890123456789012", bank: false, state: "error", question: false, waiting: true, look })!]),
+      ...[false, true].flatMap((look) => [turnItem({ id: "t", conversation: "cv_1234567890123456789012", state: "done", question: false, waiting: false, look })!, turnItem({ id: "t", conversation: "cv_1234567890123456789012", state: "error", question: false, waiting: true, look })!]),
       questItem({ quest: "q-1", goal: "Plan the Surprise for Anna", state: "done" })!,
     ];
     for (const told of said) {
@@ -376,7 +375,7 @@ describe("when he speaks, and when he stays silent", () => {
   });
 
   test("one item is told as itself: its own line, where it opens, a tag that replaces its last notification", () => {
-    const turn = turnItem({ id: "t_9", conversation: "cv_1234567890123456789012", bank: false, state: "done", question: false, waiting: false })!;
+    const turn = turnItem({ id: "t_9", conversation: "cv_1234567890123456789012", state: "done", question: false, waiting: false })!;
     expect(notifyMessage([turn])).toEqual({ v: 1, kind: "finished", title: "Galahad has finished", body: "A chat you left him working in has his answer.", open: "chat", conversation: "cv_1234567890123456789012", tag: tagOf("turn:t_9") });
     // The tag is a digest: the same thing told again replaces its notification, and a key's words never travel.
     expect(tagOf("notice:bank-consent:n_1")).toMatch(/^t-[A-Za-z0-9_-]{22}$/);

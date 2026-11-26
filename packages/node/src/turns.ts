@@ -38,7 +38,7 @@ import { TOOLS } from "./tools.ts";
  * message is sent once, and nothing is ever tried again by itself.
  *
  * What a turn may do is decided where it's prepared (the server: who asked, their
- * scopes, the tools, the bank's rules); the hub only runs what it's handed.
+ * scopes, the tools, the private-data rules); the hub only runs what it's handed.
  */
 
 /** A turn's answer as it's kept: its words, the model, each step, how it went. */
@@ -47,7 +47,6 @@ export interface AnswerRecord {
   model: string | null;
   steps: StoredStep[];
   error: string | null;
-  bank: boolean;
 }
 
 /** What an answer did, as it's kept with it: its words, the model, fallbacks, each tool and how it went. */
@@ -69,8 +68,6 @@ export function keepStep(answer: AnswerRecord, event: ChatStreamEvent): void {
     case "tool_result": {
       const step = answer.steps.find((s) => s.kind === "tool" && s.id === event.id);
       if (step?.kind === "tool") Object.assign(step, { ok: event.ok, summary: event.summary });
-      // Galahad read the bank in it: from now on the conversation is for devices that may.
-      if (event.ok && TOOLS.find((t) => t.name === event.name)?.flow === "private") answer.bank = true;
       return;
     }
     case "archive":
@@ -99,8 +96,6 @@ export class TurnError extends Error {
 /** A turn, prepared: who asked, what it may come to hold, and how to run it. */
 export interface TurnSpec {
   by: QueuedBy;
-  /** Its asker may read the bank, so it may come to hold bank data: only a device that may read the bank watches or steers it. */
-  bank: boolean;
   /** Its asker may command the team, so it has the tools to the knights: only a device that may command the team steers it. */
   team?: boolean;
   role: string;
@@ -321,7 +316,7 @@ export class TurnHub {
       steers: 0,
       buffer: [],
       listeners: new Set(),
-      answer: { content: "", model: null, steps: [], error: null, bank: false },
+      answer: { content: "", model: null, steps: [], error: null },
       answerId,
       stop: null,
       completed: false,
@@ -587,7 +582,7 @@ export class TurnHub {
       turn.answerId = this.opts.chats.startAnswer(c.id);
     }
     const carried: StoredStep[] = empty ? before.steps : before.model ? [{ kind: "model", ref: before.model }] : [];
-    turn.answer = { content: "", model: before.model, steps: carried, error: null, bank: before.bank };
+    turn.answer = { content: "", model: before.model, steps: carried, error: null };
   }
 
   private emit(turn: Live, event: ChatStreamEvent): void {

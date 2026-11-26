@@ -29,7 +29,6 @@ export function describeTask(task: LoopTask | null): string {
   if (task.kind === "heartbeat") return `${task.checklist ? "heartbeat + your checklist" : "heartbeat"}${task.selfAction === false ? " (self-action off)" : ""}`;
   if (task.kind === "quest") return `quest (${task.network}${task.gates?.length ? `, ${task.gates.length} gate${task.gates.length === 1 ? "" : "s"}` : ""}): ${task.goal.length > 70 ? `${task.goal.slice(0, 70)}…` : task.goal}`;
   if (task.kind === "tell") return `tell you${task.text ? `: ${task.text}` : " what woke it"}`;
-  if (task.kind === "bilag") return `copy the bilag in the mail that wakes it to Google Drive (${task.folder ?? "Bilag"}/<year>/<month>)`;
   const args = Object.entries(task.args ?? {}).map(([k, v]) => `${k}=${v}`).join(" ");
   return `call ${task.connector}.${task.tool}${args ? ` ${args}` : ""}`;
 }
@@ -159,10 +158,8 @@ function printDiscovered(connector: ConnectorView, d: { server: string | null; t
 }
 
 async function taskFrom(api: Api, flags: Flags): Promise<LoopTask | undefined> {
-  const kinds = ["heartbeat", "quest", "call", "tell", "bilag"].filter((k) => (k === "bilag" ? flags.bilag === true : flags[k] !== undefined) || (k === "tell" && flags.say !== undefined));
-  if (kinds.length > 1) throw new Error("give one of --heartbeat, --quest, --call, --tell or --bilag");
-  // Copy the bilag in the mail that wakes it to Google Drive (--bilag, into --folder <name> when you give one).
-  if (flags.bilag) return { kind: "bilag", ...(str(flags, "folder") ? { folder: str(flags, "folder")! } : {}) };
+  const kinds = ["heartbeat", "quest", "call", "tell"].filter((k) => flags[k] !== undefined || (k === "tell" && flags.say !== undefined));
+  if (kinds.length > 1) throw new Error("give one of --heartbeat, --quest, --call or --tell");
   // Tell you: a notice each run, with what woke it (and your words, --say "…").
   if (flags.tell || str(flags, "say")) return { kind: "tell", ...(str(flags, "say") ? { text: str(flags, "say")! } : {}) };
   if (flags.heartbeat) return { kind: "heartbeat", ...(str(flags, "checklist") ? { checklist: str(flags, "checklist")! } : {}) };

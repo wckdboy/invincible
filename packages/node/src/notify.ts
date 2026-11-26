@@ -262,7 +262,7 @@ export class NotifyService {
     const kept = this.o.sources.chats.summary(chat.id);
     if (!kept) return;
     const waits = kept.waits;
-    const item = turnItem({ id: turn.id, conversation: chat.id, bank: kept.bank, state: turn.state, question: !!waits?.question, waiting: !!waits && waits.actions.length + waits.secrets.length > 0, look: !!turn.spec.look });
+    const item = turnItem({ id: turn.id, conversation: chat.id, state: turn.state, question: !!waits?.question, waiting: !!waits && waits.actions.length + waits.secrets.length > 0, look: !!turn.spec.look });
     if (!item) return;
     this.o.db.addPending(item);
     this.nudge();

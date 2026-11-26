@@ -16,7 +16,7 @@ import { conceptVector, HOSTILE_PAGE } from "./archive-fixtures.ts";
 
 /*
  * The archive at work: every source through its adapter, by a cursor, idempotently,
- * catching up after downtime; the bank and secrets kept out; passages embedded; the
+ * catching up after downtime; secrets kept out; passages embedded; the
  * swift role's summaries within the day's budget; links and lessons; retrieval fenced
  * as data against a hostile page; the integrity check's notice. Providers are stand-ins.
  */
@@ -125,7 +125,7 @@ async function keepArtifact(w: World, files: Record<string, string | Uint8Array>
   ))!;
 }
 
-function keptChat(w: World, title: string, exchanges: [string, string][], opts: { bank?: boolean; tools?: string[] } = {}) {
+function keptChat(w: World, title: string, exchanges: [string, string][], opts: { tools?: string[] } = {}) {
   const c = w.chats.create({ title, project: null, role: "planner" });
   for (const [q, a] of exchanges) {
     w.chats.addUser(c.id, q);
@@ -136,7 +136,6 @@ function keptChat(w: World, title: string, exchanges: [string, string][], opts: 
       steps: (opts.tools ?? []).map((name, i) => ({ kind: "tool" as const, id: `t${i}`, name, title: name, input: "", ok: true, summary: "ok" })),
       status: "done",
       error: null,
-      bank: !!opts.bank,
     });
   }
   return c;
@@ -259,10 +258,8 @@ describe("sources: each by its cursor, idempotent, catching up after downtime", 
 });
 
 describe("what's never archived", () => {
-  test("a chat where Galahad read the bank, flagged or not; a chat still going; a chat that goes on becomes a second, linked entry", async () => {
+  test("a chat still going; a chat that goes on becomes a second, linked entry", async () => {
     const w = world();
-    keptChat(w, "Groceries this month", [["How much did I spend at Netto?", "1,234 kr."]], { bank: true });
-    keptChat(w, "Sneaky", [["Balance?", "Here it is."]], { tools: ["bank_balances"] });
     const ongoing = keptChat(w, "Footbridge", [["Load?", "5 kN/m²."]]);
     w.clock.now += 2 * 3_600_000;
     const { service, store } = w.open();
@@ -274,7 +271,7 @@ describe("what's never archived", () => {
 
     // It goes on: only the new exchange is archived, as a continuation.
     w.chats.addUser(ongoing.id, "And with snow?");
-    w.chats.finishAnswer(ongoing.id, w.chats.startAnswer(ongoing.id), { content: "Add 1 kN/m².", model: null, steps: [], status: "done", error: null, bank: false });
+    w.chats.finishAnswer(ongoing.id, w.chats.startAnswer(ongoing.id), { content: "Add 1 kN/m².", model: null, steps: [], status: "done", error: null });
     await service.drain();
     expect(store.counts().byKind).toEqual({ chat: 1 }); // not yet: it isn't quiet
     w.clock.now += 2 * 3_600_000;

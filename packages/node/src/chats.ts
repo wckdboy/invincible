@@ -21,7 +21,6 @@ interface ConversationRow {
   project: string | null;
   role: string;
   pinned: number;
-  bank: number;
   created_at: number;
   updated_at: number;
   count: number;
@@ -76,10 +75,10 @@ const lookOf = (row: LookRow): KeptLook => {
   let held: LookHeld | null = null;
   try {
     const parsed = row.held ? LookHeld.safeParse(JSON.parse(row.held)) : null;
-    held = parsed?.success ? parsed.data : row.held ? { what: "bank" } : null;
+    held = parsed?.success ? parsed.data : row.held ? { what: "private" } : null;
   } catch {
     // What it held can't be read back: held as the strictest there is.
-    held = { what: "bank" };
+    held = { what: "private" };
   }
   return { id: row.id, conversation: row.conversation, at: row.at, note: row.note, set: row.set_at, zone: row.zone, state: row.state, why: row.why, by: { kind: row.by_kind, device: row.by_device }, held };
 };
@@ -159,7 +158,6 @@ const summaryOf = (r: ConversationRow): KeptSummary => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   count: r.count,
-  bank: r.bank === 1,
   // What the store alone knows: no running turn, nothing resolved as waiting on you (the server adds both).
   state: chatState({ running: false, needs: null, queued: r.queued, last: r.last }),
   queued: r.queued,
@@ -218,7 +216,7 @@ export class ChatStore {
     this.db.exec("PRAGMA secure_delete = ON; PRAGMA foreign_keys = ON;");
     this.db.exec(`CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, project TEXT, role TEXT NOT NULL,
-        pinned INTEGER NOT NULL DEFAULT 0, bank INTEGER NOT NULL DEFAULT 0,
+        pinned INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -382,14 +380,13 @@ export class ChatStore {
   }
 
   /** His answer, ended. `read`: a device was watching it to its end, so it was read there; otherwise it's new to you. */
-  finishAnswer(conversation: string, message: number, answer: { content: string; model: string | null; steps: StoredStep[]; status: "done" | "error" | "stopped" | "steered"; error: string | null; bank: boolean }, read = false): void {
+  finishAnswer(conversation: string, message: number, answer: { content: string; model: string | null; steps: StoredStep[]; status: "done" | "error" | "stopped" | "steered"; error: string | null }, read = false): void {
     const at = this.now();
     this.db
       .query("UPDATE messages SET content = ?, model = ?, steps = ?, status = ?, error = ?, ended_at = ? WHERE id = ? AND conversation = ?")
       .run(answer.content, answer.model, JSON.stringify(answer.steps), answer.status, answer.error, at, message, conversation);
     this.db.query("UPDATE conversations SET answered_at = ? WHERE id = ?").run(at, conversation);
     if (read) this.see(conversation);
-    if (answer.bank) this.db.query("UPDATE conversations SET bank = 1 WHERE id = ?").run(conversation);
     this.touch(conversation);
   }
 
@@ -399,11 +396,11 @@ export class ChatStore {
   }
 
   /** The chats with an answer you haven't read, the newest answer first. */
-  unread(limit = 20): { id: string; title: string; bank: boolean; answeredAt: number }[] {
+  unread(limit = 20): { id: string; title: string; answeredAt: number }[] {
     return this.db
-      .query<{ id: string; title: string; bank: number; answered_at: number }, [number]>("SELECT id, title, bank, answered_at FROM conversations WHERE answered_at > COALESCE(seen_at, 0) ORDER BY answered_at DESC LIMIT ?")
+      .query<{ id: string; title: string; answered_at: number }, [number]>("SELECT id, title, answered_at FROM conversations WHERE answered_at > COALESCE(seen_at, 0) ORDER BY answered_at DESC LIMIT ?")
       .all(limit)
-      .map((r) => ({ id: r.id, title: r.title, bank: r.bank === 1, answeredAt: r.answered_at }));
+      .map((r) => ({ id: r.id, title: r.title, answeredAt: r.answered_at }));
   }
 
   /** An answer that never came to anything (you steered before he'd said or done a thing): it isn't kept. */

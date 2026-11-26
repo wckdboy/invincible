@@ -280,9 +280,9 @@ test("within what your device may do: one that may not command the team itself g
 });
 
 test("a turn that can change the team is steered only from a device that may: the others watch it, and can stop it", async () => {
-  // (Both may read the bank, as your terminal may: what keeps the first from steering is the team alone.)
-  const reader = await pairDevice("reader", ["chat", "mind:read", "mind:write", "bank:read"]);
-  const lead = await pairDevice("lead", ["chat", "mind:read", "mind:write", "bank:read", "fleet:admin"]);
+  // (What keeps the first from steering is the team alone.)
+  const reader = await pairDevice("reader", ["chat", "mind:read", "mind:write"]);
+  const lead = await pairDevice("lead", ["chat", "mind:read", "mind:write", "fleet:admin"]);
   // Your terminal's turn, held at its first model call so it is still running.
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
@@ -315,15 +315,15 @@ test("a turn that can change the team is steered only from a device that may: th
   await (await own).text();
 }, 15_000);
 
-test("the bank's rule covers them: once bank data is in an answer he makes and briefs nobody for the rest of it", async () => {
+test("the private-data rule covers them: once a private connector's data is in an answer he makes and briefs nobody for the rest of it", async () => {
   const flow = (name: string) => TOOLS.find((t) => t.name === name)!.flow;
   expect([flow("team"), flow("team_recruit"), flow("team_message")]).toEqual([undefined, "egress", "egress"]);
   const reached: string[] = [];
-  const bank: GalahadTool = { name: "bank_balances", title: "Balances", description: "Balances", input: { q: z.string().optional() }, routes: ["bankBalances"], flow: "private", run: async () => "{}" };
-  const tools = chatTools([bank, ...TOOLS.filter((t) => t.own)], { call: async (name) => { reached.push(name); return { workers: [], rooms: [], spare: { workers: 1, today: 1 } } as never; }, bytes: async () => { throw new Error("no bytes"); } }, String);
-  expect((await tools.run({ id: "1", name: "bank_balances", input: {} })).isError).toBeUndefined();
-  expect(await tools.run({ id: "2", name: "team_recruit", input: { id: "teller", name: "Teller", job: "Remember the balances." } })).toMatchObject({ isError: true, summary: "refused: bank data is in this answer" });
-  expect(await tools.run({ id: "3", name: "team_message", input: { to: "ada", text: "The balance is…" } })).toMatchObject({ isError: true, summary: "refused: bank data is in this answer" });
+  const mail: GalahadTool = { name: "mail_read", title: "Mail", description: "Mail", input: { q: z.string().optional() }, routes: ["recall"], run: async () => ({ text: "From: a friend.", private: "gmail" }) };
+  const tools = chatTools([mail, ...TOOLS.filter((t) => t.own)], { call: async (name) => { reached.push(name); return { workers: [], rooms: [], spare: { workers: 1, today: 1 } } as never; }, bytes: async () => { throw new Error("no bytes"); } }, String);
+  expect((await tools.run({ id: "1", name: "mail_read", input: {} })).isError).toBeUndefined();
+  expect(await tools.run({ id: "2", name: "team_recruit", input: { id: "teller", name: "Teller", job: "Remember the mail." } })).toMatchObject({ isError: true, summary: "refused: gmail's private data is in this answer" });
+  expect(await tools.run({ id: "3", name: "team_message", input: { to: "ada", text: "The mail says…" } })).toMatchObject({ isError: true, summary: "refused: gmail's private data is in this answer" });
   // Looking at who the knights are carries nothing out.
   expect((await tools.run({ id: "4", name: "team", input: {} })).isError).toBeUndefined();
   expect(reached).toEqual(["teamOverview"]);

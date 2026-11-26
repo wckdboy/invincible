@@ -121,7 +121,7 @@ async function page(event: FetchEventLike): Promise<Response> {
   try {
     const response = await fetch(event.request, { signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
     if (response.ok) {
-      // Anything else opened in a tab (a script, the manifest, the bank's return with its code) is shown, never kept as the app.
+      // Anything else opened in a tab (a script, the manifest, a sign-in's return with its code) is shown, never kept as the app.
       const app = APP_PAGES.includes(new URL(event.request.url).pathname) && (response.headers.get("content-type") ?? "").startsWith("text/html");
       if (app) event.waitUntil(cache.put("/", response.clone()));
       return response;

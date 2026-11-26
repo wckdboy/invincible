@@ -89,7 +89,7 @@ function setup(limits: ConstructorParameters<typeof TurnHub>[0]["limits"] = {}) 
     const answer = scriptedAnswer();
     answers.push(answer);
     const kept = conversation ? chats.summary(conversation)! : null;
-    return { by: admin, bank: false, role: "planner", conversation: kept ? { id: kept.id, title: kept.title, project: kept.project } : null, question, messages: [{ role: "user", content: question }], waits: { actions: [], secrets: [] }, run: answer.run, ...extra };
+    return { by: admin, role: "planner", conversation: kept ? { id: kept.id, title: kept.title, project: kept.project } : null, question, messages: [{ role: "user", content: question }], waits: { actions: [], secrets: [] }, run: answer.run, ...extra };
   };
   hub.setPrepare((conversation, queued) => {
     if (refuse) throw refuse;
@@ -201,7 +201,7 @@ describe("a turn the node owns", () => {
 
   test("a device that may not watch it is told only that it's running", () => {
     const t = setup();
-    const turn = t.hub.start(t.spec(t.chat(), "hi", { bank: true }));
+    const turn = t.hub.start(t.spec(t.chat(), "hi"));
     expect(t.hub.view(turn, false)).toMatchObject({ state: "running", watchable: false, step: null, model: null });
     t.answers[0]!.end();
   });
@@ -615,7 +615,7 @@ describe("when the node stops, and comes back", () => {
     const hub = new TurnHub({ chats });
     const answer = scriptedAnswer();
     const starts: string[] = [];
-    const make = (conversation: string, question: string, by: QueuedBy): TurnSpec => ({ by, bank: false, role: "planner", conversation: { id: conversation, title: "t", project: null }, question, messages: [{ role: "user", content: question }], waits: { actions: [], secrets: [] }, run: answer.run });
+    const make = (conversation: string, question: string, by: QueuedBy): TurnSpec => ({ by, role: "planner", conversation: { id: conversation, title: "t", project: null }, question, messages: [{ role: "user", content: question }], waits: { actions: [], secrets: [] }, run: answer.run });
     hub.setPrepare((conversation, queued) => {
       starts.push(queued.text);
       return make(conversation, queued.text, queued.by);
@@ -663,7 +663,7 @@ describe("a chat store from before read and unread", () => {
     const before = new ChatStore(path, () => clock++);
     const id = before.create({ title: "Old", project: null, role: "planner" }).id;
     before.addUser(id, "Hello?");
-    before.finishAnswer(id, before.startAnswer(id), { content: "Hi.", model: null, steps: [], status: "done", error: null, bank: false });
+    before.finishAnswer(id, before.startAnswer(id), { content: "Hi.", model: null, steps: [], status: "done", error: null });
     before.close();
     // As an older node left it: no columns for when he answered, or when you read it.
     const raw = new Database(path);
@@ -672,7 +672,7 @@ describe("a chat store from before read and unread", () => {
     const after = new ChatStore(path, () => clock++);
     expect(after.summary(id)!.unread).toBe(false);
     expect(after.unread()).toEqual([]);
-    after.finishAnswer(id, after.startAnswer(id), { content: "And again.", model: null, steps: [], status: "done", error: null, bank: false });
+    after.finishAnswer(id, after.startAnswer(id), { content: "And again.", model: null, steps: [], status: "done", error: null });
     expect(after.summary(id)!.unread).toBe(true);
     after.close();
     rmSync(path, { force: true });

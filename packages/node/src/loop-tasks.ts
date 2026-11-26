@@ -1,7 +1,4 @@
 import { type ChatStreamEvent, type NodeIdentity, redact, retriedRuns, type RouteName, routes, SELF_ACTION_RESOURCE, spendLabel, type Usage } from "@galahad/core";
-import type { Database } from "bun:sqlite";
-import type { BankService } from "./bank/service.ts";
-import { bilagSummary, copyBilag, type Mailbox } from "./bilag.ts";
 import { chat, commandsRun, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sseData } from "@galahad/brain";
 import type { SyncEngine } from "@galahad/link";
 import type { MindStore, Vault } from "@galahad/mind";
@@ -45,9 +42,6 @@ export interface LoopTaskDeps {
   log: (message: string) => void;
   now?: () => number;
   fetch?: typeof fetch;
-  bank?: BankService;
-  /** This node's own database (local.db): where the bilag copied to Drive are kept track of (bilag.ts). */
-  local?: Database;
   /* ---- self-action (set by the daemon) ---- */
   /** Start a run of one of this node's loops now (self-action's retry). */
   runLoop?: (name: string) => void;
@@ -146,14 +140,6 @@ export function cheapestRole(deps: LoopTaskDeps): string | null {
   return CHEAPEST_FIRST.find((role) => models[role] && roleUsable(deps, models[role]!.models)) ?? null;
 }
 
-/** The bank connection, as the heartbeat sees it: only once it's set up on this node. */
-function bankOf(bank: BankService | undefined): HeartbeatSnapshot["bank"] {
-  if (!bank) return null;
-  const status = bank.status();
-  if (!status.configured) return null;
-  return { problem: status.problem, connected: !status.reauthorizationRequired && status.accounts.length > 0, daysRemaining: status.daysRemaining, hadSession: status.validUntil !== null };
-}
-
 export async function heartbeatSnapshot(deps: LoopTaskDeps): Promise<HeartbeatSnapshot> {
   const now = (deps.now ?? Date.now)();
   const statuses = new Map(deps.sync.status().map((s) => [s.device, s]));
@@ -203,7 +189,6 @@ export async function heartbeatSnapshot(deps: LoopTaskDeps): Promise<HeartbeatSn
       .filter((o) => o.state === "active" || o.state === "stale")
       .map((o) => ({ id: o.id, label: o.label, tool: `${o.connector}.${o.tool}`, stale: o.state === "stale", until: o.until })),
     disk: diskOf(deps.home),
-    bank: bankOf(deps.bank),
     compute: deps.compute ? computeOf(deps, now) : null,
   };
 }
@@ -375,20 +360,6 @@ export function loopExecutor(deps: LoopTaskDeps) {
       case "tell":
         // What woke it is told by the runner (Woken by …); the notice is raised when the run is recorded (daemon).
         return { status: "ok", summary: task.text ?? (ctx.woken.length ? "" : "It's time.") };
-      case "bilag": {
-        // The mail that woke it, by its mailbox and id (wakes.ts names a mail's event mail:<mailbox>:<id>).
-        const mails = ctx.woken.flatMap((event) => {
-          const m = /^mail:(gmail|outlook):(.+)$/.exec(event.id);
-          return m ? [{ mailbox: m[1] as Mailbox, id: m[2]! }] : [];
-        });
-        if (!mails.length) return { status: "ok", summary: "Nothing to copy: it copies the bilag in the mail that wakes it (to copy older mail's: galahad bilag copy)." };
-        if (!deps.local) return { status: "failed", summary: "This node keeps no record of bilag copied, so it copies none." };
-        const report = await copyBilag({ transfer: (connector, step) => deps.connectors.transfer(connector, step), local: deps.local, tz: loop.tz }, mails, task.folder);
-        // A mail it couldn't copy goes back to be tried again (loops.ts giveBack): what was copied never is twice.
-        const left = new Set(report.left.map((mail) => `mail:${mail}`));
-        const giveBack = ctx.woken.filter((event) => left.has(event.id)).map((event) => event.id);
-        return { status: report.failed.length ? "attention" : "ok", summary: bilagSummary(report), ...(giveBack.length ? { giveBack } : {}) };
-      }
       case "call": {
         const outcome = await deps.connectors.call(
           { connector: task.connector, tool: task.tool, args: task.args ?? {} },

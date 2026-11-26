@@ -524,23 +524,6 @@ describe("his skills in chat, and as tools", () => {
     expect(asked.find((a) => a.role === "chat")!.system).not.toContain("<skills-");
   }, 30_000);
 
-  test("in a chat where he read the bank, he's offered no way to write a skill", async () => {
-    offered.length = 0;
-    const events = await chatTurn("Remember this chat.", { save: true });
-    const kept = events.find((e): e is Extract<ChatStreamEvent, { type: "conversation" }> => e.type === "conversation")!;
-    expect(offered.at(-1)).toContain("skill_write");
-    // As it stands after he read the bank in it (the store's own flag, set here directly: there's no bank in this test).
-    const chats = new Database(join(root, "node", "chats.db"));
-    chats.query("UPDATE conversations SET bank = 1 WHERE id = ?").run(kept.id);
-    chats.close();
-    offered.length = 0;
-    await chatTurn("Now write that up as a skill.", { conversation: kept.id });
-    expect(offered.at(-1)!.length).toBeGreaterThan(5);
-    expect(offered.at(-1)).not.toContain("skill_write");
-    expect(offered.at(-1)).toContain("skills");
-    await call("deleteConversation", { id: kept.id });
-  }, 30_000);
-
   test("an agent's tools: it lists and reads skills as data, sees nothing of one that waits, and what it writes is a proposal", async () => {
     const { token } = await call<{ token: string }>("mintArm", { label: "hermes" });
     const api = { call: <T,>(name: RouteName, input?: unknown) => call<T>(name, input, token), bytes: async () => ({ bytes: new Uint8Array(), type: "" }) };

@@ -320,7 +320,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
     manifest: {
       id: "gmail",
       label: "Gmail",
-      description: "Your mail at Google: search, read, draft, archive; sending and trashing ask you first. Galahad's alone, and what it reads stays in the answer that read it, as the bank's data does.",
+      description: "Your mail at Google: search, read, draft, archive; sending and trashing ask you first. Galahad's alone, and what it reads stays in the answer that read it.",
       origin: "https://gmail.googleapis.com",
       auth: { secret: "gmail", scheme: "oauth", oauth: { provider: "google", scopes: ["https://www.googleapis.com/auth/gmail.modify", "openid", "email"] } },
       tools: {
@@ -342,7 +342,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
     manifest: {
       id: "outlook",
       label: "Outlook",
-      description: "Your mail at Microsoft (Outlook.com, Microsoft 365): search, read, draft, archive; sending and trashing ask you first. Galahad's alone, and what it reads stays in the answer that read it, as the bank's data does.",
+      description: "Your mail at Microsoft (Outlook.com, Microsoft 365): search, read, draft, archive; sending and trashing ask you first. Galahad's alone, and what it reads stays in the answer that read it.",
       origin: "https://graph.microsoft.com",
       auth: { secret: "outlook", scheme: "oauth", oauth: { provider: "microsoft", scopes: ["offline_access", "openid", "email", "profile", "User.Read", "Mail.ReadWrite", "Mail.Send"] } },
       tools: {
@@ -357,21 +357,20 @@ export const CATALOG: Record<string, CatalogEntry> = {
       private: true,
     },
   },
-  // The owner's word of 18 November 2026: bilag copied from your mail (node bilag.ts), and all of your Drive to read
-  // (drive.readonly). Galahad writes only files of its own there (drive.file), and changes or deletes nothing of yours.
+  // All of your Drive to read (drive.readonly): Galahad writes, changes and deletes nothing there.
   gdrive: {
     // A file's or a folder's id, and a page's token.
     ids: /^[A-Za-z0-9_-]{32,200}$/,
-    keyHelp: "it signs in with Google, through the app you registered for Gmail with the Google Drive API on and the drive.readonly and drive.file scopes added (docs/BOOKS.md)",
+    keyHelp: "it signs in with Google, through the app you registered for Gmail with the Google Drive API on and the drive.readonly scope added (docs/MAIL.md)",
     manifest: {
       id: "gdrive",
       label: "Google Drive",
-      description: "Your Drive, to read: find files anywhere in it and in shared drives, look one up, read a Google Doc or Sheet. It writes only the bilag it copies from your mail (Bilag/<year>/<month>). Galahad's alone, and what it reads stays in the answer that read it, as the mail's does.",
+      description: "Your Drive, to read: find files anywhere in it and in shared drives, look one up, read a Google Doc or Sheet. It writes nothing there. Galahad's alone, and what it reads stays in the answer that read it, as the mail's does.",
       origin: "https://www.googleapis.com",
-      auth: { secret: "gdrive", scheme: "oauth", oauth: { provider: "google", scopes: ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/drive.file", "openid", "email"] } },
+      auth: { secret: "gdrive", scheme: "oauth", oauth: { provider: "google", scopes: ["https://www.googleapis.com/auth/drive.readonly", "openid", "email"] } },
       tools: {
         files: {
-          description: "Find files anywhere in your Drive. q is Drive's search words: name contains 'ACME', fullText contains 'faktura' (a PDF's words too), '<folder id>' in parents, mimeType = 'application/pdf', trashed = false. fields: files(id,name,mimeType,parents,createdTime,webViewLink),nextPageToken. pageToken for the next page. Shared drives too: corpora allDrives, includeItemsFromAllDrives and supportsAllDrives true.",
+          description: "Find files anywhere in your Drive. q is Drive's search words: name contains 'Report', fullText contains 'invoice' (a PDF's words too), '<folder id>' in parents, mimeType = 'application/pdf', trashed = false. fields: files(id,name,mimeType,parents,createdTime,webViewLink),nextPageToken. pageToken for the next page. Shared drives too: corpora allDrives, includeItemsFromAllDrives and supportsAllDrives true.",
           method: "GET",
           path: "/drive/v3/files",
           params: {

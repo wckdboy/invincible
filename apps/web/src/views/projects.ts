@@ -100,7 +100,7 @@ export const projectsView: View = (root, ctx, { scope, opts }) => {
       "button",
       { class: "item chat-row", type: "button", onclick: () => ctx.navigate("chat", { conversation: c.id }) },
       h("span", { class: "avatar" }, icon("chat", { size: 14 })),
-      h("div", { class: "grow" }, h("div", { class: "strong small ellipsis" }, c.title), h("div", { class: "meta" }, `${c.count} message${c.count === 1 ? "" : "s"} · ${relativeTime(c.updatedAt)}${c.bank ? " · bank" : ""}`)),
+      h("div", { class: "grow" }, h("div", { class: "strong small ellipsis" }, c.title), h("div", { class: "meta" }, `${c.count} message${c.count === 1 ? "" : "s"} · ${relativeTime(c.updatedAt)}`)),
     );
 
   function list(): HTMLElement {

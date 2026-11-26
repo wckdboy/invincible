@@ -149,8 +149,8 @@ export interface RunResult {
   summary: string;
   /**
    * What woke this run that it couldn't do, by its events' ids, to be tried again: each waits for the next run, once the
-   * loop's cooldown has passed, WAKE_RETRIES times at most. Only a task whose runs are safe to repeat gives any back (a
-   * bilag's mail: what was copied is never copied twice), and only when that is all that went wrong.
+   * loop's cooldown has passed, WAKE_RETRIES times at most. Only a task whose runs are safe to repeat gives any back, and
+   * only when that is all that went wrong.
    */
   giveBack?: string[];
 }

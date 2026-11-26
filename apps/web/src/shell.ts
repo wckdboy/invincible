@@ -17,7 +17,6 @@ import { toast } from "./ui/toast.ts";
 import { activityView } from "./views/activity.ts";
 import { artifactsView } from "./views/artifacts.ts";
 import { archiveView, openNewIdea } from "./views/archive.ts";
-import { bankView } from "./views/bank.ts";
 import { projectsView } from "./views/projects.ts";
 import { chatActivityPill, chatsForPalette, chatView, lookAtWork, startNewChat } from "./views/chat.ts";
 import { filterConversations } from "./lib/chats.ts";
@@ -75,7 +74,6 @@ const VIEWS: Record<Route, View> = {
   vault: vaultView,
   models: modelsView,
   connectors: connectorsView,
-  bank: bankView,
   settings: settingsView,
 };
 

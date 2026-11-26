@@ -42,7 +42,7 @@ export function turnLine(t: TurnView, now: number): string {
     where,
     t.role,
     `${minutes(now - t.startedAt)} so far`,
-    t.watchable ? plainLine(t.step ?? "starting") : "may read the bank: not shown to this device",
+    t.watchable ? plainLine(t.step ?? "starting") : "started on another device: not shown to this one",
     t.tools ? `${t.tools} tool${t.tools === 1 ? "" : "s"}` : null,
     t.steering ? `${t.steering} of your messages waiting to reach him` : null,
     watching,

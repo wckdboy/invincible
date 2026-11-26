@@ -194,7 +194,6 @@ import { compressedJson } from "./compress.ts";
 import { type Capabilities, isAlwaysOn } from "./capabilities.ts";
 import { handleGitGateway } from "./git-gateway.ts";
 import { handleKeyGateway, keyScope, ungivable } from "./key-gateway.ts";
-import { BankError, type BankService } from "./bank/service.ts";
 import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
@@ -209,8 +208,6 @@ import { TELEGRAM_SCOPES, TelegramError, type TelegramGateway } from "./telegram
 import { OutcomeError, OutcomeRunner } from "./outcomes.ts";
 import { BacklogRunner, issueLines } from "./backlog.ts";
 import { offerFix } from "./ci-back.ts";
-import type { BilagService } from "./bilag.ts";
-import type { BooksAttach, BooksAttached } from "./books.ts";
 import { ShipManifest } from "./ship.ts";
 import { randomBytes } from "node:crypto";
 import type { LoopDraft, LoopDrafts } from "./loop-drafts.ts";
@@ -284,21 +281,12 @@ export interface AppContext {
   questions?: Questions;
   /** Connectors agents asked you for, waiting for you to add one or dismiss the request (node-local). */
   connectorRequests: ConnectorRequests;
-  /** Bilag copied from your mail to Google Drive (bilag.ts): what was copied, and copying what came before the loop's wakes. */
-  bilag?: BilagService;
-  /** A bilag from Drive into Dinero, to the payment it documents, or into its archive alone (books.ts). */
-  books?: {
-    attach(input: BooksAttach): Promise<BooksAttached>;
-    upload(input: { organizationId: number; file: string }): Promise<{ name: string; bytes: number; sha256: string; fileGuid: string }>;
-  };
   /** The heartbeat's checks, run here and now (no writes). */
   heartbeatCheck: () => Promise<FindingView[]>;
   /** The doctor: one look at this node's whole installation (doctor.ts). It changes nothing. */
   doctor: (opts: DoctorOptions) => Promise<DoctorRun>;
   /** Notifications to the owner's paired devices: who is subscribed, what's sent and when (notify.ts). */
   notify: NotifyService;
-  /** Read-only bank access (Enable Banking), on the node that holds the key. */
-  bank: BankService;
   /** Your chat history, on this node. */
   chats: ChatStore;
   /** What you attach to your messages there: pictures and texts, kept by their SHA-256 (uploads.ts). */
@@ -837,8 +825,6 @@ export function createApp(ctx: AppContext) {
   function ownerOnly(p: Principal): void {
     if (!isOwner(p)) throw new HttpError(403, "chats are yours alone");
   }
-  /** A chat where Galahad read the bank is for devices that may read the bank. */
-  const visibleTo = (c: ConversationSummary, p: Principal) => !c.bank || p.scopes.includes("bank:read");
 
   /* ---------- turns the node owns: who may see, steer and stop them; a chat's state at a glance ---------- */
 
@@ -861,16 +847,12 @@ export function createApp(ctx: AppContext) {
     if (!isOwner(p)) return false;
     const c = turn.spec.conversation;
     if (!c) return sameAsker(turn.spec.by, p);
-    const kept = ctx.chats.summary(c.id);
-    return !!kept && visibleTo(kept, p);
+    return !!ctx.chats.summary(c.id);
   }
-  /** Whether it may watch and steer it too: a turn that may read the bank is only for a device that may read the bank. */
-  const watchesTurn = (turn: LiveTurn, p: Principal): boolean => knowsTurn(turn, p) && (!turn.spec.bank || p.scopes.includes("bank:read"));
   function watchedTurn(id: string, p: Principal): LiveTurn {
     ownerOnly(p);
     const turn = ctx.turns.get(id);
     if (!turn || !knowsTurn(turn, p)) throw new HttpError(404, "no such turn here (one that ended a while ago is in its chat)");
-    if (!watchesTurn(turn, p)) throw new HttpError(403, "that turn may read the bank, and this device may not: it can be stopped from here, not watched or steered");
     return turn;
   }
   /**
@@ -882,12 +864,12 @@ export function createApp(ctx: AppContext) {
     if (turn.spec.team && !p.scopes.includes("fleet:admin")) throw new HttpError(403, "that turn may change the team, and this device may not: it can be watched and stopped from here, not steered");
     return turn;
   }
-  const turnView = (turn: LiveTurn, p: Principal): TurnView => ctx.turns.view(turn, watchesTurn(turn, p));
+  const turnView = (turn: LiveTurn, p: Principal): TurnView => ctx.turns.view(turn, knowsTurn(turn, p));
   /** A kept chat of yours that this device may see, or 404. */
   function keptChat(id: string, p: Principal): KeptSummary {
     ownerOnly(p);
     const kept = ctx.chats.summary(id);
-    if (!kept || !visibleTo(kept, p)) throw new HttpError(404, "no such conversation");
+    if (!kept) throw new HttpError(404, "no such conversation");
     return kept;
   }
   /** What a turn left waiting on you, as it stands now: approvals still unanswered, keys still not given. */
@@ -980,7 +962,7 @@ export function createApp(ctx: AppContext) {
       return null;
     }
   }
-  /** His tools for an answer. In a chat where he read the bank he's offered no way to write a skill: none is ever drawn from one. */
+  /** His tools for an answer. */
   const toolsIn = (agent: Principal, kept: ConversationSummary | null) => {
     // (His own tools, the ones to the knights, only where he may lead them and this node keeps a team; a Mac itself
     // only where a node of the fleet lends him its screen.)
@@ -988,8 +970,7 @@ export function createApp(ctx: AppContext) {
     const tools = toolsFor(agent.scopes, leadsTeam(agent) && !!ctx.team).filter((t) => (lends || t.name !== "mac") && t.name !== "look_later");
     // A look of his own comes back as a turn in the chat he set it in: only in a kept chat, only for him, on a node that takes them.
     const looks = kept && himself(agent) && ctx.looks ? toolsFor(agent.scopes, true).filter((t) => t.name === "look_later") : [];
-    const offered = [...tools, ...looks];
-    return kept?.bank ? offered.filter((t) => t.name !== "skill_write") : offered;
+    return [...tools, ...looks];
   };
   /**
    * Why a call was given others' words by this node itself: untrusted memories recalled for it (the same recall
@@ -1367,17 +1348,6 @@ export function createApp(ctx: AppContext) {
       throw error;
     }
   };
-  /** The books' routes: yours alone; a connector's refusal as it came, anything else said as Dinero's or Drive's (502). */
-  async function booksErrors<T>(p: Principal, work: (books: NonNullable<AppContext["books"]>) => Promise<T>): Promise<T> {
-    ownerOnly(p);
-    if (!ctx.books) throw new HttpError(503, "this node keeps no books");
-    try {
-      return await connectorErrors(() => work(ctx.books!));
-    } catch (error) {
-      if (error instanceof HttpError) throw error;
-      throw new HttpError(502, redact(String((error as Error).message ?? error)).slice(0, 500));
-    }
-  }
   /** Who reaches a connector: you (a device of yours), or an agent: a coding agent's arm, or another node. */
   const connectorCaller = (p: Principal): Caller =>
     p.kind === "admin" || p.kind === "client"
@@ -1417,7 +1387,7 @@ export function createApp(ctx: AppContext) {
     let upTo = 0;
     if (continued) {
       kept = ctx.chats.summary(continued);
-      if (!kept || !visibleTo(kept, p)) throw new HttpError(404, "no such conversation");
+      if (!kept) throw new HttpError(404, "no such conversation");
       if (asked.role !== "user") throw new HttpError(400, "the last message must be yours");
       if (retry) ctx.chats.dropLastExchange(kept.id, asked.content);
       // The kept conversation leads: what's stored (once it is long, its story and what came after it whole), then
@@ -1436,7 +1406,7 @@ export function createApp(ctx: AppContext) {
       // A conversation started elsewhere (a temporary chat you now keep) brings what was said before.
       for (const m of request.messages.slice(0, -1)) {
         if (m.role === "user") ctx.chats.addUser(kept.id, m.content, m.attachments);
-        else ctx.chats.finishAnswer(kept.id, ctx.chats.startAnswer(kept.id), { content: m.content, model: null, steps: [], status: "done", error: null, bank: false }, true);
+        else ctx.chats.finishAnswer(kept.id, ctx.chats.startAnswer(kept.id), { content: m.content, model: null, steps: [], status: "done", error: null }, true);
       }
     }
     // What he recalls: for your question, the latest thing said. For coding work (a quest's call), for what the
@@ -1515,7 +1485,7 @@ export function createApp(ctx: AppContext) {
 
   /**
    * A turn of yours, ready for the hub to run: the same answer as ever (his tools within what you may do, as
-   * the agent he is, the bank's rules in them, his slot, the archive), on the turn's own signal
+   * the agent he is, the private-data rules in them, his slot, the archive), on the turn's own signal
    * instead of a request's, so nothing about it depends on a connection.
    */
   function turnSpec(ready: ReturnType<typeof prepareAnswer>, p: Principal, opts: { held?: LookHeld | null } = {}): TurnSpec {
@@ -1525,8 +1495,6 @@ export function createApp(ctx: AppContext) {
     const waits: TurnSpec["waits"] = { actions: [], secrets: [] };
     return {
       by: byOf(p),
-      // Offered the bank's tools, so the answer may come to hold bank data.
-      bank: agent.scopes.includes("bank:read"),
       // Offered the tools to the knights, so what it is told next it may do with them.
       team: leadsTeam(agent) && !!ctx.team,
       role,
@@ -1536,12 +1504,12 @@ export function createApp(ctx: AppContext) {
       messages,
       waits,
       run: async function* (steering, signal) {
-        // One set of tools for the whole turn: what the bank's rules refuse stays refused after a steer.
+        // One set of tools for the whole turn: what the private-data rules refuse stays refused after a steer.
         const tools = chatTools(toolsIn(agent, kept), noting(inProcess(agent, signal), waits, { conversation: kept?.id ?? null, by: byOf(p), zone }), explain, {
           ...(project ? { tag: `project:${project.id}` } : {}),
           ...(opts.held ? { held: opts.held } : {}),
         });
-        const shown: AnswerRecord = { content: "", model: null, steps: [], error: null, bank: false };
+        const shown: AnswerRecord = { content: "", model: null, steps: [], error: null };
         let leave: (() => void) | null = null;
         let answered: (() => void) | null = null;
         try {
@@ -1549,10 +1517,10 @@ export function createApp(ctx: AppContext) {
           leave = await ctx.governor.enterModel({ wait: false }, signal);
           answered = ctx.archive.answering();
           // A long chat is folded first, on the swift role (a chore): its older words summed up into its story, once.
-          // Never one where he read the bank (that stays put); one that can't be folded now is sent as it was.
+          // One that can't be folded now is sent as it was.
           let sent = messages;
           let story = ready.story;
-          if (kept && !kept.bank) {
+          if (kept) {
             const told = await foldChat(kept.id, ready.upTo, p, signal).catch((error) => {
               ctx.log(`fold ${kept.id}: ${redact(String((error as Error).message ?? error)).slice(0, 200)}`);
               return null;
@@ -1611,7 +1579,7 @@ export function createApp(ctx: AppContext) {
   ctx.turns.setPrepare((conversation, queued) => {
     const p = askerNow(queued.by);
     const kept = ctx.chats.summary(conversation);
-    if (!kept || !visibleTo(kept, p)) throw new TurnError(404, "the chat is gone, or the device that queued it may no longer see it", "device");
+    if (!kept) throw new TurnError(404, "the chat is gone", "device");
     const input = routes.chat.input.parse({ role: queued.role ?? kept.role, conversation, messages: [{ role: "user", content: queued.text }] });
     return turnSpec(prepareAnswer(input, p), p);
   });
@@ -1622,7 +1590,7 @@ export function createApp(ctx: AppContext) {
   ctx.looks?.setPrepare((look: KeptLook) => {
     const p = askerNow(look.by);
     const kept = ctx.chats.summary(look.conversation);
-    if (!kept || !visibleTo(kept, p)) throw new TurnError(404, "the chat is gone, or the device whose turn set it may no longer see it", "device");
+    if (!kept) throw new TurnError(404, "the chat is gone", "device");
     const text = lookMessage(look, Date.now());
     guardAgainstSecrets(text);
     const input = routes.chat.input.parse({ role: kept.role, conversation: look.conversation, messages: [{ role: "user", content: text }] });
@@ -2008,7 +1976,7 @@ export function createApp(ctx: AppContext) {
     if (ctx.turns.runningIn(kept.id)) throw new HttpError(409, "He has just started working in that chat again. Try once more: it will steer him.");
     ctx.chats.addUser(kept.id, aside.question);
     // (Read: you are bringing it here from where you read it.)
-    ctx.chats.finishAnswer(kept.id, ctx.chats.startAnswer(kept.id), { content: aside.answer, model: aside.model, steps: aside.model ? [{ kind: "model", ref: aside.model }] : [], status: "done", error: null, bank: false }, true);
+    ctx.chats.finishAnswer(kept.id, ctx.chats.startAnswer(kept.id), { content: aside.answer, model: aside.model, steps: aside.model ? [{ kind: "model", ref: aside.model }] : [], status: "done", error: null }, true);
     asides.delete(id);
     return { how: "kept" };
   }
@@ -3110,7 +3078,7 @@ export function createApp(ctx: AppContext) {
           // Long thinking produces no text for a while; comments keep proxies and idle timers awake.
           const heartbeat = setInterval(() => write(": keep-alive\n\n"), 15_000);
           req.signal.addEventListener("abort", () => clearInterval(heartbeat));
-          const answer: AnswerRecord = { content: "", model: null, steps: [], error: null, bank: false };
+          const answer: AnswerRecord = { content: "", model: null, steps: [], error: null };
           let answerId: number | null = null;
           if (kept) {
             ctx.chats.addUser(kept.id, ready.asked.content, ready.asked.attachments);
@@ -3180,12 +3148,12 @@ export function createApp(ctx: AppContext) {
     conversations: (_input, p) => {
       ownerOnly(p);
       const needsOf = needsResolver();
-      return { conversations: ctx.chats.list().filter((c) => visibleTo(c, p)).map((c) => chatSummary(c, needsOf)) };
+      return { conversations: ctx.chats.list().map((c) => chatSummary(c, needsOf)) };
     },
     underway: (input, p) => {
       ownerOnly(p);
       const kept = ctx.chats.summary(input.id);
-      if (!kept || !visibleTo(kept, p)) throw new HttpError(404, "no such conversation");
+      if (!kept) throw new HttpError(404, "no such conversation");
       // The tasks he gave from here that haven't ended, newest first; his looks here that wait, soonest first.
       const store = ctx.team?.store;
       const tasks: UnderwayTask[] = [];
@@ -3221,7 +3189,7 @@ export function createApp(ctx: AppContext) {
       ownerOnly(p);
       const looks = ctx.chats.looksWaiting().filter((look) => {
         const kept = ctx.chats.summary(look.conversation);
-        return !!kept && visibleTo(kept, p);
+        return !!kept;
       });
       return { looks: looks.map(({ by: _by, held: _held, ...look }) => look) };
     },
@@ -3229,7 +3197,7 @@ export function createApp(ctx: AppContext) {
       const kept = ctx.chats.look(input.id);
       // Yours to call off from a device that may see its chat; his, only in the chat it is in.
       const chat = kept ? ctx.chats.summary(kept.conversation) : null;
-      const yours = isOwner(p) && !!chat && visibleTo(chat, p);
+      const yours = isOwner(p) && !!chat;
       const his = himself(p) && !!kept && input.turn?.conversation === kept.conversation;
       if (!kept || (!yours && !his)) throw new HttpError(404, "no such look");
       if (kept.state !== "waiting") throw new HttpError(409, kept.state === "done" ? "it has come already" : `it was ${kept.state} already`);
@@ -3240,7 +3208,7 @@ export function createApp(ctx: AppContext) {
     conversation: (input, p) => {
       ownerOnly(p);
       const conversation = ctx.chats.get(input.id);
-      if (!conversation || !visibleTo(conversation, p)) throw new HttpError(404, "no such conversation");
+      if (!conversation) throw new HttpError(404, "no such conversation");
       const { messages, ...kept } = conversation;
       const running = ctx.turns.runningIn(kept.id);
       const view: ConversationView = { ...chatSummary(kept), messages, turn: running ? turnView(running, p) : null, queue: queueView(kept.id).queue };
@@ -3300,7 +3268,7 @@ export function createApp(ctx: AppContext) {
         // Which writing of the chats this is: another device's chat, answer or rename shows as a new one.
         chats: ctx.chats.version(),
         // His answers you haven't read yet, on any device: his ring is green while there are some.
-        unread: ctx.chats.unread().filter((c) => !c.bank || p.scopes.includes("bank:read")).map(({ id, title, answeredAt }): UnreadChat => ({ id, title, answeredAt })),
+        unread: ctx.chats.unread().map(({ id, title, answeredAt }): UnreadChat => ({ id, title, answeredAt })),
       };
     },
     attachTurn: (input, p, req) => watchTurn(watchedTurn(input.turn, p), req),
@@ -3341,8 +3309,7 @@ export function createApp(ctx: AppContext) {
     sendQueued: (input, p) => {
       const kept = keptChat(input.conversation, p);
       const running = ctx.turns.runningIn(kept.id);
-      // Steering needs what watching needs: a turn that may read the bank isn't steered from a device that may not
-      // (nor one that may change the team, from a device that may not).
+      // Steering needs what watching needs: a turn that may change the team isn't steered from a device that may not.
       if (running) steeredTurn(running.id, p);
       const sent = turnErrors(() => ctx.turns.sendNow(kept.id, input.id, byOf(p)));
       return { how: sent.how, turn: turnView(sent.turn, p), ...queueView(kept.id) };
@@ -3695,14 +3662,6 @@ export function createApp(ctx: AppContext) {
       if (spent?.length) ctx.store.emit(ctx.identity, "trial.spent", { trial: id, spent: { lines: spent } });
       return { trial: trialViews().find((t) => t.id === id) };
     },
-    bankStatus: () => bankErrors(async () => ctx.bank.status()),
-    bankAccounts: () => bankErrors(async () => ctx.bank.accounts()),
-    bankBalances: (input) => bankErrors(() => ctx.bank.balances(input)),
-    bankTransactions: (input) => bankErrors(() => ctx.bank.transactions(input)),
-    // Yours alone: fleet:admin, which agents can never hold.
-    bankConnect: () => bankErrors(() => ctx.bank.connect()),
-    bankComplete: (input) => bankErrors(() => ctx.bank.complete(input)),
-    bankDisconnect: () => bankErrors(() => ctx.bank.disconnect()),
     grantArm: (input) => {
       // A grant's arm holds what its tools' routes need and nothing else: another tool is another grant.
       if (QampGrants.isGrantArm(input.label)) throw new HttpError(400, "a Q-AMP grant's arm holds what its tools need and nothing else: grant again (galahad qamp grant) for other tools");
@@ -3965,23 +3924,6 @@ export function createApp(ctx: AppContext) {
       if (input.draft) ctx.loopDrafts.remove(input.draft);
       return { loop: loopViews().find((l) => l.name === input.name), ...(hookSecret ? { hookSecret } : {}) };
     },
-    bilag: (_input, p) => {
-      ownerOnly(p);
-      if (!ctx.bilag) throw new HttpError(503, "this node keeps no record of bilag");
-      return ctx.bilag.status();
-    },
-    bilagCopy: (input, p) => {
-      ownerOnly(p);
-      if (!ctx.bilag) throw new HttpError(503, "this node copies no bilag");
-      return connectorErrors(() => ctx.bilag!.copy(input));
-    },
-    bilagNames: (_input, p) => {
-      ownerOnly(p);
-      if (!ctx.bilag) throw new HttpError(503, "this node copies no bilag");
-      return connectorErrors(() => ctx.bilag!.names());
-    },
-    booksAttach: (input, p) => booksErrors(p, (books) => books.attach(input)),
-    booksUpload: (input, p) => booksErrors(p, (books) => books.upload(input)),
     loopHook: (input) => {
       const loop = loopRecords(ctx.store).find((l) => l.name === input.name);
       if (!loop) throw new HttpError(404, `no loop "${input.name}"`);
@@ -4405,16 +4347,6 @@ export function createApp(ctx: AppContext) {
       throw error;
     }
   };
-
-  /** Bank failures as plain HTTP errors: a status and a sentence, never the bank's body. */
-  async function bankErrors<T>(run: () => Promise<T>): Promise<T> {
-    try {
-      return await run();
-    } catch (error) {
-      if (error instanceof BankError) throw new HttpError(error.status, error.message);
-      throw new HttpError(500, "bank access failed");
-    }
-  }
 
   const routeTable = new Map(Object.entries(routes).map(([name, r]) => [`${r.method} ${r.path}`, name as RouteName]));
 

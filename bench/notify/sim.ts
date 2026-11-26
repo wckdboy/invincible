@@ -37,7 +37,7 @@ export const OWNER_ZONE = "Europe/Copenhagen";
 export const NODE_ZONE = "Europe/London";
 const PHONE = "c_sim-phone";
 const LAPTOP = "c_sim-laptop";
-const SCOPES = ["mind:read", "mind:write", "chat", "vault:read", "brain:write", "fleet:admin", "connect", "bank:read"];
+const SCOPES = ["mind:read", "mind:write", "chat", "vault:read", "brain:write", "fleet:admin", "connect"];
 
 export interface NotifySimOptions {
   seed: number;
@@ -133,7 +133,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
   const connectors: { id: string; ask: Ask }[] = [];
   const notices: Notice[] = [];
   const running: LiveTurn[] = [];
-  const summaries = new Map<string, { title: string; bank: boolean; waits: { actions: string[]; secrets: string[]; question: boolean } | null }>();
+  const summaries = new Map<string, { title: string; waits: { actions: string[]; secrets: string[]; question: boolean } | null }>();
   const asks = new Map<string, Ask>();
   /** What resolved without the owner, and what his own judgment raised. */
   const selfResolved = new Set<string>();
@@ -395,7 +395,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
       ended,
     } as unknown as LiveTurn;
     at(start, 1, () => {
-      summaries.set(conversation, { title: how.look ? "Watch the deploy" : "Plan the garden shed", bank: false, waits: { actions: [], secrets: [], question: how.question } });
+      summaries.set(conversation, { title: how.look ? "Watch the deploy" : "Plan the garden shed", waits: { actions: [], secrets: [], question: how.question } });
       running.push(live);
       service.lookAtTurns();
       // A look that ends waiting on you filed an approval as it ran.

@@ -105,8 +105,6 @@ export async function buildAssets(webDir = join(REPO_ROOT, "apps/web")): Promise
     const html = servedPage(readFileSync(join(src, "index.html"), "utf8"));
     files.set("/", { body: html, type: "text/html; charset=utf-8" });
     files.set("/index.html", { body: html, type: "text/html; charset=utf-8" });
-    // Where the bank sends you back after authorising: the app itself finishes it.
-    files.set("/bank/callback", { body: html, type: "text/html; charset=utf-8" });
     files.set("/frame.html", { body: readFileSync(join(src, "frame.html")), type: "text/html; charset=utf-8", framed: { csp: FRAME_CSP } });
     files.set("/manifest.webmanifest", {
       body: readFileSync(join(src, "manifest.webmanifest")),

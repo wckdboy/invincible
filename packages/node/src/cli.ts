@@ -15,7 +15,6 @@ import { loadEnv } from "./env.ts";
 import { Home } from "./home.ts";
 import { actionCommand, connectorCommand, heartbeatCommand, loopCommand, noticeCommand, orderCommand, selfActionCommand, statusLine } from "./loop-cli.ts";
 import { lookTime } from "./looks.ts";
-import { BILAG_QUERY } from "./bilag.ts";
 import { runMcpServer } from "./mcp.ts";
 import { runAcpAgent } from "./acp-agent.ts";
 import { archiveCommand } from "./archive-cli.ts";
@@ -28,8 +27,7 @@ import { checkGates, githubConnector, githubRepo, investigateFromCli, questFromC
 import { askCommand, questsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
 import { ABOUT_YOU_TAG, chatStateWords, checkFacts, type MemoryView, type ModelCheck, THINKING_EFFORTS } from "@galahad/core";
 import { ShipManifest } from "./ship.ts";
-import { BankService } from "./bank/service.ts";
-import type { BankStatusView, ConversationSummary, ConversationView, ProjectGitView, ProjectView, ProviderView, TeamChangesView } from "@galahad/core";
+import type { ConversationSummary, ConversationView, ProjectGitView, ProjectView, ProviderView, TeamChangesView } from "@galahad/core";
 import { runWithToken } from "./run-tool.ts";
 import { streamedError } from "./server.ts";
 import { priceCommand, trialCommand, usageCommand, UsageError } from "./trial-commands.ts";
@@ -96,15 +94,6 @@ of its own; "roundtable", "squires" and "team" are the same command)
                                     tasks on his own within its budget, reports daily, asks you there
   outcome pause|resume|stop <id>   stopping it stops its waiting work
   outcome budget <id> <usd|+usd>   its budget: a new total, or +usd on top; one that had spent what it may goes on
-  bilag                            receipts and invoices copied from your mail to Google Drive: how many, the latest,
-                                    and what is left to set up (docs/BOOKS.md)
-  bilag on [--folder Bilag]        a loop that copies each new mail's bilag on its own, woken by Gmail, Outlook or both
-  bilag copy --from gmail|outlook [--query "…"] [--folder Bilag]
-                                    copy the bilag of mail that came before, a batch at a time until none is left
-  bilag names                      copies of forwarded mail renamed for who first sent them (a bilag you forwarded yourself)
-  books attach --org <id> --card <voucher card> --file <Drive file id> | --dinero-file <id> --why "…"
-                                    a bilag from Drive into Dinero as it is; attaching it to the payment's card asks you
-  books upload --org <id> --file <Drive file id>   a bilag into Dinero's archive alone: its fileGuid, for a draft
   roundtable files <knight> [/work/path]  a folder of its workspace (its VM's /work; galahad: his computer's)
   roundtable read <knight> </work/path>  one file of it (anything like a key redacted)
   roundtable changes <knight> [--task <id>] [--files]  what its latest task (or that one) changed: files, then the diff
@@ -402,16 +391,6 @@ Tripwires and checks (your rules on the commands his work runs: data, never a mo
                                   after a command that matches has run, however it ended, you are told: a notice in your
                                   Inbox and a notification, once for each task (rule add pushes --tell git --contains push)
 
-Bank (read-only: balances and transactions of your own accounts, through Enable Banking)
-  bank setup --app-id <uuid> --key /path/to/<app-id>.pem --redirect-url https://…/bank/callback
-             --aspsp "<bank>" --country <XX>
-                                  the bank by the name Enable Banking lists it under, and its country
-                                  (try Enable Banking's sandbox first: --aspsp "Mock ASPSP" --country FI)
-  bank status | bank connect | bank complete | bank disconnect
-                                  connect gives the bank's link (or use the PWA: Bank → Connect);
-                                  complete takes the URL the bank sent you back to, in a hidden prompt
-  arms grant <agent> bank:read    let one agent read the bank (arms ungrant <agent> bank:read to stop)
-
 Agents (MCP, ACP)
   mcp install claude|opencode|codex|hermes [--label name] [--apply]
                                   give a coding agent Galahad's mind and sandboxes (least privilege)
@@ -638,13 +617,6 @@ async function main(): Promise<void> {
       cooldown: { type: "string" },
       // A loop that tells you: --tell, with your words --say "…".
       say: { type: "string" },
-      // Bilag to Google Drive: a loop's --bilag [--folder Bilag]; galahad bilag copy --from gmail|outlook [--query "…"].
-      bilag: { type: "boolean" },
-      folder: { type: "string" },
-      query: { type: "string" },
-      org: { type: "string" },
-      card: { type: "string" },
-      "dinero-file": { type: "string" },
       // An outcome he owns: outcome add "<title>" --goal "…" --knight id… --budget-usd 20 [--done "…"] [--report-hour 9].
       goal: { type: "string" },
       done: { type: "string" },
@@ -974,7 +946,7 @@ Next:
         return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : "?";
       };
       if (matches.length > 1 && !matches.some((d) => d.id === sub)) {
-        fail(`"${sub}" matches ${matches.length} devices; name one by its id:\n${matches.map((d) => `  ${d.id.slice(0, 12)}  ${d.name}  paired ${pairedOn(d.enrolledAt)}  ${d.scopes.includes("bank:read") ? "(has bank:read)" : ""}`).join("\n")}`);
+        fail(`"${sub}" matches ${matches.length} devices; name one by its id:\n${matches.map((d) => `  ${d.id.slice(0, 12)}  ${d.name}  paired ${pairedOn(d.enrolledAt)}`).join("\n")}`);
       }
       const target = matches.find((d) => d.id === sub) ?? matches[0]!;
       const scopes = [...new Set([...target.scopes, ...rest])];
@@ -1444,7 +1416,7 @@ Next:
         // Where each stands, at a glance: working, needs you, queued, stopped, failed (nothing to say when it's done); and
         // whether an answer in it is new to you (read it with galahad chat <id>, or on any device).
         const state = chatStateWords(c);
-        console.log(`${c.pinned ? "★ " : "  "}${c.title}  ${c.unread ? `${bold("new")}  ` : ""}${state ? `${bold(state)}  ` : ""}${dim(`${c.id} · ${c.count} messages · ${new Date(c.updatedAt).toLocaleString()}${c.project ? ` · ${c.project}` : ""}${c.bank ? " · bank" : ""}`)}`);
+        console.log(`${c.pinned ? "★ " : "  "}${c.title}  ${c.unread ? `${bold("new")}  ` : ""}${state ? `${bold(state)}  ` : ""}${dim(`${c.id} · ${c.count} messages · ${new Date(c.updatedAt).toLocaleString()}${c.project ? ` · ${c.project}` : ""}`)}`);
       }
       return;
     }
@@ -2004,70 +1976,11 @@ Evidence: galahad artifact ${i!.artifact}`));
       return;
     }
 
-    case "bank": {
-      const admin = new Admin(home);
-      if (sub === "setup") {
-        // Written by this process, the node's own user, into the node's home: private (600) from the start.
-        const service = new BankService({ dir: join(home.dir, "bank") });
-        try {
-          const config = service.setup({
-            appId: str("app-id") ?? "",
-            keyPath: str("key") ?? "",
-            redirectUrl: str("redirect-url") ?? "",
-            aspsp: str("aspsp") ?? "",
-            country: str("country") ?? "",
-          });
-          console.log(`Bank set up: app ${config.appId}, ${config.aspsp} (${config.country}), consent ${config.consentDays} days, callback ${config.redirectUrl}`);
-        } catch (error) {
-          fail(`bank setup: ${(error as Error).message}\nusage: galahad bank setup --app-id <uuid> --key /path/to/<app-id>.pem --redirect-url https://…/bank/callback --aspsp "<bank>" --country <XX>`);
-        }
-        const problem = service.problem();
-        console.log(problem ? `${bold("Not ready yet:")} ${problem}` : "Key and files are private to this node's user. Next: galahad bank connect (or the PWA: Bank → Connect).");
-        return;
-      }
-      if (sub === "connect") {
-        const { url, aspsp, validUntil } = (await admin.call("bankConnect", {})) as { url: string; aspsp: string; validUntil: string };
-        console.log(`Open this to authorise ${aspsp} (read-only, until ${validUntil.slice(0, 10)}); it's good for 15 minutes:\n\n  ${url}\n`);
-        console.log(dim("The bank sends you back to the PWA, which finishes it. Without the PWA: galahad bank complete"));
-        return;
-      }
-      if (sub === "complete") {
-        const pasted = await readSecret("Paste the URL the bank sent you back to (hidden): ");
-        let code: string | null = null;
-        let state: string | null = null;
-        try {
-          const url = new URL(pasted.trim());
-          code = url.searchParams.get("code");
-          state = url.searchParams.get("state");
-        } catch {
-          fail("that isn't a URL");
-        }
-        if (!code || !state) fail("the URL has no code and state: copy the whole address the bank sent you back to");
-        const done = (await admin.call("bankComplete", { code, state })) as { accounts: number; ibans: string[]; validUntil: string };
-        console.log(`Connected: ${done.accounts} account(s) (${done.ibans.join(", ")}), until ${done.validUntil.slice(0, 10)}.`);
-        return;
-      }
-      if (sub === "disconnect") {
-        if (!flags.yes && !confirm("End the bank consent and forget the session and the cache?")) return;
-        const { ended } = (await admin.call("bankDisconnect", {})) as { ended: boolean };
-        console.log(ended ? "Ended at the bank, and forgotten here." : "Forgotten here (the bank didn't confirm ending it; it expires on its own).");
-        return;
-      }
-      const status = (await admin.call("bankStatus")) as BankStatusView;
-      console.log(status.message);
-      for (const a of status.accounts) {
-        const b = status.budget.find((x) => x.account === a.uid);
-        console.log(`  ${a.name || "(unnamed)"} ${a.iban ?? ""} ${a.currency ?? ""}  ${dim(`${a.uid} · ${b ? `${b.remaining}/${b.perDay} background fetches left` : ""}${b?.cacheAgeSeconds != null ? ` · cache ${Math.round(b.cacheAgeSeconds / 60)} min old` : ""}`)}`);
-      }
-      if (status.daysRemaining !== null) console.log(dim(`${status.daysRemaining} day(s) of consent left.`));
-      return;
-    }
-
     case "arms": {
       const admin = new Admin(home);
       if (sub === "grant" || sub === "ungrant") {
         const [label, ...scopes] = rest;
-        if (!label || !scopes.length) fail(`usage: galahad arms ${sub} <agent> <scope…>   e.g. galahad arms grant claude-code bank:read`);
+        if (!label || !scopes.length) fail(`usage: galahad arms ${sub} <agent> <scope…>   e.g. galahad arms grant claude-code mind:read`);
         const { arm } = (await admin.call("grantArm", sub === "grant" ? { label, add: scopes } : { label, remove: scopes })) as { arm: { label: string; scopes: string[] } };
         console.log(`${arm.label}: ${arm.scopes.join(", ")}`);
         console.log(dim("Its MCP server offers the tools at its next start (restart the agent)."));
@@ -2169,86 +2082,6 @@ Evidence: galahad artifact ${i!.artifact}`));
     case "notify":
       await notifyCommand(new Admin(home), sub, rest, flags);
       return;
-    case "bilag": {
-      // Bilag from your mail to Google Drive (bilag.ts): copied by the node itself, the owner's word of 18 November 2026.
-      const admin = new Admin(home);
-      if (sub === "copy") {
-        const from = str("from");
-        if (from !== "gmail" && from !== "outlook") fail('usage: galahad bilag copy --from gmail|outlook [--query "…"] [--folder Bilag]');
-        let page: string | undefined;
-        const total = { copied: 0, already: 0, skipped: 0, failed: 0, mails: 0 };
-        do {
-          const batch = await admin.call<{ copied: { name: string; folder: string }[]; already: number; skipped: number; failed: string[]; found: number; next: string | null }>("bilagCopy", {
-            from,
-            ...(str("query") ? { query: str("query") } : {}),
-            ...(str("folder") ? { folder: str("folder") } : {}),
-            ...(page ? { page } : {}),
-          });
-          for (const c of batch.copied) console.log(`  ✓ ${c.folder}/${c.name}`);
-          for (const why of batch.failed) console.log(dim(`  ✗ ${why}`));
-          total.copied += batch.copied.length;
-          total.already += batch.already;
-          total.skipped += batch.skipped;
-          total.failed += batch.failed.length;
-          total.mails += batch.found;
-          page = batch.next ?? undefined;
-          if (page) console.log(dim(`  … ${total.mails} mails looked at so far`));
-        } while (page);
-        console.log(`${bold(`${total.copied} bilag copied`)} from ${total.mails} mails${total.already ? `; ${total.already} copied before` : ""}${total.skipped ? `; ${total.skipped} attachments weren't bilag` : ""}${total.failed ? `; ${total.failed} mails couldn't be copied` : ""}.`);
-        return;
-      }
-      const { connectors } = await admin.call<{ connectors: { id: string; installed: boolean; key: string }[] }>("connectors");
-      const ready = (id: string) => connectors.some((c) => c.id === id && c.installed && c.key === "ready");
-      if (sub === "on") {
-        const mail = (["gmail", "outlook"] as const).filter(ready);
-        if (!ready("gdrive") || !mail.length) fail(`connect Google Drive and at least one of Gmail and Outlook first (${[!ready("gdrive") ? "gdrive" : null, ...(mail.length ? [] : ["gmail", "outlook"])].filter(Boolean).join(", ")}: docs/BOOKS.md)`);
-        const { loop } = await admin.call<{ loop: { name: string } }>("setLoop", {
-          name: "bilag",
-          schedule: "never",
-          task: { kind: "bilag", ...(str("folder") ? { folder: str("folder") } : {}) },
-          wakes: mail.map((connector) => ({ kind: "mail", connector, query: BILAG_QUERY[connector] })),
-        });
-        console.log(`Loop ${bold(loop.name)}: new mail in ${mail.join(" and ")} that holds a receipt or an invoice wakes it, and its bilag go to Google Drive (${str("folder") ?? "Bilag"}/<year>/<month>). Mail already there: galahad bilag copy --from ${mail[0]}`);
-        return;
-      }
-      if (sub === "names") {
-        const { renamed, failed } = await admin.call<{ renamed: { from: string; to: string }[]; failed: string[] }>("bilagNames", {});
-        for (const r of renamed) console.log(`  ${dim(r.from)}\n  → ${r.to}`);
-        for (const why of failed) console.log(dim(`  ✗ ${why}`));
-        console.log(`${bold(`${renamed.length} bilag`)} renamed for who first sent them${failed.length ? `; ${failed.length} couldn't be` : ""}.`);
-        return;
-      }
-      if (sub) fail("usage: galahad bilag [on | copy --from gmail|outlook | names]");
-      const status = await admin.call<{ copied: number; latest: { name: string; link: string | null; at: number }[] }>("bilag");
-      console.log(`${bold(`${status.copied} bilag`)} copied to Google Drive`);
-      for (const b of status.latest) console.log(`  ${new Date(b.at).toLocaleDateString()}  ${b.name}${b.link ? dim(`  ${b.link}`) : ""}`);
-      const missing = ["gdrive", "gmail", "outlook"].filter((id) => !ready(id));
-      if (missing.length) console.log(dim(`\nNot connected yet: ${missing.join(", ")} (docs/BOOKS.md says how).`));
-      return;
-    }
-    case "books": {
-      // A bilag from your Drive into Dinero, to the payment it documents (books.ts); attaching it asks you.
-      const usage = 'usage: galahad books attach --org <Dinero organization id> --card <voucher card id> --file <Drive file id> | --dinero-file <id in Dinero\'s archive> --why "…"\n       galahad books upload --org <Dinero organization id> --file <Drive file id>';
-      if (sub === "upload") {
-        const org = Number(str("org"));
-        if (!Number.isInteger(org) || org <= 0 || !str("file")) fail(usage);
-        const up = await new Admin(home).call<{ name: string; bytes: number; sha256: string; fileGuid: string }>("booksUpload", { organizationId: org, file: str("file") });
-        console.log(`${bold(up.name)} is in Dinero's archive (${up.bytes} bytes, SHA-256 ${up.sha256.slice(0, 12)}…): fileGuid ${up.fileGuid}`);
-        return;
-      }
-      if (sub !== "attach") fail(usage);
-      const org = Number(str("org"));
-      if (!Number.isInteger(org) || org <= 0 || !str("card") || !str("file") === !str("dinero-file") || !str("why")) fail(usage);
-      const done = await new Admin(home).call<{ name: string | null; bytes: number | null; sha256: string | null; fileGuid: string; action: string | null }>("booksAttach", {
-        organizationId: org,
-        card: str("card"),
-        ...(str("file") ? { file: str("file") } : { dineroFile: str("dinero-file") }),
-        why: str("why"),
-      });
-      if (done.name) console.log(`${bold(done.name)} is in Dinero's archive (${done.bytes} bytes, SHA-256 ${done.sha256!.slice(0, 12)}…, file ${done.fileGuid}).`);
-      console.log(done.action ? `Attaching it to the payment's card waits for you: action ${done.action} (your Inbox, or galahad action approve ${done.action}).` : "It is attached to the payment's card.");
-      return;
-    }
     case "outcome":
     case "outcomes": {
       const admin = new Admin(home);

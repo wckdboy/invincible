@@ -13,7 +13,6 @@ const chat = (over: Partial<ConversationSummary> = {}): ConversationSummary => (
   createdAt: now,
   updatedAt: now,
   count: 2,
-  bank: false,
   state: "done",
   queued: 0,
   held: null,

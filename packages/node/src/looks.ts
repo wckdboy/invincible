@@ -8,7 +8,7 @@ import { type TurnHub, TurnError, type TurnSpec } from "./turns.ts";
  * of asking you to come back. The look waits in the chat store; when its time comes it becomes a turn of his in that
  * chat, with his note as the message that starts it (shown as his, never as yours), run as the device whose turn set
  * it as that device stands then (revoked since, or no longer allowed to chat, and it doesn't run). What the answer that
- * set it held of yours (the bank, a private connector's data), its turn starts holding: nothing that can carry data out
+ * set it held of yours (a private connector's data), its turn starts holding: nothing that can carry data out
  * runs in it. A look whose chat is busy waits for the turn there to end; one that came due while this node was away is
  * taken when it is back, within a week, and said to be late. Each is taken once, and never tried again by itself.
  */

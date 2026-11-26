@@ -47,7 +47,6 @@ import { galahadAsks } from "./galahad-asks.ts";
 
 /** Which icon a tool's step shows. */
 function toolIcon(name: string): IconName {
-  if (name.startsWith("bank_")) return "bank";
   if (name.startsWith("sandbox_")) return "sandbox";
   if (name.startsWith("connector")) return "plug";
   if (name.startsWith("artifact")) return "archive";
@@ -112,7 +111,7 @@ let queue: QueuedMessage[] = [];
 let held: QueueHold | null = null;
 /** Messages sent to steer him that haven't reached him yet (he's mid-tool, or mid-thought). */
 let steering: string[] = [];
-/** A turn is running in this chat that this device may not watch (it may read the bank). */
+/** A turn is running in this chat that this device may not watch (started from another device). */
 let unwatchable: TurnView | null = null;
 /** The chat turns the node is running, as last asked (his line of what he's doing, in the chat's header and on the roster). */
 export const nodeTurns = signal<TurnView[]>([]);
@@ -171,7 +170,6 @@ interface Current {
   id: string;
   title: string;
   project: string | null;
-  bank: boolean;
   pinned: boolean;
 }
 let current: Current | null = null;
@@ -199,7 +197,7 @@ function refreshKept(api: Api): Promise<void> {
     try {
       kept = (await api.get<{ conversations: ConversationSummary[] }>("/api/conversations")).conversations;
       const mine = current && kept.find((c) => c.id === current!.id);
-      if (mine) current = { id: mine.id, title: mine.title, project: mine.project, bank: mine.bank, pinned: mine.pinned };
+      if (mine) current = { id: mine.id, title: mine.title, project: mine.project, pinned: mine.pinned };
       for (const fn of keptChanged) fn();
     } catch {
       // A node without chat history yet (or out of reach): chats still work; no recent ones to show.
@@ -273,7 +271,7 @@ function handle(w: Watching, event: ChatStreamEvent): void {
       stopChat();
     }
   } else if (event.type === "conversation") {
-    current = { id: event.id, title: event.title, project: event.project, bank: current?.bank ?? false, pinned: current?.pinned ?? false };
+    current = { id: event.id, title: event.title, project: event.project, pinned: current?.pinned ?? false };
     startIn = null;
     rememberOpenChat(event.id);
     for (const fn of keptChanged) fn();
@@ -439,7 +437,7 @@ export async function openConversation(api: Api, id: string): Promise<void> {
   thread.turns = keptMessages(conversation).map((m) => turnOf(m, conversation.role, thread.nextId++));
   thread.target = null;
   thread.base = null;
-  current = { id: conversation.id, title: conversation.title, project: conversation.project, bank: conversation.bank, pinned: conversation.pinned };
+  current = { id: conversation.id, title: conversation.title, project: conversation.project, pinned: conversation.pinned };
   temporary = false;
   startIn = null;
   rememberOpenChat(conversation.id);
@@ -1101,14 +1099,14 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     syncKeyAsks();
     syncConnectorAsks();
     panel.render({ queue, held, steering, busy, deadline: live?.deadline ?? null });
-    // He's working in this chat on a turn this device may not watch (it may read the bank): said, with Stop.
+    // He's working in this chat on a turn this device may not watch (started from another device): said, with Stop.
     const other = unwatchable && !live ? unwatchable.id : "";
     if (other !== shownElsewhere) {
       shownElsewhere = other;
       replace(
         elsewhere,
         other
-          ? callout("info", "That turn may read the bank, and this device may not, so it isn't shown here. It goes on on the node; the answer will be in the chat for devices that may.", {
+          ? callout("info", "That turn was started on another device, so it isn't shown here. It goes on on the node; the answer will be in the chat.", {
               title: "He's working in this chat, started from another device",
               actions: button("Stop him", { size: "sm", icon: "stop", onClick: () => void ctx.api.post("/api/turns/stop", { turn: other }).catch((error: unknown) => toast("Couldn't stop him", { tone: "error", description: errorMessage(error) })) }),
             })
@@ -1398,7 +1396,6 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
         current.project
           ? h("a", { class: "chip", href: "#/projects", onclick: (e: Event) => { e.preventDefault(); ctx.navigate("projects", { project: current!.project! }); } }, icon("folder", { size: 12 }), projectName(current.project))
           : null,
-        current.bank ? badge("bank", "neutral", "bank") : null,
       );
     } else if (temporary) {
       replace(subHead, badge("temporary", "warn", "eye"), h("span", { class: "small muted" }, "Not kept: gone when you start another chat or close the app."));
@@ -1423,7 +1420,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
       },
       h("span", { class: "avatar" }, icon(c.pinned ? "pin" : c.project ? "folder" : "chat", { size: 14 })),
       // An answer in it you haven't read: a green dot, as an unread email has, until you open it.
-      h("div", { class: "grow" }, h("div", { class: "chat-row-title" }, c.unread ? dot("ok", { label: "New answer" }) : null, h("span", { class: "strong small ellipsis" }, c.title)), h("div", { class: "meta" }, meta, c.bank ? h("span", {}, " · bank") : null)),
+      h("div", { class: "grow" }, h("div", { class: "chat-row-title" }, c.unread ? dot("ok", { label: "New answer" }) : null, h("span", { class: "strong small ellipsis" }, c.title)), h("div", { class: "meta" }, meta)),
       // Where it stands, at a glance: working, needs you, queued, stopped or failed (nothing when it's simply done).
       chatStateBadge(c),
     );
