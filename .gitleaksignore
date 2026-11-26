@@ -39,3 +39,11 @@
 # A key-derivation label, not a key: pairing's HKDF info string ("invincible/pair/v1/mac"), named on the line
 # `const pairKey = …` that the generic-api-key rule reads as an assignment of a key.
 717c7812c4a1b302e6cd55c4063c46c45d993cae:packages/core/src/pairing.ts:generic-api-key:49
+
+# The native apps' ports of the same: pairing's HKDF info string ("invincible/pair/v1/mac") in the Apple and Android apps'
+# Pairing, a key-derivation label and no key; and RequestAuthTests' declaration of its signer's private key's type
+# (CryptoKit's P-256), whose value is the parity vectors' test scalar (32 bytes of 0x11, apps/apple/scripts/vectors.ts):
+# obviously fake.
+d2e57b6a21abb5e5b310c37a536105545e03419a:apps/android/app/src/main/kotlin/sh/invincible/bot/core/Pairing.kt:generic-api-key:63
+d2e57b6a21abb5e5b310c37a536105545e03419a:apps/apple/Invincible/Core/Pairing.swift:generic-api-key:122
+d2e57b6a21abb5e5b310c37a536105545e03419a:apps/apple/InvincibleTests/RequestAuthTests.swift:generic-api-key:92
