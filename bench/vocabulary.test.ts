@@ -66,8 +66,15 @@ describe("what it reads", () => {
   });
 });
 
-test("nothing in this repository says any of them", () => {
-  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// The check reads what git tracks: in a deployed tree (a `git archive` of a commit, with no git of its own) there is
+// nothing to ask, and the commit it came from was checked by CI's Vocabulary job before it could land. So there it says
+// so and is skipped, rather than failing a deploy on a missing tool.
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const inGit = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" }).stdout.toString().trim() === "true";
+if (!inGit) console.warn("vocabulary: not a git work tree (a deployed tree?): the repository-wide check is CI's, skipped here");
+
+test.skipIf(!inGit)("nothing in this repository says any of them", () => {
+  const root = repoRoot;
   const files = trackedFiles(root);
   expect(files.length).toBeGreaterThan(500);
   expect(findOldWords(files).map((f) => `${f.path}:${f.line}: ${f.word}`)).toEqual([]);
