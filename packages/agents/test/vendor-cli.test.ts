@@ -25,6 +25,17 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 const PYTHON = Bun.which("python3")!;
+/**
+ * What this host's python3 puts into any process's environment by itself, measured: macOS's CoreFoundation adds
+ * `__CF_USER_TEXT_ENCODING` and `LC_CTYPE`, and Apple's /usr/bin/python3 (a developer tools shim) adds `SDKROOT`,
+ * `CPATH`, `LIBRARY_PATH` and `MANPATH` (found 26 November 2026 on the Mac mini, whose only python3 it is). A driver is
+ * held to adding nothing beyond these: on Linux, as a VM is, the set is empty.
+ */
+const HOST_ADDED: ReadonlySet<string> = (() => {
+  const given = { PATH: "/usr/bin:/bin" };
+  const seen = Bun.spawnSync([PYTHON, "-c", "import json, os; print(json.dumps(sorted(os.environ)))"], { env: given, stdout: "pipe" });
+  return new Set((JSON.parse(seen.stdout.toString()) as string[]).filter((name) => !(name in given)));
+})();
 const SESSION = "00000000-0000-4000-8000-000000000001";
 const FIXTURE = {
   claude: readFileSync(new URL("./fixtures/claude-code-2.1.311.jsonl", import.meta.url), "utf8"),
@@ -307,7 +318,7 @@ describe("Claude Code, on its own sign-in", () => {
     // What the owner set up in the VM is the tool's to read: nothing of it is taken away, and nothing is added.
     expect(started.env).toMatchObject({ OWNER_SET: "kept", HOME: box.env.HOME, ANTHROPIC_API_KEY: "fake-owner-key-in-this-vm" });
     const added = Object.keys(started.env).filter((name) => !(name in box.env));
-    expect(added.filter((name) => !["__CF_USER_TEXT_ENCODING", "LC_CTYPE"].includes(name))).toEqual([]);
+    expect(added.filter((name) => !HOST_ADDED.has(name))).toEqual([]);
   });
 
   test("a resumed run continues the session it is given, and one the tool doesn't know is not replaced with a new one", async () => {
@@ -459,7 +470,7 @@ describe("Codex, on its own sign-in", () => {
     expect(JSON.stringify(started.env)).not.toContain("gw_fake");
     expect(started.env).toMatchObject({ OWNER_SET: "kept", HOME: box.env.HOME });
     const added = Object.keys(started.env).filter((name) => !(name in box.env));
-    expect(added.filter((name) => !["__CF_USER_TEXT_ENCODING", "LC_CTYPE"].includes(name))).toEqual([]);
+    expect(added.filter((name) => !HOST_ADDED.has(name))).toEqual([]);
   });
 
   test("a resumed run is `codex exec resume <id>`, and an unknown session is not replaced with a new one", async () => {
