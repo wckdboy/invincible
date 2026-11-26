@@ -1,5 +1,13 @@
 import { interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint } from "@invincible/core";
-import { agentColors } from "@invincible/core/avatar";
+import { MARK_PALETTE, markForm, markOf } from "@invincible/core/agent-mark";
+
+/** An agent's mark as the CLI says it (agent-mark.ts): its hue's name and both its forms (light page, dark page), and its
+ * form: its number, how many slots, at what angle. */
+function markJson(id: string, avatar: unknown): string {
+  const mark = markOf(id, avatar);
+  const hue = MARK_PALETTE[mark.color]!;
+  return JSON.stringify({ name: hue.name, light: hue.light, dark: hue.dark, form: mark.form, ...markForm(mark.form) });
+}
 
 interface Api { call<T>(name: RouteName, input?: unknown): Promise<T> }
 type Flags = Record<string, unknown>;
@@ -182,8 +190,8 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     if (flags.reset || color !== undefined) {
       // What isn't a colour is the node's to refuse: nothing here guesses at it.
       const { agent } = await api.call<{ agent: Agent }>("saveAgent", { id: member.id, name: member.name, avatar: flags.reset ? null : { v: 2, color: color!.trim().toLowerCase() } });
-      print(JSON.stringify(agentColors(agent.id, agent.avatar)));
-    } else print(JSON.stringify(agentColors(member.id, member.avatar)));
+      print(markJson(agent.id, agent.avatar));
+    } else print(markJson(member.id, member.avatar));
     return;
   }
   if (sub === "room") {

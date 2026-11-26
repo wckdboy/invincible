@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, closeSync, existsSync, openSync } from "node:fs";
 import { AttachmentRef, findSecrets, randomId, readAlike, redact } from "@invincible/core";
 import { isOrbProfile, type AvatarActivity } from "@invincible/core/avatar";
+import { type AgentMark, assignMark, isMarkProfile, joinOrder, markOf, markProfile, type MarkProfile, readMarkProfile, snapColor } from "@invincible/core/agent-mark";
 import { z } from "zod";
 import {
   TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, AgentId, AgentInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
@@ -181,6 +182,47 @@ export class TeamStore {
       for (const { id } of this.db.query<{ id: string }, []>("SELECT id FROM team_agents").all()) add.run(`agent:${id}`, at);
       for (const { id } of this.db.query<{ id: string }, []>("SELECT id FROM team_rooms").all()) add.run(`room:${id}`, at);
     }
+    this.markEveryone();
+  }
+
+  /**
+   * Agents from before the marks (agent-mark.ts) given theirs, once: one by one in the order they joined, each after the
+   * ones before it, a colour chosen for its orb snapped to the eight. Deterministic (ids, when each was made, colours
+   * chosen), so every node with the same agents comes to the same marks. Only the avatar is written; an agent removed
+   * keeps what it had.
+   */
+  private markEveryone(): void {
+    const agents = joinOrder(this.agents());
+    if (agents.every((agent) => isMarkProfile(agent.avatar))) return;
+    this.db.transaction(() => {
+      const marks: AgentMark[] = [];
+      for (const agent of agents) {
+        const own = readMarkProfile(agent.avatar);
+        const mark = own ?? assignMark(agent.id, marks, isOrbProfile(agent.avatar) ? agent.avatar.color : null);
+        if (!own) {
+          const value = JSON.parse(this.db.query<DocRow, [string]>("SELECT value FROM team_agents WHERE id = ?").get(agent.id)!.value) as Record<string, unknown>;
+          this.db.query("UPDATE team_agents SET value = ? WHERE id = ?").run(JSON.stringify({ ...value, avatar: markProfile(mark) }), agent.id);
+        }
+        marks.push(mark);
+      }
+    })();
+  }
+
+  /** The marks of the agents here but `id`, in the order they joined: what a mark given to `id` now comes after. */
+  private marksBut(id: string): AgentMark[] {
+    return joinOrder(this.agents().filter((agent) => agent.id !== id)).map((agent) => markOf(agent.id, agent.avatar));
+  }
+
+  /**
+   * Its mark, as you ask for it: omitted, the one it has (or, new, the one it is given as it joins); a colour you pick,
+   * snapped to the eight, its form kept; a mark sent back as it was, kept; null, the one it would be given now.
+   */
+  private markFor(id: string, previous: Agent | null, asked: AgentInput["avatar"]): MarkProfile {
+    const own = readMarkProfile(previous?.avatar);
+    if (asked === undefined) return markProfile(own ?? assignMark(id, this.marksBut(id), isOrbProfile(previous?.avatar) ? previous.avatar.color : null));
+    if (asked === null) return markProfile(assignMark(id, this.marksBut(id)));
+    if (isMarkProfile(asked)) return asked;
+    return markProfile({ color: snapColor(asked.color), form: own?.form ?? assignMark(id, this.marksBut(id), asked.color).form });
   }
 
   close(): void { this.db.close(); }
@@ -252,7 +294,7 @@ export class TeamStore {
     const row = this.db.query<DocRow, [string]>("SELECT value FROM team_agents WHERE id = ?").get(id);
     if (!row) return null;
     const value = JSON.parse(row.value) as Agent;
-    return { ...value, avatar: isOrbProfile(value.avatar) ? value.avatar : undefined, repository: value.repository ?? null, workspaceNode: value.workspaceNode ?? value.workspace?.node ?? null, createdBy: value.createdBy ?? TEAM_OWNER, instructionsBy: value.instructionsBy ?? TEAM_OWNER, turnsToday: this.turns(id) };
+    return { ...value, avatar: isMarkProfile(value.avatar) || isOrbProfile(value.avatar) ? value.avatar : undefined, repository: value.repository ?? null, workspaceNode: value.workspaceNode ?? value.workspace?.node ?? null, createdBy: value.createdBy ?? TEAM_OWNER, instructionsBy: value.instructionsBy ?? TEAM_OWNER, turnsToday: this.turns(id) };
   }
   private records(): Agent[] { return this.db.query<{ id: string }, []>("SELECT id FROM team_agents ORDER BY id").all().map((r) => this.record(r.id)!); }
   /** A worker that is here. One that was removed is nobody's to work with, write to or change (null), though its record is kept. */
@@ -266,7 +308,9 @@ export class TeamStore {
   }
   /** The workers you removed. Their handles stay taken and their names stay beside what they said. */
   removed(): Agent[] { return this.records().filter((t) => t.removedAt !== undefined); }
-  private putAgent(value: Agent): Agent {
+  private putAgent(raw: Agent): Agent {
+    // Every agent here has its mark: one that joins without one (a worker the primary makes) is given it now.
+    const value = raw.removedAt === undefined && !isMarkProfile(raw.avatar) ? { ...raw, avatar: this.markFor(raw.id, null, undefined) } : raw;
     this.db.query("INSERT INTO team_agents(id,value) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").run(value.id, JSON.stringify(value));
     return this.agent(value.id)!;
   }
@@ -296,7 +340,7 @@ export class TeamStore {
     if (harness === "acp" && !acp) throw new TeamError(400, "Name the command that starts its ACP agent in its VM, e.g. goose acp or gemini --acp.");
     // (It calls the models you set it up with, which sensitive mode can't hold it to.)
     if (harness === "acp" && sensitive) throw new TeamError(400, "An agent in sensitive mode works on your agent's own harness, OpenCode, Hermes, Claude Code or Codex: an ACP agent of yours calls the models you set it up with, which your agent can't hold it to.");
-    return this.putAgent({ id: input.id, name: input.name, instructions: input.instructions ?? previous?.instructions ?? "", role: input.role ?? previous?.role ?? "engineer", ...(models ? { models } : {}), ...(sensitive ? { sensitive: true } : {}), harness, ...(acp ? { acp } : {}), ...(keys ? { keys } : {}), enabled: input.enabled ?? previous?.enabled ?? true, dailyTurns: input.dailyTurns ?? previous?.dailyTurns ?? DAILY_TURNS, repository: input.repository === undefined ? previous?.repository ?? null : input.repository, turnsToday: this.turns(input.id), workspaceNode: previous?.workspaceNode ?? null, workspace: previous?.workspace ?? null, memory: previous?.memory ?? "", avatar: input.avatar === undefined ? previous?.avatar : (input.avatar ?? undefined), createdBy: previous?.createdBy ?? TEAM_OWNER, instructionsBy: input.instructions === undefined || input.instructions === previous?.instructions ? previous?.instructionsBy ?? TEAM_OWNER : TEAM_OWNER, createdAt: previous?.createdAt ?? at, updatedAt: at });
+    return this.putAgent({ id: input.id, name: input.name, instructions: input.instructions ?? previous?.instructions ?? "", role: input.role ?? previous?.role ?? "engineer", ...(models ? { models } : {}), ...(sensitive ? { sensitive: true } : {}), harness, ...(acp ? { acp } : {}), ...(keys ? { keys } : {}), enabled: input.enabled ?? previous?.enabled ?? true, dailyTurns: input.dailyTurns ?? previous?.dailyTurns ?? DAILY_TURNS, repository: input.repository === undefined ? previous?.repository ?? null : input.repository, turnsToday: this.turns(input.id), workspaceNode: previous?.workspaceNode ?? null, workspace: previous?.workspace ?? null, memory: previous?.memory ?? "", avatar: this.markFor(input.id, previous, input.avatar), createdBy: previous?.createdBy ?? TEAM_OWNER, instructionsBy: input.instructions === undefined || input.instructions === previous?.instructions ? previous?.instructionsBy ?? TEAM_OWNER : TEAM_OWNER, createdAt: previous?.createdAt ?? at, updatedAt: at });
   }
   /**
    * An agent brought whole from the system Invincible succeeds (`invincible import`): its profile, held to every rule

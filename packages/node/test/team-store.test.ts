@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { avatarExpression } from "@invincible/core/avatar";
+import { type AgentMark, assignMark, isMarkProfile, markProfile, readMarkProfile } from "@invincible/core/agent-mark";
+import { TEAM_PRIMARY } from "@invincible/core/team";
 import { TEAM_LIMITS } from "@invincible/core/team-limits";
 import { SENSITIVE_WORK } from "@invincible/core";
 import { TeamStore, TeamError } from "../src/team-store.ts";
@@ -67,45 +69,81 @@ describe("private team persistence", () => {
     for (const models of [["ollama/*"], ["mimo"], Array.from({ length: 9 }, (_, i) => `p/m${i}`)]) expect(() => reopened.saveAgent({ id: "ada", name: "Augusta", models })).toThrow();
   });
 
-  test("an orb's colour survives omitted edits and reopens; explicit null resets it to the handle's", () => {
+  test("an agent gets its mark as it joins (O2's Grille): kept through edits that leave it out and a reopen; null gives it the one it would get now", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
-    const avatar = { v: 2 as const, color: "#ffccdd" };
-    expect(store.saveAgent({ id: "ada", name: "Ada" }).avatar).toBeUndefined();
-    expect(store.saveAgent({ id: "ada", name: "Ada", avatar }).avatar).toEqual(avatar);
+    const ada = store.saveAgent({ id: "ada", name: "Ada" }).avatar;
+    expect(isMarkProfile(ada)).toBe(true);
+    expect(ada).toEqual(markProfile(assignMark("ada", [])));
     store.saveAgent({ id: "ada", name: "Augusta" }); store.remember("ada", "Keep these notes.");
     store.setWorkspace("ada", { node: "host", id: "0123456789" }); close(store);
     const reopened = make(path);
-    expect(reopened.agent("ada")).toMatchObject({ name: "Augusta", avatar, memory: "Keep these notes.", workspace: { node: "host", id: "0123456789" } });
-    expect(() => reopened.saveAgent({ id: "ada", name: "Augusta", avatar: { ...avatar, color: "url(https://example.invalid/p)" } })).toThrow(TeamError);
-    expect(reopened.agent("ada")?.avatar).toEqual(avatar);
-    expect(reopened.saveAgent({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
+    expect(reopened.agent("ada")).toMatchObject({ name: "Augusta", avatar: ada, memory: "Keep these notes.", workspace: { node: "host", id: "0123456789" } });
+    // Sent back as it was (an app saving something else, or an import from another node): kept.
+    expect(reopened.saveAgent({ id: "ada", name: "Augusta", avatar: ada as never }).avatar).toEqual(ada);
+    expect(reopened.saveAgent({ id: "ada", name: "Augusta", avatar: null }).avatar).toEqual(markProfile(assignMark("ada", [])));
   });
-  test("a colour chosen for an agent's orb is kept as it was chosen, through edits that leave it out and a reopen; a bad one is refused", () => {
+  test("a colour you pick for an agent snaps to the nearest of the eight and keeps its form; a bad one is refused", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
-    expect(store.saveAgent({ id: "ada", name: "Ada", avatar: { v: 2, color: "#3ABEFF" } }).avatar).toEqual({ v: 2, color: "#3abeff" });
+    const form = readMarkProfile(store.saveAgent({ id: "ada", name: "Ada" }).avatar)!.form;
+    // A colour as the apps' pickers send it ({v: 2, color}): the nearest of the eight, the agent's form kept.
+    expect(store.saveAgent({ id: "ada", name: "Ada", avatar: { v: 2, color: "#3ABEFF" } }).avatar).toEqual({ v: 3, color: "#0084ba", form });
     store.saveAgent({ id: "ada", name: "Augusta" }); close(store);
     const reopened = make(path);
-    expect(reopened.agent("ada")?.avatar).toEqual({ v: 2, color: "#3abeff" });
-    for (const avatar of [{ v: 2, color: "blue" }, { v: 2, color: "#3abeff", form: "round" }, { v: 3, color: "#3abeff" }]) {
+    expect(reopened.agent("ada")?.avatar).toEqual({ v: 3, color: "#0084ba", form });
+    // Red, picked, is never red.
+    expect(reopened.saveAgent({ id: "ada", name: "Augusta", avatar: { v: 2, color: "#ff0000" } }).avatar).toEqual({ v: 3, color: "#c88200", form });
+    for (const avatar of [{ v: 2, color: "blue" }, { v: 2, color: "url(https://example.invalid/p)" }, { v: 2, color: "#3abeff", form: "round" }, { v: 3, color: "#3abeff", form: 1 }, { v: 3, color: "#0084ba" }, { v: 3, color: "#0084ba", form: 12 }, { v: 3, color: "#0084ba", form: 1, glow: true }]) {
       expect(() => reopened.saveAgent({ id: "ada", name: "Augusta", avatar: avatar as never })).toThrow(TeamError);
     }
-    expect(reopened.agent("ada")?.avatar).toEqual({ v: 2, color: "#3abeff" });
-    expect(reopened.saveAgent({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
+    expect(reopened.agent("ada")?.avatar).toEqual({ v: 3, color: "#c88200", form });
   });
-  test("legacy records get deterministic appearances without rewriting their saved JSON", () => {
+  test("agents from before the marks get theirs once, in the order they joined: the dev fleet's as the sheet gives them; a colour chosen for one, snapped", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
-    const { avatar: _unused, ...legacy } = store.saveAgent({ id: "ada", name: "Ada", instructions: "Preserve this instruction." }); close(store);
-    const raw = JSON.stringify(legacy);
+    const fleet = ["builder", "writer", "researcher", "coder", "reviewer", "operator", "designer", "tester", "ops", "docs"];
+    for (const id of fleet) store.saveAgent({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: `Preserve ${id}'s words.` });
+    close(store);
+    // As a node from before the marks saved them: no avatar, or a colour chosen for the orb (v 2), each made in turn.
     const db = new Database(path);
-    db.query("UPDATE team_agents SET value=? WHERE id='ada'").run(raw);
+    const before: Record<string, string> = {};
+    for (const [n, id] of fleet.entries()) {
+      const value = JSON.parse(db.query<{ value: string }, [string]>("SELECT value FROM team_agents WHERE id = ?").get(id)!.value);
+      delete value.avatar;
+      if (id === "coder") value.avatar = { v: 2, color: "#fa86b6" };
+      value.createdAt = 1_000 + n;
+      before[id] = JSON.stringify(value);
+      db.query("UPDATE team_agents SET value = ? WHERE id = ?").run(before[id]!, id);
+    }
     const reopened = make(path);
-    expect(reopened.agent("ada")).toMatchObject({ instructions: "Preserve this instruction." });
-    expect(reopened.agent("ada")!.avatar).toBeUndefined();
-    expect(db.query<{ value: string }, []>("SELECT value FROM team_agents WHERE id='ada'").get()?.value).toBe(raw);
+    const marks = Object.fromEntries(fleet.map((id) => [id, readMarkProfile(reopened.agent(id)!.avatar)]));
+    // As the sheet: one by one in the order they joined, coder's chosen colour snapped (#fa86b6 is the old Blush: Magenta).
+    const expected: AgentMark[] = [];
+    for (const id of fleet) expected.push(assignMark(id, expected, id === "coder" ? "#fa86b6" : null));
+    expect(marks).toEqual(Object.fromEntries(fleet.map((id, i) => [id, expected[i]!])));
+    expect(marks.coder?.color).toBe(7);
+    expect(marks.builder).toEqual({ color: 0, form: 1 });
+    // Written once: the avatar alone, every other word as it was; a second opening changes nothing.
+    for (const id of fleet) {
+      const { avatar, ...rest } = JSON.parse(db.query<{ value: string }, [string]>("SELECT value FROM team_agents WHERE id = ?").get(id)!.value);
+      const { avatar: _old, ...was } = JSON.parse(before[id]!);
+      expect(rest).toEqual(was);
+      expect(avatar).toEqual(markProfile(marks[id]!));
+    }
+    const rows = db.query<{ id: string; value: string }, []>("SELECT id, value FROM team_agents ORDER BY id").all();
+    close(reopened);
+    make(path);
+    expect(db.query<{ id: string; value: string }, []>("SELECT id, value FROM team_agents ORDER BY id").all()).toEqual(rows);
     db.close();
+  });
+  test("a worker the primary makes gets its mark as it joins, after the agents already here", () => {
+    const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
+    const store = make(path);
+    const builder = readMarkProfile(store.saveAgent({ id: "builder", name: "Builder" }).avatar)!;
+    const scout = store.recruit({ id: "scout", name: "Scout", instructions: "Finds what the others need." }, TEAM_PRIMARY);
+    expect(readMarkProfile(scout.avatar)).toEqual(assignMark("scout", [builder]));
+    close(store);
   });
   test("agents, memory, workspace, messages and queued work survive reopen; files stay private", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir);

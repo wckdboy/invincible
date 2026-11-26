@@ -41,6 +41,24 @@ Regenerate the icons with `bun scripts/brand.ts --png`. Tests pin each icon's si
 
 The primary is the field orb in gold, marked apart by its **beam**: a line of light along its field's own axis, light on dark pages and gold ink on light ones, dimming and breathing with its mood, its tip red-brown when its work fails. Each agent is a field in colours of its own: one you chose, or one of core's 24 `AGENT_TINTS` its handle picks (`agentColors`, `lib/field-orb.ts` `agentField`). Embers drift off a field at work. *Motion* says when each moves.
 
+**An agent's mark is the Grille** (O2: shown five directions on 26 November 2026, the owner chose "2 · Grille"; core's
+`agent-mark.ts`), replacing each agent's field app by app; the primary stays the I-beam in one ink, never a Grille. A
+solid disc in the agent's own colour, cut into slats by two or three slots at its own angle: twelve forms (six angles,
+two or three slots). Its colour is one of eight, Amber, Lime, Green, Teal, Sky, Blue, Violet and Magenta (OKLCH 72 to 334
+degrees: none between pink-red and red-orange, which are failure's), each in a light-page form at least 3:1 against the
+page and a dark-page one. The node gives each agent its colour and form once, as it joins, after the agents before it:
+its handle's colour or the next free one, so no two share a colour until all eight are taken, and its handle's form or
+the next one nobody wears, so colour and form both differ while they can and a ninth agent repeats a colour but never a
+form (`assignMark`). A colour you pick snaps to the nearest of the eight (`snapColor`), its form kept. Its states:
+idle, solid and still; working, its slats slide in their slots, each in its own phase, a cycle every 5.5 s; asking you,
+its top slat in ink and out of line, beating every 4.2 s; queued, pale; paused, grey; done, its slots close and open
+once as it arrives (1.4 s), then still; failed, its bottom slat in the shared red, knocked loose about its middle (0.6
+s), then still. The shape tells the state, never colour alone, and the red is a slat at most. Rows are always still,
+reduced motion stills everything, and nothing is drawn at rest. Its sizes are 64, 44, 28, 20 and 16 pt, a slot never
+narrower than 1.35 pt. Every app draws it from core's numbers (`markGeometry`, `markColors`), held to them by the
+vectors' `marks`. Every agent's colour changed once when the marks came: agents from before were given theirs in the
+order they joined, and a colour chosen for one was snapped.
+
 ### Starlight
 
 The one decorative flourish, and it is barely there: a faint radial glow (`--glow`, `--glow-hero`) at the top of the canvas and behind the emblem on the welcome, pairing and empty-chat screens. Primary buttons and the active navigation item carry a slight top-to-bottom gradient.

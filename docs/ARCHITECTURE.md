@@ -178,6 +178,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - a firewall that lets a run reach its node's bridge and nothing it wasn't granted.
 - **Shipping:** a run's verified changes become a pull request. Its CI and the review comments come back to the same
   task.
+- **Each agent's mark:** the Grille (core's `agent-mark.ts`; the look in DESIGN.md), the node's to give, once, as the
+  agent joins (its colour and form after the agents here before it), and saved as its avatar, `{v: 3, color, form}`.
+  Agents from before the marks get theirs once, in the order they joined (the team store's `markEveryone`), so a team's
+  marks are the same wherever it is read. A colour you pick (`{v: 2, color}`, as the pickers send it) is snapped to
+  the eight, its form kept. Every app draws the mark from core's numbers, held by the vectors' `marks`; an app from
+  before the marks reads a v 3 avatar as none and draws the agent as it did.
 
 ## 7. Models
 

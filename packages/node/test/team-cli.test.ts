@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentInput, type RouteName, type Agent, type TeamMessage, type TeamRoom, type TeamRoomView, type TeamSnapshot } from "@invincible/core";
-import { agentColors } from "@invincible/core/avatar";
+import { MARK_PALETTE, markForm, markOf } from "@invincible/core/agent-mark";
 import { teamCommand } from "../src/team-cli.ts";
 
 /* `invincible agents` at a terminal, against what the node would answer. */
@@ -135,26 +135,38 @@ test("names, titles and notes a model can write are shown as plain text too", as
   for (const line of [...lines, ...notes]) expect(line).not.toMatch(STEERS);
 });
 
-test("an agent's orb is the colour you choose for it, or its handle's: --color saves it, --reset lets it go, reading saves nothing", async () => {
+/** An agent's mark as the CLI says it (agent-mark.ts): its hue, in both its forms, and its form. */
+const markSaid = (id: string, avatar?: unknown) => {
+  const mark = markOf(id, avatar);
+  const hue = MARK_PALETTE[mark.color]!;
+  return { name: hue.name, light: hue.light, dark: hue.dark, form: mark.form, ...markForm(mark.form) };
+};
+
+test("an agent's mark: --color picks its colour (snapped by its node), --reset gives it the one it would get now, reading saves nothing", async () => {
   const { api, saved } = node([member("ada")]);
   const lines: string[] = [];
   const say = (line: string) => lines.push(line);
   await teamCommand(api, "avatar", ["ada"], { color: "#A8C9DB" }, say);
   expect(saved.at(-1)).toEqual({ name: "saveAgent", input: { id: "ada", name: "Ada", avatar: { v: 2, color: "#a8c9db" } } });
-  expect(JSON.parse(lines.at(-1)!)).toEqual(agentColors("ada", { v: 2, color: "#a8c9db" }));
+  expect(JSON.parse(lines.at(-1)!)).toEqual(markSaid("ada", { v: 2, color: "#a8c9db" }));
   // What isn't a colour is the node's to refuse, as it was: nothing here guesses at it.
   await teamCommand(api, "avatar", ["ada"], { color: "blue" }, say);
   expect(saved.at(-1)!.input.avatar).toEqual({ v: 2, color: "blue" });
   await teamCommand(api, "avatar", ["ada"], { reset: true }, say);
   expect(saved.at(-1)!.input.avatar).toBeNull();
-  // Reading it changes nothing, and says its colours: here, the ones its handle gives it.
+  // Reading it changes nothing, and says its mark: here, from a node before the marks, the one its handle gives it.
   const before = saved.length;
   const read = node([member("ada")]);
   const shown: string[] = [];
   await teamCommand(read.api, "avatar", ["ada"], {}, (line) => shown.push(line));
   expect(read.saved).toHaveLength(0);
   expect(saved).toHaveLength(before);
-  expect(JSON.parse(shown[0]!)).toEqual({ ...agentColors("ada"), chosen: false });
+  expect(JSON.parse(shown[0]!)).toEqual(markSaid("ada"));
+  // From a node that gave it its mark: that one.
+  const marked = node([{ ...member("ada"), avatar: { v: 3, color: "#0084ba", form: 10 } }]);
+  const told: string[] = [];
+  await teamCommand(marked.api, "avatar", ["ada"], {}, (line) => told.push(line));
+  expect(JSON.parse(told[0]!)).toEqual({ name: "Sky", light: "#0084ba", dark: "#3bb7f7", form: 10, slots: 3, angle: 27 });
 });
 
 test("removing an agent asks first and says what goes with it; a no, or a VM nobody said may go, removes nothing", async () => {

@@ -128,8 +128,9 @@ of its own; "agents" and "team" are the same command)
                                     budget ($3 at most); one that may spend more than is left of your budget (primary
                                     usage budget) waits for you (invincible agents approve <task>); on until you turn it off
   agents avatar <id> [--color #rrggbb | --reset]
-                                    an agent is an orb: choose its colour, or let it go back to the one its
-                                    handle gives it; with neither, its orb's colours are printed
+                                    an agent's mark, the Grille: pick its colour (its node snaps it to the
+                                    nearest of eight), or give it the mark it would get now; with neither, its
+                                    mark is printed (its colour, light and dark, and its form)
   agents pause|resume|stop <room|agent|task> <id>
   agents remove <id> [--destroy-workspace] [--yes]
                                     remove an agent for good: it leaves its rooms and does no more work; what it

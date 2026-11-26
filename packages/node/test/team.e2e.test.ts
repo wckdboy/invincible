@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AttachmentRef, routes, teamArmLabel, type LedgerEntry, type RouteName, type TeamMessage, type TeamSnapshot, type TeamRoomView, type TeamTask } from "@invincible/core";
+import { type AttachmentRef, MARK_PALETTE, readMarkProfile, routes, snapColor, teamArmLabel, type LedgerEntry, type RouteName, type TeamMessage, type TeamSnapshot, type TeamRoomView, type TeamTask } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { startDaemon, type Daemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -90,7 +90,9 @@ test("agents, notes, rooms and messages survive a controller restart", async () 
   await api("teamMemory", { id: "ada", text: "Working context for the ongoing build." });
   const avatar = { v: 2 as const, color: "#b9dfd4" };
   const saved = await api("saveAgent", { id: "ada", name: "ADA", avatar });
-  expect(saved.agent.avatar).toEqual(avatar);
+  // A colour picked as the apps' pickers send it: snapped to the eight a mark is drawn in, its form kept (agent-mark.ts).
+  const mark = { v: 3 as const, color: MARK_PALETTE[snapColor(avatar.color)]!.light, form: readMarkProfile(saved.agent.avatar)!.form };
+  expect(saved.agent.avatar).toEqual(mark);
   expect(saved.agent.role).toBe("planner");
   expect((await request("saveAgent", { id: "ada", name: "ADA", avatar: { ...avatar, color: "url(https://untrusted.example/avatar.svg)" } })).status).toBe(400);
   expect((await request("saveAgent", { id: "ada", name: "ADA", avatar: { ...avatar, imageUrl: "javascript:alert(1)" } })).status).toBe(400);
@@ -99,7 +101,7 @@ test("agents, notes, rooms and messages survive a controller restart", async () 
   expect((await api<TeamRoomView>("teamRoom", { id: "forge" })).messages).toEqual(before.messages);
   const persisted = (await api<TeamSnapshot>("team")).agents.find((m) => m.id === "ada");
   expect(persisted?.memory).toContain("ongoing build");
-  expect(persisted?.avatar).toEqual(avatar);
+  expect(persisted?.avatar).toEqual(mark);
 });
 
 test("real API: you remove an agent, nobody else can; it is gone from the team and what it said stays its own", async () => {
