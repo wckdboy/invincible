@@ -56,7 +56,7 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     const state = await api.call<TeamSnapshot>("team");
     // (One Galahad made for himself says so: in your conversation with him, or by the worker that asked for it.)
     const maker = (m: Teammate) => (!m.createdBy || m.createdBy === "owner" ? "" : ` · made by ${m.createdBy === "galahad" ? "Galahad" : m.createdBy}`);
-    for (const m of state.teammates) print(`${m.id} · ${plainLine(m.name)}${state.primary === m.id ? " · leads the Roundtable" : ""}${m.sensitive ? " · sensitive mode" : ""} · ${m.harness} · ${m.enabled ? "enabled" : "paused"} · ${m.turnsToday}/${m.dailyTurns} turns today · ${m.workspace ? `VM ${m.workspace.id} on ${m.workspace.node}` : "VM not provisioned"}${maker(m)}`);
+    for (const m of state.teammates) print(`${m.id} · ${plainLine(m.name)}${m.sensitive ? " · sensitive mode" : ""} · ${m.harness} · ${m.enabled ? "enabled" : "paused"} · ${m.turnsToday}/${m.dailyTurns} turns today · ${m.workspace ? `VM ${m.workspace.id} on ${m.workspace.node}` : "VM not provisioned"}${maker(m)}`);
     // (One you removed is named still: its handle stays taken.)
     for (const m of state.removed ?? []) print(`${m.id} · ${plainLine(m.name)} · removed${m.conversations?.length ? ` · its conversations, kept to read: ${m.conversations.map((room) => `galahad roundtable chat ${room}`).join(", ")}` : ""}`);
     for (const r of state.rooms) print(`${r.id} · ${plainLine(r.name)} · ${r.members.join(", ")}${r.paused ? " · paused" : ""}`);
@@ -174,27 +174,10 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     if (read.ignored.length) print(`Left out, not a knight's: ${read.ignored.join(", ")}.`);
     return;
   }
-  if (sub === "order") {
-    // Your order of the knights: every device shows them so. Those not named come after, by handle.
-    const ids = args.flatMap((arg) => arg.split(",")).map((id) => id.trim()).filter(Boolean);
-    if (!ids.length) throw new Error("usage: galahad roundtable order <knight,knight,...>");
-    const { order } = await api.call<{ order: string[] }>("arrangeTeam", { order: ids });
-    print(`In this order now: ${order.join(", ")}.`); return;
-  }
-  if (sub === "primary") {
-    // Who leads the Roundtable: what you say to a room without naming anyone is theirs to answer, and they come first.
-    if (args.length !== 1) throw new Error("usage: galahad roundtable primary <knight|galahad>");
-    const { primary } = await api.call<{ primary: string }>("arrangeTeam", { primary: args[0] });
-    print(primary === "galahad" ? "Galahad leads the Roundtable." : `${primary} leads the Roundtable: what you say to a room it sits in without naming anyone is its to answer.`); return;
-  }
   if (sub === "avatar") {
     const state = await api.call<TeamSnapshot>("team");
     const member = state.teammates.find((m) => m.id === args[0]);
     if (!member) throw new Error("No such knight");
-    // The drawings are gone (25 November 2026): a knight is an orb, and its colour is all there is to choose.
-    if (["look", "form", "accent", "eyes", "accessory", "temperament"].some((key) => flags[key] !== undefined)) {
-      throw new Error("A knight is an orb now, and its colour is all there is to choose: give --color #rrggbb, or --reset for the one its handle gives it.");
-    }
     const color = string("color");
     if (flags.reset || color !== undefined) {
       // What isn't a colour is the node's to refuse: nothing here guesses at it.

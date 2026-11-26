@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AttachmentRef, defaultAvatar, routes, teamArmLabel, type LedgerEntry, type RouteName, type TeamMessage, type TeamSnapshot, type TeamRoomView, type TeamTask } from "@galahad/core";
+import { type AttachmentRef, routes, teamArmLabel, type LedgerEntry, type RouteName, type TeamMessage, type TeamSnapshot, type TeamRoomView, type TeamTask } from "@galahad/core";
 import { foundFleet, MindStore } from "@galahad/mind";
 import { startDaemon, type Daemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
@@ -88,7 +88,7 @@ test("team owner routes reject external arms, spoofed speakers and fake VM avail
 
 test("knights, notes, rooms and messages survive a controller restart", async () => {
   await api("teamMemory", { id: "ada", text: "Working context for the ongoing build." });
-  const avatar = { ...defaultAvatar("ada"), form: "round" as const, color: "#b9dfd4", accessory: "plume" as const };
+  const avatar = { v: 2 as const, color: "#b9dfd4" };
   const saved = await api("saveTeammate", { id: "ada", name: "ADA", avatar });
   expect(saved.teammate.avatar).toEqual(avatar);
   expect(saved.teammate.role).toBe("planner");
@@ -172,21 +172,6 @@ test("real API: a role you made is yours to remove, but not while a knight works
   expect((await api("setRoster", { role: "frontend", models: [] })).roster.frontend).toBeUndefined();
   expect((await api("setRoster", { role: "swift", models: [] })).roster.swift).toMatchObject({ configured: false, custom: false });
   await api("removeTeammate", { id: "rolly" });
-});
-
-test("real API: you arrange the knights and choose who leads; no agent can, and every device reads it from the team", async () => {
-  await api("saveTeammate", { id: "zed", name: "Zed", role: "engineer" });
-  const before = (await api<TeamSnapshot>("team")).teammates.map((m) => m.id);
-  const order = [...before].reverse();
-  expect(await api("arrangeTeam", { order, primary: "zed" })).toEqual({ order, primary: "zed" });
-  const after = await api<TeamSnapshot>("team");
-  expect(after.teammates.map((m) => m.id)).toEqual(order);
-  expect(after).toMatchObject({ order, primary: "zed" });
-  const { token } = await api("mintArm", { label: "arranger", scopes: ["chat", "mind:read", "mind:write", "sandbox"] });
-  expect((await request("arrangeTeam", { primary: "galahad" }, token)).status).toBe(403);
-  expect((await request("arrangeTeam", { primary: "nobody" })).status).toBe(400);
-  expect(await api("arrangeTeam", { primary: "galahad" })).toMatchObject({ primary: "galahad" });
-  await api("removeTeammate", { id: "zed" });
 });
 
 test("real API: you looked at a knight's page or a room, on any device: the team says when; no agent can say it for you", async () => {

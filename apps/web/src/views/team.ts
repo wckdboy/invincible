@@ -20,10 +20,9 @@ import { badge, button, callout, dot, empty, errorState, list, listRow, note, se
 import { h, keepPlace, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
-import { leadMark, stateChip, workerAvatar } from "../ui/avatar.ts";
+import { stateChip, workerAvatar } from "../ui/avatar.ts";
 import { orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
-import { makePrimary, pending } from "./arrange.ts";
 import { attachedView, attachTray, type Waiting } from "./attach-tray.ts";
 import { roundtableHome } from "./board.ts";
 import { noteSaid, seatFace, tableOf } from "./roster.ts";
@@ -169,9 +168,8 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     // A knight's face sits in its seat, its state in a word beside its name, as on the roster.
     const table = person ? tableOf(ctx) : null;
     const seated = person ? table!.seats.find((one) => one.id === person.id) : undefined;
-    const leads = Boolean(person && table?.primary === person.id);
     const open = panelOpen();
-    const version = JSON.stringify([current.id, current.name, current.members.map((id) => [id, nameOf(id)]), current.paused, person, seated, leads, active.map((job) => [job.id, job.status]), person && snapshot ? avatarExpression(person, snapshot, Date.now()) : null, open, sideShown]);
+    const version = JSON.stringify([current.id, current.name, current.members.map((id) => [id, nameOf(id)]), current.paused, person, seated, active.map((job) => [job.id, job.status]), person && snapshot ? avatarExpression(person, snapshot, Date.now()) : null, open, sideShown]);
     if (version === headVersion) return;
     headVersion = version;
     const toggle = button("Workspace", { size: "sm", icon: "sandbox", label: open ? "Close the workspace" : "Workspace", onClick: () => showPanel(!open) });
@@ -188,7 +186,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
         h(
           "div",
           { class: "grow" },
-          h("div", { class: "team-head-title" }, h("h2", { class: "ellipsis" }, person?.name ?? current.name), leads ? leadMark(person!.name) : null, person ? stateChip(seated?.state) : null),
+          h("div", { class: "team-head-title" }, h("h2", { class: "ellipsis" }, person?.name ?? current.name), person ? stateChip(seated?.state) : null),
           h("p", { class: "meta ellipsis" }, person ? [knightWorksOn(person), madeBy(person)].filter(Boolean).join(" · ") : [...(current.direct ? [] : ["Galahad"]), ...current.members.map(nameOf)].join(" · ")),
         ),
         current.paused ? badge("Paused", "warn") : null,
@@ -355,9 +353,8 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     if (side.hidden || !person || !snapshot) return;
     const table = tableOf(ctx);
     const seated = table.seats.find((one) => one.id === person.id);
-    const leads = table.primary === person.id;
     const tasks = snapshot.tasks.filter((task) => task.assignee === person.id).sort((a, b) => b.updatedAt - a.updatedAt);
-    const version = JSON.stringify([person, seated, leads, tasks.map((task) => [task.id, task.title, task.status, task.verified, relativeTime(task.updatedAt)]), panelOpen()]);
+    const version = JSON.stringify([person, seated, tasks.map((task) => [task.id, task.title, task.status, task.verified, relativeTime(task.updatedAt)]), panelOpen()]);
     if (version === sideVersion) return;
     sideVersion = version;
     side.setAttribute("aria-label", `${person.name}, beside the timeline`);
@@ -368,14 +365,13 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
           "div",
           { class: "team-side-who" },
           seated ? seatFace(seated, 88) : avatar(person, true, 88),
-          h("div", { class: "team-side-name" }, h("h2", { class: "ellipsis" }, person.name), leads ? leadMark(person.name) : null, stateChip(seated?.state)),
+          h("div", { class: "team-side-name" }, h("h2", { class: "ellipsis" }, person.name), stateChip(seated?.state)),
           h("p", { class: "meta" }, [knightWorksOn(person), madeBy(person)].filter(Boolean).join(" · ")),
           seated ? h("p", { class: "team-side-line" }, besideChip(seated.line, seated.state)) : null,
           canEdit
             ? h(
                 "div",
                 { class: "row wrap" },
-                button(leads ? "Galahad leads" : "Make primary", { size: "sm", title: leads ? "Give the lead back to Galahad" : `What you say to a room ${person.name} sits in without naming anyone becomes ${person.name}'s to answer`, onClick: () => void (leads ? makePrimary(ctx, GALAHAD, "Galahad") : makePrimary(ctx, person.id, person.name)) }),
                 button("Edit", { size: "sm", icon: "edit", onClick: () => void editKnight(ctx, person) }),
                 button(person.enabled ? "Pause" : "Resume", { size: "sm", icon: person.enabled ? "pause" : "play", label: `${person.enabled ? "Pause" : "Resume"} ${person.name}`, onClick: () => void control({ teammate: person.id, action: person.enabled ? "pause" : "resume" }) }),
               )
@@ -445,7 +441,6 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
           ? h(
               "div",
               { class: "row wrap" },
-              (tableOf(ctx).primary === person.id ? button("Galahad leads", { size: "sm", title: "Give the lead back to Galahad", onClick: () => void makePrimary(ctx, GALAHAD, "Galahad") }) : button("Make primary", { size: "sm", title: `What you say to a room ${person.name} sits in without naming anyone becomes ${person.name}'s to answer`, onClick: () => void makePrimary(ctx, person.id, person.name) })),
               button(person.enabled ? "Pause knight" : "Resume knight", { size: "sm", icon: person.enabled ? "pause" : "play", onClick: () => void control({ teammate: person.id, action: person.enabled ? "pause" : "resume" }) }),
               button("Working notes", { size: "sm", icon: "memory", onClick: () => editNotes(ctx, person) }),
               button("Export", { size: "sm", icon: "download", title: `${person.name} as a file to take in on another node: its job and how it works, never its memory or a key`, onClick: () => exportKnight(person) }),
@@ -693,7 +688,6 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   scope.add(ctx.live.follow(["team"], () => load(), 2000, 2000));
   scope.add(ctx.live.team.subscribe(() => draw()));
   // (Who leads, as you just chose it, before the node has said so.)
-  scope.add(pending.subscribe(() => draw(true)));
   scope.add(ctx.live.teamProblem.subscribe((error) => error && failed(error)));
   // The room as it was last read this session, at once (api.peek); the fresh one is drawn only if it differs.
   if (roomId) room = ctx.api.peek<TeamRoomView>("/api/team/room", { id: roomId }) ?? null;

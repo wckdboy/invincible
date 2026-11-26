@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { AVATAR_EXPRESSIONS, defaultAvatar, KNIGHT_TINTS, knightColors, lookProfile } from "@galahad/core/avatar";
-import { avatarEditor, KNIGHT_CSS, leadMark, seat, stateChip, workerAvatar, type WorkerAvatarOptions } from "./avatar.ts";
+import { AVATAR_EXPRESSIONS, KNIGHT_TINTS, knightColors } from "@galahad/core/avatar";
+import { avatarEditor, KNIGHT_CSS, seat, stateChip, workerAvatar, type WorkerAvatarOptions } from "./avatar.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with
  * no canvas, so a knight's orb is its box alone and Galahad's his ring and seat in SVG). */
@@ -40,7 +40,7 @@ describe("knights at the page's boundary", () => {
   test("nothing from a profile or a name reaches a URL, a style or a paint, but a colour checked to be six hex digits", () => {
     const name = '<image href="https://invalid.example/pixel" onload="alert(1)">';
     const profiles = [
-      { ...defaultAvatar("ada"), color: "url(https://invalid.example/paint)", accent: '#fff" onload="alert(1)', form: "foreignObject", onload: "alert(1)" },
+      { v: 1, color: "url(https://invalid.example/paint)", accent: '#fff" onload="alert(1)', form: "foreignObject", onload: "alert(1)" },
       { v: 2, color: "url(https://invalid.example/paint)" },
       { v: 2, color: '#3abeff" onload="alert(1)' },
       { v: 2, color: "#3abeff", onload: "alert(1)" },
@@ -66,8 +66,8 @@ describe("knights at the page's boundary", () => {
     }
   });
 
-  test("its colour is the one you chose for it, or its handle's; a look from the drawings colours nothing", () => {
-    const [chosen, handle, look] = render({ id: "ada", name: "Ada", profile: { v: 2, color: "#3ABEFF" }, still: true }, { id: "ada", name: "Ada", still: true }, { id: "ada", name: "Ada", profile: lookProfile("bors"), still: true });
+  test("its colour is the one you chose for it, or its handle's; anything else colours nothing", () => {
+    const [chosen, handle, look] = render({ id: "ada", name: "Ada", profile: { v: 2, color: "#3ABEFF" }, still: true }, { id: "ada", name: "Ada", still: true }, { id: "ada", name: "Ada", profile: { v: 1, form: "round", color: "#be7153" }, still: true });
     expect(orbOf(chosen!).attrs["data-tint"]).toBe("#3abeff");
     expect(orbOf(handle!).attrs["data-tint"]).toBe(knightColors("ada").tint);
     expect(orbOf(look!).attrs["data-tint"]).toBe(knightColors("ada").tint);
@@ -127,13 +127,6 @@ describe("a knight in its seat", () => {
     expect(failed!.attrs["data-tone"]).toBe("failed");
     // At rest there is nothing to say beyond its line.
     expect(resting).toBeNull();
-  });
-
-  test("the one who leads wears a mark in words, which says what leading means", () => {
-    const [lin, galahad] = withDocument(() => [leadMark("Lin"), leadMark()] as unknown as Node_[]);
-    expect(lin!.children.map((child) => child.text)).toEqual(["Leads"]);
-    expect(lin!.attrs.title).toContain("what you say to a room Lin sits in without naming anyone is its to answer");
-    expect(galahad!.attrs.title).toBe("Leads the Roundtable");
   });
 });
 

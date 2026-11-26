@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { avatarExpression, defaultAvatar } from "@galahad/core/avatar";
+import { avatarExpression } from "@galahad/core/avatar";
 import { TEAM_LIMITS } from "@galahad/core/team-limits";
 import { SENSITIVE_WORK } from "@galahad/core";
 import { TeamStore, TeamError } from "../src/team-store.ts";
@@ -67,11 +67,11 @@ describe("private team persistence", () => {
     for (const models of [["ollama/*"], ["mimo"], Array.from({ length: 9 }, (_, i) => `p/m${i}`)]) expect(() => reopened.saveTeammate({ id: "ada", name: "Augusta", models })).toThrow();
   });
 
-  test("custom appearances survive omitted edits and reopen; explicit null resets the seeded default", () => {
+  test("an orb's colour survives omitted edits and reopens; explicit null resets it to the handle's", () => {
     const dir = mkdtempSync(join(tmpdir(), "galahad-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
-    const avatar = { ...defaultAvatar("ada"), form: "round" as const, color: "#ffccdd", accessory: "plume" as const };
-    expect(store.saveTeammate({ id: "ada", name: "Ada" }).avatar).toEqual(defaultAvatar("ada"));
+    const avatar = { v: 2 as const, color: "#ffccdd" };
+    expect(store.saveTeammate({ id: "ada", name: "Ada" }).avatar).toBeUndefined();
     expect(store.saveTeammate({ id: "ada", name: "Ada", avatar }).avatar).toEqual(avatar);
     store.saveTeammate({ id: "ada", name: "Augusta" }); store.remember("ada", "Keep these notes.");
     store.setWorkspace("ada", { node: "host", id: "0123456789" }); close(store);
@@ -79,7 +79,7 @@ describe("private team persistence", () => {
     expect(reopened.teammate("ada")).toMatchObject({ name: "Augusta", avatar, memory: "Keep these notes.", workspace: { node: "host", id: "0123456789" } });
     expect(() => reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: { ...avatar, color: "url(https://example.invalid/p)" } })).toThrow(TeamError);
     expect(reopened.teammate("ada")?.avatar).toEqual(avatar);
-    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toEqual(defaultAvatar("ada"));
+    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
   });
   test("a colour chosen for a knight's orb is kept as it was chosen, through edits that leave it out and a reopen; a bad one is refused", () => {
     const dir = mkdtempSync(join(tmpdir(), "galahad-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
@@ -92,7 +92,7 @@ describe("private team persistence", () => {
       expect(() => reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: avatar as never })).toThrow(TeamError);
     }
     expect(reopened.teammate("ada")?.avatar).toEqual({ v: 2, color: "#3abeff" });
-    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toEqual(defaultAvatar("ada"));
+    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
   });
   test("legacy records get deterministic appearances without rewriting their saved JSON", () => {
     const dir = mkdtempSync(join(tmpdir(), "galahad-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
@@ -102,7 +102,8 @@ describe("private team persistence", () => {
     const db = new Database(path);
     db.query("UPDATE team_teammates SET value=? WHERE id='ada'").run(raw);
     const reopened = make(path);
-    expect(reopened.teammate("ada")).toMatchObject({ avatar: defaultAvatar("ada"), instructions: "Preserve this instruction." });
+    expect(reopened.teammate("ada")).toMatchObject({ instructions: "Preserve this instruction." });
+    expect(reopened.teammate("ada")!.avatar).toBeUndefined();
     expect(db.query<{ value: string }, []>("SELECT value FROM team_teammates WHERE id='ada'").get()?.value).toBe(raw);
     db.close();
   });
@@ -388,20 +389,20 @@ describe("the knights Galahad makes for himself", () => {
   test("a knight he makes is a new one with the defaults, and says whose words its job is", () => {
     const store = make(); setup(store);
     const scout = store.recruit({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", role: "reviewer" }, "galahad");
-    expect(scout).toMatchObject({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", role: "reviewer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspace: null, workspaceNode: null, memory: "", avatar: defaultAvatar("scout"), createdBy: "galahad", instructionsBy: "galahad" });
+    expect(scout).toMatchObject({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", role: "reviewer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspace: null, workspaceNode: null, memory: "", createdBy: "galahad", instructionsBy: "galahad" });
     // Never an existing worker: yours stay exactly as you left them.
     const ada = store.teammate("ada");
     expect(ada).toMatchObject({ createdBy: "owner", instructionsBy: "owner" });
     expect(() => store.recruit({ id: "ada", name: "Impostor", instructions: "Take her place." }, "galahad")).toThrow(/already exists/);
     expect(store.teammate("ada")).toEqual(ada);
     // Its allowance, its state and its look are not his to choose; nor is a credential ever part of a job.
-    for (const extra of [{ dailyTurns: 1000 }, { enabled: false }, { avatar: defaultAvatar("x") }, { createdBy: "owner" }]) expect(() => store.recruit({ ...job("x"), ...extra } as never, "galahad")).toThrow(TeamError);
+    for (const extra of [{ dailyTurns: 1000 }, { enabled: false }, { avatar: { v: 2, color: "#3abeff" } }, { createdBy: "owner" }]) expect(() => store.recruit({ ...job("x"), ...extra } as never, "galahad")).toThrow(TeamError);
     expect(() => store.recruit({ ...job("keys"), instructions: `Sign in with ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` }, "galahad")).toThrow(/credential/);
     expect(store.teammates().map((t) => t.id)).toEqual(["ada", "lin", "scout"]);
     // Its job becomes yours when you change its words, never by saving something else about it (the app sends
     // the whole profile with every save); who made it stays on record.
     expect(store.saveTeammate({ id: "scout", name: "Scout the second" })).toMatchObject({ createdBy: "galahad", instructionsBy: "galahad" });
-    expect(store.saveTeammate({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", dailyTurns: 12, avatar: defaultAvatar("other") })).toMatchObject({ createdBy: "galahad", instructionsBy: "galahad", dailyTurns: 12 });
+    expect(store.saveTeammate({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", dailyTurns: 12, avatar: { v: 2, color: "#3abeff" } })).toMatchObject({ createdBy: "galahad", instructionsBy: "galahad", dailyTurns: 12 });
     expect(store.saveTeammate({ id: "scout", name: "Scout", instructions: "Watch them weekly." })).toMatchObject({ createdBy: "galahad", instructionsBy: "owner" });
     expect(store.saveTeammate({ id: "scout", name: "Scout", instructions: "Watch them weekly." })).toMatchObject({ createdBy: "galahad", instructionsBy: "owner" });
   });
@@ -809,49 +810,6 @@ test("what was said is searched in the rooms asked, every word of the question, 
   expect(store.searchMessages(["forge"], "100%_")).toEqual([]);
   expect(store.searchMessages([], "release")).toEqual([]);
   store.close();
-});
-
-describe("your order of the knights, and who leads", () => {
-  test("the knights come in the order you gave; one you didn't place comes after them, by handle", () => {
-    const store = make(); setup(store); store.saveTeammate({ id: "bors", name: "Bors" });
-    expect(store.teammates().map((t) => t.id)).toEqual(["ada", "bors", "lin"]);
-    store.arrange({ order: ["lin", "bors"] });
-    expect(store.teammates().map((t) => t.id)).toEqual(["lin", "bors", "ada"]);
-    expect(store.snapshot()).toMatchObject({ order: ["lin", "bors"], primary: "galahad" });
-  });
-
-  test("Galahad leads by default: your words to a room that name nobody are his to answer", () => {
-    const store = make(); setup(store);
-    store.post({ room: "workshop", text: "What's next?" });
-    expect(store.queuedAnswers()).toHaveLength(1);
-    expect(store.deliveries("workshop")).toEqual([]);
-  });
-
-  test("a knight you made primary leads a room it sits in: what names nobody goes to it alone; a room without it stays Galahad's", () => {
-    const store = make(); setup(store);
-    store.arrange({ primary: "lin" });
-    expect(store.snapshot().primary).toBe("lin");
-    store.post({ room: "workshop", text: "What's next?" });
-    expect(store.queuedAnswers()).toEqual([]);
-    expect(store.deliveries("workshop").map((d) => d.teammate)).toEqual(["lin"]);
-    // Naming him still reaches him; a room the primary isn't in is still his to lead.
-    store.post({ room: "workshop", text: "@galahad what do you think?" });
-    expect(store.queuedAnswers()).toHaveLength(1);
-    store.saveRoom({ id: "corner", name: "Corner", members: ["ada"] });
-    store.post({ room: "corner", text: "And here?" });
-    expect(store.queuedAnswers().map((a) => a.room)).toContain("corner");
-  });
-
-  test("the primary must be Galahad or a knight of yours, and the order names only yours; a primary removed hands the lead back", () => {
-    const store = make(); setup(store);
-    expect(() => store.arrange({ primary: "nobody" })).toThrow(TeamError);
-    expect(() => store.arrange({ order: ["ada", "nobody"] })).toThrow(TeamError);
-    store.arrange({ primary: "ada", order: ["lin", "ada"] });
-    store.remove("ada");
-    expect(store.snapshot()).toMatchObject({ primary: "galahad", order: ["lin"] });
-    store.arrange({ primary: "galahad" });
-    expect(store.snapshot().primary).toBe("galahad");
-  });
 });
 
 describe("each time you step in on a task (#28)", () => {

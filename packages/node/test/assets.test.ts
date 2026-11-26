@@ -90,17 +90,9 @@ describe("the PWA bundle", () => {
     expect(new Uint8Array(await assets.serve("/icon-mono-96.png").arrayBuffer())[25]).toBe(6);
   });
 
-  test("the knights' drawings are served as WebP, every one the app can show, and nothing beside them", async () => {
+  test("no drawing of a face is served: what was under /knights/ is gone", async () => {
     const assets = await buildAssets();
-    for (const name of ["galahad", "galahad@2x", "black-knight", "black-knight@2x", "kay", "gaheris", "percival", "palamedes", "gawain", "tristan", "lancelot", "bedivere", "bors", "gareth"]) {
-      expect(assets.has(`/knights/${name}.webp`)).toBe(true);
-      const response = assets.serve(`/knights/${name}.webp`);
-      expect(response.headers.get("content-type")).toBe("image/webp");
-      expect(response.headers.get("content-encoding")).toBeNull();
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      expect(new TextDecoder("latin1").decode(bytes.slice(0, 4)) + new TextDecoder("latin1").decode(bytes.slice(8, 12))).toBe("RIFFWEBP");
-    }
-    for (const path of ["/knights/", "/knights/merlin.webp", "/knights/../index.html", "/knights/galahad.png"]) expect(assets.has(path)).toBe(false);
+    for (const path of ["/knights/", "/knights/galahad.webp", "/knights/galahad-helm.webp", "/knights/../index.html"]) expect(assets.has(path)).toBe(false);
   });
 
   test("the app's typeface is its own: Geist, served from the node with its licence beside it, never fetched elsewhere", async () => {

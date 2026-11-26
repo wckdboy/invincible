@@ -1,42 +1,20 @@
-import { MARK_PATH, ROUNDTABLE } from "../brand.ts";
 import { svg } from "./dom.ts";
 
 /*
  * Galahad's icon set: drawn for this app on a 24px grid, 1.75px strokes with
  * round caps and joins, built with createElementNS from constant path data.
- * A path prefixed with "!" is filled instead of stroked; one prefixed with "*" is filled in Galahad's red.
+ * A path prefixed with "!" is filled instead of stroked.
  */
 
 const circle = (cx: number, cy: number, r: number): string => `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`;
 const rect = (x: number, y: number, w: number, hgt: number, r: number): string =>
   `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${hgt - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${-(w - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${-r}v${-(hgt - 2 * r)}a${r} ${r} 0 0 1 ${r} ${-r}z`;
 
-/** The mark, flat: Galahad's drawn helm as a silhouette on the icon grid, its cross and slit cut out (the drawing
- * itself is ./emblem.ts). */
-export { MARK_PATH };
-
-const round = (n: number): string => String(Math.round(n * 1000) / 1000);
-/** A chair of the Round Table (brand.ts's ROUNDTABLE): the rounded rectangle at the bottom of the grid, turned `deg`
- * clockwise about the middle; at 0 and 180 its corners stay on whole units. */
-const chair = (c: { R: number; w: number; d: number; rx: number }, deg: number): string => {
-  const a = (deg * Math.PI) / 180, cos = Math.round(Math.cos(a) * 1e9) / 1e9, sin = Math.round(Math.sin(a) * 1e9) / 1e9;
-  const turn = (x: number, y: number): string => `${round(12 + (x - 12) * cos - (y - 12) * sin)} ${round(12 + (x - 12) * sin + (y - 12) * cos)}`;
-  const [x0, y0, x1, y1, r] = [12 - c.w / 2, 12 + c.R - c.d / 2, 12 + c.w / 2, 12 + c.R + c.d / 2, c.rx];
-  // (A chair as deep as its corners are round is a pill: its ends are the arcs alone, with no line between them.)
-  const side = (x: number, y: number): string => (c.d > 2 * r ? `L${turn(x, y)}` : "");
-  return `M${turn(x0 + r, y0)}L${turn(x1 - r, y0)}A${r} ${r} 0 0 1 ${turn(x1, y0 + r)}${side(x1, y1 - r)}A${r} ${r} 0 0 1 ${turn(x1 - r, y1)}L${turn(x0 + r, y1)}A${r} ${r} 0 0 1 ${turn(x0, y1 - r)}${side(x0, y0 + r)}A${r} ${r} 0 0 1 ${turn(x0 + r, y0)}Z`;
-};
-/** The table: a ring filled between its edges, the inner circle wound the other way so it is a hole. */
-const ring = (r: number, width: number): string => {
-  const [o, i] = [r + width / 2, r - width / 2];
-  return `M${12 - o} 12a${o} ${o} 0 1 0 ${2 * o} 0a${o} ${o} 0 1 0 ${-2 * o} 0ZM${12 - i} 12a${i} ${i} 0 1 1 ${2 * i} 0a${i} ${i} 0 1 1 ${-2 * i} 0Z`;
-};
-
 const ICONS = {
-  mark: [`!${MARK_PATH}`],
-  // The Round Table from above, as a floor plan draws it (brand.ts's ROUNDTABLE): the table, the knights' chairs round
-  // it, and at the top the Siege Perilous, Galahad's: the deeper chair, the one in his red.
-  roundtable: [`!${ring(ROUNDTABLE.table.r, ROUNDTABLE.table.width)}`, ...ROUNDTABLE.seats.map((deg) => `!${chair(ROUNDTABLE.chair, deg - 180)}`), `*${chair(ROUNDTABLE.siege, 180)}`],
+  // The mark until the new identity's (Phase 1): your agent as an orb seen from afar, a ring round a lit core.
+  mark: [circle(12, 12, 7.25), `!${circle(12, 12, 2.75)}`],
+  // The agents: three of them, apart.
+  roundtable: [circle(12, 6.75, 2.75), circle(6, 17, 2.75), circle(18, 17, 2.75)],
   overview: [rect(3.5, 3.5, 7, 7, 1.75), rect(13.5, 3.5, 7, 7, 1.75), rect(3.5, 13.5, 7, 7, 1.75), circle(17, 17, 3.5)],
   inbox: ["M3.5 13.5h4.25l1.5 2.5h5.5l1.5-2.5h4.25", "M6.6 5h10.8a1.5 1.5 0 0 1 1.45 1.1L20.5 13v5a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-5l1.65-6.9A1.5 1.5 0 0 1 6.6 5z"],
   chat: ["M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9.5A1.5 1.5 0 0 1 19 17h-7.5l-4.25 3.25V17H5a1.5 1.5 0 0 1-1.5-1.5V6A1.5 1.5 0 0 1 5 4.5z"],
@@ -157,8 +135,6 @@ export function icon(name: IconName, options: IconOptions = {}): SVGSVGElement {
   });
   for (const d of ICONS[name]) {
     if (d.startsWith("!")) el.appendChild(svg("path", { d: d.slice(1), fill: "currentColor", stroke: "none" }));
-    // Filled in Galahad's red where the page has it (svg.icon .icon-siege); in the icon's own colour where it hasn't.
-    else if (d.startsWith("*")) el.appendChild(svg("path", { d: d.slice(1), class: "icon-siege", fill: "currentColor", stroke: "none" }));
     else el.appendChild(svg("path", { d }));
   }
   return el;

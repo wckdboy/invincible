@@ -2361,7 +2361,6 @@ export function createApp(ctx: AppContext) {
       engram: () => ctx.team!.store.engram(),
       memories: (query) => memoryContext(query) ?? "",
       roundtable: () => teamOf().overview().workers,
-      primary: () => ctx.team!.store.arrangement().primary,
       work: (id) => teamOf().snapshot().tasks.filter((task) => task.assignee === id),
       // Where a key of yours a knight may use is pinned (PLAN #17), for telling it so.
       keyAddress: (secret) => ctx.vault.info(secret)?.origin ?? null,
@@ -2446,7 +2445,6 @@ export function createApp(ctx: AppContext) {
       return { teammate: teamOf().saveTeammate(input) };
     },
     saveTeamRoom: (input, p) => { ownerOnly(p); return { room: teamOf().saveRoom(input) }; },
-    arrangeTeam: (input, p) => { ownerOnly(p); return teamOf().arrange(input); },
     directTeammate: (input, p) => { ownerOnly(p); return { room: teamOf().direct(input.id) }; },
     teamRoom: (input, p) => { ownerOnly(p); return teamOf().room(input.id); },
     teamTrail: (input, p) => { ownerOnly(p); return teamOf().trail(input.task, input.after ?? 0); },

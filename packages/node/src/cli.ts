@@ -125,8 +125,6 @@ of its own; "roundtable" and "team" are the same command)
                                     step of its repository's plan, a task a day at most, on Galahad's own yes within its
                                     budget ($3 at most); one that may spend more than is left of your budget (galahad
                                     usage budget) waits for you (galahad roundtable approve <task>); on until you turn it off
-  roundtable order <knight,knight,...>  your order of the knights, on every device (those not named come after)
-  roundtable primary <knight|galahad>   who leads the Roundtable: it answers what you say to a room without a name
   roundtable avatar <id> [--color #rrggbb | --reset]
                                     a knight is an orb: choose its colour, or let it go back to the one its
                                     handle gives it; with neither, its orb's colours are printed
@@ -596,7 +594,6 @@ async function main(): Promise<void> {
       net: { type: "string" },
       // (A knight's VM: `roundtable provision <id> --network gateway`. Undeclared, it was read as a switch and its VM made online.)
       network: { type: "string" },
-      look: { type: "string" },
       cpus: { type: "string" },
       image: { type: "string" },
       keep: { type: "boolean" },
@@ -677,12 +674,7 @@ async function main(): Promise<void> {
       project: { type: "string" },
       instructions: { type: "string" },
       after: { type: "string" },
-      form: { type: "string" },
       color: { type: "string" },
-      accent: { type: "string" },
-      eyes: { type: "string" },
-      accessory: { type: "string" },
-      temperament: { type: "string" },
       "instructions-file": { type: "string" },
       base: { type: "string" },
       branch: { type: "string" },

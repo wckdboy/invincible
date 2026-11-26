@@ -100,10 +100,6 @@ export function stateChip(state: KnightState | undefined): HTMLElement | null {
   return h("span", { class: "badge state-chip", "data-tone": look.tone }, state === "working" ? dot("work", { live: true }) : null, look.words);
 }
 
-/** The mark of the one who leads the Roundtable, beside its name: small, in ink, in words. */
-export const leadMark = (name?: string): HTMLElement =>
-  h("span", { class: "lead-mark", title: name && name !== "Galahad" ? `${name} leads the Roundtable: what you say to a room ${name} sits in without naming anyone is its to answer` : "Leads the Roundtable" }, "Leads");
-
 /**
  * A knight's colour, as you choose it: its orb as it will be, and the 24 colours to choose from, or the one its handle
  * gives it. An unsaved draft: the form it is in decides whether to save it. Its value: the colour you chose (an

@@ -11,7 +11,7 @@
 import { arrive, badge, button, callout, card, chipInput, copyField, count, disclosure, dot, empty, errorState, field, formActions, kbd, kv, linkButton, list, listRow, meta, meter, note, pageHead, rangeControl, rows, sasCode, secretInput, section, segmented, setCount, skeletonBlock, skeletonRows, skeletonStat, spinner, statTile, switchControl, type Tone } from "../src/ui/controls.ts";
 import { bannerPill, connectionBanner } from "../src/ui/banner.ts";
 import { type ConfirmOptions, confirmAction, openSheet } from "../src/ui/dialog.ts";
-import { leadMark, seat, stateChip } from "../src/ui/avatar.ts";
+import { seat, stateChip } from "../src/ui/avatar.ts";
 import type { KnightState } from "../src/lib/knight-state.ts";
 import { h, Scope } from "../src/ui/dom.ts";
 import { icon } from "../src/ui/icons.ts";
@@ -239,11 +239,10 @@ const page = h(
     ),
 
     shown(
-      "seat() · stateChip() · leadMark()",
+      "seat() · stateChip()",
       "A knight in its seat: its face, still, its state said beside it by the chip, in words and its colour; and the mark of the one who leads.",
       state("each state, on a row's face", h("div", { class: "gallery-seats" }, ...SEATED.map(([each, expression]) => h("div", { class: "stack snug gallery-seat" }, seat({ id: "percival", name: "Percival", state: each, expression, size: 32 }), chip(each))))),
       state("on a card, and as a portrait", h("div", { class: "row wrap" }, seat({ id: "percival", name: "Percival", state: "working", expression: "working", size: 84 }), seat({ id: "gareth", name: "Gareth", state: "needs", expression: "asking", size: 104 }))),
-      state("who leads", h("div", { class: "row wrap" }, h("strong", {}, "Lin"), leadMark("Lin"), stateChip("working")), h("div", { class: "row wrap" }, h("strong", {}, "Galahad"), leadMark())),
     ),
 
     shown(

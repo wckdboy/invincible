@@ -17,7 +17,7 @@ const GARETH = {
   acp: "goose acp",
   repository: "https://github.com/amiriteorg/galahad",
   dailyTurns: 40,
-  avatar: { look: "gareth", temperament: "steady" },
+  avatar: { v: 2, color: "#3abeff" },
   keys: ["stripe"],
 };
 

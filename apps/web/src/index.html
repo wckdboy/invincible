@@ -86,8 +86,6 @@
         --work: light-dark(#0a5fcc, #58a6ff);
         --needs: light-dark(#946200, #f0b549);
         --failed: light-dark(#c4141b, #ff6b6b);
-        /* Galahad's seat at the Round Table (icon("roundtable")): the red of the cross on his helm, brighter on black */
-        --siege: light-dark(#c4141b, #ee2c36);
 
         /* Semantic tones (status, trust, verdict, network risk): the only colour, kept for meaning */
         --ok: light-dark(#137a43, #4cc38a);
@@ -202,7 +200,6 @@
       h1, h2, h3, h4, p { margin: 0; }
       img, svg { display: block; }
       svg.icon { flex: none; }
-      svg.icon .icon-siege { fill: var(--siege); }
       ::selection { background: color-mix(in srgb, var(--accent-fill) 28%, transparent); }
       :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm); }
       [hidden] { display: none !important; }
@@ -1966,7 +1963,7 @@
   </head>
   <body>
     <div id="app">
-      <div class="boot" role="status" aria-label="Galahad is starting"><img src="/knights/galahad-helm.webp" alt="" /></div>
+      <div class="boot" role="status" aria-label="Galahad is starting"><img src="/icon-192.png" alt="" /></div>
     </div>
     <noscript><div class="solo"><div class="solo-card"><div class="card"><p>Galahad needs JavaScript enabled.</p></div></div></div></noscript>
     <script type="module" src="/app.js"></script>

@@ -15,7 +15,7 @@ import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBad
 
 const VERSION = "galahad-shell-v10";
 // (Not the SVG icons: the app never shows them, a browser fetches its favicon itself, and the installer its icons.)
-const SHELL = ["/", "/app.js", "/boot.js", "/manifest.webmanifest", "/icon-192.png", "/apple-touch-icon.png", "/knights/galahad-helm.webp", "/fonts/geist.woff2"];
+const SHELL = ["/", "/app.js", "/boot.js", "/manifest.webmanifest", "/icon-192.png", "/apple-touch-icon.png", "/fonts/geist.woff2"];
 const NEVER_CACHE = ["/api/", "/link/", "/gw/"];
 
 interface ExtendableEventLike extends Event {

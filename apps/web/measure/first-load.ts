@@ -11,8 +11,8 @@
  *     --moves 5     also times moving between places in the app already open, as a person does (a look at the page,
  *                   a press, the tap; each place twice, so a revisit shows), this many times over on each profile;
  *                   with --runs 0, only that
- *     --shots <dir> also screenshots, 390 and 1280 px, light and dark: the Roundtable (as a board, as a list, its
- *                   knights being arranged, and led by a knight), Galahad's timeline (and a message of yours that
+ *     --shots <dir> also screenshots, 390 and 1280 px, light and dark: the Roundtable (as a board, as a list),
+ *                   Galahad's timeline (and a message of yours that
  *                   carried files, and the message box with two waiting to go), a knight's
  *                   with a task running, one whose task kept its changes, one whose task failed, a room's work, a
  *                   knight's Workspace with its desktop, a task's own thread (at work, verified, failed), a task
@@ -327,7 +327,7 @@ async function serveGallery(repo: string): Promise<{ url: string; stop(): void }
       const path = new URL(request.url).pathname;
       if (path === "/") return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
       if (path === "/gallery.js") return new Response(script, { headers: { "content-type": "text/javascript; charset=utf-8" } });
-      if (/^\/(fonts\/[a-z-]+\.woff2|knights\/[a-z-]+(@2x)?\.webp)$/.test(path) && existsSync(join(src, path))) return new Response(Bun.file(join(src, path)));
+      if (/^\/fonts\/[a-z-]+\.woff2$/.test(path) && existsSync(join(src, path))) return new Response(Bun.file(join(src, path)));
       return new Response("", { status: 404 });
     },
   });
@@ -645,7 +645,7 @@ try {
   if (routes.uploadAttachment) {
     const up = async (name: string, type: string, bytes: Uint8Array) => (await admin("uploadAttachment", { name, type, data: Buffer.from(bytes).toString("base64") })).attachment;
     const drawing = await up("icon.png", "image/png", new Uint8Array(readFileSync(join(REPO, "apps/web/src/icon-192.png"))));
-    const notes = await up("icon-notes.md", "text/plain", new TextEncoder().encode("# The icon\n\nGalahad's helm, as the home screen shows it: 192 pixels square.\n"));
+    const notes = await up("icon-notes.md", "text/plain", new TextEncoder().encode("# The icon\n\nThe app's icon, as the home screen shows it: 192 pixels square.\n"));
     const sent = await fetch(`http://127.0.0.1:${port}${routes.chat!.path}`, {
       method: "POST",
       headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" },
@@ -986,10 +986,8 @@ try {
     }
     const views: View[] = [
       { name: "roundtable", hash: "#/team" },
-      // The Roundtable as a list (this device's choice), the knights being arranged, and a knight leading it.
+      // The Roundtable as a list (this device's choice).
       { name: "roundtable-list", hash: "#/team", prefs: { "galahad:roundtable-view": "list" } },
-      { name: "roundtable-arrange", hash: "#/team", steps: [press("Arrange")], wait: "[data-arranging]" },
-      { name: "roundtable-lin-leads", hash: "#/team", around: { route: "arrangeTeam", before: { primary: "lin" }, after: { primary: "galahad" } } },
       { name: "galahad", hash: `#/chat?c=${conversation}`, wait: ".turn.assistant" },
       // A new chat with him: his orb, large, and what he asks you under it (where the checkout has it).
       { name: "galahad-welcome", hash: "#/chat", steps: [press("Chat options"), press("New chat")], wait: ".chat-hero" },

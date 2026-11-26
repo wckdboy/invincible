@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { BRAND_PNGS, BRAND_SVGS, ZOOM } from "../../../scripts/brand.ts";
+import { BRAND_PNGS, ZOOM } from "../../../scripts/brand.ts";
 import { downscale, greyscale, png, renderField, rgba, roundTile } from "../../../scripts/field-icon.ts";
-import { MARK_PATH, toSvg } from "./brand.ts";
 import { fieldPoints, project } from "./lib/field.ts";
 
 const ROOT = resolve(import.meta.dir, "../../..");
@@ -14,27 +13,6 @@ function header(path: string): { width: number; height: number; type: number } {
   const view = new DataView(bytes.buffer, bytes.byteOffset);
   return { width: view.getUint32(16), height: view.getUint32(20), type: bytes[25]! };
 }
-
-describe("the mark: Galahad's helm as the owner drew it", () => {
-  test("its flat form is the helm's silhouette on the icon grid, the cross and the slit cut out of it", () => {
-    // Only moves, curves, lines and closes, in plain numbers: nothing else can ride in a path.
-    expect(MARK_PATH).toMatch(/^[MCLZ0-9 .-]+$/);
-    const numbers = MARK_PATH.match(/-?\d+(\.\d+)?/g)!.map(Number);
-    // Inside the 24-unit grid, within its 1.5 inset (a curve's handles may lean a hair past it).
-    expect(Math.min(...numbers)).toBeGreaterThanOrEqual(1.2);
-    expect(Math.max(...numbers)).toBeLessThanOrEqual(22.8);
-    // The outline, and holes in it: the cross and the slit.
-    expect(MARK_PATH.match(/M/g)!.length).toBeGreaterThanOrEqual(3);
-  });
-
-  test("the committed marks match their definition (run `bun scripts/brand.ts`), and carry no picture", () => {
-    for (const [path, tree] of Object.entries(BRAND_SVGS)) {
-      const svg = readFileSync(join(ROOT, path), "utf8");
-      expect(svg).toBe(`${toSvg(tree())}\n`);
-      expect(svg).not.toContain("<image");
-    }
-  });
-});
 
 // The owner's, 26 November 2026: "field aurum", then "maybe less fog, so it reads clearer".
 describe("the app icon: Galahad's field in gold, rendered as light", () => {

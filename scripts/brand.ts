@@ -1,28 +1,19 @@
 #!/usr/bin/env bun
 /*
- * Regenerates every brand file. Two kinds:
- *   - the marks, drawn (apps/web/src/brand.ts): Galahad's helm and the Roundtable, as SVG;
- *   - the app icon, as light: Galahad's field in gold (apps/web/src/lib/field.ts, your choice of 26 November 2026,
- *     "field aurum"), rendered by scripts/field-icon.ts into every PNG a platform takes: the web app's (its manifest's
- *     tiles, its maskable and touch icons, its favicon, its notification badge) and the README's. The site's, the
- *     Android app's adaptive layers and the Apple app's come back with those apps (a later phase).
+ * Regenerates the app icon, as light: the field in gold (apps/web/src/lib/field.ts, the owner's choice of 26 November
+ * 2026, "field aurum"), rendered by scripts/field-icon.ts into every PNG a platform takes: the web app's (its manifest's
+ * tiles, its maskable and touch icons, its favicon, its notification badge) and the README's. The site's, the Android
+ * app's adaptive layers and the Apple app's come back with those apps (a later phase). The new identity's mark comes
+ * with Phase 1.
  *
- *   bun scripts/brand.ts          the SVG marks only (deterministic; safe to run any time)
- *   bun scripts/brand.ts --png    also the icons (deterministic too: pure TypeScript, no browser; about ten seconds)
+ *   bun scripts/brand.ts --png    the icons (deterministic: pure TypeScript, no browser; about ten seconds)
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { flatMark, roundtableIcon, toSvg, type SvgNode } from "../apps/web/src/brand.ts";
 import { downscale, png, renderField, rgba, roundTile } from "./field-icon.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const at = (p: string): string => join(ROOT, p);
-
-/** Every committed SVG, by where it goes: what tests read back (brand.test.ts). */
-export const BRAND_SVGS: Record<string, () => SvgNode> = {
-  "assets/galahad-mark.svg": () => flatMark(),
-  "assets/roundtable.svg": () => roundtableIcon(),
-};
 
 /** How far the field is drawn in, for a form a platform masks: its whole glow inside the circle every mask keeps (a
  * maskable icon's 80 %, an adaptive icon's 66 dp of 108). */
@@ -40,10 +31,6 @@ export const BRAND_PNGS: Record<string, number> = {
 };
 
 if (import.meta.main) {
-  for (const [path, tree] of Object.entries(BRAND_SVGS)) {
-    writeFileSync(at(path), `${toSvg(tree())}\n`);
-    console.log(`wrote ${path}`);
-  }
   if (Bun.argv.includes("--png")) await renderPngs();
 }
 

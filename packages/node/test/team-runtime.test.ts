@@ -88,16 +88,6 @@ test("a knight sees the whole Roundtable, not only its room: every knight's name
   expect(asked).toMatch(/"id":"kay","state":"ready"/);
 });
 
-test("the knight you made primary is told it leads a room: what names nobody is its to answer, bringing in only who the work needs", async () => {
-  const lead = fixture([say("I'll take it.")], { primary: () => "ada" });
-  await lead.runtime.respond(member, room, [said(1, "owner", "What's next?")], lead.context);
-  expect(lead.bodies[0].messages[0].content as string).toContain("You lead the Roundtable for the owner");
-  // Any other knight, or with Galahad leading, hears nothing of it.
-  const other = fixture([say("Noted.")], { primary: () => "galahad" });
-  await other.runtime.respond(member, room, [said(1, "owner", "What's next?")], other.context);
-  expect(other.bodies[0].messages[0].content as string).not.toContain("You lead the Roundtable");
-});
-
 test("a knight is told its own latest work, wherever it was given", async () => {
   const done = { ...task, id: "task-donenotes000", title: "Draft the notes", status: "done" as const, verified: true, room: "release" };
   const f = fixture([say("I drafted them.")], { work: () => [done] });

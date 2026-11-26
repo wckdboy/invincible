@@ -16,7 +16,7 @@ import { PricedModel, PriceSchema, SpendLines, type TrialSpent, UsageBudgetInput
 import { type ComputeUsage, EffortAsk, EffortLevel } from "./compute.ts";
 import { DecisionRequest } from "./decisions.ts";
 import { CancelLookInput, ConversationId, LookLaterInput, ProjectBranchInput, ProjectCommitInput, ProjectGitInput, ProjectId, ProjectInput } from "./chats.ts";
-import { TeammateId, TeammateInput, TeamArrangeInput, TeamBacklogInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamWorkspaceQuest, TeammateModels } from "./team.ts";
+import { TeammateId, TeammateInput, TeamBacklogInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamWorkspaceQuest, TeammateModels } from "./team.ts";
 import { QuestGates, QuestProgressInput } from "./quests.ts";
 import { type StopReason, TURN_ID } from "./turns.ts";
 import { type ArchiveContextEntry, ArchiveBudgetInput, ArchiveDeleteInput, ArchiveId, ArchiveReindexInput, ArchiveSearchInput, NoteIdeaInput } from "./archive.ts";
@@ -345,7 +345,6 @@ export const routes = {
   teamModels: { method: "GET", path: "/api/team/models", scope: "mind:read", input: null },
   saveTeamRoom: { method: "POST", path: "/api/team/rooms", scope: "fleet:admin", input: TeamRoomInput },
   /** Yours alone: the knights' order, and who leads the Roundtable. */
-  arrangeTeam: { method: "POST", path: "/api/team/arrange", scope: "fleet:admin", input: TeamArrangeInput },
   directTeammate: { method: "POST", path: "/api/team/direct", scope: "fleet:admin", input: z.strictObject({ id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/) }) },
   teamRoom: { method: "POST", path: "/api/team/room", scope: "chat", input: z.strictObject({ id: z.string().min(1).max(80) }) },
   /** What a task did, as it happened: its kept lines after number `after`, a page at a time, with the task's status now. Yours to read, like a room. */

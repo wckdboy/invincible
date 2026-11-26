@@ -119,10 +119,6 @@ export async function buildAssets(webDir = join(REPO_ROOT, "apps/web")): Promise
     for (const name of readdirSync(join(src, "fonts")).filter((file) => /^[a-z-]+\.woff2$/.test(file))) {
       files.set(`/fonts/${name}`, { body: new Uint8Array(readFileSync(join(src, "fonts", name))), type: "font/woff2" });
     }
-    // The knights as the owner drew them (ui/avatar.ts shows them): every drawing in the folder, by its own name.
-    for (const name of readdirSync(join(src, "knights")).filter((file) => /^[a-z-]+(@2x)?\.webp$/.test(file))) {
-      files.set(`/knights/${name}`, { body: new Uint8Array(readFileSync(join(src, "knights", name))), type: "image/webp" });
-    }
   } catch (error) {
     const message = String((error as Error).message ?? error).replace(/[<>&]/g, "");
     files.set("/", { body: `<!doctype html><title>Galahad</title><p>The PWA failed to build: ${message}</p>`, type: "text/html" });

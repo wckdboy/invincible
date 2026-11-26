@@ -1,11 +1,10 @@
 import { expect, test } from "bun:test";
 import type { RouteName, TeamSnapshot, Teammate, TerminalEvent, TerminalView } from "@galahad/core";
-import { defaultAvatar } from "@galahad/core/avatar";
 import { type Screen, terminalCommand } from "../src/terminal-cli.ts";
 
 /* `galahad terminal` at a terminal, against what the node would answer. */
 
-const member = (id: string, over: Partial<Teammate> = {}): Teammate => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", avatar: defaultAvatar(id), createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
+const member = (id: string, over: Partial<Teammate> = {}): Teammate => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
 const view = (id: string, over: Partial<TerminalView> = {}): TerminalView => ({ id, sandbox: "0123456789", name: "galahad-sbx-0123456789", cols: 80, rows: 24, opened: 1, exitCode: null, watchers: 0, ...over });
 const out = (text: string): TerminalEvent => ({ type: "output", data: Buffer.from(text).toString("base64") });
 

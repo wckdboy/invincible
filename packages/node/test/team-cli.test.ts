@@ -3,12 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TeammateInput, type RouteName, type Teammate, type TeamMessage, type TeamRoom, type TeamRoomView, type TeamSnapshot } from "@galahad/core";
-import { defaultAvatar, knightColors } from "@galahad/core/avatar";
+import { knightColors } from "@galahad/core/avatar";
 import { teamCommand } from "../src/team-cli.ts";
 
 /* `galahad roundtable` at a terminal, against what the node would answer. */
 
-const member = (id: string, over: Partial<Teammate> = {}): Teammate => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", avatar: defaultAvatar(id), createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
+const member = (id: string, over: Partial<Teammate> = {}): Teammate => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
 function node(teammates: Teammate[]) {
   const saved: { name: RouteName; input: any }[] = [];
   const state: TeamSnapshot = { teammates, rooms: [], tasks: [], deliveries: [] };
@@ -17,7 +17,7 @@ function node(teammates: Teammate[]) {
       if (name === "team") return state as T;
       saved.push({ name, input });
       const asked = input as { id: string; avatar: Teammate["avatar"] | null };
-      return { teammate: { ...teammates.find((t) => t.id === asked.id)!, avatar: asked.avatar ?? defaultAvatar(asked.id) } } as T;
+      return { teammate: { ...teammates.find((t) => t.id === asked.id)!, ...(asked.avatar ? { avatar: asked.avatar } : {}) } } as T;
     },
   };
   return { api, saved };
@@ -155,14 +155,6 @@ test("a knight's orb is the colour you choose for it, or its handle's: --color s
   expect(read.saved).toHaveLength(0);
   expect(saved).toHaveLength(before);
   expect(JSON.parse(shown[0]!)).toEqual({ ...knightColors("ada"), chosen: false });
-});
-
-test("the drawings are gone: a look, a shape, eyes or a temperament is refused, saying what to give instead", async () => {
-  const { api, saved } = node([member("ada")]);
-  for (const flags of [{ look: "percival" }, { form: "round" }, { accent: "#112233" }, { eyes: "visor" }, { accessory: "crown" }, { temperament: "lively" }, { look: "bors", color: "#112233" }]) {
-    await expect(teamCommand(api, "avatar", ["ada"], flags, () => {})).rejects.toThrow(/an orb now.*--color/);
-  }
-  expect(saved).toHaveLength(0);
 });
 
 test("removing a knight asks first and says what goes with it; a no, or a VM nobody said may go, removes nothing", async () => {

@@ -1,17 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { TeammateInput, TeamEngramInput, TeamRecruitInput, TeamRemoveInput, TeamRoomInput, TeamControlInput, TeamPostInput, TeamSayInput, TeamTaskInput, TeamWorkspaceQuest, teamArmLabel, AvatarProfileSchema, heldModels } from "../src/team.ts";
 import { routes } from "../src/api.ts";
-import { defaultAvatar } from "../src/avatar.ts";
 
 describe("team contracts", () => {
-  test("avatar edits are strict v1 profiles or explicit resets; old requests remain valid", () => {
-    const avatar = defaultAvatar("ada");
+  test("avatar edits are strict orb colours or explicit resets; old requests remain valid", () => {
+    const avatar = { v: 2 as const, color: "#3abeff" };
     expect(TeammateInput.parse({ id: "ada", name: "Ada", avatar }).avatar).toEqual(avatar);
     expect(TeammateInput.parse({ id: "ada", name: "Ada", avatar: null }).avatar).toBeNull();
     expect(TeammateInput.parse({ id: "ada", name: "Ada" }).avatar).toBeUndefined();
     expect(AvatarProfileSchema.parse({ ...avatar, color: "#AABBCC" }).color).toBe("#aabbcc");
-    for (const invalid of [{ ...avatar, v: 2 }, { ...avatar, color: "url(https://example.invalid/p)" }, { ...avatar, accent: "#fff" },
-      { ...avatar, form: "orb" }, { ...avatar, accessory: "crest" }, { ...avatar, url: "image.svg" }]) {
+    for (const invalid of [{ ...avatar, v: 1 }, { ...avatar, color: "url(https://example.invalid/p)" }, { ...avatar, accent: "#fff" },
+      { ...avatar, form: "orb" }, { v: 1, form: "round", color: "#3abeff", accent: "#ffffff", eyes: "oval", accessory: "none", temperament: "calm" }, { ...avatar, url: "image.svg" }]) {
       expect(TeammateInput.safeParse({ id: "ada", name: "Ada", avatar: invalid }).success).toBe(false);
     }
   });
@@ -48,7 +47,7 @@ describe("team contracts", () => {
     expect(TeamRecruitInput.parse(job)).toEqual(job);
     // Its allowance, state, look and origin are not his to say. Nor is a repository or a harness: a repository is
     // cloned into its VM with the owner's own GitHub access, and a harness is something the owner installs there.
-    for (const extra of [{ dailyTurns: 1000 }, { enabled: false }, { avatar: defaultAvatar("scout") }, { createdBy: "owner" }, { instructionsBy: "owner" }, { memory: "notes" }, { workspace: { id: "0000000000", node: "host" } },
+    for (const extra of [{ dailyTurns: 1000 }, { enabled: false }, { avatar: { v: 2, color: "#3abeff" } }, { createdBy: "owner" }, { instructionsBy: "owner" }, { memory: "notes" }, { workspace: { id: "0000000000", node: "host" } },
       { repository: "https://github.com/example/fixture" }, { repository: null }, { harness: "hermes" }, { harness: "native" }]) {
       expect(TeamRecruitInput.safeParse({ ...job, ...extra }).success).toBe(false);
     }

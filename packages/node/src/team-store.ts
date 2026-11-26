@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, closeSync, existsSync, openSync } from "node:fs";
 import { AttachmentRef, findSecrets, randomId, readAlike, redact } from "@galahad/core";
-import { defaultAvatar, isOrbProfile, resolveAvatar, type AvatarActivity } from "@galahad/core/avatar";
+import { isOrbProfile, type AvatarActivity } from "@galahad/core/avatar";
 import { z } from "zod";
 import {
   TEAM_GALAHAD, TEAM_LIMITS, TEAM_OWNER, TeammateInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
@@ -234,7 +234,7 @@ export class TeamStore {
     const row = this.db.query<DocRow, [string]>("SELECT value FROM team_teammates WHERE id = ?").get(id);
     if (!row) return null;
     const value = JSON.parse(row.value) as Teammate;
-    return { ...value, avatar: isOrbProfile(value.avatar) ? value.avatar : resolveAvatar(id, value.avatar), repository: value.repository ?? null, workspaceNode: value.workspaceNode ?? value.workspace?.node ?? null, createdBy: value.createdBy ?? TEAM_OWNER, instructionsBy: value.instructionsBy ?? TEAM_OWNER, turnsToday: this.turns(id) };
+    return { ...value, avatar: isOrbProfile(value.avatar) ? value.avatar : undefined, repository: value.repository ?? null, workspaceNode: value.workspaceNode ?? value.workspace?.node ?? null, createdBy: value.createdBy ?? TEAM_OWNER, instructionsBy: value.instructionsBy ?? TEAM_OWNER, turnsToday: this.turns(id) };
   }
   private records(): Teammate[] { return this.db.query<{ id: string }, []>("SELECT id FROM team_teammates ORDER BY id").all().map((r) => this.record(r.id)!); }
   /** A worker that is here. One that was removed is nobody's to work with, write to or change (null), though its record is kept. */
@@ -242,34 +242,9 @@ export class TeamStore {
     const kept = this.record(id);
     return kept && kept.removedAt === undefined ? kept : null;
   }
-  /** Your knights in the order you gave them; one you didn't place comes after, by handle. */
+  /** Your knights, by handle. */
   teammates(): Teammate[] {
-    const here = this.records().filter((t) => t.removedAt === undefined);
-    const order = this.arrangement().order;
-    const at = (id: string) => { const i = order.indexOf(id); return i < 0 ? order.length : i; };
-    return here.sort((a, b) => at(a.id) - at(b.id) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  }
-  /** Your order of the knights (only those still here), and who leads the Roundtable: Galahad (`galahad`) unless you chose a knight. */
-  arrangement(): { order: string[]; primary: string } {
-    const here = new Set(this.records().filter((t) => t.removedAt === undefined).map((t) => t.id));
-    const setting = (key: string) => this.db.query<DocRow, [string]>("SELECT value FROM team_settings WHERE key=?").get(key)?.value;
-    const order = ((): string[] => { try { const parsed = JSON.parse(setting("order") ?? "[]"); return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string" && here.has(id)) : []; } catch { return []; } })();
-    const primary = setting("primary");
-    return { order, primary: primary && here.has(primary) ? primary : TEAM_GALAHAD };
-  }
-  /** Yours alone (the route says so): the knights' order, and who leads. Every name must be a knight of yours (or, to lead, Galahad). */
-  arrange(input: { order?: string[]; primary?: string }): { order: string[]; primary: string } {
-    const here = new Set(this.teammates().map((t) => t.id));
-    if (input.order) {
-      const unknown = input.order.filter((id) => !here.has(id));
-      if (unknown.length) throw new TeamError(400, `No knight of yours is ${unknown.map((id) => `"${id}"`).join(", ")}.`);
-      if (new Set(input.order).size !== input.order.length) throw new TeamError(400, "Each knight is in the order once.");
-    }
-    if (input.primary !== undefined && input.primary !== TEAM_GALAHAD && !here.has(input.primary)) throw new TeamError(400, `No knight of yours is "${input.primary}": the Roundtable is led by Galahad or one of your knights.`);
-    const put = (key: string, value: string) => this.db.query("INSERT INTO team_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
-    if (input.order) put("order", JSON.stringify(input.order));
-    if (input.primary !== undefined) put("primary", input.primary);
-    return this.arrangement();
+    return this.records().filter((t) => t.removedAt === undefined);
   }
   /** The workers you removed. Their handles stay taken and their names stay beside what they said. */
   removed(): Teammate[] { return this.records().filter((t) => t.removedAt !== undefined); }
@@ -303,7 +278,7 @@ export class TeamStore {
     if (harness === "acp" && !acp) throw new TeamError(400, "Name the command that starts its ACP agent in its VM, e.g. goose acp or gemini --acp.");
     // (It calls the models you set it up with, which sensitive mode can't hold it to.)
     if (harness === "acp" && sensitive) throw new TeamError(400, "A knight in sensitive mode works on Galahad's own harness, OpenCode, Hermes, Claude Code or Codex: an ACP agent of yours calls the models you set it up with, which Galahad can't hold it to.");
-    return this.putTeammate({ id: input.id, name: input.name, instructions: input.instructions ?? previous?.instructions ?? "", role: input.role ?? previous?.role ?? "engineer", ...(models ? { models } : {}), ...(sensitive ? { sensitive: true } : {}), harness, ...(acp ? { acp } : {}), ...(keys ? { keys } : {}), enabled: input.enabled ?? previous?.enabled ?? true, dailyTurns: input.dailyTurns ?? previous?.dailyTurns ?? DAILY_TURNS, repository: input.repository === undefined ? previous?.repository ?? null : input.repository, turnsToday: this.turns(input.id), workspaceNode: previous?.workspaceNode ?? null, workspace: previous?.workspace ?? null, memory: previous?.memory ?? "", avatar: input.avatar === undefined ? previous?.avatar ?? defaultAvatar(input.id) : input.avatar ?? defaultAvatar(input.id), createdBy: previous?.createdBy ?? TEAM_OWNER, instructionsBy: input.instructions === undefined || input.instructions === previous?.instructions ? previous?.instructionsBy ?? TEAM_OWNER : TEAM_OWNER, createdAt: previous?.createdAt ?? at, updatedAt: at });
+    return this.putTeammate({ id: input.id, name: input.name, instructions: input.instructions ?? previous?.instructions ?? "", role: input.role ?? previous?.role ?? "engineer", ...(models ? { models } : {}), ...(sensitive ? { sensitive: true } : {}), harness, ...(acp ? { acp } : {}), ...(keys ? { keys } : {}), enabled: input.enabled ?? previous?.enabled ?? true, dailyTurns: input.dailyTurns ?? previous?.dailyTurns ?? DAILY_TURNS, repository: input.repository === undefined ? previous?.repository ?? null : input.repository, turnsToday: this.turns(input.id), workspaceNode: previous?.workspaceNode ?? null, workspace: previous?.workspace ?? null, memory: previous?.memory ?? "", avatar: input.avatar === undefined ? previous?.avatar : (input.avatar ?? undefined), createdBy: previous?.createdBy ?? TEAM_OWNER, instructionsBy: input.instructions === undefined || input.instructions === previous?.instructions ? previous?.instructionsBy ?? TEAM_OWNER : TEAM_OWNER, createdAt: previous?.createdAt ?? at, updatedAt: at });
   }
   /** How many more workers Galahad may make for himself: on this node in all, and in the day now ending. */
   private spare(all: Teammate[] = this.teammates()): TeamOverview["spare"] {
@@ -337,7 +312,7 @@ export class TeamStore {
       const at = this.now();
       // One a knight in sensitive mode makes is in it too, on the same models: what it starts never runs elsewhere.
       const held = by === TEAM_GALAHAD ? null : heldModels(this.requireTeammate(by));
-      const made = this.putTeammate({ id: input.id, name: input.name, instructions: input.instructions, role: input.role ?? "engineer", ...(held ? { models: [...held], sensitive: true } : {}), harness: "native", enabled: true, dailyTurns: DAILY_TURNS, repository: null, turnsToday: 0, workspaceNode: null, workspace: null, memory: "", avatar: defaultAvatar(input.id), createdBy: by, instructionsBy: by, createdAt: at, updatedAt: at });
+      const made = this.putTeammate({ id: input.id, name: input.name, instructions: input.instructions, role: input.role ?? "engineer", ...(held ? { models: [...held], sensitive: true } : {}), harness: "native", enabled: true, dailyTurns: DAILY_TURNS, repository: null, turnsToday: 0, workspaceNode: null, workspace: null, memory: "", createdBy: by, instructionsBy: by, createdAt: at, updatedAt: at });
       if (joined && !joined.direct) this.putRoom({ ...joined, members: [...joined.members, made.id], updatedAt: at });
       return made;
     })();
@@ -488,12 +463,9 @@ export class TeamStore {
       for (const member of room.members) this.requireTeammate(member);
       if (by.teammate && !by.chainId) throw new TeamError(403, "A knight message must belong to its current conversation.");
       if (by.chainId && !this.db.query("SELECT id FROM team_chains WHERE id = ?").get(by.chainId)) throw new TeamError(404, "No such conversation chain.");
-      let named = mentioned(input.text, room.members.map((member) => this.requireTeammate(member)));
-      // What you say to a room of knights without naming one is the lead's: the knight you made primary when it sits
-      // here (it alone hears it), Galahad otherwise.
-      const primary = this.arrangement().primary;
+      const named = mentioned(input.text, room.members.map((member) => this.requireTeammate(member)));
+      // What you say to a room of knights without naming one is Galahad's.
       const unnamed = !by.galahad && !by.teammate && !by.reply && !room.direct && !named.length;
-      if (unnamed && primary !== TEAM_GALAHAD && room.members.includes(primary)) named = [primary];
       // Galahad hears what names him, and what you say to a room of knights without naming one when he leads it: he answers
       // it, or names who should take it up. In a knight's own conversation with you, your words stay the knight's unless you name him.
       const forGalahad = !by.galahad && (mentioned(input.text, GALAHAD_SEAT).length > 0 || (unnamed && !named.length));
@@ -739,8 +711,7 @@ export class TeamStore {
     const direct = this.rooms().filter((room) => room.direct).sort((a, b) => a.members.length - b.members.length);
     const removed = this.removed().map(({ id, name, removedAt }) => { const conversations = direct.filter((room) => room.members.includes(id)).map((room) => room.id); return { id, name, removedAt, ...(conversations.length ? { conversations } : {}) }; });
     const computer = this.computer();
-    const { order, primary } = this.arrangement();
-    return { northStar: this.northStar(this.now() - 30 * 86_400_000), teammates: this.teammates(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.galahadAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ...(computer ? { computer } : {}), order, primary, seen: this.seen() };
+    return { northStar: this.northStar(this.now() - 30 * 86_400_000), teammates: this.teammates(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.galahadAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ...(computer ? { computer } : {}), seen: this.seen() };
   }
   /**
    * Which writing of the team this is, for the live stream: the rows this store has written, and the database's

@@ -196,8 +196,6 @@ export class TeamService {
     return saved;
   }
   direct(teammate: string): TeamRoom { this.accepting(); const room = this.store.direct(teammate); this.changed(); return room; }
-  /** Your order of the knights, and who leads the Roundtable. */
-  arrange(input: { order?: string[]; primary?: string }): { order: string[]; primary: string } { this.accepting(); const arranged = this.store.arrange(input); this.changed(); return arranged; }
   /** Your words to a room, from the device you wrote on (`asker`), whose own scopes Galahad answers with. */
   post(input: TeamPostInput, asker?: Exclude<TeamAsker, { kind: "knight" }>): TeamMessage { this.accepting(); const message = this.store.post(input, asker ? { asker } : {}); this.changed(); this.kick(); return message; }
   /** His workers as Galahad himself reads them. */

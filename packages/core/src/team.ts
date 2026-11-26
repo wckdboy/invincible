@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TEAM_LIMITS } from "./team-limits.ts";
 import { sha256Bytes } from "./crypto.ts";
 import { utf8 } from "./bytes.ts";
-import { AVATAR_FORMS, AVATAR_EYES, AVATAR_ACCESSORIES, AVATAR_TEMPERAMENTS, type AvatarProfile, type OrbProfile } from "./avatar.ts";
+import type { OrbProfile } from "./avatar.ts";
 import { hasUndrawn, oneScript, readAlike } from "./lookalike.ts";
 import { SpendLines } from "./usage.ts";
 import { ATTACHMENT_LIMITS } from "./attachments.ts";
@@ -52,15 +52,8 @@ export function teamArmLabel(controller: string, teammate: string): string {
 }
 
 const AvatarColor = z.string().regex(/^#[0-9a-f]{6}$/i, "a six-digit hex color").transform((color) => color.toLowerCase());
-/** A knight's avatar as saved: the colour you chose for its orb (v 2), or the look from before the orbs (v 1), still taken
- * from an app that sends one, though it colours nothing now (core's knightColors). */
-export const AvatarProfileSchema = z.union([
-  z.strictObject({ v: z.literal(2), color: AvatarColor }),
-  z.strictObject({
-    v: z.literal(1), form: z.enum(AVATAR_FORMS), color: AvatarColor, accent: AvatarColor,
-    eyes: z.enum(AVATAR_EYES), accessory: z.enum(AVATAR_ACCESSORIES), temperament: z.enum(AVATAR_TEMPERAMENTS),
-  }),
-]);
+/** A knight's avatar as saved: the colour you chose for its orb (core's knightColors). */
+export const AvatarProfileSchema = z.strictObject({ v: z.literal(2), color: AvatarColor });
 
 /** The model role a knight works on: one of the roster's, built in or one you made. */
 export const TeammateRole = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
@@ -271,13 +264,6 @@ export interface TeamOutcome {
   updatedAt: number;
 }
 
-/** Your order of the knights, and who leads the Roundtable (`galahad`, or one of your knights). Each is optional. */
-export const TeamArrangeInput = z.strictObject({
-  order: z.array(TeammateId).max(64).refine((ids) => new Set(ids).size === ids.length, "each knight is in the order once").optional(),
-  primary: z.union([z.literal(TEAM_GALAHAD), TeammateId]).optional(),
-});
-export type TeamArrangeInput = z.infer<typeof TeamArrangeInput>;
-
 /** A knight's page (its conversation with you and its tasks), or a room, looked at by you. */
 export const TeamSeenInput = z.union([z.strictObject({ knight: TeammateId }), z.strictObject({ room: TeamRoomId })]);
 export type TeamSeenInput = z.infer<typeof TeamSeenInput>;
@@ -346,7 +332,7 @@ export interface Teammate {
   memory: string;
   /** The colour you chose for its orb (v 2), or a look from before the orbs (v 1, which colours nothing); absent: none
    * chosen. Drawn with core's knightColors(id, avatar). */
-  avatar?: AvatarProfile | OrbProfile;
+  avatar?: OrbProfile;
   /** Who made this worker, and whose words its instructions are: TEAM_OWNER (you: also what an older
    * snapshot without them means), TEAM_GALAHAD (himself, in your conversation) or the worker that made it.
    * Instructions you save are yours from then on. */
@@ -594,10 +580,6 @@ export interface TeamSnapshot {
   backlog?: boolean;
   /** Galahad's own computer, when he has one: his persistent VM, made and watched as a knight's is (under his handle). */
   computer?: TeamWorkspace;
-  /** Your order of the knights (`teammates` comes in it already; absent from an older node). */
-  order?: string[];
-  /** Who leads the Roundtable: `galahad`, or the knight you chose (absent from an older node: Galahad). */
-  primary?: string;
   /** When you last looked, on any device, at each knight's page (`knight:<id>`) and each room (`room:<id>`): what ended
    * there after it is new to you, as an email is unread (absent from an older node, which keeps no such thing). */
   seen?: Record<string, number>;
