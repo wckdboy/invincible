@@ -3,6 +3,7 @@ import { TEAM_LIMITS } from "./team-limits.ts";
 import { sha256Bytes } from "./crypto.ts";
 import { utf8 } from "./bytes.ts";
 import type { OrbProfile } from "./avatar.ts";
+import { MARK_FORMS, MARK_PALETTE, type MarkProfile } from "./agent-mark.ts";
 import { hasUndrawn, oneScript, readAlike } from "./lookalike.ts";
 import { SpendLines } from "./usage.ts";
 import { ATTACHMENT_LIMITS } from "./attachments.ts";
@@ -52,8 +53,15 @@ export function teamArmLabel(controller: string, agent: string): string {
 }
 
 const AvatarColor = z.string().regex(/^#[0-9a-f]{6}$/i, "a six-digit hex color").transform((color) => color.toLowerCase());
-/** An agent's avatar as saved: the colour you chose for its orb (core's agentColors). */
+/** A colour you pick for an agent, as the apps' pickers send it: snapped by its node to the nearest of the eight its
+ * mark is drawn in (agent-mark.ts), its form kept. */
 export const AvatarProfileSchema = z.strictObject({ v: z.literal(2), color: AvatarColor });
+/** An agent's mark as its node gave it (agent-mark.ts): its colour, one of the eight as its light form, and its form. */
+export const MarkProfileSchema = z.strictObject({
+  v: z.literal(3),
+  color: z.enum(MARK_PALETTE.map((hue) => hue.light) as [string, ...string[]]),
+  form: z.number().int().min(0).max(MARK_FORMS - 1),
+});
 
 /** The model role an agent works on: one of the roster's, built in or one you made. */
 export const AgentRole = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
@@ -102,8 +110,10 @@ export const AgentInput = z.strictObject({
   enabled: z.boolean().optional(),
   dailyTurns: z.number().int().min(0).max(1000).optional(),
   repository: z.string().trim().max(300).regex(/^https:\/\/github\.com\/[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*\/?$/, "an HTTPS GitHub repository without credentials, query or fragment").transform((url) => url.replace(/\/$/, "").replace(/\.git$/, "")).nullable().optional(),
-  /** Omitted edits preserve appearance; null restores this identity's seeded default. */
-  avatar: AvatarProfileSchema.nullable().optional(),
+  /** Its mark (agent-mark.ts). Omitted: kept as it is. A colour you pick (v 2): snapped to the eight, its form kept. A
+   * mark (v 3): kept as sent (an app saving something else, or an import from another node). Null: the mark it would
+   * be given now. */
+  avatar: z.union([AvatarProfileSchema, MarkProfileSchema]).nullable().optional(),
 });
 export type AgentInput = z.infer<typeof AgentInput>;
 
@@ -361,9 +371,9 @@ export interface Agent {
   workspaceNode: string | null;
   workspace: TeamWorkspace | null;
   memory: string;
-  /** The colour you chose for its orb (v 2), or a look from before the orbs (v 1, which colours nothing); absent: none
-   * chosen. Drawn with core's agentColors(id, avatar). */
-  avatar?: OrbProfile;
+  /** Its mark (v 3: agent-mark.ts), which its node gives it as it joins and every app draws; from a node before the
+   * marks, the colour chosen for its orb (v 2), or nothing. Drawn with core's markOf(id, avatar). */
+  avatar?: MarkProfile | OrbProfile;
   /** Who made this worker, and whose words its instructions are: TEAM_OWNER (you: also what an older
    * snapshot without them means), TEAM_PRIMARY (itself, in your conversation) or the worker that made it.
    * Instructions you save are yours from then on. */

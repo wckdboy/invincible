@@ -93,7 +93,12 @@ describe("an agent's orb", () => {
     expect(agentColors("max", { v: 2, color: "#3ABEFF" })).toMatchObject({ tint: "#3abeff", chosen: true });
     expect(agentColors("max", { v: 2, color: "#123456" })).toMatchObject({ tint: "#123456", chosen: true });
     expect(agentColors("max", { v: 1, form: "round", color: "#be7153" })).toEqual(agentColors("max"));
-    for (const odd of [null, "blue", { v: 2, color: "url(x)" }, { v: 2, color: "#3abeff", form: "round" }, { v: 3, color: "#3abeff" }]) expect(agentColors("max", odd)).toEqual(agentColors("max"));
+    for (const odd of [null, "blue", { v: 2, color: "url(x)" }, { v: 2, color: "#3abeff", form: "round" }, { v: 3, color: "#3abeff" }, { v: 3, color: "#0084ba", form: 12 }]) expect(agentColors("max", odd)).toEqual(agentColors("max"));
+  });
+
+  test("a mark its node gave it (agent-mark.ts, v 3) colours its orb in its hue, bright as the tints are, until the apps draw marks", () => {
+    expect(agentColors("max", { v: 3, color: "#0084ba", form: 10 })).toMatchObject({ tint: "#3bb7f7", chosen: true });
+    expect(agentColors("max", { v: 3, color: "#007745", form: 0 })).toMatchObject({ tint: "#18c376", chosen: true });
   });
 
   test("lit and shadowed in whole channels, and a second colour three to six tints on from its own", () => {

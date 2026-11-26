@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./attachments": "./src/attachments.ts",
+    "./agent-mark": "./src/agent-mark.ts",
     "./avatar": "./src/avatar.ts",
     "./blocks": "./src/blocks.ts",
     "./bytes": "./src/bytes.ts",
