@@ -10,6 +10,10 @@ import SwiftUI
  * iPhone, its details: the agent's VM, where its work began, its changes, its gates as they run, the reviewer, its cost
  * against its budget, and what waits on it.
  *
+ * While it runs, its message box steers the task or queues for after it (the PWA's lib/steer.ts, in Core/Steer.swift):
+ * what you write reaches the work at its next safe point, is said on its way until then, then in its trail where it was
+ * taken, and its proof says what its review judged against.
+ *
  * Everything is what the node already answers: the team (the task, its agent, what depends on it), the task's trail
  * (POST /api/team/trail: the runner's own lines, never the agent's account; Steps.swift reads them), its conversation
  * (POST /api/team/room), its changes (POST /api/team/changes, where this device may look into a VM) and your prices.
@@ -287,8 +291,11 @@ private struct TaskThreadView: View {
     var composing: FocusState<Bool>.Binding
     @State private var workedOpen = false
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// What Return does while it works, on this device (Settings → Chat, as a chat's box: steer unless you chose otherwise).
+    @AppStorage("chat.enter") private var enter = ComposerWords.Enter.steer.rawValue
 
     private var canAct: Bool { session.can("fleet:admin") && session.can("chat") }
+    private var choice: ComposerWords.Enter { ComposerWords.Enter(rawValue: enter) ?? .steer }
     private var agent: Agent? { session.drawn(task.assignee) }
     private var name: String { agent?.name ?? session.team?.removed?.first { $0.id == task.assignee }?.name ?? task.assignee }
 
@@ -346,6 +353,20 @@ private struct TaskThreadView: View {
             if thread.read, task.status == "done" || task.status == "failed" {
                 Divider()
                 ProofSection(session: session, task: task, thread: thread, agent: agent, name: name, canAct: canAct, answers: answers)
+            }
+            // What you or your agent said that its run never took: it ended first.
+            if let never = SteerWords.neverReached(status: task.status, steers: task.steers) {
+                Divider()
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Label(never.title, systemImage: "arrow.up").font(Typeset.detail.weight(.semibold))
+                    ForEach(Array(never.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line).font(Typeset.detail).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .padding(.vertical, Space.s4)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("task.never")
             }
             // The agent's own words, after the proof and labelled as its own: never its bare claim of a verdict.
             if let said = TaskCard.saidBesideProof(TaskCard.end(task)?.said) {
@@ -433,27 +454,43 @@ private struct TaskThreadView: View {
         .padding(.vertical, Space.s4)
     }
 
-    /// Its foot: the live line while it works, and its message box.
+    /// Its foot: the live line while it works, what is on its way to it, and its message box: while it runs, Steer this
+    /// task or Queue for after it (the web's words); otherwise a message to its agent, as ever.
     private func foot(_ entries: [TrailEntry], running: Bool) -> some View {
         let stopping: (() -> Void)? = canAct ? { answers.run(.stop, task, session: session) } : nil
         return VStack(spacing: 0) {
             if running, let live = Steps.live(entries) { LiveLine(live: live, stop: stopping) }
             if canAct {
-                if let hint = hint {
+                // Said once the node has it, gone once its run has taken it.
+                if let waiting = SteerWords.waiting(status: task.status, steers: task.steers, name: name) { OnItsWay(title: waiting.title, lines: waiting.lines) }
+                if !hint.isEmpty {
                     Text(hint).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, Metrics.margin + Space.s4).padding(.top, Space.s1)
                 }
-                RoomComposer(room: thread.room, name: name, client: session.client, composing: composing, prompt: "Tell \(name)…")
+                if running {
+                    SteerComposer(room: thread.room, name: name, client: session.client, composing: composing, enter: choice) { text in
+                        do {
+                            try await session.steer(task: task.id, text)
+                            return true
+                        } catch {
+                            answers.trouble = "It wasn't steered: \(error.localizedDescription)"
+                            return false
+                        }
+                    }
+                } else {
+                    RoomComposer(room: thread.room, name: name, client: session.client, composing: composing, prompt: "Tell \(name)…")
+                }
             }
         }
     }
 
-    /// What its message box says under it: when the agent reads what you tell it.
-    private var hint: String? {
-        switch task.status {
-        case "running": "\(name) answers once this work ends"
-        case "queued": "\(name) answers before starting on it"
-        default: nil
-        }
+    /// What its message box says under it (the web's steerHint): on a Mac, what Return does while it runs (a phone's buttons
+    /// say it themselves); queued, when its agent answers a message.
+    private var hint: String {
+        #if os(iOS)
+        return SteerWords.hint(status: task.status, name: name, enter: choice, coarse: true, mac: true)
+        #else
+        return SteerWords.hint(status: task.status, name: name, enter: choice, coarse: false, mac: true)
+        #endif
     }
 
     /// Who gave it, and how; and when.
@@ -569,38 +606,55 @@ private struct StepRow: View {
     let group: Steps.Group
     @State private var open = false
 
-    private var opens: Bool { !(group.items.isEmpty || (group.items.count == 1 && group.kind != .plan && group.kind != .review && group.kind != .gate)) }
+    private var opens: Bool {
+        // (A steer whose words are one line says them whole in its line; a longer one opens on them.)
+        if group.kind == .steer { return group.items.first?.text.contains("\n") ?? false }
+        return !(group.items.isEmpty || (group.items.count == 1 && group.kind != .plan && group.kind != .review && group.kind != .gate))
+    }
+
+    /// The step's line: its mark, what it folds to, and a chevron where it opens.
+    private var line: some View {
+        HStack(spacing: Space.s2) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 18)
+            Text(group.text)
+                .lineLimit(open ? nil : 1)
+                // Your words to it in ink: what you said, where its run took it.
+                .foregroundStyle(group.kind == .steer && group.by == "owner" ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            if opens {
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary).rotationEffect(.degrees(open ? 90 : 0))
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(minHeight: 28)
+        .contentShape(.rect)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Button {
-                if opens { withAnimation(.snappy) { open.toggle() } }
-            } label: {
-                HStack(spacing: Space.s2) {
-                    Image(systemName: symbol)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(tint)
-                        .frame(width: 18)
-                    Text(group.text).lineLimit(open ? nil : 1)
-                    if opens {
-                        Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary).rotationEffect(.degrees(open ? 90 : 0))
-                    }
-                    Spacer(minLength: 0)
+            if group.kind == .steer && !opens {
+                // (Not a disabled button, which would dim it: a steer of one line is said whole in its line, and yours in ink.)
+                line
+            } else {
+                Button {
+                    if opens { withAnimation(.snappy) { open.toggle() } }
+                } label: {
+                    line
                 }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(minHeight: 28)
-                .contentShape(.rect)
+                .buttonStyle(.plain)
+                .disabled(!opens)
+                .accessibilityValue(opens ? (open ? "Shown" : "Folded") : "")
             }
-            .buttonStyle(.plain)
-            .disabled(!opens)
-            .accessibilityValue(opens ? (open ? "Shown" : "Folded") : "")
             if open {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(group.items.enumerated()), id: \.offset) { _, item in
                         HStack(alignment: .firstTextBaseline, spacing: Space.s1) {
                             Text(item.text)
-                                .font(group.kind == .plan || group.kind == .review ? .caption : .caption.monospaced())
+                                .font(group.kind == .plan || group.kind == .review || group.kind == .steer ? .caption : .caption.monospaced())
                                 .textSelection(.enabled)
                             if let exit = item.exit, exit != 0 { Text("exit \(exit)").font(.caption.monospaced()).foregroundStyle(Color.failed) }
                         }
@@ -626,6 +680,7 @@ private struct StepRow: View {
         case .read: "doc.text"
         case .submitted: "checkmark.shield"
         case .run: "apple.terminal"
+        case .steer: "arrow.up"
         }
     }
 
@@ -635,6 +690,127 @@ private struct StepRow: View {
         case .failed: .failed
         case .warn: .needs
         case .neutral: .secondary
+        }
+    }
+}
+
+/// What is on its way to the work: your words and your agent's that its run hasn't taken yet, above the box (the web's
+/// steersWaiting). Still: it changes only when the node says so.
+private struct OnItsWay: View {
+    let title: String
+    let lines: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.line) {
+            HStack(spacing: Space.s2) {
+                Circle().fill(Color.working).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(title).fontWeight(.semibold)
+            }
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line).lineLimit(2).padding(.leading, 7 + Space.s2)
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Metrics.margin + Space.s1)
+        .padding(.top, Space.s2)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("task.steering")
+    }
+}
+
+/// The box while its task runs: what you write steers the task or is queued for after it (the web's words), each its own
+/// button over the box, the one Return does in ink once there is something to send (⌘-Return the other). A steer is words
+/// alone, of SteerWords.limit characters at most: files, or longer words, go as a message queued for after it.
+private struct SteerComposer: View {
+    @Bindable var room: AgentRoom
+    let name: String
+    let client: NodeClient
+    var composing: FocusState<Bool>.Binding
+    let enter: ComposerWords.Enter
+    /// Your words, steered: true once the node has them.
+    let steer: @MainActor (String) async -> Bool
+    @State private var sending = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var text: String { room.draft.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// Past what a steer holds, counted as the node counts (UTF-16, as JavaScript does).
+    private var long: Bool { text.utf16.count > SteerWords.limit }
+    private var ready: Bool { !text.isEmpty && !sending }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            OutboxLines(outbox: room.outbox)
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s2)) : AnyLayout(HStackLayout(spacing: Space.s2))
+            layout {
+                button(SteerWords.queue, .queue, hint: SteerWords.queueTitle, can: ready && room.sendable)
+                button(SteerWords.steer, .steer, hint: SteerWords.steerTitle, can: ready && !long && room.outbox.carried.isEmpty && !room.outbox.going)
+            }
+            if long {
+                Text("A steer holds \(SteerWords.limit.formatted(.number.locale(Locale(identifier: "en_US")))) characters at most: queue it for after this task instead.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            GlassEffectContainer(spacing: 10) {
+                HStack(alignment: .bottom, spacing: Space.s2) {
+                    AttachButton(outbox: room.outbox, client: client)
+                    TextField("Tell \(name)…", text: $room.draft, axis: .vertical)
+                        .plainField()
+                        .lineLimit(1...6)
+                        .focused(composing)
+                        .sendsOnReturn(modified: { deliver(SteerWords.action(running: true, enter: enter, modifier: $0)) })
+                        .padding(.horizontal, Space.s4)
+                        // One line high, the field is 44 points: Apple's least for a thing to tap.
+                        .padding(.vertical, 11)
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
+                        .accessibilityLabel("Steer \(name)'s task, or queue a message for after it")
+                        .accessibilityIdentifier("task.composer")
+                }
+            }
+        }
+        .padding(.horizontal, Metrics.margin)
+        .padding(.vertical, Space.s2)
+        .readingWidth()
+        .takingFiles(room.outbox, client: client, composing: composing)
+    }
+
+    @ViewBuilder private func button(_ title: String, _ how: ComposerWords.Action, hint: String, can: Bool) -> some View {
+        let chosen = (enter == .steer ? ComposerWords.Action.steer : .queue) == how
+        if chosen && can {
+            Button { deliver(how) } label: {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Prominent.label()).frame(minHeight: 30).padding(.horizontal, Space.s1)
+            }
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.capsule)
+            .accessibilityHint(hint)
+            .accessibilityIdentifier("task.\(how.rawValue)")
+        } else {
+            Button { deliver(how) } label: {
+                Text(title).font(.subheadline.weight(.medium)).frame(minHeight: 30).padding(.horizontal, Space.s1)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .disabled(!can)
+            .accessibilityHint(hint)
+            .accessibilityIdentifier("task.\(how.rawValue)")
+        }
+    }
+
+    /// Steered (the node takes it, and the task says it is on its way), or queued: a message in its conversation, which its
+    /// agent answers once this task is done.
+    private func deliver(_ how: ComposerWords.Action) {
+        let words = text
+        guard !words.isEmpty, !sending else { return }
+        if how == .steer {
+            guard !long, room.outbox.carried.isEmpty, !room.outbox.going else { return }
+            sending = true
+            Task {
+                if await steer(words), room.draft.trimmingCharacters(in: .whitespacesAndNewlines) == words { room.draft = "" }
+                sending = false
+            }
+        } else if room.sendable {
+            Task { await room.send(with: client) }
         }
     }
 }
@@ -769,6 +945,14 @@ private struct ProofSection: View {
                 .font(Typeset.detail)
                 .foregroundStyle(.secondary)
                 .padding(.vertical, Space.s2)
+                // Steered work was judged against its brief and its steers, in order: said beside the verdict.
+                if let judged = SteerWords.judgedLine(Steps.judgedWith(thread.entries), steers: task.steers ?? []) {
+                    Label(judged, systemImage: "arrow.up")
+                        .font(Typeset.detail)
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, Space.s2)
+                        .accessibilityIdentifier("task.judged")
+                }
             }
             Divider()
             HStack(alignment: .firstTextBaseline, spacing: Space.s3) {

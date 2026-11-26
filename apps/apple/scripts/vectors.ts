@@ -40,7 +40,8 @@ import { budgetFrom } from "../../web/src/lib/give.ts";
 import { applyEvent, ASIDE_ANSWERING, ASIDE_FAILED, ASIDE_NOTHING_YET, asideNote, asideOf, asidePlaceholder, BRING_BACK_FAILED, beginTurn, broughtBackWords, busyPlaceholder, composerAction, endTurn, failTurn, FILES_WAIT, JUST_STARTING, keptDiffers, NOT_KEPT, queueHead, shownAgain, steeringLine, turnOf, undeliveredWords } from "../../web/src/lib/turns.ts";
 import { chatStateWords } from "../../../packages/core/src/turns.ts";
 import { atAGlance, attended, byAttention, doingNow, failedGate, inboxBeyond, inProject, NEW_FOR_MS, projectBadge, projectKey, seenOnOpen, shortSpan, spentSince, type Attended } from "../../web/src/lib/work.ts";
-import { commandKind, costWords, factsOfRecord, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, verdictOf, workedFor, workSummary } from "../../web/src/lib/steps.ts";
+import { commandKind, costWords, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "../../web/src/lib/steps.ts";
+import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../../web/src/lib/steer.ts";
 import { MARK_BOX, MARK_POLYGON, MARK_RECTS } from "../../../scripts/mark.ts";
 import { GAP_MS, HELLO_WAIT_MS, RETRY_FIRST_MS, RETRY_MAX_MS, SILENT_MS, STEADY_MS } from "../../web/src/lib/live-link.ts";
 
@@ -1276,6 +1277,68 @@ const steps = {
   ].map(({ budgetUsd, record: r }) => ({ budgetUsd: budgetUsd ?? null, record: r ?? null, words: costWords({ budgetUsd, record: r }, PRICES) })),
 };
 
+// ---- steering an agent's running task (the PWA's lib/steer.ts, and its trail's steps in lib/steps.ts): the task thread's
+// message box while it runs and the line under it, what is on its way to the work, what never reached it, what its proof
+// was judged against, and the steers its trail holds. A section of its own: no other one changes. ------------------------
+const steerOf = (by: core.TeamSteer["by"], text: string, taken?: number): core.TeamSteer => ({ by, text, at: at(20), ...(taken !== undefined ? { taken: { at: at(10), step: taken } } : {}) });
+const steeredTrail = trailOf([
+  [40, "Plan · write the parser\nDone when: its test passes."],
+  [39, "Running · bun test parser"],
+  [38.9, "Exit 1 · 1 fail"],
+  [38, "Steered · You: Use the new schema."],
+  [37, "Running · bun test parser"],
+  [36.9, "Exit 0 · 1 pass"],
+  [36, "Steered · Your agent: Keep the old reader.\nIt still reads the v1 files."],
+  [35, "Submitted for review · Written on the new schema."],
+  [34, "Judged · against its goal and 2 steers, in order"],
+  [33, "Review · pass\nIt reads the new schema."],
+]);
+/** A task as the steer lib reads it: how it stands, and what was said to it. */
+const steerTaskOf = (status: core.TeamWorkStatus, steers: core.TeamSteer[]) => ({ status, steers });
+const steer = {
+  words: STEER_WORDS,
+  limit: core.TEAM_LIMITS.steer,
+  actions: [true, false].flatMap((running) => (["steer", "queue"] as const).flatMap((enter) => [false, true].map((modifier) => ({ running, enter, modifier, action: steerAction({ running, enter, modifier }) })))),
+  hints: (["running", "queued", "done"] as const).flatMap((status) =>
+    (["steer", "queue"] as const).flatMap((enter) => [false, true].flatMap((coarse) => [false, true].map((mac) => ({ status, name: "Ada", enter, coarse, mac, hint: steerHint({ status, name: "Ada", enter, coarse, mac }) })))),
+  ),
+  tasks: [
+    steerTaskOf("running", [steerOf("owner", "Use the new schema.", 3), steerOf("primary", "Keep the old reader."), steerOf("owner", "And name it v2.\nAs the others are.")]),
+    steerTaskOf("running", [steerOf("owner", "Use the new schema.", 1)]),
+    steerTaskOf("running", []),
+    steerTaskOf("stopped", [steerOf("owner", "Use the new schema.", 3), steerOf("owner", "And name it v2.")]),
+    steerTaskOf("failed", [steerOf("primary", "Keep the old reader.")]),
+    steerTaskOf("done", [steerOf("owner", "Use the new schema.", 1)]),
+    steerTaskOf("queued", [steerOf("owner", "Use the new schema.")]),
+  ].map((task) => ({ task, name: "Ada", waiting: steersWaiting(task, "Ada"), never: neverReached(task) })),
+  judged: (
+    [
+      [1, [steerOf("owner", "x", 1)]],
+      [2, [steerOf("owner", "x", 1), steerOf("owner", "y", 2)]],
+      [1, [steerOf("primary", "x", 1)]],
+      [2, [steerOf("primary", "x", 1), steerOf("primary", "y", 2)]],
+      [2, [steerOf("owner", "x", 1), steerOf("primary", "y", 2)]],
+      [1, [steerOf("owner", "x", 1), steerOf("owner", "y", 9)]],
+      [2, [steerOf("owner", "x", 1), steerOf("owner", "y", 2), steerOf("primary", "z", 3)]],
+      [2, [steerOf("owner", "x", 1)]],
+      [1, []],
+      [0, []],
+      [null, [steerOf("owner", "x", 1)]],
+    ] as [number | null, core.TeamSteer[]][]
+  ).map(([judged, steers]) => ({ judged, steers, line: judgedLine(judged, steers) })),
+  trail: steeredTrail,
+  groups: stepGroups(steeredTrail),
+  steers: steersOf(steeredTrail),
+  judgedWith: [
+    { entries: steeredTrail, judged: judgedWith(steeredTrail) },
+    { entries: trailOf([[2, "Steered · You: Use the new schema."], [1, "Review · pass\nIt holds."]]), judged: 0 },
+    { entries: trailOf([[1, "Steered · You: Use the new schema."]]), judged: null },
+  ].map((c) => ({ ...c, judged: judgedWith(c.entries) })),
+  live: ["Steered · You: Use the new schema.", "Steered · Your agent: Keep the old reader.\nIt still reads the v1 files."].map((text) => ({ text, live: liveStep(trailOf([[3, text]])) })),
+  // Whose words a steer was is the runner's to say, "You" or "Your agent": any other line with its mark is a note.
+  strangers: ["Steered · Someone: x", "Steered · you: x", "Judged · against its goal and two steers"].map((text) => ({ text, groups: stepGroups(trailOf([[3, text]])) })),
+};
+
 // ---- the file ----------------------------------------------------------------------------------------------------------
 // ---- the verdict, in words that follow the proof (the PWA's lib/steps.ts verdictOf), from a task's record ------------
 const proofRecord = (ended: "done" | "unverified" | "gave-up" | "stopped", proof?: { before: number[]; after: number[]; review: "pass" | "revise" | null; sameModel: boolean }) => ({ startedAt: 0, endedAt: 1000, ended, commands: 2, revisions: 0, spent: [], ...(proof ? { proof } : {}) });
@@ -1401,6 +1464,7 @@ const vectors = {
   threads,
   chats,
   composer,
+  steer,
   markdown,
   blocks,
   timelines,

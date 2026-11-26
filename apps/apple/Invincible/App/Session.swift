@@ -554,6 +554,14 @@ import Observation
         await reread(["team"])
     }
 
+    /// Your words to a running task (POST /api/team/steer, fleet:admin): its run takes them at its next safe point, and its
+    /// reviewer judges the work against them. Until then they wait with the task, on their way (SteerWords.waiting).
+    func steer(task: String, _ text: String) async throws {
+        struct Steer: Encodable { let task: String; let text: String }
+        _ = try await client.post("/api/team/steer", Steer(task: task, text: text), as: JSONValue.self)
+        await reread(["team"])
+    }
+
     /// Pause, resume or stop a room's work, or an agent's (one of the two).
     func control(room: String? = nil, agent: String? = nil, _ action: String) async throws {
         struct Control: Encodable { let room: String?; let agent: String?; let action: String }

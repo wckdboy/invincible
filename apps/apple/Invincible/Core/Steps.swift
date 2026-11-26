@@ -16,7 +16,7 @@ struct TrailEntry: Codable, Equatable, Sendable {
 }
 
 enum Steps {
-    enum Kind: String, Sendable { case plan, read, edit, run, submitted, gate, review, note }
+    enum Kind: String, Sendable { case plan, read, edit, run, submitted, gate, review, note, steer }
     enum Tone: String, Sendable { case neutral, ok, failed, warn }
 
     /// One line of the work, folded: a step of its own (its plan, a gate, the review, a note), or a run of steps alike.
@@ -34,6 +34,16 @@ enum Steps {
         /// The trail's numbers it spans, and when it began.
         let from: Int
         let to: Int
+        let at: Double
+        /// A steer's: whose words they were, "owner" or "primary" (nil on every other step).
+        var by: String? = nil
+    }
+
+    /// A steer on a task's trail (the PWA's TrailSteer): whose words, what they said, and the line it was taken at.
+    struct TrailSteer: Equatable, Sendable {
+        let by: String
+        let text: String
+        let n: Int
         let at: Double
     }
 
@@ -80,6 +90,10 @@ enum Steps {
         case review(verdict: String, notes: String)
         case thought
         case note(text: String, tone: Tone)
+        /// Your words to it, or your agent's, where its run took them ("Steered · You: …").
+        case steer(by: String, text: String)
+        /// What the review after it judged the work against: its goal and this many steers ("Judged · …").
+        case judged(steers: Int)
     }
 
     private static let noteTone: [String: Tone] = [
@@ -117,6 +131,12 @@ enum Steps {
             return listed.isEmpty ? .gated : .gates(listed)
         }
         if mark == "Review", said == "pass" || said == "revise" { return .review(verdict: said, notes: Markdown.trim(body)) }
+        // (Whose words a steer was is the runner's to say: "You" or "Your agent", and nothing else.)
+        if mark == "Steered" {
+            let by: String? = said.hasPrefix("You: ") ? "owner" : said.hasPrefix("Your agent: ") ? "primary" : nil
+            if let by { return .steer(by: by, text: [String(said.dropFirst(by == "owner" ? 5 : 12)), body].filter { !$0.isEmpty }.joined(separator: "\n")) }
+        }
+        if mark == "Judged", let judged = said.wholeMatch(of: #/against its goal and ([0-9]+) steers?, in order/#), let steers = Int(judged.1) { return .judged(steers: steers) }
         return .note(text: head, tone: noteTone[mark] ?? .neutral)
     }
 
@@ -231,7 +251,7 @@ enum Steps {
         for entry in entries {
             let line = read(entry.text)
             switch line {
-            case .thought, .gates, .gated, .baseline:
+            case .thought, .gates, .gated, .baseline, .judged:
                 continue
             case .exit(let code):
                 if var shut = open, let last = shut.raw.last, last.exit == nil {
@@ -253,8 +273,8 @@ enum Steps {
                 break
             }
             close()
-            func one(_ kind: Kind, _ text: String, _ tone: Tone, _ items: [Group.Item] = []) {
-                groups.append(Group(kind: kind, text: text, items: items, tone: tone, from: entry.n, to: entry.n, at: entry.at))
+            func one(_ kind: Kind, _ text: String, _ tone: Tone, _ items: [Group.Item] = [], by: String? = nil) {
+                groups.append(Group(kind: kind, text: text, items: items, tone: tone, from: entry.n, to: entry.n, at: entry.at, by: by))
             }
             switch line {
             case .plan(let text):
@@ -267,12 +287,34 @@ enum Steps {
                 one(.review, verdict == "pass" ? "The reviewer passed it" : "The reviewer sent it back", verdict == "pass" ? .ok : .warn, notes.isEmpty ? [] : [.init(text: firstLine(notes), exit: nil)])
             case .note(let text, let tone):
                 one(.note, text, tone)
+            case .steer(let by, let text):
+                one(.steer, "\(by == "owner" ? "You" : "Your agent"): \(firstLine(text))", .neutral, [.init(text: text, exit: nil)], by: by)
             default:
                 break
             }
         }
         close()
         return groups
+    }
+
+    /// The steers on a task's trail, in the order its run took them.
+    static func steersOf(_ entries: [TrailEntry]) -> [TrailSteer] {
+        entries.compactMap { entry in
+            if case .steer(let by, let text) = read(entry.text) { return TrailSteer(by: by, text: text, n: entry.n, at: entry.at) }
+            return nil
+        }
+    }
+
+    /// How many steers the latest review judged the work against, as its runner said on the line just before it ("Judged ·
+    /// against its goal and 2 steers, in order"): a run taken up again is told each steer anew, so its trail can hold one
+    /// twice, and only the runner's count is right. No such line: none. Nil: no review yet.
+    static func judgedWith(_ entries: [TrailEntry]) -> Int? {
+        for i in entries.indices.reversed() {
+            guard case .review = read(entries[i].text) else { continue }
+            if i > entries.startIndex, case .judged(let steers) = read(entries[i - 1].text) { return steers }
+            return 0
+        }
+        return nil
     }
 
     /// What the work came to in figures, for its folded line ("Worked for 6m 12s · ran 14 commands · edited 5 files").
@@ -386,6 +428,7 @@ enum Steps {
         case .review(let verdict, _): return (verdict == "pass" ? "Keeping its changes" : "Back to the work", false, last.at)
         case .exit: return ("Reading what it printed", false, last.at)
         case .thought: return ("Thinking", false, last.at)
+        case .steer(let by, _): return (by == "owner" ? "Taking up your words" : "Taking up your agent's words", false, last.at)
         default: return ("Working", false, last.at)
         }
     }

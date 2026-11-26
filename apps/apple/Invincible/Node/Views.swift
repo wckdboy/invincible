@@ -164,6 +164,17 @@ struct TeamTask: Decodable, Sendable {
     /// Its pull request, once you shipped its work from an app.
     struct Shipped: Decodable, Sendable { let url: String; let pr: Int? }
     var shipped: Shipped? = nil
+    /// Your words to it while it ran, and your agent's, in order (core's TeamSteer): each with where its run took them, or
+    /// none while they are on their way (and for good once it ended first).
+    struct Steer: Decodable, Equatable, Sendable {
+        struct Taken: Decodable, Equatable, Sendable { let at: Double; let step: Int }
+        /// owner · primary
+        let by: String
+        let text: String
+        let at: Double
+        var taken: Taken? = nil
+    }
+    var steers: [Steer]? = nil
 }
 
 /// An agent's reply on its way (or how it went).

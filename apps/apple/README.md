@@ -24,7 +24,11 @@ menu or a swipe, and Dynamic Type to the largest accessibility size without clip
 full, with what was noticed below them, counted nowhere. While the primary answers, its chat's message box stays open:
 Steer and Queue beside Stop (Return does the one Settings → Chat chose), what you queued above the box with Send now,
 Edit and Remove, a held queue saying why with Resume, and a side question asked apart from its menu or with `/btw …`
-(`UI/ChatQueue.swift`, the web's words through the vectors' `composer`). An iPad's and a Mac's window are three panes:
+(`UI/ChatQueue.swift`, the web's words through the vectors' `composer`). While an agent's task runs, its thread's box
+steers it: Steer this task and Queue for after it over the box, Return again the one Settings → Chat chose, what you
+said on its way to it above the box until its run takes it, then in its trail as yours where it was taken, what an
+ended task never took, and its proof saying what its review judged against (`Core/Steer.swift`, the vectors' `steer`;
+`TaskSteerTests` taps it against the dev node). An iPad's and a Mac's window are three panes:
 the mark and the INVINCIBLE wordmark at the head of a sidebar of the work by attention (`UI/Places.swift`), the place
 chosen, and a task's details beside it; ⌘K searches or asks. A tap anywhere but a field closes the keyboard
 (`KeyboardCloser`).

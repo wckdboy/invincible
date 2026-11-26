@@ -24718,6 +24718,919 @@
     "asideFailed": "It couldn't answer on the side",
     "bringBackFailed": "Couldn't bring it back"
   },
+  "steer": {
+    "words": {
+      "steer": "Steer this task",
+      "queue": "Queue for after it",
+      "steerTitle": "It takes your words at its next safe point: a command it's running finishes first",
+      "queueTitle": "A message, kept until this task is done: its agent answers then"
+    },
+    "limit": 4000,
+    "actions": [
+      {
+        "running": true,
+        "enter": "steer",
+        "modifier": false,
+        "action": "steer"
+      },
+      {
+        "running": true,
+        "enter": "steer",
+        "modifier": true,
+        "action": "queue"
+      },
+      {
+        "running": true,
+        "enter": "queue",
+        "modifier": false,
+        "action": "queue"
+      },
+      {
+        "running": true,
+        "enter": "queue",
+        "modifier": true,
+        "action": "steer"
+      },
+      {
+        "running": false,
+        "enter": "steer",
+        "modifier": false,
+        "action": "send"
+      },
+      {
+        "running": false,
+        "enter": "steer",
+        "modifier": true,
+        "action": "send"
+      },
+      {
+        "running": false,
+        "enter": "queue",
+        "modifier": false,
+        "action": "send"
+      },
+      {
+        "running": false,
+        "enter": "queue",
+        "modifier": true,
+        "action": "send"
+      }
+    ],
+    "hints": [
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": false,
+        "mac": false,
+        "hint": "Enter steers Ada · Ctrl+Enter queues for after it"
+      },
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": false,
+        "mac": true,
+        "hint": "Enter steers Ada · ⌘+Enter queues for after it"
+      },
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": true,
+        "mac": false,
+        "hint": ""
+      },
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": true,
+        "mac": true,
+        "hint": ""
+      },
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": false,
+        "mac": false,
+        "hint": "Enter queues for after it · Ctrl+Enter steers Ada"
+      },
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": false,
+        "mac": true,
+        "hint": "Enter queues for after it · ⌘+Enter steers Ada"
+      },
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": true,
+        "mac": false,
+        "hint": ""
+      },
+      {
+        "status": "running",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": true,
+        "mac": true,
+        "hint": ""
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": false,
+        "mac": false,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": false,
+        "mac": true,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": true,
+        "mac": false,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": true,
+        "mac": true,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": false,
+        "mac": false,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": false,
+        "mac": true,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": true,
+        "mac": false,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "queued",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": true,
+        "mac": true,
+        "hint": "Ada answers after this task"
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": false,
+        "mac": false,
+        "hint": ""
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": false,
+        "mac": true,
+        "hint": ""
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": true,
+        "mac": false,
+        "hint": ""
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "steer",
+        "coarse": true,
+        "mac": true,
+        "hint": ""
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": false,
+        "mac": false,
+        "hint": ""
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": false,
+        "mac": true,
+        "hint": ""
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": true,
+        "mac": false,
+        "hint": ""
+      },
+      {
+        "status": "done",
+        "name": "Ada",
+        "enter": "queue",
+        "coarse": true,
+        "mac": true,
+        "hint": ""
+      }
+    ],
+    "tasks": [
+      {
+        "task": {
+          "status": "running",
+          "steers": [
+            {
+              "by": "owner",
+              "text": "Use the new schema.",
+              "at": 1763198800000,
+              "taken": {
+                "at": 1763199400000,
+                "step": 3
+              }
+            },
+            {
+              "by": "primary",
+              "text": "Keep the old reader.",
+              "at": 1763198800000
+            },
+            {
+              "by": "owner",
+              "text": "And name it v2.\nAs the others are.",
+              "at": 1763198800000
+            }
+          ]
+        },
+        "name": "Ada",
+        "waiting": {
+          "title": "On its way to Ada, at its next safe point",
+          "lines": [
+            "Your agent: Keep the old reader.",
+            "You: And name it v2."
+          ]
+        },
+        "never": null
+      },
+      {
+        "task": {
+          "status": "running",
+          "steers": [
+            {
+              "by": "owner",
+              "text": "Use the new schema.",
+              "at": 1763198800000,
+              "taken": {
+                "at": 1763199400000,
+                "step": 1
+              }
+            }
+          ]
+        },
+        "name": "Ada",
+        "waiting": null,
+        "never": null
+      },
+      {
+        "task": {
+          "status": "running",
+          "steers": []
+        },
+        "name": "Ada",
+        "waiting": null,
+        "never": null
+      },
+      {
+        "task": {
+          "status": "stopped",
+          "steers": [
+            {
+              "by": "owner",
+              "text": "Use the new schema.",
+              "at": 1763198800000,
+              "taken": {
+                "at": 1763199400000,
+                "step": 3
+              }
+            },
+            {
+              "by": "owner",
+              "text": "And name it v2.",
+              "at": 1763198800000
+            }
+          ]
+        },
+        "name": "Ada",
+        "waiting": null,
+        "never": {
+          "title": "It ended before this reached it",
+          "lines": [
+            "You: And name it v2."
+          ]
+        }
+      },
+      {
+        "task": {
+          "status": "failed",
+          "steers": [
+            {
+              "by": "primary",
+              "text": "Keep the old reader.",
+              "at": 1763198800000
+            }
+          ]
+        },
+        "name": "Ada",
+        "waiting": null,
+        "never": {
+          "title": "It ended before this reached it",
+          "lines": [
+            "Your agent: Keep the old reader."
+          ]
+        }
+      },
+      {
+        "task": {
+          "status": "done",
+          "steers": [
+            {
+              "by": "owner",
+              "text": "Use the new schema.",
+              "at": 1763198800000,
+              "taken": {
+                "at": 1763199400000,
+                "step": 1
+              }
+            }
+          ]
+        },
+        "name": "Ada",
+        "waiting": null,
+        "never": null
+      },
+      {
+        "task": {
+          "status": "queued",
+          "steers": [
+            {
+              "by": "owner",
+              "text": "Use the new schema.",
+              "at": 1763198800000
+            }
+          ]
+        },
+        "name": "Ada",
+        "waiting": null,
+        "never": null
+      }
+    ],
+    "judged": [
+      {
+        "judged": 1,
+        "steers": [
+          {
+            "by": "owner",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          }
+        ],
+        "line": "Judged against its brief and your steer"
+      },
+      {
+        "judged": 2,
+        "steers": [
+          {
+            "by": "owner",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          },
+          {
+            "by": "owner",
+            "text": "y",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 2
+            }
+          }
+        ],
+        "line": "Judged against its brief and your 2 steers, in order"
+      },
+      {
+        "judged": 1,
+        "steers": [
+          {
+            "by": "primary",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          }
+        ],
+        "line": "Judged against its brief and your agent's steer"
+      },
+      {
+        "judged": 2,
+        "steers": [
+          {
+            "by": "primary",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          },
+          {
+            "by": "primary",
+            "text": "y",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 2
+            }
+          }
+        ],
+        "line": "Judged against its brief and your agent's 2 steers, in order"
+      },
+      {
+        "judged": 2,
+        "steers": [
+          {
+            "by": "owner",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          },
+          {
+            "by": "primary",
+            "text": "y",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 2
+            }
+          }
+        ],
+        "line": "Judged against its brief and 2 steers, yours and your agent's, in order"
+      },
+      {
+        "judged": 1,
+        "steers": [
+          {
+            "by": "owner",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          },
+          {
+            "by": "owner",
+            "text": "y",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 9
+            }
+          }
+        ],
+        "line": "Judged against its brief and the first of its 2 steers"
+      },
+      {
+        "judged": 2,
+        "steers": [
+          {
+            "by": "owner",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          },
+          {
+            "by": "owner",
+            "text": "y",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 2
+            }
+          },
+          {
+            "by": "primary",
+            "text": "z",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 3
+            }
+          }
+        ],
+        "line": "Judged against its brief and the first 2 of its 3 steers"
+      },
+      {
+        "judged": 2,
+        "steers": [
+          {
+            "by": "owner",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          }
+        ],
+        "line": "Judged against its brief and 2 steers, in order"
+      },
+      {
+        "judged": 1,
+        "steers": [],
+        "line": "Judged against its brief and a steer"
+      },
+      {
+        "judged": 0,
+        "steers": [],
+        "line": null
+      },
+      {
+        "judged": null,
+        "steers": [
+          {
+            "by": "owner",
+            "text": "x",
+            "at": 1763198800000,
+            "taken": {
+              "at": 1763199400000,
+              "step": 1
+            }
+          }
+        ],
+        "line": null
+      }
+    ],
+    "trail": [
+      {
+        "n": 1,
+        "at": 1763197600000,
+        "text": "Plan · write the parser\nDone when: its test passes."
+      },
+      {
+        "n": 2,
+        "at": 1763197660000,
+        "text": "Running · bun test parser"
+      },
+      {
+        "n": 3,
+        "at": 1763197666000,
+        "text": "Exit 1 · 1 fail"
+      },
+      {
+        "n": 4,
+        "at": 1763197720000,
+        "text": "Steered · You: Use the new schema."
+      },
+      {
+        "n": 5,
+        "at": 1763197780000,
+        "text": "Running · bun test parser"
+      },
+      {
+        "n": 6,
+        "at": 1763197786000,
+        "text": "Exit 0 · 1 pass"
+      },
+      {
+        "n": 7,
+        "at": 1763197840000,
+        "text": "Steered · Your agent: Keep the old reader.\nIt still reads the v1 files."
+      },
+      {
+        "n": 8,
+        "at": 1763197900000,
+        "text": "Submitted for review · Written on the new schema."
+      },
+      {
+        "n": 9,
+        "at": 1763197960000,
+        "text": "Judged · against its goal and 2 steers, in order"
+      },
+      {
+        "n": 10,
+        "at": 1763198020000,
+        "text": "Review · pass\nIt reads the new schema."
+      }
+    ],
+    "groups": [
+      {
+        "kind": "plan",
+        "text": "Planned the work",
+        "items": [
+          {
+            "text": "write the parser",
+            "exit": null
+          },
+          {
+            "text": "Done when: its test passes.",
+            "exit": null
+          }
+        ],
+        "tone": "neutral",
+        "from": 1,
+        "to": 1,
+        "at": 1763197600000
+      },
+      {
+        "kind": "run",
+        "text": "Ran bun test parser · failed",
+        "items": [
+          {
+            "text": "bun test parser",
+            "exit": 1
+          }
+        ],
+        "tone": "warn",
+        "from": 2,
+        "to": 3,
+        "at": 1763197660000
+      },
+      {
+        "kind": "steer",
+        "text": "You: Use the new schema.",
+        "items": [
+          {
+            "text": "Use the new schema.",
+            "exit": null
+          }
+        ],
+        "tone": "neutral",
+        "from": 4,
+        "to": 4,
+        "at": 1763197720000,
+        "by": "owner"
+      },
+      {
+        "kind": "run",
+        "text": "Ran bun test parser",
+        "items": [
+          {
+            "text": "bun test parser",
+            "exit": 0
+          }
+        ],
+        "tone": "neutral",
+        "from": 5,
+        "to": 6,
+        "at": 1763197780000
+      },
+      {
+        "kind": "steer",
+        "text": "Your agent: Keep the old reader.",
+        "items": [
+          {
+            "text": "Keep the old reader.\nIt still reads the v1 files.",
+            "exit": null
+          }
+        ],
+        "tone": "neutral",
+        "from": 7,
+        "to": 7,
+        "at": 1763197840000,
+        "by": "primary"
+      },
+      {
+        "kind": "submitted",
+        "text": "Submitted it for its gates and review",
+        "items": [],
+        "tone": "neutral",
+        "from": 8,
+        "to": 8,
+        "at": 1763197900000
+      },
+      {
+        "kind": "review",
+        "text": "The reviewer passed it",
+        "items": [
+          {
+            "text": "It reads the new schema.",
+            "exit": null
+          }
+        ],
+        "tone": "ok",
+        "from": 10,
+        "to": 10,
+        "at": 1763198020000
+      }
+    ],
+    "steers": [
+      {
+        "by": "owner",
+        "text": "Use the new schema.",
+        "n": 4,
+        "at": 1763197720000
+      },
+      {
+        "by": "primary",
+        "text": "Keep the old reader.\nIt still reads the v1 files.",
+        "n": 7,
+        "at": 1763197840000
+      }
+    ],
+    "judgedWith": [
+      {
+        "entries": [
+          {
+            "n": 1,
+            "at": 1763197600000,
+            "text": "Plan · write the parser\nDone when: its test passes."
+          },
+          {
+            "n": 2,
+            "at": 1763197660000,
+            "text": "Running · bun test parser"
+          },
+          {
+            "n": 3,
+            "at": 1763197666000,
+            "text": "Exit 1 · 1 fail"
+          },
+          {
+            "n": 4,
+            "at": 1763197720000,
+            "text": "Steered · You: Use the new schema."
+          },
+          {
+            "n": 5,
+            "at": 1763197780000,
+            "text": "Running · bun test parser"
+          },
+          {
+            "n": 6,
+            "at": 1763197786000,
+            "text": "Exit 0 · 1 pass"
+          },
+          {
+            "n": 7,
+            "at": 1763197840000,
+            "text": "Steered · Your agent: Keep the old reader.\nIt still reads the v1 files."
+          },
+          {
+            "n": 8,
+            "at": 1763197900000,
+            "text": "Submitted for review · Written on the new schema."
+          },
+          {
+            "n": 9,
+            "at": 1763197960000,
+            "text": "Judged · against its goal and 2 steers, in order"
+          },
+          {
+            "n": 10,
+            "at": 1763198020000,
+            "text": "Review · pass\nIt reads the new schema."
+          }
+        ],
+        "judged": 2
+      },
+      {
+        "entries": [
+          {
+            "n": 1,
+            "at": 1763199880000,
+            "text": "Steered · You: Use the new schema."
+          },
+          {
+            "n": 2,
+            "at": 1763199940000,
+            "text": "Review · pass\nIt holds."
+          }
+        ],
+        "judged": 0
+      },
+      {
+        "entries": [
+          {
+            "n": 1,
+            "at": 1763199940000,
+            "text": "Steered · You: Use the new schema."
+          }
+        ],
+        "judged": null
+      }
+    ],
+    "live": [
+      {
+        "text": "Steered · You: Use the new schema.",
+        "live": {
+          "text": "Taking up your words",
+          "command": false,
+          "since": 1763199820000
+        }
+      },
+      {
+        "text": "Steered · Your agent: Keep the old reader.\nIt still reads the v1 files.",
+        "live": {
+          "text": "Taking up your agent's words",
+          "command": false,
+          "since": 1763199820000
+        }
+      }
+    ],
+    "strangers": [
+      {
+        "text": "Steered · Someone: x",
+        "groups": [
+          {
+            "kind": "note",
+            "text": "Steered · Someone: x",
+            "items": [],
+            "tone": "neutral",
+            "from": 1,
+            "to": 1,
+            "at": 1763199820000
+          }
+        ]
+      },
+      {
+        "text": "Steered · you: x",
+        "groups": [
+          {
+            "kind": "note",
+            "text": "Steered · you: x",
+            "items": [],
+            "tone": "neutral",
+            "from": 1,
+            "to": 1,
+            "at": 1763199820000
+          }
+        ]
+      },
+      {
+        "text": "Judged · against its goal and two steers",
+        "groups": [
+          {
+            "kind": "note",
+            "text": "Judged · against its goal and two steers",
+            "items": [],
+            "tone": "neutral",
+            "from": 1,
+            "to": 1,
+            "at": 1763199820000
+          }
+        ]
+      }
+    ]
+  },
   "markdown": [
     {
       "source": "## What I found\n\nThree things stand out, and **one needs you**:\n\n1. The *release* is on track.\n2. CI on `main` is green: https://github.com/wckdboy/invincible/actions.\n3. ~~Friday~~ Monday is the new date.\n   - It moved for the review.\n\n> The gate held: nothing ships unreviewed.",
