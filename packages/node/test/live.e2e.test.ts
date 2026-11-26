@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLIENT_DEFAULT_SCOPES, clientIdFromKey, LIVE_TOPICS, type LiveEvent, type LiveTopic, newNodeIdentity, type RouteName, routes, type Scope, signRequest, utf8 } from "@invincible/core";
+import { CLIENT_DEFAULT_SCOPES, clientIdFromKey, LIVE_BEAT_MS, LIVE_TOPICS, type LiveEvent, type LiveTopic, newNodeIdentity, type RouteName, routes, type Scope, signRequest, utf8 } from "@invincible/core";
 import { requestPairing, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
@@ -59,6 +59,7 @@ interface Heard {
 interface Listening {
   status: number;
   heard: Heard[];
+  beats: number[];
   /** The first event from now on (or already heard after `since`) that matches, within `ms`. */
   next(match: (event: LiveEvent) => boolean, since?: number, ms?: number): Promise<Heard>;
   ended: Promise<void>;
@@ -93,6 +94,8 @@ async function listenWith(headers: Record<string, string>): Promise<Listening> {
   const controller = new AbortController();
   const response = await fetch(`http://127.0.0.1:${port}${routes.live.path}`, { headers, signal: controller.signal });
   const heard: Heard[] = [];
+  /** When each of its beats came (a comment: nothing to tell, but alive). */
+  const beats: number[] = [];
   const waiting = new Set<() => void>();
   let done!: () => void;
   const ended = new Promise<void>((resolve) => (done = resolve));
@@ -107,6 +110,7 @@ async function listenWith(headers: Record<string, string>): Promise<Listening> {
           while ((cut = buffer.indexOf("\n\n")) >= 0) {
             const block = buffer.slice(0, cut);
             buffer = buffer.slice(cut + 2);
+            if (block.startsWith(":")) beats.push(performance.now());
             for (const line of block.split("\n")) if (line.startsWith("data:")) heard.push({ at: performance.now(), event: JSON.parse(line.slice(5)) as LiveEvent });
             for (const wake of [...waiting]) wake();
           }
@@ -126,6 +130,7 @@ async function listenWith(headers: Record<string, string>): Promise<Listening> {
   return {
     status: response.status,
     heard,
+    beats,
     ended,
     close: () => controller.abort(),
     next: (match, since = performance.now(), ms = 5_000) =>
@@ -294,6 +299,18 @@ describe("your devices' live stream", () => {
     expect((await streams[0]!.next((e) => e.type === "bye", 0)).event).toEqual({ type: "bye", reason: "replaced" });
     expect(streams.slice(1).every((s) => !s.heard.some((h) => h.event.type === "bye"))).toBe(true);
     for (const s of streams) s.close();
+  });
+
+  test("its hello says how often it beats, and it beats that often, so a phone tells a dead link within seconds", async () => {
+    const phone = await pair("phone-beat", CLIENT_DEFAULT_SCOPES);
+    const live = await phone.listen();
+    const hello = (await live.next((e) => e.type === "hello", 0)).event;
+    expect(hello.type === "hello" && hello.beat).toBe(LIVE_BEAT_MS);
+    // Three silent beats and a stream is gone: within five seconds.
+    expect(3 * LIVE_BEAT_MS).toBeLessThanOrEqual(5_000);
+    await Bun.sleep(2 * LIVE_BEAT_MS + 400);
+    expect(live.beats.length).toBeGreaterThanOrEqual(2);
+    live.close();
   });
 
   test("the node stopping ends every stream with a word, so a device opens it again when it is back", async () => {

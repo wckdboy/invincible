@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { LiveEvent, LiveTopic } from "@invincible/core/live";
+import { LIVE_BEAT_MS, type LiveEvent, type LiveTopic } from "@invincible/core/live";
 import { type FirstRead, Followers, GAP_MS, HELLO_WAIT_MS, type LinkHandlers, liveLink, RETRY_FIRST_MS, RETRY_MAX_MS, SILENT_MS, STEADY_MS } from "./live-link.ts";
 
 /*
@@ -121,7 +121,11 @@ describe("the stream, kept open", () => {
     const { c, s, told, l } = link();
     l.start();
     s.last().push(hello("fleet"));
-    await c.advance(STEADY_MS);
+    // Open a while, beating as a node does (three silent beats and it would be gone).
+    for (let at = 0; at < STEADY_MS; at += LIVE_BEAT_MS) {
+      await c.advance(LIVE_BEAT_MS);
+      s.last().beat();
+    }
     s.last().push({ type: "bye", reason: "stopping" });
     // (At once: on the next tick.)
     await c.advance(0);

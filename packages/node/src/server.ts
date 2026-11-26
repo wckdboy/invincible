@@ -1606,7 +1606,7 @@ export function createApp(ctx: AppContext) {
           }
         };
         // Long thinking produces no text for a while; comments keep proxies and idle timers awake.
-        heartbeat = setInterval(() => write(": keep-alive\n\n"), 15_000);
+        heartbeat = setInterval(() => write(": keep-alive\n\n"), LIVE_BEAT_MS);
         req.signal.addEventListener("abort", close);
         const unsubscribe = ctx.turns.subscribe(turn, (event) => (event ? write(`data: ${JSON.stringify(event)}\n\n`) : close()), { starting });
         if (open) leave = unsubscribe;
@@ -1676,7 +1676,7 @@ export function createApp(ctx: AppContext) {
     });
     if (open) leave = unwatch;
     else unwatch();
-    heartbeat = setInterval(() => write(": keep-alive\n\n"), 15_000);
+    heartbeat = setInterval(() => write(": keep-alive\n\n"), LIVE_BEAT_MS);
     req.signal.addEventListener("abort", close);
     return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", ...SECURITY_HEADERS } });
   }
@@ -1798,7 +1798,7 @@ export function createApp(ctx: AppContext) {
     );
     if (mine.size >= LIVE_PER_DEVICE) [...mine][0]!("replaced");
     mine.add(end);
-    send({ type: "hello", topics: [...topics] });
+    send({ type: "hello", topics: [...topics], beat: LIVE_BEAT_MS });
     // (Nothing can change between the hello and this: no write runs until this returns.)
     const unsubscribe = liveChanges.subscribe((changed) => {
       if (changed.includes("fleet")) {
@@ -3032,7 +3032,7 @@ export function createApp(ctx: AppContext) {
           };
           const send = (event: ChatStreamEvent) => write(`data: ${JSON.stringify(event)}\n\n`);
           // Long thinking produces no text for a while; comments keep proxies and idle timers awake.
-          const heartbeat = setInterval(() => write(": keep-alive\n\n"), 15_000);
+          const heartbeat = setInterval(() => write(": keep-alive\n\n"), LIVE_BEAT_MS);
           req.signal.addEventListener("abort", () => clearInterval(heartbeat));
           const answer: AnswerRecord = { content: "", model: null, steps: [], error: null };
           let answerId: number | null = null;
