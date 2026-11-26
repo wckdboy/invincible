@@ -51,7 +51,7 @@ describe.if(enabled)("sandbox host on real Docker", () => {
   test("gateway mode has no internet; online mode does", async () => {
     const gw = await host.create({ ...base, network: "gateway", run: "it-2", providers: ["deepseek"] });
     const env = (await host.exec(gw.id, ["sh", "-c", "echo $OPENAI_BASE_URL; echo ${OPENAI_API_KEY%%_*}"])).stdout.split("\n");
-    expect(env[0]).toBe("http://172.31.250.1:7402/gw/deepseek");
+    expect(env[0]).toBe("http://172.31.248.1:7402/gw/deepseek");
     expect(env[1]).toBe("gw"); // a scoped gateway token, never a provider key
     expect((await host.exec(gw.id, ["sh", "-c", "curl -s -m 4 https://example.com >/dev/null"])).exitCode).not.toBe(0);
     const online = await host.create({ ...base, network: "online", run: "it-2" });
@@ -170,8 +170,8 @@ describe.if(microVMs)("KVM microVMs on real Docker", () => {
     const sb = await host.create({ ...base, network: "online", run: "it-vm" });
     expect(sb.isolation).toBe("vm");
     expect(await sh(sb.id, "curl -s -m 10 -o /dev/null -w '%{http_code}' https://example.com")).toBe("200");
-    expect(await sh(sb.id, "curl -s -m 4 -o /dev/null -w '%{http_code}' http://172.31.250.1:7402/ || true")).not.toBe("000");
-    expect((await host.exec(sb.id, ["sh", "-c", "curl -s -m 3 http://172.31.249.1:7400/ >/dev/null"])).exitCode).not.toBe(0);
+    expect(await sh(sb.id, "curl -s -m 4 -o /dev/null -w '%{http_code}' http://172.31.248.1:7402/ || true")).not.toBe("000");
+    expect((await host.exec(sb.id, ["sh", "-c", "curl -s -m 3 http://172.31.247.1:7400/ >/dev/null"])).exitCode).not.toBe(0);
     await host.destroy(sb.id, { run: "it-vm" });
   }, 180_000);
 

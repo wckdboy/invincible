@@ -252,7 +252,7 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
 
 ## Web search (tested)
 
-- **Loopback only.** SearXNG listens on `127.0.0.1:8888` of the sandbox host, with every capability dropped but the three its entrypoint needs and `no-new-privileges`; it's reached through the node, never directly from a sandbox.
+- **Loopback only.** SearXNG listens on `127.0.0.1:8889` of the sandbox host, with every capability dropped but the three its entrypoint needs and `no-new-privileges`; it's reached through the node, never directly from a sandbox.
 - **Scoped.** A sandbox searches through its gateway only with a token that carries the `search` scope; a model token or a git token is refused (`packages/node/test/search.test.ts`). Only the request's own search flag puts that scope on a sandbox's token: asking for `search`, `git:…` or the retired `world` among its providers is refused, and so is a provider the fleet doesn't have (`packages/node/test/mcp.test.ts`, `packages/sandbox/test/spec.test.ts`). Every search is ledgered.
 - **Residual risk:** search results and the pages behind them are written by strangers and can carry prompt injection; runs treat them as data, and anything outward still asks you.
 

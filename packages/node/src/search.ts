@@ -9,7 +9,7 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
  * without the internet. Results are what strangers wrote: data, never instructions.
  */
 
-export const SEARXNG = "http://127.0.0.1:8888";
+export const SEARXNG = "http://127.0.0.1:8889";
 export const SEARCH_SCOPE = "search";
 
 export interface SearchQuery {

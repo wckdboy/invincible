@@ -68,7 +68,7 @@ describe("a repository checked out in an eval's sandbox", () => {
     const write = f.commands.find((args) => args[0] === "exec" && args.at(-1) !== BASE)!;
     expect(write.slice(0, 5)).toEqual(["exec", "--interactive", "--workdir", "/work", containerName(ID)]);
     const env = JSON.parse(Buffer.from(write.at(-1)!, "base64").toString());
-    expect(env).toEqual({ INVINCIBLE_GATEWAY: "http://172.31.250.1:7402/gw", INVINCIBLE_TOKEN: lease(1), INVINCIBLE_REPO_URL: "http://172.31.250.1:7402/git/github/example/widgets.git" });
+    expect(env).toEqual({ INVINCIBLE_GATEWAY: "http://172.31.248.1:7402/gw", INVINCIBLE_TOKEN: lease(1), INVINCIBLE_REPO_URL: "http://172.31.248.1:7402/git/github/example/widgets.git" });
     // The fetch names the place and the commit, and reads the lease itself: the token is in no command of it.
     const fetch = f.commands.find((args) => args[0] === "exec" && args.at(-1) === BASE)!;
     expect(fetch.slice(-2)).toEqual([ROOT, BASE]);

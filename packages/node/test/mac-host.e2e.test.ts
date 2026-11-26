@@ -76,7 +76,7 @@ afterAll(async () => {
 
 describe("a node on a Mac with Apple's container", () => {
   test("waits for the gateway's address, which comes with the networks' VMs, and doesn't call that trouble", () => {
-    // (No machine running this has 172.31.250.1: here the address never comes, and the wait is all it says in a minute.)
+    // (No machine running this has 172.31.248.1: here the address never comes, and the wait is all it says in a minute.)
     expect(logged).toContain("sandbox gateway: waiting for its address on this Mac, which comes with the networks' VMs (tried every 5 s)");
     expect(logged.filter((line) => line.includes("gateway listener unavailable"))).toEqual([]);
   });

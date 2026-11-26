@@ -33,7 +33,7 @@ describe("searching", () => {
   test("SearXNG's JSON, trimmed: web pages only, titles and snippets clipped, its suggestions", async () => {
     const s = searxng(RESULTS);
     const found = await searchWeb({ q: "finite element method", timeRange: "year", page: 2 }, s.fetch);
-    expect(s.asked[0]).toBe("http://127.0.0.1:8888/search?q=finite+element+method&format=json&time_range=year&pageno=2");
+    expect(s.asked[0]).toBe("http://127.0.0.1:8889/search?q=finite+element+method&format=json&time_range=year&pageno=2");
     expect(found.results.map((r) => r.url)).toEqual(["https://en.wikipedia.org/wiki/Finite_element_method", "https://example.com/long"]);
     expect(found.results[1]!.title.length).toBeLessThanOrEqual(301);
     expect(found.results[1]!.snippet.length).toBeLessThanOrEqual(601);
@@ -57,7 +57,7 @@ describe("searching from a sandbox", () => {
     const ledger: LedgerEntryInput[] = [];
     const s = searxng(RESULTS);
     const call = (query: string, token: string) =>
-      handleSandboxSearch(new Request(`http://172.31.250.1:7402/search${query}`, { headers: { authorization: `Bearer ${token}` } }), { tokens, ledger: (e) => ledger.push(e), fetch: s.fetch });
+      handleSandboxSearch(new Request(`http://172.31.248.1:7402/search${query}`, { headers: { authorization: `Bearer ${token}` } }), { tokens, ledger: (e) => ledger.push(e), fetch: s.fetch });
     return { tokens, ledger, call, s };
   };
 
@@ -83,8 +83,8 @@ describe("searching from a sandbox", () => {
 
   test("a sandbox with search gets its address; search is never mistaken for a model provider", () => {
     const env = gatewayEnv("gw_test", ["search", "orcarouter"]);
-    expect(env.INVINCIBLE_SEARCH).toBe("http://172.31.250.1:7402/search");
-    expect(env.OPENAI_BASE_URL).toBe("http://172.31.250.1:7402/gw/orcarouter");
+    expect(env.INVINCIBLE_SEARCH).toBe("http://172.31.248.1:7402/search");
+    expect(env.OPENAI_BASE_URL).toBe("http://172.31.248.1:7402/gw/orcarouter");
     const searchOnly = gatewayEnv("gw_test", ["search"]);
     expect(searchOnly.OPENAI_BASE_URL).toBeUndefined();
     expect(searchOnly.INVINCIBLE_TOKEN).toBe("gw_test");

@@ -284,13 +284,13 @@ UNIT
     fi
     if [[ $(docker inspect -f '{{.Config.Image}}' invincible-searxng 2>/dev/null) != "$SEARX_IMAGE" ]]; then
       docker rm -f invincible-searxng >/dev/null 2>&1 || true
-      docker run -d --name invincible-searxng --restart unless-stopped -p 127.0.0.1:8888:8080 \
+      docker run -d --name invincible-searxng --restart unless-stopped -p 127.0.0.1:8889:8080 \
         -v /etc/invincible/searxng:/etc/searxng --label dev.invincible.service=search \
         --cap-drop ALL --cap-add CHOWN --cap-add SETGID --cap-add SETUID --cap-add DAC_OVERRIDE \
         --security-opt no-new-privileges "$SEARX_IMAGE" >/dev/null || echo "web search couldn't start; Invincible works without it" >&2
     fi
     for _ in $(seq 1 30); do
-      [[ $(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:8888/search?q=invincible&format=json') == 200 ]] && { echo "→ web search ready (SearXNG on 127.0.0.1:8888)"; break; }
+      [[ $(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:8889/search?q=invincible&format=json') == 200 ]] && { echo "→ web search ready (SearXNG on 127.0.0.1:8889)"; break; }
       sleep 2
     done
   fi

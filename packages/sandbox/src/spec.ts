@@ -23,8 +23,8 @@ export const SANDBOX_GATEWAY_PORT = 7402;
  * Inter-container traffic is disabled on both, so sandboxes cannot reach each other.
  */
 export const NETWORKS = {
-  gateway: { name: "invincible-gw", bridge: "inv0", subnet: "172.31.250.0/24", gateway: "172.31.250.1", internal: true },
-  online: { name: "invincible-net", bridge: "inv1", subnet: "172.31.249.0/24", gateway: "172.31.249.1", internal: false },
+  gateway: { name: "invincible-gw", bridge: "inv0", subnet: "172.31.248.0/24", gateway: "172.31.248.1", internal: true },
+  online: { name: "invincible-net", bridge: "inv1", subnet: "172.31.247.0/24", gateway: "172.31.247.1", internal: false },
 } as const;
 
 export interface SandboxSpec {

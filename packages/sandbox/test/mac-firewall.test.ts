@@ -15,12 +15,12 @@ bridge0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
 		ipfilter disabled flags 0x0
 	member: en2 flags=3<LEARNING,DISCOVER>
 bridge100: flags=8a63<UP,BROADCAST,SMART,RUNNING,ALLMULTI,SIMPLEX,MULTICAST> mtu 1500
-	inet 172.31.249.1 netmask 0xffffff00 broadcast 172.31.249.255
+	inet 172.31.247.1 netmask 0xffffff00 broadcast 172.31.247.255
 	Configuration:
 		ipfilter disabled flags 0x2
 	member: vmenet0 flags=20003<LEARNING,DISCOVER,VIRTIO>
 bridge101: flags=8a63<UP,BROADCAST,SMART,RUNNING,ALLMULTI,SIMPLEX,MULTICAST> mtu 1500
-	inet 172.31.250.1 netmask 0xffffff00 broadcast 172.31.250.255
+	inet 172.31.248.1 netmask 0xffffff00 broadcast 172.31.248.255
 	Configuration:
 		ipfilter disabled flags 0x2
 	member: vmenet1 flags=20003<LEARNING,DISCOVER,VIRTIO>
@@ -89,8 +89,8 @@ describe("what ifconfig prints, read", () => {
       { name: "lo0", inet: ["127.0.0.1"], filter: null },
       { name: "en0", inet: ["192.168.1.20"], filter: null },
       { name: "bridge0", inet: [], filter: 0 },
-      { name: "bridge100", inet: ["172.31.249.1"], filter: 2 },
-      { name: "bridge101", inet: ["172.31.250.1"], filter: 2 },
+      { name: "bridge100", inet: ["172.31.247.1"], filter: 2 },
+      { name: "bridge101", inet: ["172.31.248.1"], filter: 2 },
     ]);
   });
 });
@@ -122,14 +122,14 @@ describe("whether it is on", () => {
   });
 
   test("a bridge without its filter yet, or no bridge yet, is off until the helper's next run: soon", async () => {
-    const unfiltered = IFCONFIG.replace("inet 172.31.250.1 netmask 0xffffff00 broadcast 172.31.250.255\n\tConfiguration:\n\t\tipfilter disabled flags 0x2", "inet 172.31.250.1 netmask 0xffffff00 broadcast 172.31.250.255\n\tConfiguration:\n\t\tipfilter disabled flags 0x0");
+    const unfiltered = IFCONFIG.replace("inet 172.31.248.1 netmask 0xffffff00 broadcast 172.31.248.255\n\tConfiguration:\n\t\tipfilter disabled flags 0x2", "inet 172.31.248.1 netmask 0xffffff00 broadcast 172.31.248.255\n\tConfiguration:\n\t\tipfilter disabled flags 0x0");
     expect(await macFirewall(deps({ ifconfig: async () => unfiltered }))).toEqual({ on: false, installed: true, soon: true, why: "pf doesn't see what passes between the VMs on bridge101 (invincible-gw) yet" });
-    const noOnline = IFCONFIG.replace("inet 172.31.249.1 ", "inet 172.31.248.1 ");
+    const noOnline = IFCONFIG.replace("inet 172.31.247.1 ", "inet 172.31.246.1 ");
     expect(await macFirewall(deps({ ifconfig: async () => noOnline }))).toEqual({ on: false, installed: true, soon: true, why: "the invincible-net network has no bridge on this Mac yet" });
   });
 
   test("a gateway's address on anything but a bridge is off, and not soon", async () => {
-    const elsewhere = IFCONFIG.replace("inet 192.168.1.20 ", "inet 172.31.250.1 ");
-    expect(await macFirewall(deps({ ifconfig: async () => elsewhere }))).toMatchObject({ on: false, soon: false, why: "172.31.250.1 is on en0, which isn't a bridge" });
+    const elsewhere = IFCONFIG.replace("inet 192.168.1.20 ", "inet 172.31.248.1 ");
+    expect(await macFirewall(deps({ ifconfig: async () => elsewhere }))).toMatchObject({ on: false, soon: false, why: "172.31.248.1 is on en0, which isn't a bridge" });
   });
 });

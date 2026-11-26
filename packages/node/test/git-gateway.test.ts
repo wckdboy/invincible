@@ -33,7 +33,7 @@ function setup() {
     return new Response("PACK…", { headers: { "content-type": "application/x-git-upload-pack-result" } });
   }) as typeof globalThis.fetch;
   const call = (path: string, init: RequestInit & { token?: string } = {}) =>
-    handleGitGateway(new Request(`http://172.31.250.1:7402${path}`, { ...init, headers: { authorization: `Bearer ${init.token ?? token}`, ...(init.headers ?? {}) } }), { store, vault, tokens, ledger: (e) => ledger.push(e), fetch });
+    handleGitGateway(new Request(`http://172.31.248.1:7402${path}`, { ...init, headers: { authorization: `Bearer ${init.token ?? token}`, ...(init.headers ?? {}) } }), { store, vault, tokens, ledger: (e) => ledger.push(e), fetch });
   return { call, seen, ledger, tokens };
 }
 

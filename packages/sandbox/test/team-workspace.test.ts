@@ -129,9 +129,9 @@ describe("persistent agent workspaces", () => {
     const payload = f.commands.find((args) => args[0] === "exec")!.at(-1)!;
     const env = JSON.parse(Buffer.from(payload, "base64").toString());
     expect(env.OPENAI_API_KEY).toBe(lease(1));
-    expect(env.OPENAI_BASE_URL).toBe("http://172.31.250.1:7402/gw/openai");
+    expect(env.OPENAI_BASE_URL).toBe("http://172.31.248.1:7402/gw/openai");
     expect(env.INVINCIBLE_TOKEN).toBe(lease(1));
-    expect(env.INVINCIBLE_REPO_URL).toBe("http://172.31.250.1:7402/git/github/example/project.git");
+    expect(env.INVINCIBLE_REPO_URL).toBe("http://172.31.248.1:7402/git/github/example/project.git");
     const visible = JSON.stringify({ resumed, ledger: f.ledger });
     expect(visible).not.toContain(lease(1));
     expect(visible).not.toContain("test-only-hash-1");

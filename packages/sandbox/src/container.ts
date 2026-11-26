@@ -141,11 +141,11 @@ export const DOCKER_ON_A_MAC: Readonly<Record<string, { container: string | null
     holds: "same",
     why: "Host-only, with no way out (the reference: \"Restrict to host-only network\"). What invincible-firewall adds on Ultra, one port of the host and nothing else, is the Mac's firewall (mac-firewall.ts): pf, from a root helper, and no sandbox is made here while it isn't on.",
   },
-  "--subnet": { container: "--subnet", holds: "same", why: "Docker's subnets, 172.31.250.0/24 and 172.31.249.0/24, so the gateway's address and the lease's URL are the same." },
+  "--subnet": { container: "--subnet", holds: "same", why: "Docker's subnets, 172.31.248.0/24 and 172.31.247.0/24, so the gateway's address and the lease's URL are the same." },
   "--gateway": {
     container: null,
     holds: "replaced",
-    why: "No flag: vmnet gives the host the subnet's first address, which is Docker's: 172.31.250.1 and 172.31.249.1 (seen on the Mac mini, 17 November 2026).",
+    why: "No flag: vmnet gives the host the subnet's first address, which is Docker's: 172.31.248.1 and 172.31.247.1 (seen on the Mac mini, 17 November 2026).",
   },
   "-o": {
     container: "the Mac's firewall",
