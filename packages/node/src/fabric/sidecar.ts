@@ -284,7 +284,8 @@ export class Sidecar {
   private exited(proc: SidecarProcess, how: number | string | null): void {
     if (this.proc !== proc) return;
     this.proc = null;
-    if (this.stopping) return;
+    // One that ends while it is starting is that start's failure, said once, by the start itself.
+    if (this.stopping || this.state === "starting") return;
     const client = this.client;
     this.client = null;
     client?.close();
