@@ -133,6 +133,48 @@ export const SeatSignInCancelInput = z.strictObject({ id: SeatId, attempt: SeatA
 /** A seat's own setting: how many runs at once it takes, at most (D4; never above SHARED_RUNS_PROVEN for a subscription). */
 export const SeatPolicyInput = z.strictObject({ id: SeatId, runs: SeatRuns });
 
+/* ---------- signing a seat in (never in the log: a card lives on the node, for the length of its sign-in) ---------- */
+
+/**
+ * What a sign-in asks of you, on your device: Codex's device code (open its page, sign in there and enter the code it
+ * shows here), or Claude Code's (open its page, sign in there, and paste back the code it shows you, which goes to that
+ * sign-in's own process and nowhere else: D7). `until`: when it lapses. `firstTime`: the first ChatGPT seat's card says
+ * once to turn on device code sign-in in ChatGPT's security settings. Answered by startSeatSignIn, never kept or logged.
+ */
+export interface SeatSignInCard {
+  attempt: string;
+  seat: string;
+  kind: "device-code" | "paste-code";
+  url: string;
+  /** The code to enter on the vendor's page (device-code alone). */
+  code?: string;
+  until: number;
+  firstTime?: boolean;
+}
+
+/**
+ * Where each vendor's own sign-in is: a sign-in's card shows only an address there, over https, so a VM can never put
+ * another site in front of you as its vendor's page. (Codex's device page is OpenAI's own; Claude Code's sign-in is on
+ * claude.ai, or Anthropic's console for a key.)
+ */
+export const SIGN_IN_HOSTS: Readonly<Record<"claude-subscription" | "chatgpt-codex", readonly string[]>> = {
+  "claude-subscription": ["claude.ai", "claude.com", "platform.claude.com", "console.anthropic.com"],
+  "chatgpt-codex": ["auth.openai.com", "chatgpt.com"],
+};
+
+/** Whether an address a seat's tool showed is its vendor's sign-in page: https, on one of its hosts, nothing else in it. */
+export function signInUrlOk(kind: SeatKind, url: string): boolean {
+  if (kind !== "claude-subscription" && kind !== "chatgpt-codex") return false;
+  if (url.length > 4_096 || /[\s<>"'`]/.test(url)) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && !parsed.username && !parsed.password && !parsed.port && SIGN_IN_HOSTS[kind].includes(parsed.hostname);
+}
+
 /* ---------- in the log (the bodies, with a node's own device id where one is named: events.ts) ---------- */
 
 /** How a sign-in ended: ready, or why not. */

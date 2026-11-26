@@ -9,7 +9,7 @@ import { MAX_ORDER_DAYS, OrderId, OrderPattern } from "./orders.ts";
 import { QampGrantInput, QampRevokeInput } from "./qamp.ts";
 import { HandId, HandTaskInput } from "./fabric.ts";
 import { RuleInput, RuleName, RuleToldInput, RuleTrippedInput } from "./rules.ts";
-import { SeatAddInput, SeatIdInput, SeatPolicyInput } from "./seats.ts";
+import { SeatAddInput, SeatIdInput, SeatPolicyInput, SeatSignInAnswerInput, SeatSignInCancelInput } from "./seats.ts";
 import { type Scope, Scope as ScopeSchema } from "./scopes.ts";
 import { EvalRecord, EvalRunId, type EvalRunSettings } from "./evals.ts";
 import { HarnessOptions, EvalPins, VariantName } from "./evals.ts";
@@ -1362,6 +1362,14 @@ export const routes = {
   removeSeat: { method: "POST", path: "/api/seats/remove", scope: "fleet:admin", input: SeatIdInput },
   /** How many runs at once a seat takes, at most (never more than has been shown safe). Answers `{ seat }`. */
   setSeatPolicy: { method: "POST", path: "/api/seats/policy", scope: "fleet:admin", input: SeatPolicyInput },
+  /**
+   * Sign a seat in: its vendor's tool starts its own sign-in in a VM made for the seat, and answers with what it asks of
+   * you (`{ card }`: its page, and its code or a field for yours). Asked again while one is open, the same card.
+   */
+  startSeatSignIn: { method: "POST", path: "/api/seats/sign-in", scope: "fleet:admin", input: SeatIdInput },
+  /** The code its vendor's page showed you: to that sign-in's own process, once, and nowhere else. */
+  answerSeatSignIn: { method: "POST", path: "/api/seats/sign-in/answer", scope: "fleet:admin", input: SeatSignInAnswerInput },
+  cancelSeatSignIn: { method: "POST", path: "/api/seats/sign-in/cancel", scope: "fleet:admin", input: SeatSignInCancelInput },
   arms: { method: "GET", path: "/api/arms", scope: "fleet:admin", input: null },
   mintArm: {
     method: "POST",

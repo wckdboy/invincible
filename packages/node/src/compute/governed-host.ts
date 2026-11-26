@@ -59,6 +59,14 @@ export class GovernedSandboxHost extends SandboxHost {
     }
   }
 
+  /** A process in a VM that runs while it's wanted (a seat's sign-in): its threads count while it runs, as a command's do. */
+  override async stream(id: string, cmd: string[], timeoutSec: number): ReturnType<SandboxHost["stream"]> {
+    const running = await super.stream(id, cmd, timeoutSec);
+    const ended = this.governed.governor.work(id);
+    void running.exited.finally(ended);
+    return running;
+  }
+
   /** A command in an agent's VM: its threads count against the ceiling while it runs, and a while after (the governor's `work`). */
   override async exec(id: string, cmd: string[], timeoutSec?: number): Promise<ExecResult> {
     const ended = this.governed.governor.work(id);

@@ -139,6 +139,23 @@ describe("seats", () => {
     expect((await admin("removeSeat", { id: seat.id })).status).toBe(200);
   });
 
+  test("a sign-in is yours alone, its code never shaped like a token, and on a node without Docker it says it can't make the seat's VM", async () => {
+    const seat = (await admin<{ seat: SeatView }>("addSeat", { kind: "claude-subscription", label: "Work Max" })).body.seat;
+    const attempt = `sa_${"a".repeat(22)}`;
+    expect((await arm("startSeatSignIn", { id: seat.id })).status).toBe(403);
+    expect((await arm("answerSeatSignIn", { id: seat.id, attempt, code: "FAKEcode0000#FAKE-state-0000" })).status).toBe(403);
+    const reader = await pair("watch", ["mind:read"]);
+    expect((await reader.call("startSeatSignIn", { id: seat.id })).status).toBe(403);
+    // (This test's node has no Docker: a seat's VM is made on a Linux host with it.)
+    const started = await admin<{ error: string }>("startSeatSignIn", { id: seat.id });
+    expect(started.status).toBe(424);
+    expect(started.body.error).toContain("can't make a seat's VM");
+    for (const code of [FAKE_SETUP_TOKEN, FAKE_SIGNED, "two words"]) expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code })).status).toBe(400);
+    expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code: "FAKEcode0000#FAKE-state-0000" })).status).toBe(404);
+    expect((await admin("cancelSeatSignIn", { id: seat.id, attempt })).status).toBe(404);
+    expect((await admin("removeSeat", { id: seat.id })).status).toBe(200);
+  });
+
   test(`at most ${MAX_SEATS}`, async () => {
     const ids: string[] = [];
     for (let i = 0; i < MAX_SEATS; i++) ids.push((await admin<{ seat: SeatView }>("addSeat", { kind: "claude-subscription", label: `Seat ${i}` })).body.seat.id);

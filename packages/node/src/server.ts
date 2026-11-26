@@ -154,6 +154,7 @@ import { type Caller, ConnectorCallError, type ConnectorService } from "./connec
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
 import { addSeat, removeSeat, SeatError, seatViews, setSeatPolicy } from "./seats.ts";
+import { SeatSignIns } from "./seat-sign-in.ts";
 import { QuestionError, type Questions } from "./questions.ts";
 
 /** An agent's uses of each key it was given are counted over this many days (teamKeyUses). */
@@ -1013,6 +1014,17 @@ export function createApp(ctx: AppContext) {
    * quotes them from the ledger), so they pass.
    */
   const scanOptions = { isPublic: (token: string) => ctx.store.event(token) !== null };
+  /** Seats' sign-ins on this node, each in a VM of the seat's own on this node's sandbox host (seat-sign-in.ts). */
+  const seatSignIns = new SeatSignIns({ store: ctx.store, vault: ctx.vault, node: ctx.identity, host: () => ctx.sandbox ?? null });
+  /** A seat's refusal, in its words and with its status. */
+  async function seatErrorsAsync<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof SeatError) throw new HttpError(error.status, error.message);
+      throw error;
+    }
+  }
   /** A seat's refusal, in its words and with its status. */
   function seatErrors<T>(work: () => T): T {
     try {
@@ -4194,6 +4206,20 @@ export function createApp(ctx: AppContext) {
     setSeatPolicy: (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can set a seat");
       return seatErrors(() => ({ seat: setSeatPolicy(ctx.store, ctx.identity, input.id, input.runs, p.kind === "client" ? p.device : null) }));
+    },
+    // A seat's sign-in: yours alone, on the vendor's own page. Its card is answered to you and kept nowhere; your code
+    // goes to its process alone (seat-sign-in.ts).
+    startSeatSignIn: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can sign a seat in");
+      return seatErrorsAsync(async () => ({ card: await seatSignIns.start(input.id) }));
+    },
+    answerSeatSignIn: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can sign a seat in");
+      return seatErrors(() => (seatSignIns.answer(input.id, input.attempt, input.code), { answered: true }));
+    },
+    cancelSeatSignIn: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can sign a seat in");
+      return seatErrorsAsync(async () => (await seatSignIns.cancel(input.id, input.attempt), { cancelled: true }));
     },
     arms: () => ({ arms: ctx.arms.list() }),
     mintArm: (input) => {

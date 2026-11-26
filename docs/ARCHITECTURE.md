@@ -195,8 +195,14 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - its status is asked of its own tool in such a VM (`askSeat`), with the fleet's salt from the vault; the log is told
     only what changes (`recordSeatStatus`), and a sign-in to another account than the seat's, or to another seat's, is
     refused;
-  - routes: `GET /api/seats` (`mind:read`); `POST /api/seats`, `/api/seats/remove` and `/api/seats/policy`
-    (`fleet:admin`, yours alone).
+  - signed in on the vendor's own page, by the vendor's own tool in a VM made for the seat (`seat-sign-in.ts`): Codex's
+    app server by ChatGPT's device code, Claude Code's `auth login` on a terminal of its own, its page's code relayed
+    to it once (D7). The card (its page, and Codex's code) is answered to you and kept nowhere; it shows only an address
+    on the vendor's own hosts (`signInUrlOk`). Ten minutes, then it lapses. Then the tool's own status says how it
+    stands; another account than the seat's is refused and signed out again by the tool's own command. A Mistral plan
+    is a key seat (Vibe's sign-in ends in an API key), and Sign in with ChatGPT is the node's own (to come);
+  - routes: `GET /api/seats` (`mind:read`); `POST /api/seats`, `/api/seats/remove`, `/api/seats/policy`,
+    `/api/seats/sign-in`, `/api/seats/sign-in/answer` and `/api/seats/sign-in/cancel` (`fleet:admin`, yours alone).
 - **Sandboxes:**
   - Kata microVMs on Linux and Apple containers on macOS;
   - one per run;

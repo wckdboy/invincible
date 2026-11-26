@@ -133,6 +133,8 @@ export interface SandboxHostOptions {
   runner?: DockerRunner;
   /** How a terminal's process is started (tests pass one that starts a local shell instead of `docker exec`). */
   spawnTerminal?: SpawnTerminal;
+  /** How a sandbox's long-lived process is started (tests pass a stand-in; nothing is spawned then). */
+  spawnStream?: SpawnStream;
   now?: () => number;
   /** How long to wait before starting a sandbox once more (tests pass one that doesn't). */
   pause?: (ms: number) => Promise<void>;
@@ -162,6 +164,67 @@ export interface TerminalProcess {
 }
 
 export type SpawnTerminal = (argv: string[], size: { cols: number; rows: number }, onData: (bytes: Uint8Array) => void) => TerminalProcess;
+
+/**
+ * A process in a sandbox that runs while it's wanted (a seat's sign-in): what it prints, a line at a time, and what it's
+ * told on its standard input. A line longer than STREAM_LINE_LIMIT is dropped whole, never cut.
+ */
+export interface SandboxStream {
+  lines: AsyncIterable<string>;
+  write(text: string): void;
+  /** Its standard input closed: it reads the end. */
+  close(): void;
+  kill(): void;
+  exited: Promise<number>;
+}
+export type SpawnStream = (argv: string[]) => SandboxStream;
+export const STREAM_LINE_LIMIT = 64 * 1024;
+
+/** A process on this host whose stdin stays open (`docker exec --interactive`), its stdout read as lines. */
+export const spawnStream: SpawnStream = (argv) => {
+  const proc = Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+  async function* lines(): AsyncIterable<string> {
+    const decoder = new TextDecoder();
+    let held = "";
+    let dropping = false;
+    for await (const chunk of proc.stdout as unknown as AsyncIterable<Uint8Array>) {
+      held += decoder.decode(chunk, { stream: true });
+      let at: number;
+      while ((at = held.indexOf("\n")) >= 0) {
+        const line = held.slice(0, at);
+        held = held.slice(at + 1);
+        if (!dropping && line.length <= STREAM_LINE_LIMIT) yield line;
+        dropping = false;
+      }
+      // (A line still growing past the limit is dropped whole, up to its end.)
+      if (held.length > STREAM_LINE_LIMIT) {
+        held = "";
+        dropping = true;
+      }
+    }
+    if (held && !dropping && held.length <= STREAM_LINE_LIMIT) yield held;
+  }
+  return {
+    lines: lines(),
+    write: (text) => {
+      try {
+        proc.stdin.write(text);
+        proc.stdin.flush();
+      } catch {
+        // (It has ended: what it's told goes nowhere.)
+      }
+    },
+    close: () => {
+      try {
+        proc.stdin.end();
+      } catch {
+        // (Ended already.)
+      }
+    },
+    kill: () => proc.kill(),
+    exited: proc.exited,
+  };
+};
 
 /**
  * A process under a pseudo-terminal on this host (Bun's own): it sees a real terminal, and a resize reaches it.
@@ -1285,6 +1348,20 @@ export class SandboxHost {
     if (work?.Type === "volume" && work.Name === volumeName(id)) return { sandbox: id, volume: work.Name };
     if (work?.Type === "bind" && work.Source?.startsWith("/")) return { sandbox: id, workspace: work.Source };
     throw new SandboxError("could not tell where that agent's /work is; nothing was made", 424);
+  }
+
+  /**
+   * A process in one of this host's sandboxes that runs while it's wanted, its stdin open and its stdout read as lines
+   * (a seat's sign-in, which waits for you): under the same deadline as any command (execArgs' timeout). The ledger says
+   * that it ran and where, never what it was told.
+   */
+  async stream(id: string, cmd: string[], timeoutSec: number): Promise<SandboxStream> {
+    if (this.apple) throw new SandboxError("a process that runs while it's wanted is made on a Linux host with Docker", 424);
+    const sandbox = await this.get(id);
+    if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
+    if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
+    this.opts.ledger({ class: "modify", resource: "sandbox.stream", target: sandbox.name, verdict: "allow", run: sandbox.run, detail: truncateLedgerDetail(redact(cmd.slice(0, 2).join(" ").slice(0, 120))) });
+    return (this.opts.spawnStream ?? spawnStream)([this.bin, ...execArgs(id, cmd, timeoutSec)]);
   }
 
   /** Remove a seat's home, and the sign-in its tool keeps there: never while a VM has it. */

@@ -14,6 +14,7 @@ import {
   seatVendor,
   seatView,
   SHARED_RUNS_PROVEN,
+  signInUrlOk,
   tokenShaped,
 } from "../src/seats.ts";
 
@@ -150,5 +151,27 @@ describe("runs at once (D4) and the rule (D1, D2)", () => {
     expect(mayCarryOn(claude("st_a"), { id: "st_c", kind: "chatgpt-codex" })).toBe(true);
     // A plan's own sanctioned capacity: the API credits it comes with, on its Console org's key.
     expect(mayCarryOn(claude("st_a"), { id: "st_k", kind: "api", provider: "anthropic" })).toBe(true);
+  });
+});
+
+describe("a sign-in's card", () => {
+  test("shows only its vendor's own sign-in page, over https: never a look-alike, a login in the address, another port or a stranger's site", () => {
+    expect(signInUrlOk("claude-subscription", "https://claude.ai/oauth/authorize?code=true&client_id=FAKE&state=FAKE")).toBe(true);
+    expect(signInUrlOk("claude-subscription", "https://claude.com/cai/oauth/authorize?state=FAKE")).toBe(true);
+    expect(signInUrlOk("chatgpt-codex", "https://auth.openai.com/codex/device")).toBe(true);
+    for (const url of [
+      "http://claude.ai/oauth/authorize",
+      "https://claude.ai.example.test/oauth/authorize",
+      "https://claude-ai.example.test/",
+      "https://user:pass@claude.ai/oauth",
+      "https://claude.ai:8443/oauth",
+      "https://claude.ai/oauth authorize",
+      "javascript:alert(1)",
+      "not a url",
+    ]) expect([url, signInUrlOk("claude-subscription", url)]).toEqual([url, false]);
+    // Each vendor's own: not the other's, and never a keyed seat's.
+    expect(signInUrlOk("chatgpt-codex", "https://claude.ai/oauth/authorize")).toBe(false);
+    expect(signInUrlOk("claude-subscription", "https://auth.openai.com/codex/device")).toBe(false);
+    expect(signInUrlOk("api", "https://claude.ai/oauth/authorize")).toBe(false);
   });
 });
