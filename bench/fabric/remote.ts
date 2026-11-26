@@ -293,8 +293,9 @@ try {
     const t0 = performance.now();
     await signedPost(me.identity, serverEndpoint, "/link/sync", { have });
     warmHttp.push(performance.now() - t0);
+    // Signed inside the clock, as signedPost signs inside its own: each path's whole call, as a sync makes it.
     const t1 = performance.now();
-    await me.fabric.sidecar.client!.call(serverAddress, FABRIC.sync, { have }).result;
+    await me.fabric.sidecar.client!.call(serverAddress, FABRIC.sync, await me.fabric.seal(LINK_PATHS.sync, { have })).result;
     warmQamp.push(performance.now() - t1);
   }
   record("an answer on a warm connection · HTTP, signed request", warmHttp);
