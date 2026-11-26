@@ -37,6 +37,7 @@ import { sandboxSetup, type SetupNode, setupWords, systemSetupDeps } from "./san
 import { notifyCommand } from "./notify-cli.ts";
 import { teamCommand } from "./team-cli.ts";
 import { terminalCommand, ttyScreen } from "./terminal-cli.ts";
+import { IMPORT_HELP, importCommand } from "./import/index.ts";
 
 const VERSION = "0.1.0";
 
@@ -137,6 +138,7 @@ of its own; "agents" and "team" are the same command)
 Set up
   init [--name laptop] [--fleet homelab] [--port 7400]     found a fleet on this machine
   join <invite> [--name server] [--port 7400]              join a fleet with an invite
+${IMPORT_HELP}
   serve                                                    run this node (daemon)
   expose [--https 443]                                     publish the PWA over HTTPS on your tailnet (tailscale serve)
   invite [--client] [--origin https://host.ts.net:8443] [--no-qr] [--no-wait]
@@ -731,6 +733,9 @@ async function main(): Promise<void> {
       file: { type: "string" },
       // `ask --attach file --attach file`: your files with the message.
       attach: { type: "string", multiple: true },
+      // The one-time import: `import <system> <its home> [--dry-run] [--chats all|none|<id>,<id>]`.
+      "dry-run": { type: "boolean" },
+      chats: { type: "string" },
       // The doctor: `doctor [--offline] [--quick] [--json]`.
       offline: { type: "boolean" },
       quick: { type: "boolean" },
@@ -2145,6 +2150,11 @@ Evidence: invincible artifact ${i!.artifact}`));
       const base = admin?.base ?? "this machine";
       // Its exit code is the answer for a script: 0 well, 1 needs you, 2 broken.
       process.exitCode = await doctorCommand(admin ?? { call: () => Promise.reject(new CliError("no daemon on this machine")) }, flags, () => stoppedReport(home, base));
+      return;
+    }
+
+    case "import": {
+      process.exitCode = await importCommand(sub, rest, { home, dryRun: flags["dry-run"] === true, chats: str("chats") }, console.log);
       return;
     }
 
