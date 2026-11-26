@@ -1,0 +1,152 @@
+import CoreGraphics
+import Foundation
+import SwiftUI
+import Testing
+@testable import Invincible
+
+/// An agent's mark, the Grille (O2, 26 November 2026), as core makes it (`agent-mark.ts`, through the vectors' `marks`):
+/// its palette and its pale and grey forms, its forms and times, each expression's state, the marks a node gives, the snap
+/// of a colour you pick, a saved mark read strictly, its sines and cosines and its slats at given moments to the last bit.
+struct AgentMarkTests {
+    let marks = Vectors.shared.marks
+
+    @Test func itsPaletteAndItsPaleAndGreyFormsAreCores() {
+        #expect(AgentMark.palette.map(\.name) == marks.palette.map(\.name))
+        #expect(AgentMark.palette.map(\.forms.light) == marks.palette.map(\.light))
+        #expect(AgentMark.palette.map(\.forms.dark) == marks.palette.map(\.dark))
+        #expect(AgentMark.queued.map(\.light) == marks.queued.map(\.light))
+        #expect(AgentMark.queued.map(\.dark) == marks.queued.map(\.dark))
+        for (mine, theirs) in [(AgentMark.paused, marks.paused), (AgentMark.page, marks.page), (AgentMark.ink, marks.ink), (AgentMark.red, marks.red)] {
+            #expect(mine.light == theirs.light && mine.dark == theirs.dark, "\(theirs.light)")
+        }
+        #expect(AgentMark.grey == marks.grey)
+    }
+
+    @Test func itsFormsTimesAndStatesAreCores() {
+        #expect(AgentMark.forms == marks.forms.count)
+        for (n, form) in marks.forms.enumerated() {
+            let mine = AgentMark.shape(n)
+            #expect(mine.slots == form.slots && mine.angle == form.angle, "\(n)")
+        }
+        #expect(AgentMark.Timing.workCycle == marks.timing.workCycle && AgentMark.Timing.needsBeat == marks.timing.needsBeat)
+        #expect(AgentMark.Timing.doneSettle == marks.timing.doneSettle && AgentMark.Timing.failDrop == marks.timing.failDrop)
+        #expect(MarkState.allCases.map(\.rawValue) == marks.states)
+    }
+
+    @Test func whatAnAgentIsDoingIsItsMarksStateAsCores() {
+        #expect(marks.stateOf.count == 11)
+        for item in marks.stateOf {
+            #expect(MarkState(expression: item.expression).rawValue == item.state, "\(item.expression)")
+        }
+        #expect(MarkState(expression: "dancing") == .idle && MarkState(expression: nil) == .idle)
+    }
+
+    @Test func aHandlesSeedIsFNV1aOverItsUTF16AsCoresIs() {
+        // (core's handleSeed of each, as the vectors' agentOrbs.seeds have them: two quotes, a backslash and an emoji with
+        // its variation selector among them, each counted in UTF-16 code units.)
+        let seeds: [(String, UInt32)] = [("", 2_166_136_261), ("a", 3_826_002_220), ("foobar", 3_214_735_720), ("coder", 3_469_596_402), ("Will\u{2019}s \u{201C}iPad\u{201D} \\ \u{1F6E1}\u{FE0F}", 3_419_317_483)]
+        for (id, seed) in seeds { #expect(AgentMark.seed(id) == seed, "\(id)") }
+    }
+
+    @Test func aNodeGivesMarksAsCoreDoes() {
+        var given = [AgentMark]()
+        for item in marks.given {
+            #expect(AgentMark.seed(item.id) == item.seed, "\(item.id)")
+            let mark = AgentMark.assign(item.id, after: given)
+            #expect(mark == AgentMark(color: item.color, form: item.form), "\(item.id)")
+            given.append(mark)
+        }
+        for item in marks.chosen {
+            let others = item.others.map { AgentMark(color: $0.color, form: $0.form) }
+            #expect(AgentMark.assign(item.id, after: others, chosen: item.chosen) == AgentMark(color: item.mark.color, form: item.mark.form), "\(item.id)")
+        }
+        // Only which marks are worn counts, never their order: what the app tells you a node will give is what it gives.
+        for id in ["ada", "lin", "agent"] {
+            #expect(AgentMark.assign(id, after: given.reversed()) == AgentMark.assign(id, after: given), "\(id)")
+        }
+    }
+
+    @Test func aColourYouPickSnapsAsCoresToTheLastBit() {
+        // sRGB's levels in linear light, to the last bit: the snap raises nothing to a power.
+        #expect(AgentMark.linear.count == 256)
+        #expect(AgentMark.linear == marks.linear)
+        for item in marks.snaps { #expect(AgentMark.snap(item.hex) == item.color, "\(item.hex)") }
+        // Every colour of the grid core snapped: 18 levels a channel, red slowest.
+        var grid = ""
+        for r in stride(from: 0, to: 256, by: 15) {
+            for g in stride(from: 0, to: 256, by: 15) {
+                for b in stride(from: 0, to: 256, by: 15) { grid += String(AgentMark.snap("#" + [r, g, b].map { $0 < 16 ? "0" + String($0, radix: 16) : String($0, radix: 16) }.joined())) }
+            }
+        }
+        #expect(grid == marks.snapGrid)
+        // A pale mint is Teal's, never Violet's; red, which isn't among the eight, is Amber's; each of the eight is its own.
+        #expect(AgentMark.palette[AgentMark.snap("#b9dfd4")].name == "Teal")
+        #expect(AgentMark.palette[AgentMark.snap("#ff0000")].name == "Amber")
+        for (n, hue) in AgentMark.palette.enumerated() {
+            #expect(AgentMark.snap(hue.forms.light) == n && AgentMark.snap(hue.forms.dark) == n, "\(hue.name)")
+        }
+        // What isn't six hex digits is the first, as core's arithmetic comes to.
+        #expect(AgentMark.snap("blue") == 0 && AgentMark.snap("#12345g") == 0)
+    }
+
+    @Test func aSavedMarkIsReadStrictlyAsCoresIs() throws {
+        #expect(marks.profiles.count == 6)
+        for item in marks.profiles {
+            #expect((AgentMark.read(item.profile) != nil) == item.saved, "\(item.id) \(String(describing: item.profile))")
+            #expect(AgentMark.of(id: item.id, profile: item.profile) == AgentMark(color: item.mark.color, form: item.mark.form), "\(item.id) \(String(describing: item.profile))")
+        }
+        // As the node sends it, read by the app's own decoding: every form, 0 and 1 among them, is a number, never a yes or no.
+        for form in 0..<AgentMark.forms {
+            let sent = try JSONDecoder().decode(JSONValue.self, from: Data(##"{"v":3,"color":"#0084ba","form":\##(form)}"##.utf8))
+            #expect(AgentMark.read(sent) == AgentMark(color: 4, form: form), "\(form)")
+        }
+        // Not a mark: half a form, a form in words, a colour not among the eight's light forms.
+        for text in [##"{"v":3,"color":"#0084ba","form":1.5}"##, ##"{"v":3,"color":"#0084ba","form":"1"}"##, ##"{"v":3,"color":"#0084BA","form":1}"##, ##"{"v":"3","color":"#0084ba","form":1}"##] {
+            #expect(AgentMark.read(try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))) == nil, "\(text)")
+        }
+        // From a node before the marks: the colour chosen for its orb, snapped, in its handle's form; nothing: its handle's.
+        let chosen = try JSONDecoder().decode(JSONValue.self, from: Data(##"{"v":2,"color":"#3ABEFF"}"##.utf8))
+        #expect(AgentMark.of(id: "coder", profile: chosen) == AgentMark(color: AgentMark.snap("#3abeff"), form: AgentMark.seeded("coder").form))
+        #expect(AgentMark.of(id: "coder", profile: nil) == AgentMark.seeded("coder"))
+    }
+
+    @Test func itsSinesAndCosinesAreCoresToTheLastBit() {
+        #expect(marks.trig.count == 21)
+        for item in marks.trig {
+            // (Exactly equal: JSON can't say a negative zero, and no other two doubles are equal but for their bits.)
+            #expect(AgentMark.markSin(item.x) == item.sin, "sin \(item.x)")
+            #expect(AgentMark.markCos(item.x) == item.cos, "cos \(item.x)")
+        }
+    }
+
+    @Test func itsSlatsStandAsCoresToTheLastBit() throws {
+        #expect(marks.geometry.count == 108)
+        for item in marks.geometry {
+            let state = try #require(MarkState(rawValue: item.state))
+            let mark = AgentMark(color: item.mark.color, form: item.mark.form)
+            let mine = AgentMark.geometry(mark, seed: item.seed, state: state, size: item.size, t: item.t, since: item.since)
+            let at = "\(item.id) \(item.state) \(item.size) t \(String(describing: item.t)) since \(String(describing: item.since))"
+            #expect(mine.angle == item.geometry.angle && mine.radius == item.geometry.radius, "\(at)")
+            #expect(mine.slats.count == item.geometry.slats.count, "\(at)")
+            for (n, (a, b)) in zip(mine.slats, item.geometry.slats).enumerated() {
+                #expect(a.from == b.from && a.to == b.to && a.slide == b.slide, "\(at) slat \(n)")
+                #expect(a.key == (b.fill == "key") && a.drop == b.drop && a.turn == b.turn, "\(at) slat \(n)")
+                #expect(Double(a.pivot.x) == b.pivot[0] && Double(a.pivot.y) == b.pivot[1], "\(at) slat \(n)")
+            }
+            let colors = AgentMark.colors(mark.color, state: state, theme: try #require(AgentMark.Theme(rawValue: item.theme)))
+            #expect(colors.body == item.colors.body && colors.key == item.colors.key, "\(at)")
+        }
+    }
+
+    @Test func aMarkComesToRestWhereItsStillFormIs() {
+        // So a mark that stops moving (it settled, it left the screen's front, motion was reduced) draws nothing new.
+        let mark = AgentMark(color: 2, form: 7)
+        let still = { (state: MarkState) in AgentMark.geometry(mark, seed: 7, state: state, size: 44, t: nil, since: nil) }
+        #expect(AgentMark.geometry(mark, seed: 7, state: .done, size: 44, t: 9, since: AgentMark.Timing.doneSettle) == still(.done))
+        #expect(AgentMark.geometry(mark, seed: 7, state: .failed, size: 44, t: 9, since: AgentMark.Timing.failDrop) == still(.failed))
+        #expect(still(.done) == still(.idle) && still(.working) == still(.idle))
+        // Still, what asks you holds its top slat out, and what failed its bottom one loose.
+        #expect(still(.needs).slats.first?.slide == 5 && still(.needs).slats.first?.key == true)
+        #expect(still(.failed).slats.last?.drop == 8 && still(.failed).slats.last?.turn == 10)
+    }
+}

@@ -321,6 +321,60 @@ struct Vectors: Decodable {
         let sphere: Spheres
     }
 
+    /// An agent's mark, the Grille (core's agent-mark.ts): its palette, its pale and grey forms, its forms and times, each
+    /// expression's state, the marks a node gives, the snap of a colour you pick, saved marks read, and its slats at given
+    /// moments with their colours.
+    struct Marks: Decodable {
+        struct Hue: Decodable { let name: String; let light: String; let dark: String }
+        struct Forms: Decodable { let light: String; let dark: String }
+        struct Form: Decodable { let slots: Int; let angle: Double }
+        struct Timing: Decodable { let workCycle: Double; let needsBeat: Double; let doneSettle: Double; let failDrop: Double }
+        struct StateOf: Decodable { let expression: String; let state: String }
+        struct Mark: Decodable { let color: Int; let form: Int }
+        struct Given: Decodable { let id: String; let seed: UInt32; let color: Int; let form: Int }
+        struct Chosen: Decodable { let id: String; let others: [Mark]; let chosen: String; let mark: Mark }
+        struct Snap: Decodable { let hex: String; let color: Int }
+        struct SnapAll: Decodable { let digest: String; let counts: [Int] }
+        struct Profile: Decodable { let id: String; let profile: JSONValue?; let saved: Bool; let mark: Mark }
+        struct Slat: Decodable { let from: Double; let to: Double; let slide: Double; let fill: String; let drop: Double; let turn: Double; let pivot: [Double] }
+        struct Geometry: Decodable { let angle: Double; let radius: Double; let slats: [Slat] }
+        struct Colors: Decodable { let body: String; let key: String }
+        struct Trig: Decodable { let x: Double; let sin: Double; let cos: Double }
+        struct Case: Decodable {
+            let id: String
+            let mark: Mark
+            let seed: UInt32
+            let state: String
+            let size: Double
+            let theme: String
+            let t: Double?
+            let since: Double?
+            let geometry: Geometry
+            let colors: Colors
+        }
+        let palette: [Hue]
+        let queued: [Forms]
+        let paused: Forms
+        let page: Forms
+        let ink: Forms
+        let red: Forms
+        let forms: [Form]
+        let timing: Timing
+        let states: [String]
+        let stateOf: [StateOf]
+        let given: [Given]
+        let chosen: [Chosen]
+        let linear: [Double]
+        let grey: Double
+        let snaps: [Snap]
+        let snapGrid: String
+        let snapAll: SnapAll
+        let profiles: [Profile]
+        let geometry: [Case]
+        /// Its sines and cosines (core's markSin and markCos, from + − × ÷ and floor alone), to the last bit.
+        let trig: [Trig]
+    }
+
     struct NoticeFrom: Decodable {
         let source: String
         let from: String
@@ -501,6 +555,8 @@ struct Vectors: Decodable {
     let desktop: DesktopCases
     let faces: Faces
     let orb: OrbCases
+    /// An agent's mark, the Grille (core's agent-mark.ts): AgentMarkTests.swift.
+    let marks: Marks
     /// The orbs as fields (the PWA's lib/field.ts and lib/field-orb.ts): FieldTests.swift.
     let field: FieldCases
     /// The work by attention (the PWA's lib/work.ts): WorkTests.swift.
