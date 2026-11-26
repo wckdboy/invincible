@@ -67,7 +67,10 @@ struct MainView: View {
             await session.chat.resume(with: session.client)
             // Notifications: Apple's token handed over again (it changes), what was answered elsewhere taken down here.
             Task { await PushCenter.shared.renew(session) }
+            // Tasks' Live Activities kept up from here while a window is in front (the node does it otherwise).
+            async let activities: Void = LiveActivities.shared.keepUp(session)
             await app.keepFresh(session)
+            await activities
         }
     }
 }

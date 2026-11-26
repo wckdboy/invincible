@@ -2,6 +2,7 @@
 Invincible.xcodeproj/
 Invincible/Info.plist
 Invincible/Invincible.entitlements
+InvincibleWidgets/Info.plist
 InvincibleMac/
 # xcodebuild -derivedDataPath build
 build/

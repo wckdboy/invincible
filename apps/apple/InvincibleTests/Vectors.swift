@@ -536,6 +536,25 @@ struct Vectors: Decodable {
     let live: Live
     /// The verdict in words that follow the proof (the PWA's lib/steps.ts verdictOf): StepsTests.swift.
     let verdicts: [VerdictCase]
+    /// A task on its Live Activity: its state from the task and its trail, and its words (lib/live-activity.ts).
+    let liveActivities: [LiveActivityCase]
+
+    struct LiveActivityCase: Decodable {
+        struct Task: Decodable {
+            let status: String
+            let verified: Bool
+            let error: String?
+            let gates: [String]
+            let record: TeamTask.Record?
+        }
+        let name: String
+        let task: Task
+        let entries: [TrailEntry]
+        let at: Double
+        let state: TaskActivityState
+        let line: String
+        let short: String
+    }
 
     struct VerdictCase: Decodable {
         struct Task: Decodable {

@@ -172,15 +172,30 @@ struct TaskView: View {
         if task.record != nil { await session.askPrices() }
         await thread.readChanges(task, agent: session.drawn(task.assignee), session: session)
         await session.opened(task: task.id)
+        #if os(iOS)
+        // Its proof on the Lock Screen: started for one in hand you open, and told how it stands (its end too).
+        if task.status == "running" || task.status == "queued" { LiveActivities.shared.start(task, agent: session.drawn(task.assignee), state: activityState(task, thread), session: session) }
+        await LiveActivities.shared.update(task.id, activityState(task, thread))
+        #endif
         // At work (or about to be): read again as the node says the agents moved (each step it takes moves them), its
         // trail within half a second, its conversation within two; nothing is asked while nothing moves.
         guard task.status == "running" || task.status == "queued" else { return }
-        let steps = session.follow(["team"], every: 4_000, gap: 500) { await thread.readTrail(with: client) }
+        let steps = session.follow(["team"], every: 4_000, gap: 500) {
+            await thread.readTrail(with: client)
+            #if os(iOS)
+            if let now = session.task(task.id) { await LiveActivities.shared.update(task.id, activityState(now, thread)) }
+            #endif
+        }
         let talk = session.follow(["team"], every: 8_000, gap: 2_000) { await thread.room.load(room: task.room, with: client) }
         await Session.held()
         steps()
         talk()
     }
+}
+
+/// How a task stands on its Live Activity, from its trail as read here.
+@MainActor private func activityState(_ task: TeamTask, _ thread: TaskThread) -> TaskActivityState {
+    TaskActivityState.of(status: task.status, verified: task.verified, error: task.error, gates: task.gates ?? [], record: task.record, entries: thread.entries, at: Date.now.timeIntervalSince1970 * 1000)
 }
 
 /// Where a task's details are: a column beside its thread on a wide screen (shown or hidden as you last left it), a sheet

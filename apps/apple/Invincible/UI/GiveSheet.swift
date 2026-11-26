@@ -149,9 +149,14 @@ struct GiveSheet: View {
         working = true
         defer { working = false }
         do {
-            given = try await session.client.post("/api/team/give", input, as: Given.self)
+            let given = try await session.client.post("/api/team/give", input, as: Given.self)
+            self.given = given
             problem = nil
             await session.reread(["team"])
+            #if os(iOS)
+            // Given from this phone: its proof on the Lock Screen from now (LiveActivities).
+            LiveActivities.shared.begin(given.task.id, session: session)
+            #endif
         } catch {
             problem = error.localizedDescription
         }

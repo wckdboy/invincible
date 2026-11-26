@@ -142,7 +142,14 @@ struct AgentView: View {
         }
         .sheet(isPresented: $giving) {
             GiveTaskSheet(name: name) { title, goal, gates, _, budget in
-                try await room.give(title: title, goal: goal, gates: gates, budgetUsd: budget, with: session.client)
+                let given = try await room.give(title: title, goal: goal, gates: gates, budgetUsd: budget, with: session.client)
+                #if os(iOS)
+                // Given from this phone: its proof on the Lock Screen from now (LiveActivities).
+                if let given {
+                    await session.reread(["team"])
+                    LiveActivities.shared.begin(given, session: session)
+                }
+                #endif
             }
         }
         .navigationDestination(isPresented: $watching) {

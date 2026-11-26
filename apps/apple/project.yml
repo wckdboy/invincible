@@ -60,6 +60,8 @@ targets:
         # An approval opened from its notification's Approve is given behind Face ID (the owner's word, 25 November 2026),
         # and so is a task's work shipped from its notification's Ship it.
         NSFaceIDUsageDescription: Invincible asks for Face ID before a yes you give from a notification, to an approval or to shipping a task's work.
+        # A task's proof on the Lock Screen and in the Dynamic Island (I10): the widgets' Live Activity, started by the app.
+        NSSupportsLiveActivities: true
         # invincible: links open a task, an agent, an approval or a chat over Home (invincible://task/<id>, /agent/<handle>,
         # /approval/<id>, /chat/<id>).
         CFBundleURLTypes:
@@ -72,6 +74,9 @@ targets:
       path: Invincible/Invincible.entitlements
       properties:
         aps-environment: development
+    # Its widgets, embedded: a task's Live Activity (InvincibleWidgets).
+    dependencies:
+      - target: InvincibleWidgets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot
@@ -79,6 +84,27 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
+  # The iPhone's and the iPad's widgets: a task's proof on the Lock Screen and in the Dynamic Island, as a Live Activity the
+  # app starts and its node keeps up (core's live-activity.ts). Its state's type and words are the app's own file.
+  InvincibleWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: InvincibleWidgets
+      - path: Invincible/Core/TaskActivity.swift
+    info:
+      path: InvincibleWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Invincible
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.widgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
   InvincibleTests:
     type: bundle.unit-test
     platform: iOS

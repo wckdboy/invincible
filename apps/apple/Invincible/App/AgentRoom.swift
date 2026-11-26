@@ -81,11 +81,15 @@ import Observation
     }
 
     /// A task for this agent (in a room of several, for `assignee`): what it should do, and the commands that prove it done.
-    func give(title: String, goal: String, gates: [String], dependsOn: [String] = [], assignee: String? = nil, budgetUsd: Double? = nil, with client: NodeClient) async throws {
+    /// A task given here; its id, as the node made it (nil: the node didn't say).
+    @discardableResult
+    func give(title: String, goal: String, gates: [String], dependsOn: [String] = [], assignee: String? = nil, budgetUsd: Double? = nil, with client: NodeClient) async throws -> String? {
         guard let room = view?.id else { throw NodeError(status: 0, message: "The conversation isn't open yet.") }
         struct Task: Encodable { let room: String; let assignee: String; let title: String; let goal: String; let dependsOn: [String]; let gates: [String]; let budgetUsd: Double? }
-        _ = try await client.post("/api/team/tasks", Task(room: room, assignee: assignee ?? agent, title: title, goal: goal, dependsOn: dependsOn, gates: gates, budgetUsd: budgetUsd), as: JSONValue.self)
+        struct Made: Decodable { struct Task: Decodable { let id: String }; let task: Task? }
+        let made = try await client.post("/api/team/tasks", Task(room: room, assignee: assignee ?? agent, title: title, goal: goal, dependsOn: dependsOn, gates: gates, budgetUsd: budgetUsd), as: Made.self)
         await load(room: room, with: client)
+        return made.task?.id
     }
 
     /// Stop work in hand, or resume work that ended unverified.
