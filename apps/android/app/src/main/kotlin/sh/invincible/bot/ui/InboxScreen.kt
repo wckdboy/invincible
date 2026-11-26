@@ -24,6 +24,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -76,11 +77,21 @@ fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit) 
         }
     }
     val asker = askerIn(table)
+    // An approval opened from its notification's Approve…: its card first, the whole request in front of you.
+    val asked by app.approvalAsked.collectAsState()
+    val first = asked?.let { id -> inbox.actions.firstOrNull { it["id"].string == id } }
+    DisposableEffect(Unit) { onDispose { app.approvalAsked.value = null } }
 
     Column(Modifier.fillMaxSize()) {
     PageBar("Inbox", back)
     LazyColumn(Modifier.fillMaxSize()) {
         said?.let { item { Problem(it) } }
+        first?.let { a ->
+            item(key = "asked") {
+                SectionTitle("From its notification")
+                Approval(a, asker(a["by"].string ?: "")) { approve -> act { app.decide(a["id"].string!!, approve) } }
+            }
+        }
         if (inbox.count == 0) {
             item { Text("Nothing needs you.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin)) }
         }
@@ -97,8 +108,9 @@ fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit) 
                 watch = { s["node"].string?.let(watch) },
             )
         }
-        if (inbox.actions.isNotEmpty()) item { SectionTitle("Waiting for your approval") }
-        items(inbox.actions, key = { "a:${it["id"].string}" }) { a -> Approval(a, asker(a["by"].string ?: "")) { approve -> act { app.decide(a["id"].string!!, approve) } } }
+        val others = inbox.actions.filter { it !== first }
+        if (others.isNotEmpty()) item { SectionTitle("Waiting for your approval") }
+        items(others, key = { "a:${it["id"].string}" }) { a -> Approval(a, asker(a["by"].string ?: "")) { approve -> act { app.decide(a["id"].string!!, approve) } } }
         if (inbox.keys.isNotEmpty()) item { SectionTitle("Keys ${Primary.name} asked for") }
         items(inbox.keys, key = { "k:${it["name"].string}" }) { k ->
             KeyAsked(k, asker(k["requestedBy"].string ?: ""), seal = { value -> act { app.sealKey(k["name"].string!!, value, k["provider"].string) } }, dismiss = { act { app.dismissKey(k["name"].string!!) } })

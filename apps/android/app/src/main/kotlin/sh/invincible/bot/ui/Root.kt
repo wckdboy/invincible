@@ -77,21 +77,31 @@ fun Root(app: AppModel) {
     val motion = MaterialTheme.motionScheme
     val brand = LocalBrand.current
 
-    // A tapped notification: the page it was about (a chat by its conversation), opened straight from Home.
+    // A tapped notification, or one of its buttons: the page it was about, opened straight from Home. The very task (its
+    // ship asked, from Ship it…), a chat by its conversation, the Inbox (an approval's card first, from Approve…).
     val opening by app.opening.collectAsState()
     LaunchedEffect(opening) {
-        val (open, conversation) = opening ?: return@LaunchedEffect
-        when (open) {
-            "chat" -> {
-                conversation?.let(app.chat::open)
+        val o = opening ?: return@LaunchedEffect
+        when {
+            o.address == "chat" -> {
+                o.conversation?.let(app.chat::open)
                 nav.open("chat")
             }
-            "inbox" -> nav.open("inbox")
-            "settings" -> nav.open("settings")
-            else -> nav.open("agents")
+            o.address.startsWith("task:") -> {
+                if (o.ship) app.shipAsked.value = o.address.removePrefix("task:")
+                nav.open(o.address)
+            }
+            o.address == "inbox" -> {
+                app.approvalAsked.value = o.approval
+                nav.open("inbox")
+            }
+            o.address == "settings" -> nav.open("settings")
+            else -> nav.open(Nav.HOME)
         }
         app.opening.value = null
     }
+    // What the app shows, so a notification about that very thing is told quietly (Notices).
+    LaunchedEffect(nav.top) { app.showing.value = nav.top }
     // Something shared from another app: a new chat, with it in the message box (the chat's composer takes it from there).
     val shared by app.shared.collectAsState()
     LaunchedEffect(shared != null) {

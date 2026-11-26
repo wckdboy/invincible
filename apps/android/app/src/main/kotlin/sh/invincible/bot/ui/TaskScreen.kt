@@ -123,6 +123,13 @@ fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolea
     var sheet by remember { mutableStateOf(false) }
     var giving by remember { mutableStateOf(false) }
     var shipping by remember { mutableStateOf(false) }
+    // Ship it… on its notification (behind the phone's unlock): its ship is asked as the page opens, where it can be.
+    val shipAsked by app.shipAsked.collectAsState()
+    LaunchedEffect(shipAsked, task) {
+        if (shipAsked != id || task == null) return@LaunchedEffect
+        app.shipAsked.value = null
+        if ("ship" in TaskWords.actions(task)) shipping = true
+    }
     val list = rememberLazyListState()
     val status = task?.status
 

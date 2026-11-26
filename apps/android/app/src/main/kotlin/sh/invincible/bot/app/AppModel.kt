@@ -185,8 +185,23 @@ class AppModel(context: Context) {
     /** An invite handed over by an `invincible:` link or a share, to join with. */
     val handed = MutableStateFlow<String?>(null)
 
-    /** Where a tapped notification opens: its place (core's NotifyOpen) and a kept chat. */
-    val opening = MutableStateFlow<Pair<String, String?>?>(null)
+    /**
+     * Where a tapped notification, or one of its buttons, opens the app (Notices.opening): Nav's address (the very task, the
+     * chat, the Inbox, Settings, Home), the kept chat it names, the approval whose card Approve… opens, and whether a
+     * task's Ship it… was pressed.
+     */
+    data class Opening(val address: String, val conversation: String? = null, val approval: String? = null, val ship: Boolean = false)
+
+    val opening = MutableStateFlow<Opening?>(null)
+
+    /** What the app shows now (Nav's address), so a notification about that very thing is told quietly. */
+    val showing = MutableStateFlow<String?>(null)
+
+    /** An approval opened from its notification's Approve…: its card first in the Inbox. */
+    val approvalAsked = MutableStateFlow<String?>(null)
+
+    /** A task whose notification's Ship it… was pressed: its ship is asked as its page opens. */
+    val shipAsked = MutableStateFlow<String?>(null)
 
     /** The app is on screen (its activity started): what asks the node again and again asks only then. */
     val front = MutableStateFlow(false)

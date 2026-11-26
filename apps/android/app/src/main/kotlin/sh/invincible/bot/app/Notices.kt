@@ -24,10 +24,10 @@ import sh.invincible.bot.R
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeClient
 import sh.invincible.bot.core.NodeError
+import sh.invincible.bot.core.NotifyPayload
 import sh.invincible.bot.core.Reach
 import sh.invincible.bot.core.bool
 import sh.invincible.bot.core.get
-import sh.invincible.bot.core.int
 import sh.invincible.bot.core.list
 import sh.invincible.bot.core.string
 import sh.invincible.bot.core.Primary
@@ -36,11 +36,14 @@ import sh.invincible.bot.core.Primary
  * Notifications with no push service (no Google, nobody in between): the node keeps what it would tell this phone, by
  * its own rules (the kinds you chose, quiet hours, the day's limit), and the phone collects it over its own signed
  * connection (core's `notifyCollect`): every fifteen minutes or so on Android's own schedule, which waits longer while
- * the phone sleeps, and each time the app comes to the front. Each is shown as the node told it: a title, one line,
- * where it opens; what needs you on the Needs you channel, news (a quiet kind) on News. An approval told alone carries
- * Approve, which opens the Inbox with the whole request in front of you (never a yes from the lock screen: your word,
- * 25 November 2026), and Decline, answered where it's told, behind the phone's own unlock. What was answered, dismissed,
- * cleared or lapsed on any device is taken down here (the node's `withdrawn`).
+ * the phone sleeps, and each time the app comes to the front. Or at once, through UnifiedPush (UnifiedPush.kt). Each is
+ * read strictly (core/NotifyPayload.kt) and shown as the node told it: a title, one line, where it opens (the very task
+ * among them); what needs you on the Needs you channel, news (a quiet kind) on News, and so is one about what the app
+ * shows that moment (as the iPhone's goes only to the list). An approval told alone carries Approve…, which opens that
+ * approval's card with the whole request in front of you (never a yes from the lock screen: your word, 25 November
+ * 2026), and Decline, answered where it's told; a task's work that can be shipped carries Ship it…, which opens the task
+ * with its ship asked. Each button works only behind the phone's own unlock. What was answered, dismissed, cleared or
+ * lapsed on any device is taken down here (the node's `withdrawn`).
  */
 object Notices {
     private const val JOB = 1
@@ -50,6 +53,11 @@ object Notices {
     private const val NEWS = "news"
     const val OPEN = "sh.invincible.bot.open"
     const val CONVERSATION = "sh.invincible.bot.conversation"
+    /** The task a notification opens (its own thread), and whether its Ship it… was pressed. */
+    const val TASK = "sh.invincible.bot.task"
+    const val SHIP = "sh.invincible.bot.ship"
+    /** The approval whose card Approve… opens. */
+    const val APPROVAL = "sh.invincible.bot.approval"
     private const val ACTION = "sh.invincible.bot.action"
     private const val APPROVE = "sh.invincible.bot.approve"
     private const val TAG = "sh.invincible.bot.tag"
@@ -128,7 +136,7 @@ object Notices {
      */
     suspend fun collect(context: Context, client: NodeClient, show: Boolean = true): Boolean {
         val answer = client.post("/api/notify/collect", Json.obj())
-        if (show && allowed(context)) for (n in answer["notifications"].list) show(context, n)
+        if (show && allowed(context)) for (n in answer["notifications"].list) present(context, NotifyPayload.read(n) ?: NotifyPayload.GENERIC)
         takeDown(context, answer["withdrawn"].list.mapNotNull { it.string })
         return answer["on"].bool == true
     }
@@ -137,7 +145,7 @@ object Notices {
     fun takeDown(context: Context, tags: List<String>) {
         if (tags.isEmpty()) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        for (tag in tags) if (TAG_FORM.matches(tag)) manager.cancel(tag, 0)
+        for (tag in tags) if (NotifyPayload.isTag(tag)) manager.cancel(tag, 0)
     }
 
     /**
@@ -145,60 +153,76 @@ object Notices {
      * readNotifyPayload): one that isn't a payload of ours is shown only as "something needs you", never as what it says.
      */
     fun showPushed(context: Context, payload: Json?) {
-        if (allowed(context)) show(context, payload?.takeIf(::ours) ?: GENERIC)
+        if (allowed(context)) present(context, NotifyPayload.read(payload) ?: NotifyPayload.GENERIC)
     }
 
-    private val KINDS = setOf("needs-you", "approval", "finished", "question", "told", "summary", "limit", "test")
-    private val OPENS = setOf("inbox", "chat", "overview", "settings")
-    private val TAG_FORM = Regex("^[A-Za-z0-9._:-]{1,64}$")
-    private val GENERIC = Json.obj("v" to 1, "kind" to "needs-you", "title" to "Invincible", "body" to "Something needs you. Open the app to see it.", "open" to "inbox", "tag" to "primary")
+    /** Shown; quietly (no sound, no pop-up: the shade alone) while the app is in front showing that very thing. */
+    private fun present(context: Context, n: NotifyPayload.Notice) {
+        val app = AppModel.of(context)
+        show(context, n, quiet = app.front.value && NotifyPayload.aboutWhatShows(n, app.showing.value))
+    }
 
-    private fun ours(p: Json): Boolean =
-        p["v"].int == 1 && p["kind"].string in KINDS && (p["title"].string?.length ?: 0) in 1..60 && (p["body"].string?.length ?: -1) in 0..140 &&
-            p["open"].string in OPENS && p["tag"].string?.let(TAG_FORM::matches) == true
+    /** The app, opened at a place: what a tap or a button hands it (read again there, `opening`). */
+    private fun app(context: Context) = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 
-    private fun show(context: Context, n: Json) {
-        val title = n["title"].string ?: return
-        val body = n["body"].string ?: ""
-        val tag = n["tag"].string ?: "primary"
-        val kind = n["kind"].string
-        val open = Intent(context, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(OPEN, n["open"].string ?: "inbox")
-            .apply { n["conversation"].string?.let { putExtra(CONVERSATION, it) } }
-        val note = Notification.Builder(context, if (Reach.quiet(kind)) NEWS else NEEDS)
+    /** A button that opens the app, behind the phone's own unlock. */
+    private fun opener(context: Context, label: String, code: Int, intent: Intent): Notification.Action =
+        Notification.Action.Builder(Icon.createWithResource(context, R.drawable.ic_notify), label, PendingIntent.getActivity(context, code, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .setAuthenticationRequired(true)
+            .build()
+
+    private fun show(context: Context, n: NotifyPayload.Notice, quiet: Boolean) {
+        val tag = n.tag
+        val open = app(context)
+            .putExtra(OPEN, n.open)
+            .apply {
+                n.conversation?.let { putExtra(CONVERSATION, it) }
+                n.task?.let { putExtra(TASK, it) }
+            }
+        val note = Notification.Builder(context, if (quiet || Reach.quiet(n.kind)) NEWS else NEEDS)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setContentTitle(n.title)
+            .setContentText(n.body)
+            .setStyle(Notification.BigTextStyle().bigText(n.body))
             .setContentIntent(PendingIntent.getActivity(context, tag.hashCode(), open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true)
-        // Answered from the notification: behind the phone's unlock, which Android 12 and later can ask for.
-        val action = n["action"].string
-        if (action != null && kind == "approval" && Build.VERSION.SDK_INT >= 31) {
-            fun answer(approve: Boolean, label: String) = Notification.Action.Builder(
-                Icon.createWithResource(context, R.drawable.ic_notify),
-                label,
-                PendingIntent.getBroadcast(
-                    context,
-                    (tag + approve).hashCode(),
-                    Intent(context, NoticeAnswer::class.java).putExtra(ACTION, action).putExtra(APPROVE, approve).putExtra(TAG, tag),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                ),
-            ).setAuthenticationRequired(true).build()
-            // Approve opens the Inbox, the whole request in front of you, behind the phone's unlock (a yes is never given
-            // from the lock screen); a delete is approved only where its name is typed, in the app, all the same.
-            if (n["approvable"].bool == true) {
-                val inbox = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra(OPEN, "inbox")
+        // Its buttons work only behind the phone's unlock, which Android 12 and later can ask for.
+        if (Build.VERSION.SDK_INT >= 31) {
+            val action = n.action
+            if (action != null && n.kind == "approval") {
+                // Approve… opens that approval's card, the whole request in front of you (a yes is never given from the lock
+                // screen); a delete is approved only where its name is typed, in the app, all the same.
+                if (n.approvable) note.addAction(opener(context, "Approve…", (tag + "approve").hashCode(), app(context).putExtra(OPEN, "inbox").putExtra(APPROVAL, action)))
                 note.addAction(
-                    Notification.Action.Builder(Icon.createWithResource(context, R.drawable.ic_notify), "Approve…", PendingIntent.getActivity(context, (tag + "open").hashCode(), inbox, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
-                        .setAuthenticationRequired(true)
-                        .build(),
+                    Notification.Action.Builder(
+                        Icon.createWithResource(context, R.drawable.ic_notify),
+                        "Decline",
+                        PendingIntent.getBroadcast(
+                            context,
+                            (tag + false).hashCode(),
+                            Intent(context, NoticeAnswer::class.java).putExtra(ACTION, action).putExtra(APPROVE, false).putExtra(TAG, tag),
+                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                        ),
+                    ).setAuthenticationRequired(true).build(),
                 )
             }
-            note.addAction(answer(false, "Decline"))
+            // A task's work that can be shipped: Ship it… opens the task with its ship asked (as the iPhone's, behind Face ID).
+            val task = n.task
+            if (task != null && n.ship) note.addAction(opener(context, "Ship it…", (tag + "ship").hashCode(), app(context).putExtra(OPEN, "task").putExtra(TASK, task).putExtra(SHIP, true)))
         }
         context.getSystemService(NotificationManager::class.java).notify(tag, 0, note.build())
+    }
+
+    /** Where a tapped notification, or one of its buttons, opens the app: read again here, as the app's own places only. */
+    fun opening(intent: Intent): AppModel.Opening? {
+        val open = intent.getStringExtra(OPEN) ?: return null
+        val address = NotifyPayload.addressOf(open, intent.getStringExtra(TASK))
+        return AppModel.Opening(
+            address,
+            conversation = intent.getStringExtra(CONVERSATION)?.takeIf { address == "chat" && NotifyPayload.isConversationId(it) },
+            approval = intent.getStringExtra(APPROVAL)?.takeIf { address == "inbox" && NotifyPayload.isActionId(it) },
+            ship = address.startsWith("task:") && intent.getBooleanExtra(SHIP, false),
+        )
     }
 
     /** After an answer from the notification: a word of how it went, in its place. */

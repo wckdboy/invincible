@@ -66,8 +66,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun take(intent: Intent?) {
         intent ?: return
-        intent.getStringExtra(Notices.OPEN)?.let { open ->
-            app.opening.value = open to intent.getStringExtra(Notices.CONVERSATION)
+        Notices.opening(intent)?.let {
+            app.opening.value = it
             return
         }
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
