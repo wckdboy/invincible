@@ -59,39 +59,14 @@ fun StateChip(state: AgentState?) {
     )
 }
 
-/** How a live dot's wave goes out (the PWA's --ease-out): fast, then slowing. */
-private val WaveOut = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
-
 /**
- * A state's dot, a small orb of its colour lit from above (the PWA's `.dot`; your word, 24 November 2026: everything
- * orbs): something new to you here, a notice's weight, a line's tone. A [live] one is something going on (work under
- * way, an answer being written, where a spinner would have turned): a ring of its light round it, and a wave of it going
- * out every 2.2 seconds while the phone's animations are on. It draws past its size without moving anything round it.
+ * A state's dot: a plain round of its ink beside its word, still (the iPhone's OrbPip, I9; the owner's bar: nothing moving
+ * at rest). The word beside it says what goes on; the dot is never alone. ([live] is kept for the places that pass it: a
+ * dot no longer sends out waves, nor is it lit.)
  */
 @Composable
-fun Dot(color: Color, size: Int = 8, live: Boolean = false) {
-    // (On the orbs' own clock, 30 frames a second, as the Apple app's: a wave needs no more, and the screen's other
-    // frames aren't woken at its refresh rate for it.)
-    val time = if (live && motionAllowed()) frameTime { 30 } else null
-    Canvas(Modifier.size(size.dp)) {
-        val r = this.size.minDimension / 2
-        if (live) {
-            // (The PWA's box-shadow: a ring 3 wide at 22 %, and a glow fading out 8 past it from 45 %.)
-            drawCircle(color.copy(alpha = 0.22f), radius = r + 3.dp.toPx())
-            val glow = r + 9.dp.toPx()
-            drawCircle(Brush.radialGradient(r / glow to color.copy(alpha = 0.45f), 1f to Color.Transparent, center = center, radius = glow), radius = glow)
-            time?.let { now ->
-                val k = WaveOut.transform(((now.doubleValue / 2.2) % 1.0).toFloat())
-                drawCircle(color.copy(alpha = 0.55f * (1 - k)), radius = r * (1 + 1.9f * k))
-            }
-        }
-        // Lit from a third of the way in and up: white-mixed at its light, its colour, shaded at its edge (in OKLab, as
-        // CSS's color-mix is).
-        drawCircle(
-            Brush.radialGradient(0f to lerp(color, Color.White, 0.55f), 0.55f to color, 1f to lerp(color, Color.Black, 0.28f), center = Offset(this.size.width * 0.34f, this.size.height * 0.3f), radius = this.size.width * 0.962f),
-            radius = r,
-        )
-    }
+fun Dot(color: Color, size: Int = 8, @Suppress("UNUSED_PARAMETER") live: Boolean = false) {
+    Canvas(Modifier.size(size.dp)) { drawCircle(color) }
 }
 
 @Composable

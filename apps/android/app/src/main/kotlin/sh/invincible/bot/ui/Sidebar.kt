@@ -172,8 +172,10 @@ fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, colla
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Dot(tone ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), size = 7)
-                Text(fleet?.takeIf { it.nodes > 1 }?.let { "$self · ${it.online}/${it.nodes}" } ?: self, style = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 104.dp))
+                // (A dot only where something is off, and its words beside it: never the colour alone.)
+                val off = fleet?.let { if (it.online == 0) "offline" else if (it.online < it.nodes) "${it.online} of ${it.nodes} online" else null }
+                if (off != null) Dot(tone ?: MaterialTheme.colorScheme.onSurfaceVariant, size = 7)
+                Text(listOfNotNull(self, off).joinToString(" · "), style = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
             }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = places, modifier = Modifier.semantics { contentDescription = "Everything else: places, settings, this device" }) { Icon(MoreIcon, null) }

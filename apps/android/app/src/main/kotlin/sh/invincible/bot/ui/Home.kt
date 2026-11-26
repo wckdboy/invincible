@@ -252,8 +252,10 @@ private fun HomeHead(app: AppModel, glance: Work.Glance, mood: OrbMotion.Mood, o
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Dot(tone ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), size = 7)
-            Text(self, style = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 120.dp))
+            // (A dot only where something is off, and its words beside it: never the colour alone.)
+            val off = fleet?.let { if (it.online == 0) "offline" else if (it.online < it.nodes) "${it.online} of ${it.nodes} online" else null }
+            if (off != null) Dot(tone ?: MaterialTheme.colorScheme.onSurfaceVariant, size = 7)
+            Text(listOfNotNull(self, off).joinToString(" · "), style = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
         }
         IconButton(onClick = places, modifier = Modifier.semantics { contentDescription = "Everything else" }) { Icon(MoreIcon, null) }
     }
