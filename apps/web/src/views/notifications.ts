@@ -1,7 +1,7 @@
 import { NOTIFY_DEFAULTS, NOTIFY_KIND_INFO, NOTIFY_KINDS, NOTIFY_PER_DAY, type NotifyKind, type NotifyPrefs, type NotifyView } from "@invincible/core/notify";
 import { type Api, isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
-import { clockProblem, digestLine, isIos, keyBytes, lostLine, perDayProblem, PUSH_STATE_TEXT, type PushEnv, type PushState, pushState, pushSync, quietLine, reachCard, reachDismissed, sameKey, todayLine, toTakeDown, WHAT_IS_SENT } from "../lib/push.ts";
+import { activitiesLine, clockProblem, digestLine, isIos, keyBytes, lostLine, perDayProblem, PUSH_STATE_TEXT, type PushEnv, type PushState, pushState, pushSync, quietLine, reachCard, reachDismissed, sameKey, todayLine, toTakeDown, WHAT_IS_SENT } from "../lib/push.ts";
 import { relativeTime } from "../lib/time.ts";
 import { putReachAway, reachPutAway } from "../prefs.ts";
 import { busy, button, callout, list, listRow, note as noteLine, section, switchControl } from "../ui/controls.ts";
@@ -361,6 +361,8 @@ export function notificationsSection(ctx: Ctx, scope: Scope): HTMLElement | null
             "div",
             { class: "stack tight" },
             h("div", { class: "label" }, "Devices it can reach"),
+            // (Its tasks' proof on an iPhone's Lock Screen, where it keeps any up: their Live Activities.)
+            activitiesLine(view) ? noteLine(activitiesLine(view)) : null,
             list(
               view.devices.map((d) =>
                 listRow({

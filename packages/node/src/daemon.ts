@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { canonical, decodeHlc, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
 import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, windowsOf } from "@invincible/models";
 // The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
+import { activityOf } from "../../../apps/web/src/lib/live-activity.ts";
 import { costWords, factsOfRecord, verdictOf } from "../../../apps/web/src/lib/steps.ts";
 import { taskActions } from "../../../apps/web/src/lib/task-card.ts";
 import { UsageStore } from "./usage.ts";
@@ -13,7 +14,7 @@ import { gmailNatives, outlookNatives } from "./mail.ts";
 import { PairingHost, SyncEngine } from "@invincible/link";
 import { adoptChains, LedgerStore, Vault } from "@invincible/ledger";
 import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
-import type { ArgValue, HostLoad } from "@invincible/core";
+import type { ArgValue, HostLoad, TeamTrailEntry } from "@invincible/core";
 import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
 import { Governor } from "./compute/governor.ts";
@@ -643,6 +644,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       // An iPhone's can't be sent at all while the vault holds no Apple push key (looked up, never opened).
       blocked: (target) => (appleTarget(target.endpoint) && !(vault.unlocked() && vault.info(APPLE_PUSH_SECRET)?.origin === APPLE_PUSH.production) ? "this node has no Apple push key: add it with `invincible notify apple-key`" : null),
       send: (target, payload, delivery, signal) => (collectTarget(target.endpoint) ? collected : appleTarget(target.endpoint) ? applePush : webPush).send(target, payload, delivery, signal),
+      // The iPhone's Live Activities: Apple's alone.
+      sendActivity: (target, state, event, signal) => applePush.sendActivity(target, state, event, signal),
       close: () => applePush.close(),
     },
     allowed: [...(env.INVINCIBLE_PUSH_HOSTS?.split(",") ?? []), ...(opts.push?.allow ?? [])],
@@ -665,6 +668,20 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       turns,
       chats,
       runs,
+      // A task on an iPhone's Live Activity: from its record and its whole trail (as many pages as it keeps), as the app
+      // says it to itself while it's in front.
+      activity: (id) => {
+        const task = team.store.task(id);
+        if (!task) return null;
+        const entries: TeamTrailEntry[] = [];
+        for (let after = 0, more = true; more && entries.length < 5_000; ) {
+          const page = team.store.trail(id, after);
+          entries.push(...page.entries);
+          more = page.more && page.entries.length > 0;
+          after = page.entries.at(-1)?.n ?? after;
+        }
+        return activityOf(task, entries, Date.now());
+      },
       // Agents' tasks, each said once it ends by its verdict and cost (the apps' words), with whether it can be shipped.
       tasks: {
         version: () => team.store.version(),

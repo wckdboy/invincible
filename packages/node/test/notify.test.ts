@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, GENERIC_NOTIFICATION, notifyDay, type NotifyPayload, type RunView, tagOf, turnItem } from "@invincible/core";
+import { type ActivityState, b64u, GENERIC_NOTIFICATION, notifyDay, type NotifyPayload, type RunView, tagOf, turnItem } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
 import { COLLECT_SERVICE, CollectSender, collectTarget } from "../src/collect-send.ts";
 import { type NotifyOptions, NotifyService, type NotifySources } from "../src/notify.ts";
@@ -12,9 +12,10 @@ import type { PushDelivery, PushOutcome, PushSender, PushTarget } from "../src/p
  * it ended. The whole path over HTTP, with a stand-in push service, is notify.e2e.test.ts.
  */
 
-function harness(over: { devices?: { id: string; name: string; kind: "node" | "client"; scopes: string[] }[]; answer?: (target: PushTarget) => PushOutcome | undefined; blocked?: (target: PushTarget) => string | null; sources?: Partial<NotifySources>; tickMs?: number | false } = {}) {
+function harness(over: { devices?: { id: string; name: string; kind: "node" | "client"; scopes: string[] }[]; answer?: (target: PushTarget) => PushOutcome | undefined; blocked?: (target: PushTarget) => string | null; activityAnswer?: () => PushOutcome | undefined; sources?: Partial<NotifySources>; tickMs?: number | false } = {}) {
   let now = Date.UTC(2026, 10, 12, 12, 0, 0);
   const sent: { to: string; payload: NotifyPayload }[] = [];
+  const activities: { token: string; environment: string; state: ActivityState; event: "update" | "end" }[] = [];
   const devices = over.devices ?? [{ id: "c_phone", name: "phone", kind: "client" as const, scopes: ["mind:read", "chat", "vault:read"] }];
   const runs: RunView[] = [];
   const listeners: (() => void)[] = [];
@@ -30,6 +31,10 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
       // A device that collects is kept for on the node, as the daemon's own sender does it.
       if (collectTarget(target.endpoint)) return new CollectSender({ db, now: () => now }).send(target, payload, delivery);
       return over.answer?.(target) ?? { ok: true, gone: false, status: 201, error: null, attempts: 1 };
+    },
+    sendActivity: async (target: { token: string; environment: string }, state: ActivityState, event: "update" | "end") => {
+      activities.push({ ...target, state, event });
+      return over.activityAnswer?.() ?? { ok: true, gone: false, status: 200, error: null, attempts: 1 };
     },
   } as unknown as PushSender;
   const sources: NotifySources = {
@@ -57,6 +62,7 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
     service,
     db,
     sent,
+    activities,
     run,
     ledger,
     advance: (ms: number) => (now += ms),
@@ -121,6 +127,91 @@ describe("an agent's task", () => {
     h.advance(31 * 60_000);
     await h.look();
     expect(h.sent.map((s) => s.payload.title)).toEqual(["Your agent's task: Failed · gate 1", "Your agent's task: Proven"]);
+  });
+});
+
+describe("a task's Live Activity, kept up from here while the app isn't in front", () => {
+  const TOKEN = "cd".repeat(80);
+  const TASK = "task-abcdefghijkl";
+  const working = (gates: ActivityState["gates"]): ActivityState => ({ phase: "running", gates, review: "waits", verdict: null, gate: null, at: 0 });
+
+  test("told how its task stands each time that changes, and nothing while it doesn't", async () => {
+    let version = 1;
+    let state: ActivityState | null = working(["waiting", "waiting"]);
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => [] }, activity: () => state } });
+    expect(h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "development" })).toEqual({ kept: true });
+    await h.service.lookAtActivities();
+    expect(h.activities.map((a) => [a.event, a.state.gates])).toEqual([["update", ["waiting", "waiting"]]]);
+    expect(h.activities[0]).toMatchObject({ token: TOKEN, environment: "development", state: { at: h.now() } });
+    // The team didn't move: nothing asked, nothing said.
+    await h.service.lookAtActivities();
+    version = 2;
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(1);
+    // It moved, and the task with it.
+    state = working(["passed", "running"]);
+    version = 3;
+    await h.service.lookAtActivities();
+    expect(h.activities.map((a) => a.state.gates)).toEqual([["waiting", "waiting"], ["passed", "running"]]);
+  });
+
+  test("its end is told once, with its verdict, and then it's forgotten", async () => {
+    let version = 1;
+    let state: ActivityState | null = working(["passed"]);
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => [] }, activity: () => state } });
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "production" });
+    await h.service.lookAtActivities();
+    state = { phase: "ended", gates: ["passed"], review: "passed", verdict: "proven", gate: null, at: 0 };
+    version = 2;
+    await h.service.lookAtActivities();
+    expect(h.activities.map((a) => a.event)).toEqual(["update", "end"]);
+    expect(h.db.activities()).toEqual([]);
+    version = 3;
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(2);
+  });
+
+  test("forgotten when the app says so, when Apple no longer knows it, when its task is gone, or its device is", async () => {
+    let state: ActivityState | null = working(["waiting"]);
+    let version = 1;
+    const answers: PushOutcome[] = [];
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => [] }, activity: () => state }, activityAnswer: () => answers.shift() });
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "development" });
+    expect(h.service.activity("c_phone", { task: TASK, token: null, environment: "development" })).toEqual({ kept: false });
+    expect(h.db.activities()).toEqual([]);
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "development" });
+    answers.push({ ok: false, gone: true, status: 410, error: "gone", attempts: 1 });
+    await h.service.lookAtActivities();
+    expect(h.db.activities()).toEqual([]);
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "development" });
+    state = null;
+    version = 2;
+    await h.service.lookAtActivities();
+    expect(h.db.activities()).toEqual([]);
+    // A device no longer paired: its activity is forgotten, never told.
+    state = working(["waiting"]);
+    h.db.putActivity("c_gone", TASK, TOKEN, "development");
+    version = 3;
+    const before = h.activities.length;
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(before);
+    expect(h.db.activities()).toEqual([]);
+  });
+
+  test("a failed send is tried again when the team next moves; one older than Apple keeps it is forgotten", async () => {
+    let version = 1;
+    const answers: PushOutcome[] = [{ ok: false, gone: false, status: 500, error: "busy", attempts: 3 }];
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => [] }, activity: () => working(["waiting"]) }, activityAnswer: () => answers.shift() });
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "development" });
+    await h.service.lookAtActivities();
+    version = 2;
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(2);
+    h.advance(13 * 60 * 60_000);
+    version = 3;
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(2);
+    expect(h.db.activities()).toEqual([]);
   });
 });
 

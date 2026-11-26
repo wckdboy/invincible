@@ -23,7 +23,7 @@ import { type StopReason, TURN_ID } from "./turns.ts";
 import { type ArchiveContextEntry, ArchiveBudgetInput, ArchiveDeleteInput, ArchiveId, ArchiveReindexInput, ArchiveSearchInput, NoteIdeaInput } from "./archive.ts";
 import { RunEvidenceInput, SkillApproveInput, SkillId, SkillLockInput, SkillRetireInput, SkillsBudgetInput, SkillWriteInput } from "./skills-input.ts";
 import { QUESTION_ID, QUESTION_LIMITS } from "./questions.ts";
-import { ApplePushInput, ApplePushKeyInput, NotifyDeviceRef, NotifyPrefsInput, PushSubscriptionInput } from "./notify-input.ts";
+import { ApplePushInput, ApplePushKeyInput, LiveActivityInput, NotifyDeviceRef, NotifyPrefsInput, PushSubscriptionInput } from "./notify-input.ts";
 
 /*
  * The node HTTP API contract, shared by the daemon, the CLI and the PWA.
@@ -1455,6 +1455,8 @@ export const routes = {
   pushSubscribe: { method: "POST", path: "/api/notify/subscribe", scope: "mind:read", input: PushSubscriptionInput },
   /** The iPhone app turns notifications on, for itself: its Apple push token, kept as that device's (off and test: the two below). */
   applePushSubscribe: { method: "POST", path: "/api/notify/apple", scope: "mind:read", input: ApplePushInput },
+  /** One of the iPhone app's Live Activities (live-activity.ts): its task and its own push token, kept as that device's while the task goes, so the node says how it stands while the app isn't in front; a null token forgets it. Only a paired device, for itself. */
+  notifyActivity: { method: "POST", path: "/api/notify/activity", scope: "mind:read", input: LiveActivityInput },
   /** The Android app turns notifications on, for itself: no push service is called; the node keeps each one for it, and the app collects them (the next). */
   collectSubscribe: { method: "POST", path: "/api/notify/collect/on", scope: "mind:read", input: z.strictObject({}) },
   /** What the node kept for this device (one that collects its notifications: all of them, or what its push service refused while it is told through one), handed over once and forgotten; `on` false when its notifications are off. */

@@ -15,6 +15,7 @@
     "./identity": "./src/identity.ts",
     "./interventions": "./src/interventions.ts",
     "./live": "./src/live.ts",
+    "./live-activity": "./src/live-activity.ts",
     "./notify": "./src/notify.ts",
     "./notify-payload": "./src/notify-payload.ts",
     "./pairing": "./src/pairing.ts",

@@ -846,6 +846,9 @@ export interface NotifyView {
   /** It's quiet hours now; how many things wait for them to end. */
   quiet: boolean;
   held: number;
+  /** How many tasks' Live Activities it keeps up on your iPhones, through Apple's push service (live-activity.ts; absent
+   * from an older node). */
+  activities?: number;
 }
 
 /* ---------- a native app's own word: re-subscribe, or say how ---------- */

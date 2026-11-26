@@ -170,6 +170,12 @@ export function toTakeDown(shown: readonly { tag: string }[], withdrawn: readonl
   return [...new Set(shown.map((n) => n.tag).filter((tag) => gone.has(tag)))];
 }
 
+/** The tasks whose proof it keeps up on an iPhone's Lock Screen (its Live Activities): said when there are any ("" when none, or the node doesn't say). */
+export function activitiesLine(view: Pick<NotifyView, "activities">): string {
+  const n = view.activities ?? 0;
+  return n > 0 ? `${n} ${n === 1 ? "task's" : "tasks'"} proof on an iPhone's Lock Screen, kept up from here.` : "";
+}
+
 /** Today's count against the limit, and what's held, in a line. */
 export function todayLine(view: Pick<NotifyView, "today" | "quiet" | "held">): string {
   const sent = view.today.count === 0 ? "Nothing sent today (a test doesn't count)" : `${view.today.count} of ${view.today.limit} sent today`;

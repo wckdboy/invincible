@@ -4335,6 +4335,11 @@ export function createApp(ctx: AppContext) {
       if (p.kind !== "client") throw new HttpError(403, "only a paired device turns notifications on, for itself");
       return notifyErrors(async () => ({ device: ctx.notify.subscribeApple(p.device, input) }));
     },
+    notifyActivity: (input, p) => {
+      // A Live Activity is one app install's, its token handed over by that app: never a terminal's, an agent's or a node's.
+      if (p.kind !== "client") throw new HttpError(403, "only a paired device keeps a Live Activity, its own");
+      return ctx.notify.activity(p.device, input);
+    },
     collectSubscribe: (_input, p) => {
       // The Android app's own act, for itself: never a terminal's, an agent's or a node's.
       if (p.kind !== "client") throw new HttpError(403, "only a paired device turns notifications on, for itself");

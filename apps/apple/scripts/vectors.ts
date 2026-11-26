@@ -33,6 +33,7 @@ import { connectorState } from "../../web/src/lib/connector-state.ts";
 import { noticeFrom } from "../../web/src/lib/notices.ts";
 import { PRESETS, SIGN_INS } from "../../../packages/models/src/providers.ts";
 import { againGoal, timeline, timelineTasks } from "../../web/src/lib/timeline.ts";
+import { activityLine, activityOf, activityShort } from "../../web/src/lib/live-activity.ts";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, taskActions, taskBadge, taskEnd } from "../../web/src/lib/task-card.ts";
 import { agentModelChoices, agentModelsLine, agentRoleLine, agentRoles, agentWorksOn, removalPlan, teamSpeaker, agentId, toggleAgentModel } from "../../web/src/lib/team.ts";
 import { budgetFrom } from "../../web/src/lib/give.ts";
@@ -1303,6 +1304,29 @@ const mark = { rects: MARK_RECTS, polygon: MARK_POLYGON, box: MARK_BOX };
 // ---- the live stream's timing (core's live.ts, the web app's lib/live-link.ts), which the app's LiveLink keeps -------
 const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS };
 
+// ---- a task on its Live Activity: its state, from the task and its trail, and its words (lib/live-activity.ts) ----------
+const activityTrail = (...texts: string[]) => texts.map((text, i) => ({ n: i + 1, at: NOW - 600_000 + i * 10_000, text }));
+const ACTIVITY_GATES = ["bun test packages/link", "bun run typecheck"];
+const activityBefore = "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck";
+const activityCases: { name: string; task: { status: core.TeamTask["status"]; verified: boolean; error: string | null; gates: string[]; record?: core.TeamTask["record"] }; entries: ReturnType<typeof activityTrail> }[] = [
+  { name: "queued", task: { status: "queued", verified: false, error: null, gates: ACTIVITY_GATES }, entries: [] },
+  { name: "at work, before its gates", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go", activityBefore, "Running · bun test") },
+  { name: "its first gate passed, the second running", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link\n14 pass") },
+  { name: "under review", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link", "Gate 2/2 · exit 0 · bun run typecheck") },
+  { name: "sent back, at work again", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link", "Gate 2/2 · exit 0 · bun run typecheck", "Review · revise\nNot wired.", "Running · bun test") },
+  { name: "proven", task: { status: "done", verified: true, error: null, gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link", "Gate 2/2 · exit 0 · bun run typecheck", "Review · pass\nMatches the brief.") },
+  { name: "reviewed, not proven", task: { status: "done", verified: true, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Gates before the work · 1. exit 0 · bun test packages/link\n2. exit 0 · bun run typecheck", "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link", "Gate 2/2 · exit 0 · bun run typecheck", "Review · pass\nok") },
+  { name: "a gate failed", task: { status: "failed", verified: false, error: "unverified", gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link", "Gate 2/2 · exit 1 · bun run typecheck") },
+  { name: "gave up", task: { status: "failed", verified: false, error: "gave-up", gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go") },
+  { name: "stopped", task: { status: "stopped", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go") },
+  { name: "interrupted", task: { status: "interrupted", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go") },
+  { name: "proven, from its record alone", task: { status: "done", verified: true, error: null, gates: ACTIVITY_GATES, record: { startedAt: NOW - 600_000, endedAt: NOW, ended: "done", spent: [], proof: { before: [1, 0], after: [0, 0], review: "pass", sameModel: false } } as core.TeamTask["record"] }, entries: [] },
+];
+const liveActivities = activityCases.map((c) => {
+  const state = activityOf({ ...c.task, record: c.task.record }, c.entries, NOW);
+  return { ...c, at: NOW, state, line: activityLine(state), short: activityShort(state) };
+});
+
 const vectors = {
   about: "Made by apps/apple/scripts/vectors.ts from packages/core (and the PWA's roster). Every key here is a fake made for these tests.",
   auth: { domain: "invincible-req/v1", headers: core.AUTH, maxSkewMs: core.MAX_REQUEST_SKEW_MS },
@@ -1337,6 +1361,7 @@ const vectors = {
   mark,
   live,
   verdicts,
+  liveActivities,
 };
 const text = `${JSON.stringify(vectors, null, 2)}\n`;
 if (Bun.argv.includes("--check")) {

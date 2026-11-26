@@ -132,11 +132,35 @@ export class NotifyStore {
       CREATE TABLE IF NOT EXISTS asks (key TEXT PRIMARY KEY, told_at INTEGER NOT NULL, expires INTEGER, reminded INTEGER NOT NULL DEFAULT 0, reminded_at INTEGER);
       CREATE TABLE IF NOT EXISTS digest (key TEXT PRIMARY KEY, topic TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS withdrawn (tag TEXT PRIMARY KEY, at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS collectors (device TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS collectors (device TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS activities (device TEXT NOT NULL, task TEXT NOT NULL, token TEXT NOT NULL, environment TEXT NOT NULL, at INTEGER NOT NULL, said TEXT, PRIMARY KEY (device, task));`);
   }
 
   close(): void {
     this.db.close();
+  }
+
+  /* ---------- the iPhone's Live Activities (core's live-activity.ts) ---------- */
+
+  /** One of a device's Live Activities, for its task: kept (anew, said nothing yet), replacing that task's last. */
+  putActivity(device: string, task: string, token: string, environment: "development" | "production"): void {
+    this.db
+      .query(`INSERT INTO activities (device, task, token, environment, at, said) VALUES (?, ?, ?, ?, ?, NULL)
+              ON CONFLICT (device, task) DO UPDATE SET token = excluded.token, environment = excluded.environment, at = excluded.at, said = NULL`)
+      .run(device, task, token, environment, this.now());
+  }
+
+  dropActivity(device: string, task: string): void {
+    this.db.query("DELETE FROM activities WHERE device = ? AND task = ?").run(device, task);
+  }
+
+  /** What it last told an activity (its state without its time), so it says nothing while that doesn't change. */
+  saidActivity(device: string, task: string, said: string): void {
+    this.db.query("UPDATE activities SET said = ? WHERE device = ? AND task = ?").run(said, device, task);
+  }
+
+  activities(): { device: string; task: string; token: string; environment: "development" | "production"; at: number; said: string | null }[] {
+    return this.db.query<{ device: string; task: string; token: string; environment: "development" | "production"; at: number; said: string | null }, []>("SELECT device, task, token, environment, at, said FROM activities ORDER BY rowid").all();
   }
 
   /* ---------- subscriptions ---------- */

@@ -31632,5 +31632,524 @@
       },
       "verdict": null
     }
+  ],
+  "liveActivities": [
+    {
+      "name": "queued",
+      "task": {
+        "status": "queued",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [],
+      "at": 1763200000000,
+      "state": {
+        "phase": "queued",
+        "gates": [
+          "waiting",
+          "waiting"
+        ],
+        "review": null,
+        "verdict": null,
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Queued",
+      "short": "Queued"
+    },
+    {
+      "name": "at work, before its gates",
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Plan · go"
+        },
+        {
+          "n": 2,
+          "at": 1763199410000,
+          "text": "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck"
+        },
+        {
+          "n": 3,
+          "at": 1763199420000,
+          "text": "Running · bun test"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "running",
+        "gates": [
+          "waiting",
+          "waiting"
+        ],
+        "review": "waits",
+        "verdict": null,
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Working",
+      "short": "0/2"
+    },
+    {
+      "name": "its first gate passed, the second running",
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck"
+        },
+        {
+          "n": 2,
+          "at": 1763199410000,
+          "text": "Submitted for review · done"
+        },
+        {
+          "n": 3,
+          "at": 1763199420000,
+          "text": "Gate 1/2 · exit 0 · bun test packages/link\n14 pass"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "running",
+        "gates": [
+          "passed",
+          "running"
+        ],
+        "review": "waits",
+        "verdict": null,
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Gate 2 of 2",
+      "short": "1/2"
+    },
+    {
+      "name": "under review",
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck"
+        },
+        {
+          "n": 2,
+          "at": 1763199410000,
+          "text": "Submitted for review · done"
+        },
+        {
+          "n": 3,
+          "at": 1763199420000,
+          "text": "Gate 1/2 · exit 0 · bun test packages/link"
+        },
+        {
+          "n": 4,
+          "at": 1763199430000,
+          "text": "Gate 2/2 · exit 0 · bun run typecheck"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "review",
+        "gates": [
+          "passed",
+          "passed"
+        ],
+        "review": "reading",
+        "verdict": null,
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "The reviewer is reading it",
+      "short": "Review"
+    },
+    {
+      "name": "sent back, at work again",
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck"
+        },
+        {
+          "n": 2,
+          "at": 1763199410000,
+          "text": "Submitted for review · done"
+        },
+        {
+          "n": 3,
+          "at": 1763199420000,
+          "text": "Gate 1/2 · exit 0 · bun test packages/link"
+        },
+        {
+          "n": 4,
+          "at": 1763199430000,
+          "text": "Gate 2/2 · exit 0 · bun run typecheck"
+        },
+        {
+          "n": 5,
+          "at": 1763199440000,
+          "text": "Review · revise\nNot wired."
+        },
+        {
+          "n": 6,
+          "at": 1763199450000,
+          "text": "Running · bun test"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "running",
+        "gates": [
+          "passed",
+          "passed"
+        ],
+        "review": "sent-back",
+        "verdict": null,
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Back to the work",
+      "short": "2/2"
+    },
+    {
+      "name": "proven",
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck"
+        },
+        {
+          "n": 2,
+          "at": 1763199410000,
+          "text": "Submitted for review · done"
+        },
+        {
+          "n": 3,
+          "at": 1763199420000,
+          "text": "Gate 1/2 · exit 0 · bun test packages/link"
+        },
+        {
+          "n": 4,
+          "at": 1763199430000,
+          "text": "Gate 2/2 · exit 0 · bun run typecheck"
+        },
+        {
+          "n": 5,
+          "at": 1763199440000,
+          "text": "Review · pass\nMatches the brief."
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "ended",
+        "gates": [
+          "passed",
+          "passed"
+        ],
+        "review": "passed",
+        "verdict": "proven",
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Proven",
+      "short": "Proven"
+    },
+    {
+      "name": "reviewed, not proven",
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Gates before the work · 1. exit 0 · bun test packages/link\n2. exit 0 · bun run typecheck"
+        },
+        {
+          "n": 2,
+          "at": 1763199410000,
+          "text": "Submitted for review · done"
+        },
+        {
+          "n": 3,
+          "at": 1763199420000,
+          "text": "Gate 1/2 · exit 0 · bun test packages/link"
+        },
+        {
+          "n": 4,
+          "at": 1763199430000,
+          "text": "Gate 2/2 · exit 0 · bun run typecheck"
+        },
+        {
+          "n": 5,
+          "at": 1763199440000,
+          "text": "Review · pass\nok"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "ended",
+        "gates": [
+          "passed",
+          "passed"
+        ],
+        "review": "passed",
+        "verdict": "reviewed",
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Reviewed, not proven",
+      "short": "Reviewed"
+    },
+    {
+      "name": "a gate failed",
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "unverified",
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck"
+        },
+        {
+          "n": 2,
+          "at": 1763199410000,
+          "text": "Submitted for review · done"
+        },
+        {
+          "n": 3,
+          "at": 1763199420000,
+          "text": "Gate 1/2 · exit 0 · bun test packages/link"
+        },
+        {
+          "n": 4,
+          "at": 1763199430000,
+          "text": "Gate 2/2 · exit 1 · bun run typecheck"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "ended",
+        "gates": [
+          "passed",
+          "failed"
+        ],
+        "review": null,
+        "verdict": "failed",
+        "gate": 2,
+        "at": 1763200000000
+      },
+      "line": "Failed · gate 2",
+      "short": "Failed"
+    },
+    {
+      "name": "gave up",
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "gave-up",
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Plan · go"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "ended",
+        "gates": [
+          "waiting",
+          "waiting"
+        ],
+        "review": null,
+        "verdict": "gave-up",
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Gave up",
+      "short": "Gave up"
+    },
+    {
+      "name": "stopped",
+      "task": {
+        "status": "stopped",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Plan · go"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "ended",
+        "gates": [
+          "waiting",
+          "waiting"
+        ],
+        "review": null,
+        "verdict": "stopped",
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Stopped",
+      "short": "Stopped"
+    },
+    {
+      "name": "interrupted",
+      "task": {
+        "status": "interrupted",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Plan · go"
+        }
+      ],
+      "at": 1763200000000,
+      "state": {
+        "phase": "interrupted",
+        "gates": [
+          "waiting",
+          "waiting"
+        ],
+        "review": null,
+        "verdict": null,
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Interrupted: it needs you",
+      "short": "Needs you"
+    },
+    {
+      "name": "proven, from its record alone",
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ],
+        "record": {
+          "startedAt": 1763199400000,
+          "endedAt": 1763200000000,
+          "ended": "done",
+          "spent": [],
+          "proof": {
+            "before": [
+              1,
+              0
+            ],
+            "after": [
+              0,
+              0
+            ],
+            "review": "pass",
+            "sameModel": false
+          }
+        }
+      },
+      "entries": [],
+      "at": 1763200000000,
+      "state": {
+        "phase": "ended",
+        "gates": [
+          "passed",
+          "passed"
+        ],
+        "review": "passed",
+        "verdict": "proven",
+        "gate": null,
+        "at": 1763200000000
+      },
+      "line": "Proven",
+      "short": "Proven"
+    }
   ]
 }

@@ -63,6 +63,7 @@ export function statusLines(view: NotifyView): string[] {
   if (view.zone && view.zone !== view.prefs.quiet.tz) out.push(dim(`  (your devices say they're in ${view.zone}; the setting's ${view.prefs.quiet.tz} is used when none has said)`));
   out.push(`${bold("The digest")}  ${digestWords(view.prefs, view.zone)}`);
   out.push(`${bold("The day's limit")}  ${view.today.count} of ${view.today.limit} sent today (${view.today.day})`);
+  if (view.activities) out.push(`${bold("Live Activities")}  ${view.activities} ${view.activities === 1 ? "task's" : "tasks'"} proof on an iPhone's Lock Screen, kept up from here`);
   for (const sent of view.today.sent) out.push(`  ${time(sent.at)}  ${sent.kind.padEnd(10)} ${dim(`to ${sent.devices.join(", ")}${sent.ok ? "" : " (didn't arrive)"}`)}`);
   return out;
 }

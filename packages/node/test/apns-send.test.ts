@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import http2 from "node:http2";
 import { fromB64u, type NotifyPayload, utf8 } from "@invincible/core";
-import { APPLE_TOKEN_MS, appleEndpoint, type ApplePushKey, ApplePushSender, appleTarget, readApplePushKey, storedApplePushKey, applePayload } from "../src/apns-send.ts";
+import type { ActivityState } from "@invincible/core";
+import { activityPayload, APPLE_TOKEN_MS, appleEndpoint, type ApplePushKey, ApplePushSender, appleTarget, readApplePushKey, storedApplePushKey, applePayload } from "../src/apns-send.ts";
 
 /*
  * Sending to the owner's iPhone app through a stand-in for Apple's push service: an HTTP/2 server on loopback that keeps
@@ -183,6 +184,55 @@ describe("a notification to the iPhone app", () => {
     expect(await apple.send({ endpoint: "https://web.push.apple.com/x", p256dh: "", auth: "" }, PAYLOAD, DELIVERY)).toMatchObject({ ok: false, gone: true });
     expect(seen).toHaveLength(0);
     apple.close();
+  });
+});
+
+describe("a task's Live Activity, kept up by the node", () => {
+  const ACTIVITY = "cd".repeat(80);
+  const running: ActivityState = { phase: "running", gates: ["passed", "running"], review: "waits", verdict: null, gate: null, at: 1_800_000_000_000 };
+  const ended: ActivityState = { phase: "ended", gates: ["passed", "failed"], review: null, verdict: "failed", gate: 2, at: 1_800_000_000_000 };
+
+  test("an update goes to the activity's own token, as a liveactivity push on its own topic, quietly", async () => {
+    const { sender: apple } = sender();
+    const outcome = await apple.sendActivity({ token: ACTIVITY, environment: "development" }, running, "update");
+    expect(outcome).toEqual({ ok: true, gone: false, status: 200, error: null, attempts: 1 });
+    const [request] = seen;
+    expect(request!.headers[":path"]).toBe(`/3/device/${ACTIVITY}`);
+    expect(request!.headers["apns-topic"]).toBe("org.example.primary.push-type.liveactivity");
+    expect(request!.headers["apns-push-type"]).toBe("liveactivity");
+    expect(request!.headers["apns-priority"]).toBe("5");
+    expect(request!.headers["apns-expiration"]).toBe(String(1_800_000_000 + 3600));
+    expect(await signedByKey(String(request!.headers.authorization).replace(/^bearer /, ""))).toBe(true);
+    // Its state and nothing else: no alert, no sound, no title, nothing of ours beside it.
+    expect(request!.body).toEqual({ aps: { timestamp: 1_800_000_000, event: "update", "content-state": running, "stale-date": 1_800_000_000 + 3600 } });
+    apple.close();
+  });
+
+  test("its end says the verdict at once, and stays a quarter of an hour", async () => {
+    const { sender: apple } = sender();
+    await apple.sendActivity({ token: ACTIVITY, environment: "production" }, ended, "end");
+    expect(seen[0]!.headers["apns-priority"]).toBe("10");
+    expect(seen[0]!.body).toEqual({ aps: { timestamp: 1_800_000_000, event: "end", "content-state": ended, "dismissal-date": 1_800_000_000 + 15 * 60 } });
+    apple.close();
+  });
+
+  test("a state that doesn't read strictly never leaves: nothing is sent", async () => {
+    const { sender: apple } = sender();
+    const outcome = await apple.sendActivity({ token: ACTIVITY, environment: "development" }, { ...running, title: "Fix the importer" } as unknown as ActivityState, "update");
+    expect(outcome).toMatchObject({ ok: false, gone: false, attempts: 0 });
+    expect(seen).toEqual([]);
+    expect(activityPayload({ ...running, verdict: "proven" }, "update", 1_800_000_000_000)).toBeNull();
+    apple.close();
+  });
+
+  test("an activity Apple no longer knows is gone; with no key, nothing is sent", async () => {
+    const { sender: apple } = sender();
+    answers = [{ status: 410, reason: "Unregistered" }];
+    expect(await apple.sendActivity({ token: ACTIVITY, environment: "development" }, running, "update")).toMatchObject({ ok: false, gone: true, status: 410 });
+    const { sender: keyless } = sender({ key: null });
+    expect(await keyless.sendActivity({ token: ACTIVITY, environment: "development" }, running, "update")).toMatchObject({ ok: false, gone: false, attempts: 0 });
+    apple.close();
+    keyless.close();
   });
 });
 

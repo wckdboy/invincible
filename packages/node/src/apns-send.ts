@@ -1,5 +1,5 @@
 import http2 from "node:http2";
-import { b64u, findSecrets, GENERIC_NOTIFICATION, isQuietKind, type NotifyPayload, readNotifyPayload, sha256Bytes, utf8 } from "@invincible/core";
+import { ACTIVITY_LINGER_MS, type ActivityState, b64u, findSecrets, GENERIC_NOTIFICATION, isQuietKind, type NotifyPayload, readActivityState, readNotifyPayload, sha256Bytes, utf8 } from "@invincible/core";
 import type { PushDelivery, PushOutcome, PushTarget } from "./push-send.ts";
 
 /*
@@ -84,6 +84,21 @@ export function applePayload(payload: NotifyPayload, delivery?: Pick<PushDeliver
     aps: { alert: { title: payload.title, body: payload.body }, ...(quiet ? {} : { sound: "default" }), "interruption-level": quiet ? "passive" : "active", "thread-id": payload.kind, ...(category ? { category } : {}) },
     invincible: { v: 1, kind: payload.kind, open: payload.open, tag: payload.tag, ...(payload.conversation ? { conversation: payload.conversation } : {}), ...(payload.task ? { task: payload.task, ...(payload.ship ? { ship: true } : {}) } : {}), ...(payload.action ? { action: payload.action } : {}) },
   });
+}
+
+/** How long a Live Activity's update is worth delivering, and when the Lock Screen may call it stale: an hour. */
+export const ACTIVITY_FRESH_S = 3600;
+
+/**
+ * Apple's `liveactivity` payload for a task's Live Activity (core's live-activity.ts): its state as the `content-state`
+ * and nothing else (no alert, no sound, no words of ours), read strictly first; null when it doesn't read, and then
+ * nothing goes. An update may go stale after an hour; an end stays on the Lock Screen a quarter of an hour.
+ */
+export function activityPayload(state: ActivityState, event: "update" | "end", now: number): string | null {
+  const checked = readActivityState(state);
+  if (!checked) return null;
+  const at = Math.floor(now / 1000);
+  return JSON.stringify({ aps: { timestamp: at, event, "content-state": checked, ...(event === "end" ? { "dismissal-date": at + ACTIVITY_LINGER_MS / 1000 } : { "stale-date": at + ACTIVITY_FRESH_S }) } });
 }
 
 export interface ApplePushOptions {
@@ -209,6 +224,35 @@ export class ApplePushSender {
       if (!second.outcome.gone) return first.outcome;
     }
     return first.outcome;
+  }
+
+  /**
+   * A task's Live Activity told how it stands, to the activity's own token, on its build's own service (the app said
+   * which): a `liveactivity` push on the app's topic for them, an update quietly (priority 5), its end at once (10).
+   */
+  async sendActivity(target: { token: string; environment: ApplePushEnvironment }, state: ActivityState, event: "update" | "end", signal?: AbortSignal): Promise<PushOutcome> {
+    if (!/^[0-9a-f]{64,512}$/.test(target.token)) return { ok: false, gone: true, status: null, error: "this isn't a Live Activity's push token", attempts: 0 };
+    const key = this.o.key();
+    if (!key) return { ok: false, gone: false, status: null, error: "this node has no Apple push key: add it with `invincible notify apple-key`", attempts: 0 };
+    const body = activityPayload(state, event, this.now());
+    if (!body) return { ok: false, gone: false, status: null, error: "a Live Activity's state that doesn't read strictly: nothing was sent", attempts: 0 };
+    let authorization: string;
+    try {
+      authorization = `bearer ${await this.authorization(key)}`;
+    } catch (error) {
+      return { ok: false, gone: false, status: null, error: `this node's Apple push key can't sign: ${String((error as Error).message).slice(0, 120)}`, attempts: 0 };
+    }
+    const headers: http2.OutgoingHttpHeaders = {
+      ":method": "POST",
+      ":path": `/3/device/${target.token}`,
+      authorization,
+      "apns-topic": `${key.topic}.push-type.liveactivity`,
+      "apns-push-type": "liveactivity",
+      "apns-priority": event === "end" ? "10" : "5",
+      "apns-expiration": String(Math.floor(this.now() / 1000) + ACTIVITY_FRESH_S),
+      "content-type": "application/json",
+    };
+    return (await this.attempt(target.environment, headers, body, signal)).outcome;
   }
 
   /** One message to one of Apple's two services, tried again when it's busy or failing; with Apple's reason when it said one. */

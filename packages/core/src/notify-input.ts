@@ -36,6 +36,19 @@ export const ApplePushInput = z.strictObject({
 export type ApplePushInput = z.infer<typeof ApplePushInput>;
 
 /**
+ * One of the iPhone app's Live Activities (live-activity.ts): the task it shows, its own push token (hex, as ActivityKit
+ * gives it; Apple's are 80 bytes or more, and may lengthen), and which of Apple's two services its build answers to; a
+ * null token forgets it (the activity ended, or you dismissed it). Never a title: the app gave its activity that on the
+ * device.
+ */
+export const LiveActivityInput = z.strictObject({
+  task: z.string().regex(/^task-[a-z0-9_-]{12}$/, "an agent's task, by id"),
+  token: z.string().regex(/^[0-9a-f]{64,512}$/, "a Live Activity's push token, in lowercase hex").refine((token) => token.length % 2 === 0, "whole bytes").nullable(),
+  environment: z.enum(["development", "production"]),
+});
+export type LiveActivityInput = z.infer<typeof LiveActivityInput>;
+
+/**
  * The owner's Apple push key (Apple Developer: Keys, with Apple Push Notifications service), as the node keeps it: the
  * .p8 file's text, the key's ID, their Team ID and the app it notifies (its bundle id). Sealed in the vault, pinned to
  * Apple's push service; given on stdin (`invincible notify apple-key`), never on a command line.

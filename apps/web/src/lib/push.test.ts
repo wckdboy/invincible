@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { NOTIFY_DEFAULTS } from "@invincible/core/notify";
-import { clockProblem, digestLine, isIos, keyBytes, pairingNote, perDayProblem, PUSH_STATE_TEXT, type PushEnv, pushState, pushSync, quietLine, REACH_DISMISS_MS, reachCard, reachDismissed, readOpenMessage, sameKey, todayLine, toTakeDown } from "./push.ts";
+import { activitiesLine, clockProblem, digestLine, isIos, keyBytes, pairingNote, perDayProblem, PUSH_STATE_TEXT, type PushEnv, pushState, pushSync, quietLine, REACH_DISMISS_MS, reachCard, reachDismissed, readOpenMessage, sameKey, todayLine, toTakeDown } from "./push.ts";
 
 /* Notifications on this device: the state it's in, and the checks the Settings fields make. */
 
@@ -147,6 +147,13 @@ describe("the settings' own checks, before anything is sent", () => {
     expect(todayLine({ today: { day: "2026-11-12", sent: [], count: 0, limit: 12 }, quiet: false, held: 0 })).toBe("Nothing sent today (a test doesn't count).");
     expect(todayLine({ today: { day: "2026-11-12", sent: [], count: 3, limit: 12 }, quiet: true, held: 2 })).toBe("3 of 12 sent today; 2 things wait for quiet hours to end.");
     expect(todayLine({ today: { day: "2026-11-12", sent: [], count: 3, limit: 12 }, quiet: true, held: 1 })).toBe("3 of 12 sent today; 1 thing waits for quiet hours to end.");
+  });
+
+  test("the tasks it keeps up on an iPhone's Lock Screen: said when there are any, from a node that says", () => {
+    expect(activitiesLine({ activities: 1 })).toBe("1 task's proof on an iPhone's Lock Screen, kept up from here.");
+    expect(activitiesLine({ activities: 3 })).toBe("3 tasks' proof on an iPhone's Lock Screen, kept up from here.");
+    expect(activitiesLine({ activities: 0 })).toBe("");
+    expect(activitiesLine({})).toBe("");
   });
 });
 

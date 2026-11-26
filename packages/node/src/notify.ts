@@ -1,4 +1,7 @@
 import {
+  ACTIVITY_KEEP_MS,
+  type ActivityState,
+  type LiveActivityInput,
   actionItem,
   questionItem,
   type ApplePushInput,
@@ -98,6 +101,9 @@ export interface NotifySources {
   /** The agents' tasks, each with its verdict and cost in words once it has ended (taskItem's), read only when the team
    * has changed since (`version`). */
   tasks?: { version(): string; list(): { id: string; status: string; word: string; cost: string; ship: boolean }[] };
+  /** How a task stands on its Live Activity now (the web lib's activityOf, from its record and its trail); null: there is
+   * no such task. Read only when the team has changed. */
+  activity?(task: string): ActivityState | null;
 }
 
 /** What sends: browsers' push services (push-send.ts) and Apple's, for the iPhone app (apns-send.ts), by the subscription. */
@@ -107,6 +113,8 @@ export interface NotifySender {
   send(target: PushTarget, payload: NotifyPayload, delivery: PushDelivery, signal?: AbortSignal): Promise<PushOutcome>;
   /** Why it can't send to this at all, before any send is tried (an iPhone's, with no Apple push key here), or null. */
   blocked?(target: PushTarget): string | null;
+  /** A Live Activity's update or end, to its own token (Apple's `liveactivity` push: apns-send.ts). */
+  sendActivity?(target: { token: string; environment: "development" | "production" }, state: ActivityState, event: "update" | "end", signal?: AbortSignal): Promise<PushOutcome>;
   close?(): void;
 }
 
@@ -194,6 +202,9 @@ export class NotifyService {
   /** The agents' tasks that had ended at the last look (null: it hasn't looked yet), and the team's version then. */
   private tasksEnded: Set<string> | null = null;
   private tasksSeen: string | null = null;
+  /** The team's version when the Live Activities were last told (null: tell them at the next look), and a look under way. */
+  private activitiesSeen: string | null = null;
+  private telling = false;
   private keyProblem: string | null = null;
   private tagSalt: string | null = null;
   /** When each device's presence was last written, and from which zone (so every request doesn't write it). */
@@ -211,6 +222,7 @@ export class NotifyService {
     this.poll = setInterval(() => {
       this.lookAtTurns();
       this.lookAtTasks();
+      void this.lookAtActivities();
     }, TURN_POLL_MS);
     if (this.o.tickMs !== false) this.timer = setInterval(() => void this.tick(), this.o.tickMs ?? 15_000);
   }
@@ -303,6 +315,58 @@ export class NotifyService {
       this.nudge();
     }
     this.tasksEnded = ended;
+  }
+
+  /**
+   * One of a paired iPhone's Live Activities (core's live-activity.ts), for itself: kept for its task, so the node says
+   * how the task stands while the app isn't in front; a null token forgets it. Told at the next look.
+   */
+  activity(device: string, input: LiveActivityInput): { kept: boolean } {
+    if (input.token === null) {
+      this.o.db.dropActivity(device, input.task);
+      return { kept: false };
+    }
+    this.o.db.putActivity(device, input.task, input.token, input.environment);
+    this.activitiesSeen = null;
+    return { kept: true };
+  }
+
+  /**
+   * Called every second: once the team has moved (or an activity was just kept), each Live Activity is told how its task
+   * stands now, where that changed since it was last told; an ended task's once more, with its verdict, and then it is
+   * forgotten. Forgotten too: one Apple no longer knows, one whose task or device is gone, one older than Apple keeps
+   * any (ACTIVITY_KEEP_MS). One that couldn't be told is tried again when the team next moves.
+   */
+  async lookAtActivities(): Promise<void> {
+    const tasks = this.o.sources.tasks;
+    const activityOf = this.o.sources.activity;
+    const send = this.o.sender.sendActivity?.bind(this.o.sender);
+    if (this.stopped || this.telling || !tasks || !activityOf || !send) return;
+    const kept = this.o.db.activities();
+    if (!kept.length) return;
+    const version = tasks.version();
+    if (version === this.activitiesSeen) return;
+    this.telling = true;
+    try {
+      this.activitiesSeen = version;
+      const now = this.now();
+      for (const kept1 of kept) {
+        const { device, task } = kept1;
+        const state = now - kept1.at > ACTIVITY_KEEP_MS || !this.o.mind.activeDevice(device) ? null : activityOf(task);
+        if (!state) {
+          this.o.db.dropActivity(device, task);
+          continue;
+        }
+        const said = JSON.stringify({ ...state, at: 0 });
+        if (said === kept1.said) continue;
+        const ended = state.phase === "ended";
+        const outcome = await send({ token: kept1.token, environment: kept1.environment }, { ...state, at: now }, ended ? "end" : "update", this.abort.signal);
+        if (outcome.gone || (ended && outcome.ok)) this.o.db.dropActivity(device, task);
+        else if (outcome.ok) this.o.db.saidActivity(device, task, said);
+      }
+    } finally {
+      this.telling = false;
+    }
   }
 
   /** A run you run (from a terminal) that was in hand and has ended. With effort: once every attempt has. */
@@ -856,6 +920,7 @@ export class NotifyService {
       today: { day, sent: db.sentOn(day), count: db.countOn(day), limit: prefs.perDay },
       quiet,
       held,
+      activities: db.activities().length,
     };
   }
 
