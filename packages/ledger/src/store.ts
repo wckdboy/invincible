@@ -80,8 +80,10 @@ CREATE TABLE IF NOT EXISTS pending (id TEXT PRIMARY KEY, device TEXT NOT NULL, h
  *    seat-window:<id>:<window>, seat-rest:<id>), applied the same way by a replica that held them before it knew them.
  * 8: the agents a seat serves (seat.serves; in v_lww as seat-serves:<id>), applied the same way by a replica that held
  *    them before it knew them.
+ * 9: your grants for hand-offs (handoff.granted, handoff.revoked; in v_lww as handoff:<from>:<to>), applied the same
+ *    way by a replica that held them before it knew them.
  */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const MAX_PENDING = 2000;
 
@@ -318,6 +320,9 @@ export class LedgerStore {
         this.replay();
       } else if (from < 8 && this.db.query("SELECT 1 FROM events WHERE kind = 'seat.serves' LIMIT 1").get()) {
         // The agents a seat serves, chosen on a newer node while this replica didn't know the kind: applied now, as a rebuild would.
+        this.replay();
+      } else if (from < 9 && this.db.query("SELECT 1 FROM events WHERE kind IN ('handoff.granted', 'handoff.revoked') LIMIT 1").get()) {
+        // Grants for hand-offs a newer node wrote while this replica didn't know them: applied now, as a rebuild would.
         this.replay();
       }
       if (from < SCHEMA_VERSION) this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -1252,6 +1257,22 @@ export class LedgerStore {
         }
         return null;
       }
+      case "handoff.granted":
+      case "handoff.revoked": {
+        // Your word alone (core's fabric.ts): never a node's own, never an agent's, never a stranger's, never unsaid.
+        if (!isFullNode(signer)) return "only full nodes record your word";
+        if (event.prov?.trust !== "owner") return "a hand-off grant is your word alone";
+        const pair = event.kind === "handoff.granted" ? bodyOf(event, "handoff.granted") : bodyOf(event, "handoff.revoked");
+        if (!isNodeId(pair.from) || !isNodeId(pair.to) || pair.from === pair.to) return "a hand-off grant is from one node to another";
+        const key = `handoff:${pair.from}:${pair.to}`;
+        if (event.kind === "handoff.revoked") {
+          this.putLww(key, event, null);
+          return null;
+        }
+        const body = bodyOf(event, "handoff.granted");
+        this.putLww(key, event, { from: body.from, to: body.to, terms: body.terms as Json, ...(event.prov.via ? { via: event.prov.via } : {}) });
+        return null;
+      }
       case "skill.written": {
         if (!isFullNode(signer)) return "only full nodes write skills";
         const body = bodyOf(event, "skill.written");
@@ -1458,6 +1479,17 @@ export class LedgerStore {
   // ---- rules -----------------------------------------------------------------
 
   /** Your rules in force, by name, each as it was written (open in the log: core's readRule reads it). */
+  /** Your grants for hand-offs in force, by pair (core's readHandoffTerms reads each one's terms). */
+  handoffGrants(): HandoffGrantRecord[] {
+    return this.lwwPrefix<{ from: string; to: string; terms: Json; via?: string }>("handoff:").map((entry) => ({ from: entry.value!.from, to: entry.value!.to, terms: entry.value!.terms, hlc: entry.hlc, via: entry.value!.via ?? null }));
+  }
+
+  /** Your grant for `from` to hand tasks to `to`'s agents (null: none, or revoked). */
+  handoffGrant(from: string, to: string): HandoffGrantRecord | null {
+    const entry = this.lww<{ from: string; to: string; terms: Json; via?: string }>(`handoff:${from}:${to}`);
+    return entry?.value ? { from: entry.value.from, to: entry.value.to, terms: entry.value.terms, hlc: entry.hlc, via: entry.value.via ?? null } : null;
+  }
+
   rules(): RuleRecord[] {
     return this.lwwPrefix<{ name: string; rule: Json; via?: string }>("rule:").map((entry) => ({ name: entry.value!.name, rule: entry.value!.rule, hlc: entry.hlc, via: entry.value!.via ?? null }));
   }
@@ -1759,6 +1791,16 @@ export interface RuleRecord {
   name: string;
   rule: Json;
   hlc: string;
+  via: string | null;
+}
+
+/** Your grant for one node to hand tasks to another's agents, as the log holds it (core's readHandoffTerms reads `terms`). */
+export interface HandoffGrantRecord {
+  from: string;
+  to: string;
+  terms: Json;
+  hlc: string;
+  /** The device of yours it was given from (absent: a terminal on a node). */
   via: string | null;
 }
 

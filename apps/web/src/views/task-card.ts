@@ -105,7 +105,9 @@ export function taskCard(ctx: Ctx, task: TeamTask, o: CardOptions): HTMLElement 
   const said = saidBesideProof(end?.said);
   const kept = keptChanges(task);
   const shipped = shippedLine(task);
-  const meta = [proposedLine(task, o.proposer), givenLine(task), sensitiveLine(task), task.room !== o.room ? `in ${o.roomName(task.room)}` : null, o.assignee].filter(Boolean).join(" · ");
+  // (A hand-off beyond your grant says where it came from once, as its proposal.)
+  const given = task.proposedBy && task.proposedBy === task.givenBy ? null : givenLine(task, (id) => ctx.live.fleet.value?.devices.find((device) => device.id === id)?.name ?? "another node of yours");
+  const meta = [proposedLine(task, o.proposer), given, sensitiveLine(task), task.room !== o.room ? `in ${o.roomName(task.room)}` : null, o.assignee].filter(Boolean).join(" · ");
   const stepped = steppedLine(task);
   const waiting = task.status === "queued" ? o.dependencies.filter((dependency) => !dependency.satisfied) : [];
   const gates = task.status === "proposed" ? gatesLine(task.gates) : null;

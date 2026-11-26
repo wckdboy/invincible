@@ -18,6 +18,7 @@ const base: HandedView = {
   tools: [],
   phase: "ended",
   status: "done",
+  waits: null,
   path: "qamp",
   proof: { state: "checked", verified: true, ended: "done", proof: { before: [1], after: [0], review: "pass", sameModel: false } },
   output: "",
@@ -133,5 +134,45 @@ describe("invincible fabric: the node's own switch", () => {
     await expect(fabricCommand({ call: async () => ({}) } as never, "maybe", config)).rejects.toThrow("usage: invincible fabric on|off|status");
     await expect(fabricCommand({ call: async () => Promise.reject(new Error("chats are yours alone")) } as never, "on", config)).rejects.toThrow("chats are yours alone");
     expect(config.get()).toBeUndefined();
+  });
+});
+
+describe("invincible fabric grant|grants|revoke: your grants for hand-offs", () => {
+  const printed = async (work: () => Promise<void>): Promise<string> => {
+    const out: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void out.push(args.join(" ")));
+    try {
+      await work();
+    } finally {
+      log.mockRestore();
+    }
+    return out.join("\n");
+  };
+  const noConfig = { readConfig: () => ({}), writeConfig() {} };
+  const grant = { from: { id: "n_a", name: "alpha" }, to: { id: "n_b", name: "beta" }, terms: { agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 5 }, via: null, at: 1 };
+
+  test("grant: what you typed is the route's input, checked as the node checks it", async () => {
+    const sent: [string, unknown][] = [];
+    const api = { call: async (name: string, input: unknown) => (sent.push([name, input]), { grant }) };
+    const text = await printed(() => fabricCommand(api as never, "grant", noConfig, ["alpha", "beta"], { budget: "5", agents: "ada", tools: "fleet" }));
+    expect(sent).toEqual([["grantHandoffs", { from: "alpha", to: "beta", agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 5 }]]);
+    expect(text).toContain("alpha → beta");
+    expect(text).toContain("agents ada · tools fleet · $5 a day");
+  });
+
+  test("a grant with no budget, or a tool no run may be given, is refused before anything is sent", async () => {
+    const api = { call: async () => Promise.reject(new Error("sent")) };
+    await expect(fabricCommand(api as never, "grant", noConfig, ["alpha", "beta"], {})).rejects.toThrow("budgetUsdPerDay");
+    await expect(fabricCommand(api as never, "grant", noConfig, ["alpha", "beta"], { budget: "5", tools: "shell" })).rejects.toThrow("tools");
+    await expect(fabricCommand(api as never, "grant", noConfig, ["alpha"], { budget: "5" })).rejects.toThrow("usage: invincible fabric");
+  });
+
+  test("grants and revoke", async () => {
+    const sent: [string, unknown][] = [];
+    const api = { call: async (name: string, input: unknown) => (sent.push([name, input]), name === "handoffGrants" ? { grants: [grant, { ...grant, terms: null }] } : {}) };
+    const listed = await printed(() => fabricCommand(api as never, "grants", noConfig));
+    expect(listed).toContain("terms this version doesn't read (a newer node's)");
+    await printed(() => fabricCommand(api as never, "revoke", noConfig, ["alpha", "beta"]));
+    expect(sent.at(-1)).toEqual(["revokeHandoffs", { from: "alpha", to: "beta" }]);
   });
 });

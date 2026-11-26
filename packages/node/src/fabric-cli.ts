@@ -1,4 +1,4 @@
-import { FABRIC_RUN_TOOLS, type FabricSettingView, type HandedView, HandTaskInput } from "@invincible/core";
+import { FABRIC_RUN_TOOLS, type FabricSettingView, type HandedView, HandoffGrantInput, type HandoffGrantView, HandTaskInput, plainLine } from "@invincible/core";
 // The apps' own words for a verdict (the CLI reads them as the apps do).
 import { type ProofFacts, verdictOf } from "../../../apps/web/src/lib/steps.ts";
 import type { Api } from "./loop-cli.ts";
@@ -34,7 +34,8 @@ export function handedVerdict(view: HandedView): { word: string; proven: boolean
 function summary(view: HandedView): string {
   const verdict = handedVerdict(view);
   const where = `${view.node.name}${view.agent ? ` · ${view.agent.name}` : ""}`;
-  return `${bold(view.id)}  ${view.title.slice(0, 80)}\n  ${dim(`${where} · ${verdict ? verdict.word : view.phase === "handing" ? "handing it over" : `${view.status} there`}${view.task ? ` · its task there ${view.task}` : ""}`)}`;
+  const state = verdict ? verdict.word : view.phase === "handing" ? "handing it over" : view.status === "proposed" ? `waits for your approval there${view.waits ? ` (${view.waits})` : ""}` : `${view.status} there`;
+  return `${bold(view.id)}  ${view.title.slice(0, 80)}\n  ${dim(`${where} · ${state}${view.task ? ` · its task there ${view.task}` : ""}`)}`;
 }
 
 async function follow(api: Api, id: string, from = 0): Promise<HandedView> {
@@ -55,7 +56,40 @@ function verdictExit(view: HandedView): void {
   if (!verdict?.proven) process.exitCode = 1;
 }
 
-export const FABRIC_USAGE = "usage: invincible fabric on|off|status";
+export const FABRIC_USAGE = `usage: invincible fabric on|off|status
+       invincible fabric grant <from> <to> --budget <usd a day> [--agents <id>,…] [--tools ${FABRIC_RUN_TOOLS.join(",")}]
+       invincible fabric grants | invincible fabric revoke <from> <to>`;
+
+function grantLine(g: HandoffGrantView): string {
+  const t = g.terms;
+  const terms = t ? `${t.agents ? `agents ${t.agents.join(", ")}` : "any agent"} · ${t.tools.length ? `tools ${t.tools.join(", ")}` : "no tools"} · $${t.budgetUsdPerDay} a day` : "terms this version doesn't read (a newer node's)";
+  return `${bold(`${plainLine(g.from.name)} → ${plainLine(g.to.name)}`)}  ${dim(terms)}`;
+}
+
+/** `invincible fabric grant|grants|revoke`: your grants for hand-offs, one per pair of nodes, given once. */
+async function grantCommand(api: Api, sub: "grant" | "grants" | "revoke", rest: string[], flags: Flags): Promise<void> {
+  if (sub === "grants") {
+    const { grants } = await api.call<{ grants: HandoffGrantView[] }>("handoffGrants");
+    if (!grants.length) console.log("No grant for hand-offs: a task handed from one node to another waits there for your approval.");
+    for (const g of grants) console.log(grantLine(g));
+    return;
+  }
+  const [from, to] = rest;
+  if (!from || !to) throw new Error(FABRIC_USAGE);
+  if (sub === "revoke") {
+    await api.call("revokeHandoffs", { from, to });
+    console.log(`Revoked: what ${plainLine(from)} handed ${plainLine(to)} under it stops there, and its next hand-off waits for your approval.`);
+    return;
+  }
+  const list = (flag: unknown) => (typeof flag === "string" ? flag.split(",").map((x) => x.trim()).filter(Boolean) : undefined);
+  const budget = typeof flags.budget === "string" ? Number(flags.budget) : undefined;
+  const agents = list(flags.agents);
+  const checked = HandoffGrantInput.safeParse({ from, to, ...(agents ? { agents } : {}), tools: list(flags.tools) ?? [], budgetUsdPerDay: budget });
+  if (!checked.success) throw new Error(checked.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; "));
+  const { grant } = await api.call<{ grant: HandoffGrantView }>("grantHandoffs", checked.data);
+  console.log(`Granted: ${grantLine(grant)}`);
+  console.log(dim(`A task ${plainLine(grant.from.name)} hands ${plainLine(grant.to.name)} within it is taken at once; anything else waits there for your approval.`));
+}
 
 /** Where the setting is kept: the node's config (home.ts), written here only when the node isn't running. */
 export interface FabricConfig {
@@ -73,7 +107,8 @@ function fabricLine(view: FabricSettingView): string {
  * running node applies it at once (on: its sidecar starts; off: it stops, and its profile names no endpoint); one that
  * isn't running keeps it in its config for its next start.
  */
-export async function fabricCommand(api: Api, sub: string | undefined, config: FabricConfig): Promise<void> {
+export async function fabricCommand(api: Api, sub: string | undefined, config: FabricConfig, rest: string[] = [], flags: Flags = {}): Promise<void> {
+  if (sub === "grant" || sub === "grants" || sub === "revoke") return grantCommand(api, sub, rest, flags);
   if (sub !== undefined && sub !== "on" && sub !== "off" && sub !== "status") throw new Error(FABRIC_USAGE);
   const on = sub === "on" ? true : sub === "off" ? false : undefined;
   let view: FabricSettingView;

@@ -286,6 +286,8 @@ try {
   await beta.call("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${models.port}/v1` });
   for (const role of ["planner", "engineer", "reviewer"]) await beta.call("setRoster", { role, models: [`stand-in/${role}`] });
   await beta.call("saveAgent", { id: "ada", name: "Ada", role: "engineer" });
+  // Your word, once, that alpha may hand beta's Ada work (its default of $3 a task, for every sample below).
+  await beta.call("grantHandoffs", { from: "alpha", to: "beta", agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 1000 });
   const hands = only.has("handoff") ? Math.min(N, 10) : 0;
   const first: number[] = [];
   const whole: number[] = [];

@@ -446,7 +446,7 @@ describe("skills converge", () => {
       raw.exec("DELETE FROM v_skills; DELETE FROM v_skill_versions; DELETE FROM v_skill_uses; DELETE FROM v_lww WHERE k LIKE 'skill-mark:%'; PRAGMA user_version = 2;");
       raw.close();
       const upgraded = new LedgerStore(path);
-      expect(upgraded.schemaVersion()).toBe(8);
+      expect(upgraded.schemaVersion()).toBe(9);
       expect(seen(upgraded)).toEqual(skills);
       expect(upgraded.skill(SK)).toMatchObject({ uses: 1, passed: 1, locked: true });
       expect(upgraded.digest()).toBe(digest);

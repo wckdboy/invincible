@@ -7,6 +7,7 @@ import {
   cborEncode,
   didKeyOfEd25519,
   goalDigest,
+  handoffUnder,
   newNodeIdentity,
   type ProofStatement,
   proofRefusal,
@@ -14,6 +15,7 @@ import {
   qampEndpointOf,
   qdtChainText,
   qdtChainTokens,
+  readHandoffTerms,
   readQdt,
   runGrantPolicy,
   signingPublicKey,
@@ -230,5 +232,35 @@ describe("the proof a node signs for work it ran for another", () => {
   test("a revoked node's proof is refused, and so is what isn't a proof", () => {
     expect(proofRefusal(signProof(runner, statement), { ...expect_, active: () => false })).toBe("the node that signed it isn't an active node of this fleet");
     for (const junk of [null, "x", { statement, sig: "short" }, { statement: { ...statement, extra: 1 }, sig: "A".repeat(86) }]) expect(proofRefusal(junk, expect_)).toBe("it isn't a proof");
+  });
+});
+
+describe("your grant for hand-offs: what a node takes at once, and what waits for you", () => {
+  const grant = readHandoffTerms({ agents: ["ada", "noa"], tools: ["fleet", "ledger"], budgetUsdPerDay: 5 })!;
+
+  test("no grant: everything waits for your approval", () => {
+    expect(handoffUnder(null, { agent: "ada", tools: [], budgetUsd: 1 }, 0)).toEqual({ beyond: "you haven't granted that node hand-offs here" });
+  });
+
+  test("within it: at once, with the budget asked for, or, when none was, what your agent may give on its own yes ($3), less if the day has less left", () => {
+    expect(handoffUnder(grant, { agent: "ada", tools: ["fleet"], budgetUsd: 2 }, 1)).toEqual({ budgetUsd: 2 });
+    expect(handoffUnder(grant, { agent: null, tools: [], budgetUsd: undefined }, 1)).toEqual({ budgetUsd: 3 });
+    expect(handoffUnder(grant, { agent: null, tools: [] }, 3.5)).toEqual({ budgetUsd: 1.5 });
+    expect(handoffUnder(readHandoffTerms({ tools: [], budgetUsdPerDay: 500 })!, { agent: "anyone", tools: [] }, 0)).toEqual({ budgetUsd: 3 });
+  });
+
+  test("beyond it, each way, with why: another agent, a tool it doesn't give, more than the day has left", () => {
+    expect(handoffUnder(grant, { agent: "max", tools: [], budgetUsd: 1 }, 0)).toEqual({ beyond: "your grant names ada, noa, not max" });
+    expect(handoffUnder(grant, { agent: "ada", tools: ["fleet", "compute"], budgetUsd: 1 }, 0)).toEqual({ beyond: "your grant gives its runs fleet, ledger, not compute" });
+    expect(handoffUnder(grant, { agent: "ada", tools: [], budgetUsd: 3 }, 2.5)).toEqual({ beyond: "it would pass your grant's $5 a day ($2.50 given in the last 24 hours)" });
+    // The day spent: nothing is taken at once, whatever it asks.
+    expect(handoffUnder(grant, { agent: "ada", tools: [] }, 5)).toEqual({ beyond: "it would pass your grant's $5 a day ($5.00 given in the last 24 hours)" });
+  });
+
+  test("terms this version doesn't understand are no grant here, and a grant gives no tool unless it names it", () => {
+    expect(readHandoffTerms({ tools: [], budgetUsdPerDay: 5, hours: [9, 17] })).toBeNull();
+    expect(readHandoffTerms({ tools: ["shell"], budgetUsdPerDay: 5 })).toBeNull();
+    expect(readHandoffTerms({ budgetUsdPerDay: 5 })).toBeNull();
+    expect(handoffUnder(readHandoffTerms({ tools: [], budgetUsdPerDay: 5 })!, { agent: null, tools: ["fleet"], budgetUsd: 1 }, 0)).toEqual({ beyond: "your grant gives its runs none of its tools, not fleet" });
   });
 });

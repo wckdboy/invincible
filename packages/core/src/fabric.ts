@@ -5,7 +5,8 @@ import { sha256B64u } from "./crypto.ts";
 import { domain, isNodeId, type NodeIdentity, verifyDeviceSignature } from "./identity.ts";
 import { QAMP_TOOLS, QampDid } from "./qamp.ts";
 import { MAX_PROPOSED_GATES, MAX_RUN_GATES } from "./runs.ts";
-import { TeamTaskProof } from "./team.ts";
+import { AgentId, TeamTaskProof } from "./team.ts";
+import { TEAM_LIMITS } from "./team-limits.ts";
 
 /*
  * The fabric (docs/ARCHITECTURE.md §3): what nodes say to each other over Q-AMP, through each node's sidecar, and what
@@ -111,10 +112,78 @@ export const HandArgs = z.strictObject({
 });
 export type HandArgs = z.infer<typeof HandArgs>;
 
+/*
+ * Your word that one node may hand tasks to another's agents (handoff.granted, by pair; handoff.revoked ends it): given
+ * once, recorded as rules and standing orders are, so every replica holds the same and only your word counts. The node
+ * that runs a hand-off takes it at once only within your grant: for an agent it names (or any, when it names none), with
+ * tools it names, and a budget that fits what is left of its day. Anything else waits there for your approval, as a
+ * proposal. Either way the task is recorded as the giving node's, never as yours.
+ */
+export const HandoffTerms = z.strictObject({
+  /** The runner's agents it may give work to, by id; absent: any of them. */
+  agents: z.array(AgentId).min(1).max(32).refine((a) => new Set(a).size === a.length, "each agent once").optional(),
+  /** Which of the giver's tools its runs may be given; none: none. */
+  tools: z.array(z.enum(FABRIC_RUN_TOOLS)).max(FABRIC_RUN_TOOLS.length).refine((t) => new Set(t).size === t.length, "each tool once"),
+  /** What its tasks there may be given to spend in a day, all together, in US dollars (each one's budget, the most it may spend). */
+  budgetUsdPerDay: z.number().positive().max(1000),
+});
+export type HandoffTerms = z.infer<typeof HandoffTerms>;
+
+/** A grant's terms as the log holds them, read strictly: what this version doesn't understand is no grant here. */
+export function readHandoffTerms(raw: unknown): HandoffTerms | null {
+  const parsed = HandoffTerms.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** The window a grant's day is counted over: the last 24 hours. */
+export const HANDOFF_DAY_MS = 86_400_000;
+/** The most tasks one node may have handed to another at once, waiting for you, queued or running there, grant or not. */
+export const HANDED_AT_ONCE = 8;
+/** What a hand-off that names no budget is given under your grant: what your agent may give a task on its own yes ($3), or less if the day has less left. */
+export const HANDOFF_DEFAULT_USD = TEAM_LIMITS.ownTaskUsd;
+
+/**
+ * Whether your grant takes a hand-off at once, and with what budget: the one asked for, or, when none was,
+ * HANDOFF_DEFAULT_USD (or what is left of the day, if less). `given`: what the tasks this pair handed under it in the
+ * last day were given. Otherwise why it waits for your approval.
+ */
+export function handoffUnder(terms: HandoffTerms | null, ask: { agent: string | null; tools: readonly string[]; budgetUsd?: number }, given: number): { budgetUsd: number } | { beyond: string } {
+  if (!terms) return { beyond: "you haven't granted that node hand-offs here" };
+  if (ask.agent !== null && terms.agents && !terms.agents.includes(ask.agent)) return { beyond: `your grant names ${terms.agents.join(", ")}, not ${ask.agent}` };
+  const extra = ask.tools.filter((t) => !(terms.tools as readonly string[]).includes(t));
+  if (extra.length) return { beyond: `your grant gives its runs ${terms.tools.join(", ") || "none of its tools"}, not ${extra.join(", ")}` };
+  const left = Math.floor((terms.budgetUsdPerDay - given) * 100) / 100;
+  const budgetUsd = ask.budgetUsd ?? Math.min(HANDOFF_DEFAULT_USD, left);
+  if (budgetUsd <= 0 || budgetUsd > left + 1e-9) return { beyond: `it would pass your grant's $${terms.budgetUsdPerDay} a day ($${given.toFixed(2)} given in the last 24 hours)` };
+  return { budgetUsd };
+}
+
+/** You, granting one node hand-offs to another's agents (each by its name or id): its terms, given once for the pair. */
+export const HandoffGrantInput = z.strictObject({
+  from: HandTaskInput.shape.node,
+  to: HandTaskInput.shape.node,
+  agents: HandoffTerms.shape.agents,
+  tools: HandoffTerms.shape.tools.optional(),
+  budgetUsdPerDay: HandoffTerms.shape.budgetUsdPerDay,
+});
+export const HandoffRevokeInput = z.strictObject({ from: HandTaskInput.shape.node, to: HandTaskInput.shape.node });
+
+/** A grant in force, as every node shows it: the pair, its terms (null: written by a newer node, not understood here). */
+export interface HandoffGrantView {
+  from: { id: string; name: string };
+  to: { id: string; name: string };
+  terms: HandoffTerms | null;
+  /** The device of yours it was given from (null: a terminal on a node), and when (ms). */
+  via: string | null;
+  at: number;
+}
+
 /** What the running node streams back, as structured chunks, oldest first. */
 export const HandChunk = z.discriminatedUnion("kind", [
   /** Taken: its task there, the agent that took it, and the run's key (what the handing node grants its tools to). */
   z.strictObject({ kind: z.literal("accepted"), task: z.string().regex(/^task-[a-z0-9_-]{12}$/), agent: z.strictObject({ id: z.string().max(32), name: z.string().max(64) }), run: RunDid }),
+  /** Written down there, beyond your grant: it waits for your approval on that node (accepted follows once you give it). */
+  z.strictObject({ kind: z.literal("proposed"), task: z.string().regex(/^task-[a-z0-9_-]{12}$/), agent: z.strictObject({ id: z.string().max(32), name: z.string().max(64) }), why: z.string().max(500) }),
   /** A line of its trail, as the runner wrote it. */
   z.strictObject({ kind: z.literal("trail"), at: z.number().int().min(0), text: z.string().max(4000) }),
   /** Its state there, when it changes. */
@@ -238,6 +307,8 @@ export interface HandedView {
   /** Here: handing it over, following it, or ended. `status`: its state there as last told. */
   phase: "handing" | "following" | "ended";
   status: string;
+  /** Why it waited there for your approval, beyond your grant (null: your grant took it at once, or it hasn't been told). */
+  waits: string | null;
   /** The path it went on (Q-AMP; the hand-off has no HTTPS form). */
   path: PeerPath;
   /** Its proof: checked (with its verdict's facts), refused and why, or none yet. */

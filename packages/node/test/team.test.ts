@@ -502,6 +502,13 @@ describe("task orchestration", () => {
     expect(give("Last", 1).status).toBe("queued");
     expect(service.ownLeft()).toEqual({ usd: 0, of: "day" });
   });
+  test("a task another node handed over waits for you: within the budget its own yes may give, your agent still never approves it", async () => {
+    const { store, service } = setup();
+    const handed = service.proposeTask({ room: "workshop", assignee: "ada", title: "Handed", goal: "Work another node handed over.", budgetUsd: 1 }, "node:n_alpha");
+    expect(handed).toMatchObject({ status: "proposed", givenBy: "node:n_alpha", proposedBy: "node:n_alpha" });
+    expect(service.approveOwn(handed.id, "a node handed it")).toBeNull();
+    expect(store.task(handed.id)?.status).toBe("proposed");
+  });
   test("tasks you give run at once: only an agent's waits for you", async () => {
     const { store, service } = setup();
     const given = service.createTask({ room: "workshop", assignee: "ada", title: "Yours", goal: "Yours" });

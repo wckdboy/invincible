@@ -10,7 +10,7 @@ import { PRIMARY } from "../lib/arrange.ts";
 import { hasDesktop } from "../lib/desktop.ts";
 import { besideChip } from "../lib/agent-state.ts";
 import { rosterRows } from "../lib/roster.ts";
-import { type TaskAction, taskStanding } from "../lib/task-card.ts";
+import { handedFrom, type TaskAction, taskStanding } from "../lib/task-card.ts";
 import { activeTeamWork, engramLine, HARNESS, harnessNote, agentWorksOn, taskDependencies, teamSpeaker, agentMaker, type HarnessStatus } from "../lib/team.ts";
 import { giveAgain, timeline, timelineTasks } from "../lib/timeline.ts";
 import { relativeTime } from "../lib/time.ts";
@@ -118,7 +118,12 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   replace(root, h("div", { class: "team-layout" }, main));
   replace(content, skeletonRows(4));
 
-  const nameOf = (id: string): string => (id === "primary" ? "Your agent" : snapshot?.agents.find((person) => person.id === id)?.name ?? snapshot?.removed?.find((person) => person.id === id)?.name ?? id);
+  const nodeOf = (id: string): string => ctx.live.fleet.value?.devices.find((device) => device.id === id)?.name ?? "another node of yours";
+  const nameOf = (id: string): string => {
+    const from = handedFrom(id);
+    if (from) return nodeOf(from);
+    return id === "primary" ? "Your agent" : snapshot?.agents.find((person) => person.id === id)?.name ?? snapshot?.removed?.find((person) => person.id === id)?.name ?? id;
+  };
   const roomName = (id: string): string => snapshot?.rooms.find((candidate) => candidate.id === id)?.name ?? id;
   /** "made by the primary", for an agent it (or another agent) made; nothing for one of yours. */
   const madeBy = (person: Agent): string => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTask } from "@invincible/core/team";
-import { gatesLine, givenLine, keptChanges, latestLine, proposedLine, sensitiveLine, steppedLine, taskActions, taskAnswers, taskBadge, taskEnd, taskStanding } from "./task-card.ts";
+import { gatesLine, givenLine, handedFrom, keptChanges, latestLine, proposedLine, sensitiveLine, steppedLine, taskActions, taskAnswers, taskBadge, taskEnd, taskStanding } from "./task-card.ts";
 
 const task = (status: TeamTask["status"], more: Partial<TeamTask> = {}): TeamTask => ({ id: "task-abcdefghijkl", room: "dm-ada", assignee: "ada", title: "Fix the importer", goal: "Fix it", dependsOn: [], gates: ["bun test"], status, verified: status === "done", progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, ...more });
 /** A task's output as the runner writes it: the agent's summary, then the review and where it worked. */
@@ -165,5 +165,17 @@ describe("a task where it was given, as the iPhone's TaskCardView says it (I10)"
     expect(gatesLine([])).toBeNull();
     expect(latestLine(task("running", { progress: "  Running bun test\nthen the lint  " }))).toBe("Running bun test");
     expect(latestLine(task("running", { progress: "" }))).toBe("");
+  });
+});
+
+describe("a task another node handed over (the fabric)", () => {
+  test("it says which node, never you: under your grant as given by it, beyond your grant as its proposal", () => {
+    const node = (id: string) => (id === "n_beta" ? "beta" : "?");
+    expect(handedFrom("node:n_beta")).toBe("n_beta");
+    expect(handedFrom("owner")).toBeNull();
+    expect(givenLine(task("queued", { givenBy: "node:n_beta" }), node)).toBe("Handed over by beta");
+    expect(givenLine(task("queued", { givenBy: "node:n_beta" }))).toBe("Handed over by another node of yours");
+    expect(proposedLine(task("proposed", { givenBy: "node:n_beta", proposedBy: "node:n_beta" }), "beta")).toBe("beta handed this over beyond your grant: it starts when you approve it");
+    expect(proposedLine(task("running", { givenBy: "node:n_beta", proposedBy: "node:n_beta" }), null)).toBe("Handed over by another node of yours, beyond your grant");
   });
 });

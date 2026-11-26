@@ -6,10 +6,13 @@ import {
   FABRIC_RUN_TOOLS,
   type FabricRunTool,
   goalDigest,
+  HANDED_AT_ONCE,
+  HANDOFF_DAY_MS,
   HandArgs,
   HandChunk,
   type HandedView,
   HandInputChunk,
+  handoffUnder,
   type HandTaskInput,
   type NodeIdentity,
   proofRefusal,
@@ -17,6 +20,7 @@ import {
   qdtChainText,
   qdtChainTokens,
   randomId,
+  readHandoffTerms,
   readQdt,
   RUN_GRANT_COMMAND,
   RUN_GRANT_TTL,
@@ -48,15 +52,30 @@ import { type Call, type Invocation, SidecarError, type ToolSpec } from "./socke
  *    signature before it says anything is proven. A node that didn't run the work can't make it look proven.
  */
 
+/**
+ * How a hand-off is given to the agents here, always as the node that handed it over (`by`, `node:<id>`): within your
+ * grant for the pair (its agents, and the budget it leaves for the day), or as a proposal that waits for your approval
+ * here, and why.
+ */
+export type HandHow = { by: string; budgetUsd: number; agents?: readonly string[] } | { by: string; propose: string };
+
+/** Who handed a task over, as its task here records it. */
+export const handedBy = (node: string): string => `node:${node}`;
+
 /** What the runner's agents need: the team service's own operations (the server binds them). */
 export interface HandTeam {
-  /** Gives the task to an agent here, as you would (the one named, or the one best suited): its task and who took it. */
-  give(args: HandArgs, signal: AbortSignal): Promise<{ task: TeamTask; agent: { id: string; name: string } }>;
+  /** Gives the task to an agent here as `how` says (the one named, or the one best suited): its task and who took it. */
+  give(args: HandArgs, signal: AbortSignal, how: HandHow): Promise<{ task: TeamTask; agent: { id: string; name: string } }>;
   task(id: string): TeamTask | null;
   trail(id: string, after: number): { entries: { n: number; at: number; text: string }[]; more: boolean };
-  stop(id: string): void;
+  /** Stops it: as you would (no `why`), or in these words, by no word of yours. */
+  stop(id: string, why?: string): void;
   /** The task an agent's VM is running now, by the VM's id (the sandbox its gateway token names). */
   runningIn(sandbox: string): string | null;
+  /** What one node has handed here: how many are open now, and what those under your grant since `since` were given. */
+  handed(by: string, since: number): { atOnce: number; given: number };
+  /** The tasks other nodes handed here that haven't ended. */
+  handedOpen(): string[];
 }
 
 /** A tool of the primary's, run on this node for a run another node runs for it (the server binds it, as that run's principal). */
@@ -108,6 +127,7 @@ interface Row {
   first_output_at: number | null;
   stop_asked_at: number | null;
   ended_at: number | null;
+  waits: string | null;
 }
 
 /** A run this node runs for another: its hand-off, the key it holds in memory alone, and the giver's chain for it. */
@@ -119,6 +139,9 @@ interface Running {
   seed: Uint8Array;
   did: string;
   tools: FabricRunTool[];
+  /** Taken under your grant (else you approved its proposal), and whether the giver has been told it was taken. */
+  granted: boolean;
+  accepted: boolean;
   /** The giver's grant, as its encoded tokens (root first), and the link this node's run key signed onto it. */
   chain: Uint8Array[] | null;
   link: { encoded: Uint8Array; exp: number } | null;
@@ -139,6 +162,7 @@ export class Handoffs implements FabricTools {
   private closed = false;
   /** Followers waiting for the agents here to change something (poke), each at most a while. */
   private readonly wakers = new Set<() => void>();
+  private readonly unsubscribe: () => void;
 
   constructor(private readonly deps: HandoffsDeps) {
     this.now = deps.now ?? Date.now;
@@ -148,13 +172,31 @@ export class Handoffs implements FabricTools {
       phase TEXT NOT NULL, status TEXT NOT NULL, proof TEXT, output TEXT NOT NULL DEFAULT '', error TEXT,
       created_at INTEGER NOT NULL, first_output_at INTEGER, stop_asked_at INTEGER, ended_at INTEGER)`);
     deps.db.exec("CREATE TABLE IF NOT EXISTS fabric_handed_trail (handoff TEXT NOT NULL, n INTEGER NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (handoff, n))");
+    // (Why it waited there for your approval: a column a table from before grants lacks.)
+    if (!deps.db.query<{ name: string }, []>("PRAGMA table_info(fabric_handed)").all().some((c) => c.name === "waits")) deps.db.exec("ALTER TABLE fabric_handed ADD COLUMN waits TEXT");
+    // Your grant for a pair revoked: what that node handed here under it stops now (what you approved yourself goes on).
+    this.unsubscribe =
+      typeof deps.store.onApplied === "function"
+        ? deps.store.onApplied((events) => {
+            for (const event of events) {
+              if (event.kind !== "handoff.revoked") continue;
+              const pair = event.body as { from?: unknown; to?: unknown };
+              if (pair.to !== deps.identity.id || typeof pair.from !== "string" || deps.store.handoffGrant(pair.from, deps.identity.id)) continue;
+              for (const run of [...this.runs.values()].filter((r) => r.giver === pair.from && r.granted)) this.team?.stop(run.task, "Your grant for the node that handed it over was revoked.");
+            }
+          })
+        : () => {};
     // A hand-off a node that stopped was following has lost its call: the runner stopped the work when it did.
     for (const row of this.rows().filter((r) => r.phase !== "ended")) this.end(row.id, { status: "interrupted", error: "this node stopped while it followed the task: the node that ran it stopped the work when the call ended" });
   }
 
-  /** The runner's side, once the server has its agents. */
+  /**
+   * The runner's side, once the server has its agents. What other nodes handed here before this node last stopped has
+   * lost its call (its giver ended it then): nobody follows it any more, so it ends now rather than run unseen.
+   */
   attachTeam(team: HandTeam): void {
     this.team = team;
+    for (const id of team.handedOpen()) team.stop(id, "The node that handed it over no longer follows it: its call ended when this node stopped.");
   }
 
   /** The giver's side: how a run elsewhere calls this node's tools. */
@@ -243,6 +285,9 @@ export class Handoffs implements FabricTools {
         if (said.kind === "accepted") {
           this.set(id, { phase: "following", task: said.task, agent: JSON.stringify(said.agent), run: said.run, status: "queued" });
           await this.grant(id, call);
+        } else if (said.kind === "proposed") {
+          // Beyond your grant there: it waits for your approval on that node, and is taken (accepted) once you give it.
+          this.set(id, { phase: "following", task: said.task, agent: JSON.stringify(said.agent), status: "proposed", waits: said.why });
         } else if (said.kind === "state") this.set(id, { status: said.status });
         else {
           n++;
@@ -382,6 +427,7 @@ export class Handoffs implements FabricTools {
    */
   close(): void {
     this.closed = true;
+    this.unsubscribe();
     this.poke();
     for (const timer of this.stopTimers) clearTimeout(timer);
     this.stopTimers.clear();
@@ -422,6 +468,7 @@ export class Handoffs implements FabricTools {
       tools: JSON.parse(row.tools) as FabricRunTool[],
       phase: row.phase,
       status: row.status,
+      waits: row.waits ?? null,
       path: "qamp",
       proof: proof?.state === "checked" ? { state: "checked", verified: proof.verified === true, proof: facts?.success ? facts.data : null, ended: proof.ended ?? null } : proof?.state === "refused" ? { state: "refused", why: proof.why ?? "" } : { state: "none" },
       output: row.output,
@@ -467,20 +514,46 @@ export class Handoffs implements FabricTools {
     if (!parsed.success) return inv.fail(2, `that isn't a task handed over: ${parsed.error.issues.map((i) => i.message).join("; ").slice(0, 300)}`);
     const args = parsed.data;
     if (!this.team) return inv.fail(1, "this node has no agents to give it to");
+    const self = this.deps.identity.id;
+    const by = handedBy(caller.id);
+    const counts = this.team.handed(by, this.now() - HANDOFF_DAY_MS);
+    if (counts.atOnce >= HANDED_AT_ONCE) return inv.fail(6, `${caller.name} has ${HANDED_AT_ONCE} tasks handed here at once already, waiting for you, queued or running: let some end first`, true);
+    // Your grant for this pair, as the ledger holds it now: within it, taken at once; beyond it, written down for you.
+    const terms = readHandoffTerms(this.deps.store.handoffGrant(caller.id, self)?.terms ?? null);
+    const under = handoffUnder(terms, { agent: args.agent ?? null, tools: args.tools, ...(args.budgetUsd !== undefined ? { budgetUsd: args.budgetUsd } : {}) }, counts.given);
+    const how: HandHow = "budgetUsd" in under ? { by, budgetUsd: under.budgetUsd, ...(terms?.agents ? { agents: terms.agents } : {}) } : { by, propose: under.beyond };
     // The run's own key: made here for this run alone, held in memory, destroyed when it ends.
     const seed = new Uint8Array(randomBytes(32));
     const did = didKeyOfEd25519(signingPublicKey(seed));
     let given: { task: TeamTask; agent: { id: string; name: string } };
     try {
-      given = await this.team.give(args, inv.signal);
+      given = await this.team.give(args, inv.signal, how);
     } catch (error) {
       seed.fill(0);
       return inv.fail(8, `it couldn't be given to an agent here: ${String((error as Error).message ?? error).slice(0, 400)}`);
     }
-    const run: Running = { handoff: args.handoff, giver: caller.id, giverKey: inv.caller, task: given.task.id, seed, did, tools: args.tools, chain: null, link: null, inv };
+    // A revocation that landed while it was being given (the node, or your grant it was taken under): it ends now.
+    const still = this.deps.store.activeDevice(caller.id);
+    const lost = !still || still.role !== "full" ? "the node that handed it over was revoked" : "budgetUsd" in how && !this.deps.store.handoffGrant(caller.id, self) ? "your grant for it was revoked as it was given" : null;
+    if (lost) {
+      this.team.stop(given.task.id, `It ended at once: ${lost}.`);
+      seed.fill(0);
+      return inv.fail(3, lost);
+    }
+    const run: Running = { handoff: args.handoff, giver: caller.id, giverKey: inv.caller, task: given.task.id, seed, did, tools: args.tools, granted: "budgetUsd" in how, accepted: false, chain: null, link: null, inv };
     this.runs.set(args.handoff, run);
-    this.deps.log(`fabric: ${caller.name} handed over “${args.title.slice(0, 80)}”: ${given.agent.name} took it as ${given.task.id}`);
-    inv.emit({ value: { kind: "accepted", task: given.task.id, agent: given.agent, run: did } });
+    const accept = () => {
+      if (run.accepted) return;
+      run.accepted = true;
+      inv.emit({ value: { kind: "accepted", task: given.task.id, agent: given.agent, run: did } });
+    };
+    if ("propose" in how) {
+      this.deps.log(`fabric: ${caller.name} handed over “${args.title.slice(0, 80)}” beyond your grant (${how.propose}): it waits for your approval as ${given.task.id}`);
+      inv.emit({ value: { kind: "proposed", task: given.task.id, agent: given.agent, why: how.propose.slice(0, 500) } });
+    } else {
+      this.deps.log(`fabric: ${caller.name} handed over “${args.title.slice(0, 80)}” under your grant: ${given.agent.name} took it as ${given.task.id}`);
+      accept();
+    }
     // In: the giver's chain for the run (and each renewal), or a stop.
     void (async () => {
       for await (const chunk of inv.inputs) {
@@ -497,13 +570,15 @@ export class Handoffs implements FabricTools {
       }
     })();
     // A call that ended (the giver cancelled, went away, or its link did): the work stops here too.
-    inv.signal.addEventListener("abort", () => this.team?.stop(run.task), { once: true });
+    inv.signal.addEventListener("abort", () => this.team?.stop(run.task, "The node that handed it over stopped following it: its call ended."), { once: true });
     let after = 0;
     let status = "";
     try {
       for (;;) {
         const task = this.team.task(run.task);
         if (!task) break;
+        // Approved by you: taken now (a proposal you declined ends stopped, never taken).
+        if (!run.accepted && (task.status === "queued" || task.status === "running" || task.record !== undefined)) accept();
         const page = this.team.trail(run.task, after);
         for (const entry of page.entries) {
           inv.emit({ value: { kind: "trail", at: entry.at, text: entry.text.slice(0, 4000) } });

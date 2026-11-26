@@ -146,7 +146,7 @@ describe("key requests you dismiss", () => {
       raw.exec("PRAGMA user_version = 5;");
       raw.close();
       const upgraded = new LedgerStore(path);
-      expect(upgraded.schemaVersion()).toBe(8);
+      expect(upgraded.schemaVersion()).toBe(9);
       expect(open(new Vault(upgraded, a))).toEqual([]);
       expect(upgraded.digest()).toBe(digest);
       upgraded.close();

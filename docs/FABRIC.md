@@ -65,16 +65,30 @@ answered and its fixes reviewed again.
 
 `invincible hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools fleet,compute,place,ledger] [--budget 2]
 [--follow]`, and `invincible handed [<id> [--follow] | stop <id>]` (its exit code is the verdict: 0 means proven).
-The routes are `handTask`, `handedTasks`, `handedTask` and `stopHanded` (and `fabricSetting`, the switch). One Q-AMP call between the two nodes'
+The routes are `handTask`, `handedTasks`, `handedTask` and `stopHanded`, with `handoffGrants`, `grantHandoffs` and
+`revokeHandoffs` for your grants (and `fabricSetting`, the switch). One Q-AMP call between the two nodes'
 transport keys carries all of it:
 
 1. **The giver opens the call** with the task: `{handoff, nonce, goal, title, gates, budgetUsd?, agent?, tools}`. The
    hand-off's id and a fresh nonce are the giver's own.
-2. **The runner takes it** only from an active full node. It gives it to its own agents as you would there (the one
-   named, or the one best suited), and makes the run a key of its own: Ed25519, in memory alone, destroyed when the run
-   ends.
+2. **The runner takes it** only from an active full node, and at once only within your grant for that pair of nodes:
+   - **Your grant**, given once for the pair: `invincible fabric grant <from> <to> --budget <usd a day> [--agents <id>,…]
+     [--tools fleet,…]` (the `grantHandoffs` route; `fabric grants`, `fabric revoke <from> <to>`). It is a
+     `handoff.granted` event in the ledger, your word alone, recorded as rules and standing orders are: every replica
+     refuses one that isn't your word or wasn't written by a full node, on replay too.
+   - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of its
+     day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among those it
+     names when the hand-off names none.
+   - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
+     `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
+   - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node
+     are open there at once (waiting, queued or running). Your grant revoked stops what was handed under it; a node
+     that restarts ends what was handed to it before, as nobody follows it any more.
+
+   It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:
-   - `{kind: "accepted", task, agent, run}`, its task there and the run's key;
+   - `{kind: "proposed", task, agent, why}`, when it waits for your approval there;
+   - `{kind: "accepted", task, agent, run}`, its task there and the run's key, once it is taken;
    - `{kind: "trail", at, text}`, each line of the run's trail the moment its agent writes it;
    - `{kind: "state", status}`.
 

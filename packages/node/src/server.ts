@@ -2,6 +2,9 @@ import {
   ABOUT_YOU_TAG,
   ZONE_HEADER,
   type FabricSettingView,
+  type HandoffGrantView,
+  HandoffTerms,
+  readHandoffTerms,
   LOOK_LIMITS,
   type LookHeld,
   type UnderwayTask,
@@ -126,7 +129,7 @@ import {
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, nowLine, PRIMARY_NAME } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
-import { type Device, enrollDevice, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
+import { type Device, enrollDevice, type HandoffGrantRecord, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
 import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
 import type { GovernedSandboxHost } from "./compute/governed-host.ts";
 import type { Governor } from "./compute/governor.ts";
@@ -2383,8 +2386,10 @@ export function createApp(ctx: AppContext) {
   /* A task given to the agents (by you, or by the primary from your conversation): the agent best suited to it
    * takes it, in that agent's own conversation with you (agents.ts says who and why). Each agent's VM is asked
    * of its host, once a host; one whose host can't say has no desktop known. */
-  async function giveTask(input: TeamGiveInput, by: string, signal: AbortSignal) {
-    const state = teamOf().snapshot();
+  /** `opts`: the agents it may go to (your grant's, for a hand-off), and whether it is proposed rather than given. */
+  async function giveTask(input: TeamGiveInput, by: string, signal: AbortSignal, opts: { agents?: readonly string[]; propose?: boolean } = {}) {
+    const all = teamOf().snapshot();
+    const state = opts.agents ? { ...all, agents: all.agents.filter((m) => opts.agents!.includes(m.id)) } : all;
     const hosts = new Map<string, Promise<SandboxView[] | null>>();
     const listed = (node: string) => {
       if (!hosts.has(node)) hosts.set(node, inProcess(teamOwner, signal).call<{ sandboxes: SandboxView[] }>("sandboxes", { on: node }).then((v) => v.sandboxes, () => null));
@@ -2408,7 +2413,8 @@ export function createApp(ctx: AppContext) {
     const room = teamOf().direct(choice.id);
     const fields = { room: room.id, assignee: choice.id, title: input.title ?? input.goal.slice(0, 200), goal: input.goal, gates: input.gates ?? [], ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}) };
     // On its own word it is held to what it may commit on its own, judged again as it is written (TeamService.giveOwn).
-    const task = by === TEAM_PRIMARY ? teamOf().giveOwn(fields) : teamOf().createTask(fields, by);
+    // Another node's beyond your grant waits for you as a proposal (fabric/handoff.ts).
+    const task = opts.propose ? teamOf().proposeTask(fields, by) : by === TEAM_PRIMARY ? teamOf().giveOwn(fields) : teamOf().createTask(fields, by);
     return { task, choice, considered };
   }
   /** The stop's word to a coding agent's run in its VM (its tool's own interrupt): bound to its VM as every command is, and sent once its task has stopped. */
@@ -2604,28 +2610,37 @@ export function createApp(ctx: AppContext) {
     // (Seats' VMs an earlier process of this node left are removed first: the work they ran ended with it.)
     void seatRuns.sweep();
     ctx.team.service.start();
-    // A task another node handed over (fabric/handoff.ts): given to the agents here as you would give it, followed, stopped.
+    // A task another node handed over (fabric/handoff.ts): given to the agents here as that node's (never as yours), at
+    // once within your grant for the pair, or as a proposal that waits for your approval; followed, stopped.
     ctx.handoffs?.attachTeam({
-      give: async (args, signal) => {
-        const budget = args.budgetUsd !== undefined ? { budgetUsd: args.budgetUsd } : {};
+      give: async (args, signal, how) => {
+        const budgetUsd = "budgetUsd" in how ? how.budgetUsd : args.budgetUsd;
+        const budget = budgetUsd !== undefined ? { budgetUsd } : {};
+        const propose = "propose" in how;
+        const allowed = "agents" in how ? how.agents : undefined;
         if (args.agent) {
           const agent = teamOf().store.agent(args.agent);
           if (!agent || !agent.enabled) throw new HttpError(404, `no agent ${args.agent} that works here now`);
+          if (allowed && !allowed.includes(agent.id)) throw new HttpError(403, `your grant names ${allowed.join(", ")}, not ${agent.id}`);
           const room = teamOf().direct(agent.id);
-          const task = teamOf().createTask({ room: room.id, assignee: agent.id, title: args.title, goal: args.goal, gates: args.gates, ...budget }, TEAM_OWNER);
+          const input = { room: room.id, assignee: agent.id, title: args.title, goal: args.goal, gates: args.gates, ...budget };
+          const task = propose ? teamOf().proposeTask(input, how.by) : teamOf().createTask(input, how.by);
           return { task, agent: { id: agent.id, name: agent.name } };
         }
-        const { task, choice } = await giveTask({ goal: args.goal, title: args.title, gates: args.gates, ...budget }, TEAM_OWNER, signal);
+        const { task, choice } = await giveTask({ goal: args.goal, title: args.title, gates: args.gates, ...budget }, how.by, signal, { propose, ...(allowed ? { agents: allowed } : {}) });
         return { task, agent: { id: choice.id, name: choice.name } };
       },
+      handed: (by, since) => teamOf().store.handed(by, since),
+      handedOpen: () => teamOf().store.handedOpen(),
       task: (id) => teamOf().task(id),
       trail: (id, after) => {
         const { entries, more } = teamOf().trail(id, after);
         return { entries, more };
       },
-      stop: (id) => {
+      stop: (id, why) => {
         try {
-          teamOf().control({ task: id, action: "stop" });
+          if (why) teamOf().stopTask(id, why);
+          else teamOf().control({ task: id, action: "stop" });
         } catch (error) {
           ctx.log(`fabric: ${id} wasn't stopped: ${(error as Error).message}`);
         }
@@ -4475,6 +4490,25 @@ export function createApp(ctx: AppContext) {
       ownerOfQamp(p);
       return { grants: ctx.qamp.list() };
     },
+    handoffGrants: (_input, p) => {
+      ownerOnly(p);
+      return { grants: ctx.store.handoffGrants().map(grantView) };
+    },
+    grantHandoffs: (input, p) => {
+      // Your word given once for the pair, as a rule or a standing order is: only you give it, from a terminal or a device of yours.
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can grant hand-offs");
+      const [from, to] = grantPair(input);
+      const terms = HandoffTerms.parse({ ...(input.agents ? { agents: input.agents } : {}), tools: input.tools ?? [], budgetUsdPerDay: input.budgetUsdPerDay });
+      ctx.store.emit(ctx.identity, "handoff.granted", { from: from.id, to: to.id, terms }, { trust: "owner", ...(p.kind === "client" ? { via: p.device } : {}) });
+      return { grant: grantView(ctx.store.handoffGrant(from.id, to.id)!) };
+    },
+    revokeHandoffs: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can revoke a grant for hand-offs");
+      const [from, to] = grantPair(input, true);
+      if (!ctx.store.handoffGrant(from.id, to.id)) throw new HttpError(404, `${from.name} has no grant for hand-offs to ${to.name}`);
+      ctx.store.emit(ctx.identity, "handoff.revoked", { from: from.id, to: to.id }, { trust: "owner", ...(p.kind === "client" ? { via: p.device } : {}) });
+      return { revoked: { from: { id: from.id, name: from.name }, to: { id: to.id, name: to.name } } };
+    },
     fabricSetting: (input, p) => {
       ownerOnly(p);
       if (!ctx.fabricSetting) throw new HttpError(424, "this node has no fabric");
@@ -4714,6 +4748,24 @@ export function createApp(ctx: AppContext) {
     if (done.isError) throw new Error(done.content.slice(0, 500));
     return { content: done.content, summary: done.summary };
   });
+
+  /** A grant for hand-offs as every surface shows it. */
+  const grantView = (g: HandoffGrantRecord): HandoffGrantView => ({
+    from: { id: g.from, name: ctx.store.device(g.from)?.name ?? g.from.slice(0, 12) },
+    to: { id: g.to, name: ctx.store.device(g.to)?.name ?? g.to.slice(0, 12) },
+    terms: readHandoffTerms(g.terms),
+    via: g.via,
+    at: decodeHlc(g.hlc).ms,
+  });
+
+  /** The two nodes a grant is between, each by its name or id: two, each an active full node (a revocation names any two). */
+  const grantPair = (input: { from: string; to: string }, ending = false): [Device, Device] => {
+    const from = resolveNode(input.from);
+    const to = resolveNode(input.to);
+    if (from.id === to.id) throw new HttpError(400, "a node hands tasks to another node's agents: name two nodes");
+    if (!ending) for (const node of [from, to]) if (node.role !== "full" || node.revokedHlc) throw new HttpError(400, `${node.name} isn't an active full node: only full nodes hand tasks over and run them`);
+    return [from, to];
+  };
 
   /** What the hand-off says went wrong, as the API says it. */
   const handErrors = async <T,>(work: () => T | Promise<T>): Promise<T> => {

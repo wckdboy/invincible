@@ -364,6 +364,15 @@ export const Bodies = {
   /** Its window is spent: it rests until that resets. Back: it is in use again. */
   "seat.rested": z.strictObject({ id: SeatId, until: z.number().int().min(0), window: SeatWindowName.optional() }),
   "seat.back": z.strictObject({ id: SeatId }),
+
+  /*
+   * Your grants for hand-offs (core's fabric.ts HandoffTerms): your word that one node may hand tasks to another's
+   * agents, given once for the pair. Yours alone: every replica refuses one that isn't your word, wasn't written by a
+   * full node, or isn't from one node to another. The last writer wins, by pair; a revocation ends it.
+   */
+  /** A grant, given or replaced. Its terms are open in the log: a newer node's never make this one refuse the event (readHandoffTerms reads them). */
+  "handoff.granted": z.strictObject({ from: DeviceRef, to: DeviceRef, terms: Open }),
+  "handoff.revoked": z.strictObject({ from: DeviceRef, to: DeviceRef }),
 } as const;
 
 export type EventKind = keyof typeof Bodies;

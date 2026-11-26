@@ -452,6 +452,23 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     node it was handed to.
   - Tests: `fabric-handoff.e2e.test.ts` (with the run's real chain and key, a tool its task wasn't given is refused at
     the giver's door, and the chain for another task at its sidecar; once the task ends nothing answers).
+- **Who may give a node's agents work: you, never another node by itself** (the fabric's security review, H1). Over
+  HTTPS a node may not give agents work at all (`ownerOnly`). Over Q-AMP a hand-off is taken at once only within your
+  grant for that pair of nodes:
+  - The grant is `handoff.granted`, your word, recorded as rules and standing orders are. Every replica refuses one that
+    isn't your word or wasn't written by a full node, on replay too.
+  - It bounds the agents, the tools and the day's budget (counted by the budgets given, the most each may spend).
+  - Anything else waits on the node that would run it as a proposal that only you approve; its own agent never does,
+    whatever it would spend.
+  - Either way the task is recorded as the giving node's (`givenBy: node:<id>`), never yours.
+  - At most 8 tasks from one node are open on another at once.
+  - A grant revoked stops what was handed under it, and a revocation that lands while a task is being given stops it.
+  - Tests: `fabric-hand-grant.test.ts` (the review's proof of concept, which failed before the fix: a node's hand call
+    made a task as yours, queued at once), `handoff-grants.test.ts` (only your word, any order, a rebuild, an upgrade),
+    `team.test.ts`, `fabric-cli.test.ts`.
+  - **Residual:** a full node that turned on you can write a grant as your word, as it can write a rule: a full node is
+    owner-equivalent in the ledger. It is a signed event every node holds and shows (`invincible fabric grants`), and
+    revoking the node ends it.
 - **A stolen chain.** A run's chain ends at the transport key of the node its task was handed to, so presented on any
   other connection it binds to nobody (Q-AMP SPEC 9.4 step 8): refused at the giver's sidecar. Re-signed by the run's
   own key to another key, it is refused at the giver's door (only the node the task was handed to). The chain and the

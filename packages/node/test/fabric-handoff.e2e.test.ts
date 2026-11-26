@@ -91,6 +91,8 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
     await callB("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${models.port}/v1` });
     for (const role of ["planner", "engineer", "reviewer"]) await callB("setRoster", { role, models: [`stand-in/${role}`] });
     await callB("saveAgent", { id: "ada", name: "Ada", role: "engineer" });
+    // Your word, once, that alpha may hand beta's Ada work, with its fleet tool, within a day's budget.
+    await callB("grantHandoffs", { from: "alpha", to: "beta", agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 100 });
   });
 
   afterAll(async () => {

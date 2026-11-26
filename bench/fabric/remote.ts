@@ -131,6 +131,11 @@ if (role === "serve") {
   await call("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${models.port}/v1` });
   for (const r of ["planner", "engineer", "reviewer"]) await call("setRoster", { role: r, models: [`stand-in/${r}`] });
   await call("saveAgent", { id: "ada", name: "Ada", role: "engineer" });
+  // Your word, once, that the measuring node may hand this one's Ada work (its default of $3 a task, every sample).
+  const grantClient = async () => {
+    const client = node!.store.devices().find((d) => d.kind === "node" && d.id !== node!.identity.id && !d.revokedHlc);
+    if (client && !node!.store.handoffGrant(client.id, node!.identity.id)) await call("grantHandoffs", { from: client.id, to: node!.identity.id, agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 1000 });
+  };
   // Echoes, and what it is told (its sidecar off or on), through the fleet's own ledger. Written after the listener
   // returns, never inside it (the ledger swallows what its listeners throw).
   const self = node.identity.id;
@@ -175,6 +180,7 @@ if (role === "serve") {
   const approver = setInterval(async () => {
     const { pairings } = await call<{ pairings: { invite: string; device: string }[] }>("pairings").catch(() => ({ pairings: [] }));
     for (const p of pairings) await call("approvePairing", { invite: p.invite, device: p.device }).catch(() => {});
+    await grantClient().catch(() => {});
   }, 200);
   const done = new Promise<void>((resolve) => {
     process.on("SIGINT", resolve);

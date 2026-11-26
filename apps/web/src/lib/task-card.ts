@@ -107,13 +107,23 @@ export const gatesLine = (gates: readonly string[]): string | null => (gates.len
 /** A running task's latest line on its card: the first of its progress, as the node last said it ("" before any). */
 export const latestLine = (task: Pick<TeamTask, "progress">): string => (task.progress ?? "").trim().split("\n")[0]?.trim() ?? "";
 
-/** Who gave a task to the agents rather than to an agent by name (null: it was given by name). */
-export const givenLine = (task: Pick<TeamTask, "givenBy">): string | null =>
-  task.givenBy === "owner" ? "Given to the agents by you" : task.givenBy === "primary" ? "Given to the agents by your agent" : null;
+/** The node a task was handed over from (`node:<id>`, the fabric's hand-offs), by its id; null: it wasn't. */
+export const handedFrom = (by: string | undefined): string | null => (by?.startsWith("node:") ? by.slice("node:".length) : null);
+
+/** Who gave a task to the agents rather than to an agent by name (null: it was given by name). `node`: a node's name, by its id. */
+export const givenLine = (task: Pick<TeamTask, "givenBy">, node?: (id: string) => string): string | null => {
+  const from = handedFrom(task.givenBy);
+  if (from) return `Handed over by ${node?.(from) ?? "another node of yours"}`;
+  return task.givenBy === "owner" ? "Given to the agents by you" : task.givenBy === "primary" ? "Given to the agents by your agent" : null;
+};
 
 /** Who wrote a task, when an agent did (null: you or the primary gave it): `proposer` is that agent's name. */
-export const proposedLine = (task: Pick<TeamTask, "proposedBy" | "status">, proposer: string | null): string | null =>
-  !task.proposedBy ? null : task.status === "proposed" ? `${proposer ?? task.proposedBy} proposes this: it starts when you approve it` : `Proposed by ${proposer ?? task.proposedBy}`;
+export const proposedLine = (task: Pick<TeamTask, "proposedBy" | "status">, proposer: string | null): string | null => {
+  if (!task.proposedBy) return null;
+  // Another node's hand-off beyond your grant: yours to approve, as any proposal.
+  if (handedFrom(task.proposedBy)) return task.status === "proposed" ? `${proposer ?? "Another node of yours"} handed this over beyond your grant: it starts when you approve it` : `Handed over by ${proposer ?? "another node of yours"}, beyond your grant`;
+  return task.status === "proposed" ? `${proposer ?? task.proposedBy} proposes this: it starts when you approve it` : `Proposed by ${proposer ?? task.proposedBy}`;
+};
 
 /** How you stepped in on a task, the north star's count (#28; null: you never did). */
 export const steppedLine = (task: Pick<TeamTask, "interventions">): string | null => {

@@ -141,8 +141,11 @@ export class TeamService {
   /** Whether failing checks go back to the agent whose work it was, outside an outcome too (ci-back.ts reads it when they fail). */
   setCiBack(on: boolean): boolean { this.accepting(); const set = this.store.setCiBack(on); this.changed(); return set; }
   setBacklog(on: boolean): boolean { this.accepting(); const set = this.store.setBacklog(on); this.changed(); return set; }
-  /** Work the primary offers an agent from your backlog (backlog.ts): proposed, it starts when it approves it itself, or you do. */
-  proposeTask(input: TeamTaskInput): TeamTask { this.accepting(); const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, propose: true }); this.changed(); return task; }
+  /**
+   * Work proposed to an agent, waiting for a yes: the primary's from your backlog (backlog.ts), which it may approve
+   * itself; or a task another node handed over beyond your grant (`node:<id>`, fabric/handoff.ts), which only you approve.
+   */
+  proposeTask(input: TeamTaskInput, by: string = TEAM_PRIMARY): TeamTask { this.accepting(); const task = this.store.createTask(input, { givenBy: by, propose: true }); this.changed(); return task; }
   /** What the primary may commit on its own word in a day while you set no usage budget: yours to set, never its. */
   ownDaily(): number { return this.store.ownDaily(); }
   setOwnDaily(usd: number): number { this.accepting(); const set = this.store.setOwnDaily(usd); this.changed(); return set; }
@@ -210,6 +213,8 @@ export class TeamService {
     const proposed = this.store.task(task);
     const budget = proposed?.budgetUsd;
     if (proposed?.status !== "proposed" || budget === undefined || budget > TEAM_LIMITS.ownTaskUsd) return null;
+    // A task another node handed over beyond your grant is yours alone to approve, whatever it would spend.
+    if (proposed.proposedBy?.startsWith("node:")) return null;
     const bound = this.ownBound();
     if (bound.usd < budget) return null;
     const approved = this.store.approve(task, true);
@@ -217,6 +222,19 @@ export class TeamService {
     this.changed();
     this.kick();
     return approved;
+  }
+  /**
+   * One task ended now, in these words, by no word of yours: another node's hand-off that nobody follows any more, or
+   * one your grant for it was revoked under (fabric/handoff.ts). Running, queued or waiting for you; ended ones stay.
+   */
+  stopTask(task: string, why: string): void {
+    this.accepting();
+    const found = this.store.task(task);
+    if (!found || (found.status !== "running" && found.status !== "queued" && found.status !== "proposed")) return;
+    this.cancel({ task }, "stopped", why);
+    this.store.finish(task, "stopped", why);
+    this.changed();
+    this.kick();
   }
   /** One it proposed, taken back before you answered it (backlog.ts: its step done, or another first): it never ran. */
   withdrawProposal(task: string, why: string): void {

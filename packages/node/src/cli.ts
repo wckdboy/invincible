@@ -416,6 +416,11 @@ Agents (MCP, ACP)
                                   the grants in force; end one, or every one, now (each also ends by itself)
   fabric on|off|status            agents across this fleet's nodes over Q-AMP, through this node's sidecar: off by
                                   default, whatever binary it has; on starts its sidecar now, off stops it (docs/FABRIC.md)
+  fabric grant <from> <to> --budget <usd a day> [--agents <id>,…] [--tools fleet,compute,place,ledger]
+                                  your word, once for the pair, that <from> may hand tasks to <to>'s agents: within it a
+                                  hand-off is taken at once; beyond it (or with none) it waits there for your approval
+  fabric grants | fabric revoke <from> <to>
+                                  the grants in force; end one (what was handed under it stops)
   hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools fleet,compute,place,ledger] [--budget 2] [--follow]
                                   a task for another node's agents, over Q-AMP: it runs there, its trail comes back as it
                                   goes, and its proof (signed by that node's own key) is checked here; --tools: what its
@@ -635,6 +640,8 @@ async function main(): Promise<void> {
       goal: { type: "string" },
       done: { type: "string" },
       agent: { type: "string", multiple: true },
+      // A grant for hand-offs: fabric grant <from> <to> --budget 5 --agents ada,noa --tools fleet.
+      agents: { type: "string" },
       "report-hour": { type: "string" },
       tz: { type: "string" },
       heartbeat: { type: "boolean" },
@@ -2091,7 +2098,7 @@ Evidence: invincible artifact ${i!.artifact}`));
       await handCommand(new Admin(home), command, [sub, ...rest].filter((x): x is string => typeof x === "string"), flags);
       return;
     case "fabric":
-      await fabricCommand(new Admin(home), sub, { readConfig: () => home.readConfig(), writeConfig: (change) => home.writeConfig({ ...home.readConfig(), ...change }) });
+      await fabricCommand(new Admin(home), sub, { readConfig: () => home.readConfig(), writeConfig: (change) => home.writeConfig({ ...home.readConfig(), ...change }) }, rest.filter((x): x is string => typeof x === "string"), flags);
       return;
     case "archive":
       await archiveCommand(new Admin(home), sub, rest, flags, { confirm, readStdin: () => Bun.stdin.text() });

@@ -11,7 +11,7 @@ import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { agentOfCaller } from "../lib/roster.ts";
 import { costWords, factsOfProof, factsOfRecord, type GateRow, judgedWith, liveStep, type Proof, proofOf, proofSeal, saidBesideProof, type StepGroup, stepGroups, summaryWords, workedLine, workSummary } from "../lib/steps.ts";
 import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../lib/steer.ts";
-import { sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
+import { handedFrom, sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
 import { teamSpeaker } from "../lib/team.ts";
 import { giveAgain } from "../lib/timeline.ts";
 import { duration, relativeTime } from "../lib/time.ts";
@@ -64,6 +64,12 @@ function conversationOf(room: TeamRoomView | null, task: TeamTask): TeamMessage[
 /** Who gave it, and how, in a line (the dispatch): the primary or you to the agents, an agent's proposal, or by name. No
  * full stop: its time follows it after a dot ("Given to Ada by name · just now"), never as a sentence of its own. */
 function dispatchWords(task: TeamTask, agent: string, proposer: string | null): string {
+  // Another node's hand-off: under your grant (taken at once), or beyond it (a proposal, yours to approve).
+  if (handedFrom(task.givenBy)) {
+    const node = proposer ?? "Another node of yours";
+    if (!task.proposedBy) return `${node} handed it over under your grant, and ${agent} took it`;
+    return task.status === "proposed" ? `${node} handed it over beyond your grant: it starts when you approve it` : `${node} handed it over beyond your grant, and you approved it`;
+  }
   if (task.proposedBy) return task.status === "proposed" ? `${proposer ?? task.proposedBy} proposes it: it starts when you approve it` : `${proposer ?? task.proposedBy} proposed it, and it was approved`;
   if (task.givenBy === "primary") return `Your agent gave it to the agents, and ${agent} took it as best suited`;
   if (task.givenBy === "owner") return `You gave it to the agents, and ${agent} took it as best suited`;
@@ -455,7 +461,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const version = JSON.stringify([task, entries.length, entries.at(-1)?.n, asks.map((a) => a.id), talk.map((m) => m.id), Boolean(prices), changes?.files.length, n.name, n.project.name, dependents.map((d) => [d.id, d.status]), Math.floor(Date.now() / 60_000)]);
     if (version === threadVersion && !force) return;
     threadVersion = version;
-    const proposer = task.proposedBy ? (n.snapshot.agents.find((person) => person.id === task.proposedBy)?.name ?? (task.proposedBy === "primary" ? "Your agent" : task.proposedBy)) : null;
+    const from = handedFrom(task.givenBy);
+    const proposer = from ? (ctx.live.fleet.value?.devices.find((device) => device.id === from)?.name ?? null) : task.proposedBy ? (n.snapshot.agents.find((person) => person.id === task.proposedBy)?.name ?? (task.proposedBy === "primary" ? "Your agent" : task.proposedBy)) : null;
     const nearEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
     const startedAgo = shortSpan(Date.now() - task.createdAt);
     const facts = [sensitiveLine(task), steppedLine(task), task.outcome ? "A step of an outcome your agent owns" : null, task.fix ? `It fixes pull request ${task.fix.pr ? `#${task.fix.pr}` : task.fix.branch}` : null, task.from ? `Started where step ${task.from.step} of another task left its files` : null].filter(Boolean);

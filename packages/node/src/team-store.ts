@@ -724,6 +724,19 @@ export class TeamStore {
       return this.task(key)!;
     })();
   }
+  /**
+   * What one node has handed here (its tasks' givenBy, `node:<id>`): how many wait for you, are queued or are running
+   * now, and what those it handed under your grant since `since` were given to spend (each one's budget, the most it may).
+   */
+  handed(by: string, since: number): { atOnce: number; given: number } {
+    const atOnce = this.db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM team_jobs WHERE kind = 'task' AND status IN ('proposed','queued','running') AND json_extract(data, '$.givenBy') = ?").get(by)!.n;
+    const given = this.db.query<{ usd: number | null }, [string, number]>("SELECT SUM(json_extract(data, '$.budgetUsd')) AS usd FROM team_jobs WHERE kind = 'task' AND json_extract(data, '$.givenBy') = ? AND json_extract(data, '$.proposedBy') IS NULL AND created_at > ?").get(by, since)!.usd ?? 0;
+    return { atOnce, given };
+  }
+  /** The tasks other nodes handed here that haven't ended (waiting for you, queued or running), by id. */
+  handedOpen(): string[] {
+    return this.db.query<{ id: string }, []>("SELECT id FROM team_jobs WHERE kind = 'task' AND status IN ('proposed','queued','running') AND json_extract(data, '$.givenBy') LIKE 'node:%' ORDER BY seq").all().map((r) => r.id);
+  }
   /** A task's work, shipped as a pull request on your word (PLAN #37): said on it from then on. */
   markShipped(key: string, shipped: TeamTaskShipped): void {
     const row = this.jobRow(key);

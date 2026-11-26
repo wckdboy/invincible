@@ -316,7 +316,7 @@ describe("seats in the mind", () => {
       raw.exec(`DELETE FROM v_lww WHERE k LIKE 'seat%'; DELETE FROM v_rejected WHERE id = '${wrong.id}'; PRAGMA user_version = 6;`);
       raw.close();
       const upgraded = new LedgerStore(path);
-      expect(upgraded.schemaVersion()).toBe(8);
+      expect(upgraded.schemaVersion()).toBe(9);
       expect(seen(upgraded)).toEqual(seats);
       // A log from before seats served agents names none: its seats serve no one until you choose.
       expect(upgraded.seats().map((s) => s.serves)).toEqual([[]]);
@@ -347,7 +347,7 @@ describe("seats in the mind", () => {
       raw.exec(`DELETE FROM v_lww WHERE k LIKE 'seat-serves:%'; PRAGMA user_version = 7;`);
       raw.close();
       const upgraded = new LedgerStore(path);
-      expect(upgraded.schemaVersion()).toBe(8);
+      expect(upgraded.schemaVersion()).toBe(9);
       expect(seen(upgraded)).toEqual(seats);
       expect(Object.fromEntries(upgraded.seats().map((s) => [s.id, s.serves]))).toEqual({ [chosen]: [ADA, BO], [plain]: [] });
       expect(upgraded.digest()).toBe(digest);
