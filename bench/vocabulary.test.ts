@@ -61,6 +61,8 @@ describe("what it reads", () => {
     for (const path of ["LICENSE", "NOTICE", `${IMPORTER}home.ts`]) expect(one(path, `${first} ${first}`)).toEqual([]);
     expect(one("assets/icon.png", `\u0000PNG ${first}`)).toEqual([]);
     expect(one("README.md", `${first}`)).toEqual([{ path: "README.md", line: 1, word: first, text: first }]);
+    // A file's name is read too, wherever it is.
+    expect(one(`scripts/${first}-crosscheck.py`, "print()")).toEqual([{ path: `scripts/${first}-crosscheck.py`, line: 0, word: first, text: `scripts/${first}-crosscheck.py` }]);
   });
 });
 

@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 /*
  * Invincible keeps none of the words of the theme it was carried from (docs/ARCHITECTURE.md §10, where they are named
  * once): its agents are workers, not characters. This finds any of them, in any tracked file, in any case and inside
- * any identifier (a camelCase, snake_case or kebab-case part is a word of its own), and says where.
+ * any identifier (a camelCase, snake_case or kebab-case part is a word of its own), and in any file's name, and says
+ * where.
  *
  * Not looked at: that one section of docs/ARCHITECTURE.md, the licence and the notice, and the importer (which reads
  * the old system's home, in its words) under IMPORTER once it exists. A file that isn't text (it holds a NUL) is
@@ -81,10 +82,11 @@ export function linesToRead(path: string, text: string): { line: number; text: s
   return out;
 }
 
-/** Every word of the theme in these files. */
+/** Every word of the theme in these files, and in their names (a finding at line 0 is in the path). */
 export function findOldWords(files: readonly { path: string; text: string }[]): Finding[] {
   const findings: Finding[] = [];
   for (const file of files) {
+    if (!EXEMPT.has(file.path) && !file.path.startsWith(IMPORTER)) for (const word of wordsIn(file.path)) findings.push({ path: file.path, line: 0, word, text: file.path });
     if (file.text.includes("\0")) continue;
     for (const { line, text } of linesToRead(file.path, file.text)) {
       for (const word of wordsIn(text)) findings.push({ path: file.path, line, word, text: text.trim().slice(0, 160) });
