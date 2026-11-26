@@ -56,8 +56,8 @@ final class ShotsTests: XCTestCase {
             try home(app, look, node)
             settle(3)
             shot("01-home", look)
-            // Home's work, a swipe down: its rows.
-            app.swipeUp()
+            // Home's work: swiped to its first row (one swipe at the largest size reaches only its decisions).
+            _ = reach(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.'")).firstMatch, app)
             settle(1.5)
             shot("01-home-work", look)
             // A task proven, one that failed, one at work: each its thread, by its link (the same ones in every look).
