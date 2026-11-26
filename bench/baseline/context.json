@@ -9,15 +9,15 @@
     "cores": 12
   },
   "metrics": [
-    {"id":"context.quest.tests-after-edits","value":336141,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: the tests run after each of 13 edits, failing until the last (26 commands)"},
-    {"id":"context.quest.read-edit-test","value":379806,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: ten files, each read, edited in place and tested (30 commands)"},
-    {"id":"context.quest.read-edit-test.last-turn","value":20250,"unit":"chars","kind":"quality","better":"lower","note":"the last turn of the same quest: what a long quest's every turn tends to"},
-    {"id":"context.quest.survey","value":647513,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: thirty different searches that each print a page (30 commands)"},
-    {"id":"context.quest.rewrites","value":6,"unit":"turns","kind":"quality","better":"lower","note":"turns, over the three quests, whose conversation doesn't begin with the turn before's (a batch cut is one)"},
-    {"id":"context.quest.fix-then-check","value":346062,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: eight test files failing in turn and fixed, the whole suite passing, a typecheck failing then passing, the work looked over (30 commands)"},
-    {"id":"context.quest.fix-then-check.rewrites","value":2,"unit":"turns","kind":"quality","better":"lower","note":"turns of that quest whose conversation doesn't begin with the turn before's"},
-    {"id":"context.knight.understand.commands","value":11,"unit":"commands","kind":"quality","better":"lower","note":"commands a careful stand-in knight ran to change three files of the first real outcome's code, each with all five files in view as they were then, and test it (eighty: it never finished)"},
-    {"id":"context.knight.understand.done","value":1,"unit":"tasks","kind":"quality","better":"higher","note":"whether that stand-in finished within eighty commands: nought when its reads were cut before it could see what it needed"},
-    {"id":"context.knight.understand","value":657574,"unit":"chars","kind":"quality","better":"lower","note":"every turn's conversation of the same task, summed: what its view of the code cost to send"}
+    {"id":"context.run.tests-after-edits","value":336141,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: the tests run after each of 13 edits, failing until the last (26 commands)"},
+    {"id":"context.run.read-edit-test","value":379806,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: ten files, each read, edited in place and tested (30 commands)"},
+    {"id":"context.run.read-edit-test.last-turn","value":20250,"unit":"chars","kind":"quality","better":"lower","note":"the last turn of the same run: what a long run's every turn tends to"},
+    {"id":"context.run.survey","value":647513,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: thirty different searches that each print a page (30 commands)"},
+    {"id":"context.run.rewrites","value":6,"unit":"turns","kind":"quality","better":"lower","note":"turns, over the three runs, whose conversation doesn't begin with the turn before's (a batch cut is one)"},
+    {"id":"context.run.fix-then-check","value":346062,"unit":"chars","kind":"quality","better":"lower","note":"every engineer turn's conversation, summed: eight test files failing in turn and fixed, the whole suite passing, a typecheck failing then passing, the work looked over (30 commands)"},
+    {"id":"context.run.fix-then-check.rewrites","value":2,"unit":"turns","kind":"quality","better":"lower","note":"turns of that run whose conversation doesn't begin with the turn before's"},
+    {"id":"context.agent.understand.commands","value":11,"unit":"commands","kind":"quality","better":"lower","note":"commands a careful stand-in agent ran to change three files of the first real outcome's code, each with all five files in view as they were then, and test it (eighty: it never finished)"},
+    {"id":"context.agent.understand.done","value":1,"unit":"tasks","kind":"quality","better":"higher","note":"whether that stand-in finished within eighty commands: nought when its reads were cut before it could see what it needed"},
+    {"id":"context.agent.understand","value":657574,"unit":"chars","kind":"quality","better":"lower","note":"every turn's conversation of the same task, summed: what its view of the code cost to send"}
   ]
 }
