@@ -128,7 +128,7 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
     expect(key).toMatchObject({ id: 3, ok: true, did: "pressed ctrl+l" });
     const t = r.trace();
     expect(calls(t, "motion")).toEqual([{ call: "motion", x: 640, y: 450 }]);
-    expect(calls(t, "button")).toEqual([{ call: "button", button: 1, down: true }, { call: "button", button: 1, down: false }]);
+    expect(calls(t, "button").map(({ at, ...b }) => b)).toEqual([{ call: "button", button: 1, down: true }, { call: "button", button: 1, down: false }]);
     expect(keys(t)).toEqual(["+Control_L", "+l", "-l", "-Control_L"]);
   });
 
@@ -514,6 +514,46 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
 });
 
 describe("nothing hangs, nothing is silent (step 5)", () => {
+  test("a key that commits (Return) waits for the screen to settle after what was typed before it, as a person's would; other keys don't wait", async () => {
+    // (C1's step 3 run: a Save As dialog's name typed in full, and the Return 20 ms after it never saved, 5 runs of 5.)
+    const r = await deskd({ DESKD_FOCUS: "mousepad" });
+    await session(r, [{ id: 1, name: "type", input: { text: "Hello" } }, { id: 2, name: "key", input: { text: "Tab" } }, { id: 3, name: "type", input: { text: "abc" } }, { id: 4, name: "key", input: { text: "Return" } }]);
+    const k = calls(r.trace(), "key") as { key: string; down: boolean; at: number }[];
+    const lastUp = (before: number) => k.slice(0, before).filter((e) => !e.down).at(-1)!.at;
+    const tab = k.findIndex((e) => e.key === "Tab" && e.down);
+    const ret = k.findIndex((e) => e.key === "Return" && e.down);
+    expect(k[tab]!.at - lastUp(tab)).toBeLessThan(0.1);
+    expect(k[ret]!.at - lastUp(ret)).toBeGreaterThanOrEqual(0.15);
+  });
+
+  test("a paste is answered once the app has taken the text, so the Return after it can't overtake it; a paste nothing takes is an error", async () => {
+    // (C1's step 4 run: in xterm, the line came after its Return, 20 of 20.)
+    const r = await deskd({ DESKD_FOCUS: "xterm", DESKD_PASTE_TAKES: "0.3" });
+    const [typed] = await session(r, [{ id: 1, name: "type", input: { text: "Søren Ærø 🙂" } }, { id: 2, name: "key", input: { text: "Return" } }]);
+    expect(typed).toMatchObject({ ok: true, did: "pasted 11 characters" });
+    const order = r.trace().filter((t) => t.call === "taken" || (t.call === "key" && t.key === "Return" && t.down)).map((t) => t.call);
+    expect(order).toEqual(["taken", "key"]);
+    const never = await deskd({ DESKD_FOCUS: "xterm", DESKD_PASTE_TAKES: "never" });
+    const [lost] = await session(never, [{ id: 1, name: "type", input: { text: "Søren Ærø 🙂" } }]);
+    expect(lost).toMatchObject({ ok: false, error: "nothing took the pasted text within 1 s: is a text field focused?" });
+  });
+
+  test("a click's press comes right after its move: nothing is asked of the display between them", async () => {
+    const r = await deskd();
+    await session(r, [{ id: 1, name: "left_click", input: { coordinate: [640, 450] } }]);
+    const t = r.trace().map((e) => e.call as string);
+    const moved = t.indexOf("motion");
+    expect(t.slice(moved, moved + 2)).toEqual(["motion", "button"]);
+  });
+
+  test("double clicks at one place, one after another, are each a double click: the next waits out the double-click time and a margin (C0's F7)", async () => {
+    const r = await deskd({ DESKD_QUIET: "1" });
+    await session(r, [{ id: 1, name: "double_click", input: { coordinate: [640, 450] } }, { id: 2, name: "double_click", input: { coordinate: [641, 451] } }]);
+    const presses = (calls(r.trace(), "button") as { down: boolean; at: number }[]).filter((b) => b.down);
+    expect(presses).toHaveLength(4);
+    expect(presses[2]!.at - presses[1]!.at).toBeGreaterThanOrEqual(0.58);
+  });
+
   /** A page with a JavaScript alert up: Chromium answers nothing on that page while it is (C0's F4: 30 s, then a traceback). */
   const ALERT = `
 import queue
@@ -628,19 +668,57 @@ print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000
     expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
   });
 
-  test("deskd keeps the browser and the window manager running: one that ends is started again without waiting for a command (C0's F9)", () => {
+  test("deskd keeps the browser and the window manager running: one that ends is started again as it ends, not at the next command (C0's F9), and not once it is stopping", () => {
     expect(py(`
 class P:
-    running = True; starts = 0
-    def start(self): P.starts += 1; P.running = True
-    def browser_running(self): return P.running
-    def browser_up(self): return P.running
-    def window_manager_running(self): return True
+    starts = 0; asked = 0; ended = None
+    def start(self): P.starts += 1
+    def browser_running(self): P.asked += 1; return True
+    def browser_up(self): P.asked += 1; return True
+    def window_manager_running(self): P.asked += 1; return True
+    def a11y_running(self): P.asked += 1; return True
+pieces = P()
+desk = d.Desk(pieces=pieces, display=object(), watch=object(), browser=d.Browser())
+desk.supervise()
+pieces.ended("browser")
+desk.stopping = True
+pieces.ended("browser")
+print(json.dumps({"starts": P.starts}))`)).toEqual({ starts: 1 });
+  });
+
+  test("the keeper waits on what deskd started, and asks nothing at rest: a piece's end is known as it happens (C1: asking four times a second cost the idle desktop 0.7 % of a core)", () => {
+    const got = py(`
+import os, signal, tempfile
+d.RUN = tempfile.mkdtemp()
+p = d.Pieces(home=d.RUN)
+ended = []
+p.ended = lambda name: ended.append([name, time.monotonic()])
+pid = p._spawn(["sleep", "30"], "kept.log", keep="browser")
+time.sleep(1.1)
+t = time.monotonic(); os.kill(pid, signal.SIGKILL); time.sleep(0.3)
+first = round((ended[0][1] - t) * 1000) if ended else None
+# One that ends as it starts is started again a second later, not at once, and again.
+pid = p._spawn(["sleep", "30"], "kept.log", keep="windows")
+t = time.monotonic(); os.kill(pid, signal.SIGKILL); time.sleep(1.4)
+second = round((ended[1][1] - t) * 1000) if len(ended) > 1 else None
+print(json.dumps({"ended": [n for n, _ in ended], "first": first, "second": second, "threads": sorted(x.name for x in __import__("threading").enumerate() if x.name.startswith("keep"))}))`) as { ended: string[]; first: number; second: number; threads: string[] };
+    expect(got.ended).toEqual(["browser", "windows"]);
+    expect(got.first).toBeLessThan(100);
+    expect(got.second).toBeGreaterThanOrEqual(1000);
+    expect(got.second).toBeLessThan(1300);
+    expect(got.threads).toEqual([]);
+    // Nothing asked at rest: no piece is polled.
+    expect(py(`
+class P:
+    asked = 0
+    def start(self): pass
+    def browser_running(self): P.asked += 1; return True
+    def browser_up(self): P.asked += 1; return True
+    def window_manager_running(self): P.asked += 1; return True
+    def a11y_running(self): P.asked += 1; return True
 desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=d.Browser())
-desk.supervise(interval=0.05)
-time.sleep(0.2); P.running = False; time.sleep(0.3)
-desk.stopping = True; P.running = False; time.sleep(0.3)
-print(json.dumps({"starts": P.starts, "running": P.running}))`)).toEqual({ starts: 1, running: false });
+desk.supervise(); time.sleep(0.6)
+print(json.dumps(P.asked))`)).toBe(0);
   });
 
   test("the keeper and a command that both find the browser gone start one browser, not two", () => {
@@ -648,7 +726,7 @@ print(json.dumps({"starts": P.starts, "running": P.running}))`)).toEqual({ start
 import tempfile, threading
 p = d.Pieces(home=tempfile.mkdtemp())
 spawned = []
-def spawn(argv, log):
+def spawn(argv, log, keep=None):
     spawned.append(argv[0]); time.sleep(0.05); return 4242
 p._spawn = spawn
 d._own = lambda comm: [1] if comm in ("Xvfb", "openbox") else []

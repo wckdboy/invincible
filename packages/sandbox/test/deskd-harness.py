@@ -10,6 +10,7 @@ file, a JSON line a call, and the tests read it. Nothing here is deskd's own log
                             body (the page, with nothing in it that takes text), bar (the browser's own bar), xterm,
                             mousepad, none
   DESKD_DIALOG=confirm      the page puts up a JavaScript confirm once it has been clicked
+  DESKD_PASTE_TAKES=…       how long the app with the focus takes to take a paste, in seconds, or never (0.01)
 """
 import importlib.util, json, os, sys, threading, time
 
@@ -24,6 +25,7 @@ QUIET = os.environ.get("DESKD_QUIET") == "1"
 FOCUS = os.environ.get("DESKD_FOCUS", "field")
 BUSY = os.environ.get("DESKD_BUSY") == "1"
 DIALOG = os.environ.get("DESKD_DIALOG")
+PASTE_TAKES = os.environ.get("DESKD_PASTE_TAKES", "0.01")
 clicked = threading.Event()
 lock = threading.Lock()
 
@@ -83,6 +85,22 @@ class Screen:
     def own(self, text):
         # (A selection held for a paste: the stand-in app that pastes it is the trace's reader.)
         trace(call="own", text=text)
+        self.given = threading.Event()
+        self.pending = True
+
+    def paste_keys_arrived(self):
+        """The app with the focus got its paste keys: it asks for the text, in its own time (DESKD_PASTE_TAKES)."""
+        if not getattr(self, "pending", False) or PASTE_TAKES == "never":
+            return
+        self.pending = False
+        def take():
+            time.sleep(float(PASTE_TAKES))
+            trace(call="taken")
+            self.given.set()
+        threading.Thread(target=take, daemon=True).start()
+
+    def taken(self, bound):
+        return self.given.wait(bound)
 
 
 class FakeDisplay:
@@ -96,9 +114,21 @@ class FakeDisplay:
                         "0x600001": {"id": "0x600001", "title": "Untitled 1 - Mousepad", "app": "Mousepad", "dialog": False, "box": [800, 300, 400, 300]}}
         self.focused = {"xterm": "0x500001", "mousepad": "0x600001", "none": "0x0"}.get(FOCUS, "0x400001")
         self.stacking = ["0x400001", "0x500001", "0x600001"]  # bottom to top
+        # Input waits in the connection's buffer, as Xlib's requests do, until a sync or a round trip sends it.
+        self.out = []
+        self.lock = threading.Lock()
 
-    def client_at(self, x, y):
+    def _deliver(self):
+        with self.lock:
+            out, self.out = self.out, []
+        for event in out:
+            event()
+
+    def client_at(self, x, y, delivering=False):
         """The topmost window whose box holds the point, as the window manager stacks them."""
+        if not delivering:
+            self._deliver()
+            trace(call="client_at")
         for w in reversed(self.stacking):
             bx, by, bw, bh = self.windows[w]["box"]
             if bx <= x < bx + bw and by <= y < by + bh:
@@ -106,10 +136,12 @@ class FakeDisplay:
         return 0
 
     def close(self, w):
+        self._deliver()
         trace(call="close", window=hex(w))
         self.windows.pop(hex(w), None)
 
     def activate(self, w):
+        self._deliver()
         trace(call="activate", window=hex(w))
         # (The window manager takes its time: a few milliseconds later it is in front, with the focus.)
         def later():
@@ -121,36 +153,47 @@ class FakeDisplay:
         threading.Thread(target=later, daemon=True).start()
 
     def motion(self, x, y):
-        self.at = (x, y)
-        trace(call="motion", x=x, y=y)
-        self.screen.drawn()
+        def sent():
+            self.at = (x, y)
+            trace(call="motion", x=x, y=y)
+            self.screen.drawn()
+        with self.lock:
+            self.out.append(sent)
 
     def button(self, b, down):
-        trace(call="button", button=b, down=down)
-        if not down:
-            clicked.set()
-        if down:
-            # Click to focus, as the window manager does, in its own time.
-            under = self.client_at(*self.at)
-            if under and hex(under) != self.focused:
-                def later():
-                    time.sleep(0.03)
-                    self.focused = hex(under)
-                threading.Thread(target=later, daemon=True).start()
-        if not down:
-            self.screen.drawn()
+        def sent():
+            trace(call="button", button=b, down=down, at=time.monotonic())
+            if not down:
+                clicked.set()
+            if down:
+                # Click to focus, as the window manager does, in its own time.
+                under = self.client_at(*self.at, delivering=True)
+                if under and hex(under) != self.focused:
+                    def later():
+                        time.sleep(0.03)
+                        self.focused = hex(under)
+                    threading.Thread(target=later, daemon=True).start()
+            if not down:
+                self.screen.drawn()
+        with self.lock:
+            self.out.append(sent)
 
     def key(self, code, down):
-        trace(call="key", key=CODE_NAMES.get(code, code), down=down)
-        if not down:
-            self.screen.drawn()
-            if CODE_NAMES.get(code) == "F5":  # (a key that opens a dialog, for the window watcher's answer)
-                self.windows["0x400002"] = {"id": "0x400002", "title": "Save As", "app": "Mousepad", "dialog": True, "box": [300, 200, 600, 400]}
-                with self.screen.lock:
-                    self.screen.appeared.append(self.windows["0x400002"])
+        def sent():
+            trace(call="key", key=CODE_NAMES.get(code, code), down=down, at=time.monotonic())
+            if not down:
+                self.screen.drawn()
+                if CODE_NAMES.get(code) == "F5":  # (a key that opens a dialog, for the window watcher's answer)
+                    self.windows["0x400002"] = {"id": "0x400002", "title": "Save As", "app": "Mousepad", "dialog": True, "box": [300, 200, 600, 400]}
+                    with self.screen.lock:
+                        self.screen.appeared.append(self.windows["0x400002"])
+                if CODE_NAMES.get(code) in ("Insert", "v"):  # (a paste's keys: the app asks for the text)
+                    self.screen.paste_keys_arrived()
+        with self.lock:
+            self.out.append(sent)
 
     def sync(self):
-        pass
+        self._deliver()
 
     def keymap(self):
         return KEYS
@@ -159,9 +202,11 @@ class FakeDisplay:
         return NAMES.get(name) or (ord(name) if len(name) == 1 else 0)
 
     def pointer(self):
+        self._deliver()
         return self.at
 
     def capture(self):
+        self._deliver()
         # A white screen with a black square at 600,400: what the pictures are checked against.
         frame = bytearray(b"\xff" * (self.w * self.h * 4))
         for y in range(400, 410):
@@ -173,12 +218,16 @@ class FakeDisplay:
         return (self.at[0], self.at[1], 2, 2, [0xFFFF0000] * 4)
 
     def active(self):
+        self._deliver()
+        trace(call="active")
         return int(self.focused, 16)
 
     def window(self, w):
+        self._deliver()
         return self.windows.get(hex(w), {"id": hex(w), "title": "", "app": "", "dialog": False, "box": None})
 
     def clients(self):
+        self._deliver()
         return [int(k, 16) for k in self.windows]
 
 
@@ -237,7 +286,7 @@ class FakePieces:
     def window_manager_running(self):
         return True
 
-    def _spawn(self, argv, log):
+    def _spawn(self, argv, log, keep=None):
         trace(call="spawn", argv=argv)
 
 

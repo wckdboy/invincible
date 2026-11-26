@@ -44,7 +44,7 @@ sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("deskd", sys.argv[1]); d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)
 started = []
 p = d.Pieces(home="/work")
-p._spawn = lambda argv, log: started.append(argv)
+p._spawn = lambda argv, log, keep=None: started.append(argv)
 p.display_up = lambda: any(a[0] == "Xvfb" for a in started)
 p.browser_up = lambda: any(a[0] == "chromium" for a in started)
 d._own = lambda comm: [1] if any(a[0] == comm for a in started) else []

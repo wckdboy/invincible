@@ -93,3 +93,6 @@ everything but the model.
 - **Strict:** a desktop number worse than its baseline fails the run. Speed beyond a ±20 % band (or the samples' own
   spread), not only past 2×; memory and CPU past their stated resolution; a count of passes, or a check that held,
   going down.
+- **Held:** what C1's steps reached is held to bars whatever the baseline says: every task's passes, each way (the
+  editor the naive way included: step 3 broke it and C0's 0/5 hid that), the test string exact in each app, and the
+  F tests' checks.

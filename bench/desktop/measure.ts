@@ -240,22 +240,26 @@ export async function typing(vm: BenchVm, n: number): Promise<Typing> {
   // A terminal: what is typed into a line that cat writes to a file, read back.
   const xterm = async () => {
     let right = 0;
+    let wrong: string | undefined;
     for (let i = 0; i < n; i++) {
       const file = `${IN_VM}/out/xterm-${i}.txt`;
       await startApp(vm, `xterm -geometry 100x20+100+100 -e sh -c 'cat > ${file}'`);
       if (await focusWindow(vm, "^xterm$")) {
-        await vm.raw(["desktop", "type", TEST_STRING], { env: { LC_ALL: "C.UTF-8" } });
+        const typed = await vm.raw(["desktop", "type", TEST_STRING], { env: { LC_ALL: "C.UTF-8" } });
         await vm.raw(["desktop", "key", "Return"]);
         await Bun.sleep(400);
-        if ((await vm.raw(["cat", file])).stdout === `${TEST_STRING}\n`) right++;
-      }
+        const got = (await vm.raw(["cat", file])).stdout;
+        if (got === `${TEST_STRING}\n`) right++;
+        else wrong ??= `one wrong: the file held ${JSON.stringify(got)}${typed.code ? `, and type said ${JSON.stringify(typed.stderr.trim())}` : ""}`;
+      } else wrong ??= "the terminal never took the focus";
       await endApp(vm);
     }
-    return { exact: right, of: n };
+    return { exact: right, of: n, ...(wrong ? { note: wrong.slice(0, 200) } : {}) };
   };
   // An editor: what is typed into a new file of its own, saved where it was named, read back.
   const mousepad = async () => {
     let right = 0;
+    let wrong: string | undefined;
     for (let i = 0; i < n; i++) {
       const file = `${IN_VM}/out/mousepad-${i}.txt`;
       await startApp(vm, `mousepad ${file}`);
@@ -263,13 +267,15 @@ export async function typing(vm: BenchVm, n: number): Promise<Typing> {
         await vm.raw(["desktop", "type", TEST_STRING], { env: { LC_ALL: "C.UTF-8" } });
         await vm.raw(["desktop", "key", "ctrl+s"]);
         for (let j = 0; j < 20 && (await vm.raw(["cat", file])).code !== 0; j++) await Bun.sleep(150);
-        if ((await vm.raw(["cat", file])).stdout.replace(/\n$/, "") === TEST_STRING) right++;
+        const got = (await vm.raw(["cat", file])).stdout.replace(/\n$/, "");
+        if (got === TEST_STRING) right++;
+        else wrong ??= `one wrong: the file held ${JSON.stringify(got)}`.slice(0, 200);
         await vm.raw(["desktop", "key", "ctrl+q"]);
         await Bun.sleep(300);
       }
       await endApp(vm);
     }
-    return { exact: right, of: n };
+    return { exact: right, of: n, ...(wrong ? { note: wrong } : {}) };
   };
   const answer = {
     exact: { chromium: { exact, of: n }, xterm: (await has("xterm")) ? await xterm() : absent("xterm"), mousepad: (await has("mousepad")) ? await mousepad() : absent("mousepad") },

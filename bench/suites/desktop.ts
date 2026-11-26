@@ -75,6 +75,30 @@ export const suite: Suite = {
   cannot: cannotRunHere,
   strict: { noiseFloor: 0.2 },
   asMeasured: true,
+  // What C1's steps reached, held whatever the baseline (still C0's) says: a step that helps one way through a task
+  // mustn't quietly break another (step 3 took the naive editor from 5/5 to 0/5, and C0's 0/5 hid it).
+  held: {
+    "desktop.boot.usable": 5,
+    "desktop.task.form.naive": 5,
+    "desktop.task.form.careful": 5,
+    "desktop.task.terminal.naive": 5,
+    "desktop.task.terminal.careful": 5,
+    "desktop.task.settings.naive": 5,
+    "desktop.task.settings.careful": 5,
+    "desktop.task.editor.naive": 5,
+    "desktop.task.editor.settled": 5,
+    "desktop.task.editor.careful": 5,
+    "desktop.type.chromium.exact": 1,
+    "desktop.type.xterm.exact": 1,
+    "desktop.type.mousepad.exact": 1,
+    "desktop.f.blind-type-refused": 1,
+    "desktop.f.alert-reported": 1,
+    "desktop.f.front-tab-read": 2,
+    "desktop.f.stale-after-navigation": 0,
+    "desktop.f.double-clicks": 5,
+    "desktop.f.browser-back": 1,
+    "desktop.f.after-last-tab": 1,
+  },
   async run(ctx) {
     const prefix = process.env.INVINCIBLE_BENCH_SCRATCH ?? "bench";
     const b = bench(prefix, ctx.log);

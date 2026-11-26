@@ -45,6 +45,10 @@ GRACE = 0.060  # an action's answer waits this long at most for the screen to sh
 CDP_BOUND = 2.0  # every call to the browser answers within this, or says it didn't
 NAVIGATION_CAP = 10.0  # a navigation an action started is waited for this long at most
 SHORT = 40  # text the keyboard has every key for, at most this long, goes key by key; anything else is inserted or pasted
+COMMITS = ("Return", "KP_Enter", "Enter")  # keys that commit what was typed: the screen is let settle before them
+COMMIT_SETTLE = 1.0  # for this long at most
+PASTE_BOUND = 1.0  # a paste is answered once the app has taken the text, or says it didn't within this
+MULTI_CLICK = 0.6  # the longest double-click time of the apps on this desktop (Chromium's 0.5 s), and a margin
 # What the browser's page says has its focus: whether the page has it, whether what has it takes text, and its tag.
 FOCUS_PROBE = ("(() => { const e = document.activeElement; const t = e ? e.tagName : null; const text = !!e && !e.disabled && !e.readOnly && "
                "(e.isContentEditable || t === 'TEXTAREA' || (t === 'INPUT' && /^(text|search|email|url|tel|password|number)$/i.test(e.type || 'text'))); "
@@ -402,6 +406,7 @@ class Watch(threading.Thread):
         # A window of its own, never shown, to hold a selection for a paste (own): the text pasted, as UTF-8.
         self.win = self.d.x.XCreateSimpleWindow(self.d.dpy, self.d.root, 0, 0, 1, 1, 0, 0, 0)
         self.clip = None
+        self.given = threading.Event()  # (set once an app has taken what is held)
         self.started = False
         self._list()
         self.started = True
@@ -451,6 +456,7 @@ class Watch(threading.Thread):
         """Hold `text` as the PRIMARY selection and the clipboard, for a paste to take (shift+Insert, ctrl+v)."""
         with self.lock:
             self.clip = text.encode("utf-8")
+            self.given.clear()
         for name in ("PRIMARY", "CLIPBOARD"):
             self.d.x.XSetSelectionOwner(self.d.dpy, self.d.atoms[name], self.win, 0)
         # (A round trip: the server has it before the paste's keys come, on the other connection.)
@@ -477,6 +483,13 @@ class Watch(threading.Thread):
         n.type, n.display, n.requestor, n.selection, n.target, n.property, n.time = 31, dpy, req.requestor, req.selection, req.target, prop, req.time
         x.XSendEvent(dpy, req.requestor, 0, 0, ctypes.byref(reply))
         x.XFlush(dpy)
+        # Taken once the app has been told it is there (the next key, on the other connection, comes after).
+        if data is not None and prop and req.target != a["TARGETS"]:
+            self.given.set()
+
+    def taken(self, bound):
+        """Whether an app has taken the text held for a paste, waiting `bound` seconds at most."""
+        return self.given.wait(bound)
 
     def since(self, t):
         """Whether the screen was drawn on after `t`, and how soon after it."""
@@ -844,10 +857,27 @@ class Pieces:
         self.home = home or os.environ.get("HOME", "/work")
         self.profile = os.path.join(self.home, ".config/chromium")
         self.browser = None  # (its process id, when it was started)
+        self.kept = {}  # what deskd started and keeps running: its name -> (the process, when it was started)
+        self.ended = None  # told a kept piece's name as it ends (the desk's keeper)
         self.lock = threading.Lock()  # (the keeper and a command may both find one gone: one of them starts it)
 
-    def _spawn(self, argv, log):
-        return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=open(os.path.join(RUN, log), "ab"), stderr=subprocess.STDOUT, start_new_session=True, env=dict(os.environ, DISPLAY=DISPLAY)).pid
+    def _spawn(self, argv, log, keep=None):
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=open(os.path.join(RUN, log), "ab"), stderr=subprocess.STDOUT, start_new_session=True, env=dict(os.environ, DISPLAY=DISPLAY))
+        if keep:
+            self.kept[keep] = (p, time.monotonic())
+            threading.Thread(target=self._wait, args=(keep, p), daemon=True, name="keep-" + keep).start()
+        return p.pid
+
+    def _wait(self, name, p):
+        """A kept piece's end, known as it happens: its process waited on, nothing asked at rest."""
+        p.wait()
+        kept = self.kept.get(name)
+        if not kept or kept[0] is not p:
+            return
+        if time.monotonic() - kept[1] < 1:
+            time.sleep(1)  # (one that ends as it starts isn't started again at once, and again)
+        if self.ended:
+            self.ended(name)
 
     def display_up(self):
         try:
@@ -891,13 +921,13 @@ class Pieces:
             self._spawn(["Xvfb", DISPLAY, "-screen", "0", "%dx%dx24" % (W, H), "-nolisten", "tcp"], "display.log")
             self.until(self.display_up, "the display", "display.log")
         if not _own("openbox"):
-            self._spawn(["openbox"], "windows.log")
+            self._spawn(["openbox"], "windows.log", keep="windows")
         if not self.browser_running():
             # Its own inner sandbox is off: the VM's restrictions (no new privileges, no capabilities) forbid it, and the
             # microVM is the boundary. Its profile is on the workspace, so what is signed in there stays with this VM's disk.
             pid = self._spawn(["chromium", "--user-data-dir=" + self.profile, "--no-sandbox", "--test-type", "--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble",
                                "--disable-gpu", "--disable-dev-shm-usage", "--remote-debugging-port=%d" % PORT, "--remote-debugging-address=127.0.0.1",
-                               "--window-size=%d,%d" % (W, H), "--window-position=0,0", "about:blank"], "browser.log")
+                               "--window-size=%d,%d" % (W, H), "--window-position=0,0", "about:blank"], "browser.log", keep="browser")
             # (Not waited for here: what reads or opens a page waits for its port, as before.)
             self.browser = (pid, time.monotonic())
 
@@ -927,7 +957,6 @@ class Desk:
         self.last_click = None  # (when, x, y): clicks at one place within the double-click time count as one burst
         self.navigating_since = None
         self.stopping = False
-        self._supervising = False
 
     # -- what it holds, brought up on first use (once: the first commands may come together)
     def ready(self):
@@ -946,25 +975,21 @@ class Desk:
             self._browser = Browser(window_title=self.browser_title)
         return self._display
 
-    def supervise(self, interval=0.25):
+    def supervise(self):
         """The window manager and the browser kept running: one that ends (killed, its last tab closed) is started again
-        within a beat, not at the next command (C0's F9: 0.76 s, after the next command came). The display is the
-        process's own: should it end, deskd ends with it, and the next command starts them all again."""
-        if self._supervising:
-            return
-        self._supervising = True
+        as it ends, not at the next command (C0's F9: 0.76 s, after the next command came), its process waited on and
+        nothing asked at rest. The display is the process's own: should it end, deskd ends with it, and the next
+        command starts them all again."""
+        if hasattr(self.pieces, "ended"):
+            self.pieces.ended = self._ended
 
-        def keep():
-            while True:
-                time.sleep(interval)
-                if self.stopping:
-                    continue
-                try:
-                    if not self.pieces.window_manager_running() or not self.pieces.browser_running():
-                        self.pieces.start()
-                except Exception as error:  # (a start that failed is tried again a beat later)
-                    sys.stderr.write("deskd: couldn't start the desktop's pieces again: %s\n" % error)
-        threading.Thread(target=keep, daemon=True, name="supervise").start()
+    def _ended(self, name):
+        if self.stopping:
+            return
+        try:
+            self.pieces.start()
+        except Exception as error:  # (the next command tries again)
+            sys.stderr.write("deskd: couldn't start the %s again: %s\n" % (name, error))
 
     def close_all(self, wait=2.0):
         """Every window asked to close as a person would (WM_DELETE_WINDOW), and given `wait` seconds to: an app that
@@ -1104,16 +1129,18 @@ class Desk:
     def _click(self, x, y, button, count, mods=""):
         def do():
             held = self._hold(mods)
-            if x is not None:
-                self.d.motion(x, y)
+            # (Asked first: nothing between the pointer's move and its press, as a person's click has nothing there.)
+            before = self.d.active()
             px, py = (x, y) if x is not None else self.d.pointer()
             # A double or triple click at the place of the last click, within a toolkit's double-click time, would be
-            # counted on from it (C0's F7: double clicks 0.3 s apart read as triples): it waits that time out first.
+            # counted on from it (C0's F7: double clicks 0.3 s apart read as triples): it waits that time out first,
+            # and a margin, as the display's clock may run behind deskd's.
             if count > 1 and self.last_click and abs(self.last_click[1] - px) <= 4 and abs(self.last_click[2] - py) <= 4:
-                wait = 0.5 - (self.now() - self.last_click[0])
+                wait = MULTI_CLICK - (self.now() - self.last_click[0])
                 if wait > 0:
                     self.sleep(wait)
-            under, before = self.d.client_at(px, py), self.d.active()
+            if x is not None:
+                self.d.motion(x, y)
             for i in range(count):
                 self.d.button(button, True)
                 self.d.button(button, False)
@@ -1121,7 +1148,9 @@ class Desk:
                     self.d.sync()
                     self.sleep(0.03)
             self._release(held)
+            self.d.sync()
             self.last_click = (self.now(), px, py)
+            under = self.d.client_at(px, py)
             # A click that gives another window the focus is answered once it has it (the window manager takes its
             # time): what is typed next goes there, not to the window before.
             if under and under != before:
@@ -1241,6 +1270,12 @@ class Desk:
                 self.d.key(code, True)
             for code in reversed(self._keys("shift+Insert" if target == "terminal" else "ctrl+v")):
                 self.d.key(code, False)
+            # A paste is the app asking for the text, in its own time: the next key (a Return) mustn't overtake it (C1's
+            # step 4 run: xterm's line came after its Return, 20 of 20). Its keys sent first: unsent, they waited in the
+            # connection's buffer for the next command, and its Return went with them (0 of 15, the first try of this).
+            self.d.sync()
+            if not self._watch.taken(PASTE_BOUND):
+                raise Failed("nothing took the pasted text within %g s: is a text field focused?" % PASTE_BOUND)
             return "pasted %d character%s" % (n, plural)
         return do
 
@@ -1321,7 +1356,13 @@ class Desk:
             repeat = int(i.get("repeat", 1))
             if not 1 <= repeat <= 100:
                 raise Refused("a key is repeated 1 to 100 times")
-            return self.act(name, self.press(i.get("text", ""), repeat))
+            combo = i.get("text", "")
+            if combo.split("+")[-1] in COMMITS:
+                # What was just typed is taken in before a key that commits it, as a person's Return comes after they see
+                # it: the screen let settle (150 ms with nothing drawn; at once when it is still). C1's step 3: a Save As
+                # name typed in full and its Return 20 ms later, never saved, 5 of 5 (150 ms later: saved, 5 of 5).
+                self.settle(cap=COMMIT_SETTLE)
+            return self.act(name, self.press(combo, repeat))
         if name == "hold_key":
             codes = self._keys(i.get("text", ""))
             duration = float(i.get("duration", 0))
