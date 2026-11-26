@@ -83,20 +83,26 @@ struct WorkRowView: View {
     /// Working rows quieter than the rest (a list of every kind); Home's sections say what each is, and keep them whole.
     var quietWhenWorking = true
     @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let quiet = quietWhenWorking && row.attention == .working && !current
         let selected = prominence == .increased
         let projected = row.project.key != "other"
+        // At the accessibility sizes how it stands takes a line of its own, under the title, which it would squeeze to a
+        // word a line beside it.
+        let stacked = typeSize.isAccessibilitySize
         VStack(alignment: .leading, spacing: dense ? 2 : 3) {
             // A project's name where there is one, with how it stands; where there is none, the title carries that, and
             // the row is two lines (X2: no "Other work" on every row).
             if projected {
                 HStack(spacing: 6) {
                     ProjectBadge(project: row.project)
-                    Text(row.project.name).lineLimit(1)
-                    Spacer(minLength: Space.s2)
-                    standing
+                    Text(row.project.name).lineLimit(stacked ? 2 : 1)
+                    if !stacked {
+                        Spacer(minLength: Space.s2)
+                        standing
+                    }
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -105,12 +111,13 @@ struct WorkRowView: View {
                 Text(row.title)
                     .font(.subheadline.weight(quiet ? .regular : .semibold))
                     .foregroundStyle(quiet && !selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                    .lineLimit(2)
-                if !projected {
+                    .lineLimit(stacked ? 4 : 2)
+                if !projected, !stacked {
                     Spacer(minLength: Space.s2)
                     standing.font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            if stacked { standing.font(.footnote).foregroundStyle(.secondary) }
             HStack(spacing: 6) {
                 AgentFace(id: row.agent.id, profile: row.agent.avatar, size: face)
                     .opacity(quiet ? 0.62 : 1)
