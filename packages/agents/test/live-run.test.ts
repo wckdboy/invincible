@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { ExecResult } from "@invincible/core";
-import { FOLLOW, followArgv, FOLLOW_TICK_MS, OPENCODE, runAgent, STOP_GRACE_SECONDS, type AgentRun, type FollowedRun } from "../src/harnesses.ts";
-import { CLAUDE } from "../src/vendor-cli.ts";
+import { FOLLOW, followArgv, FOLLOW_TICK_MS, OPENCODE, OWN_SIGN_IN, runAgent, STOP_GRACE_SECONDS, type AgentDriver, type AgentRun, type FollowedRun } from "../src/harnesses.ts";
+import { type RunEvent, type RunSteer, runLoop, steersSaid } from "../src/run.ts";
+import { CLAUDE, CODEX } from "../src/vendor-cli.ts";
 
 /*
  * A coding agent's run followed as it goes (I15 step 5; harnesses.ts runAgent): its events reach the node as they are
@@ -269,3 +270,101 @@ describe("the follow itself", () => {
   });
 });
 
+/*
+ * Steering a coding agent's task as it runs (I13 with I15 step 6): your words, or your agent's, reach its run through
+ * its channel where its tool can be told as it works (Claude Code, Codex), and at the next safe point otherwise (as
+ * OpenCode is: its run ended between its calls, and its session told). Either way the trail says them where they were
+ * taken, and the reviewer judges the work against its goal and every steer, in order.
+ */
+describe("steering a coding agent's task", () => {
+  const PLAN = "1. Write the parser.\nDone when: its test passes.";
+  /** A task's run loop on a coding agent, its VM the stand-in's, its steers yours as you give them. */
+  const task = (driver: AgentDriver, box: ReturnType<typeof vm>, waiting: RunSteer[]) => {
+    const events: RunEvent[] = [];
+    const reviewed: string[] = [];
+    const done = runLoop(
+      { goal: "Write the parser", environment: "a stand-in VM", plan: PLAN, agent: { driver, models: [OWN_SIGN_IN], workdir: "/work/repo" } },
+      {
+        ask: async (role, messages) => {
+          if (role === "reviewer") reviewed.push(messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n"));
+          return { text: "PASS\nIt parses.", model: `stand-in/${role}` };
+        },
+        exec: box.exec,
+        follow: box.follow,
+        emit: (event) => events.push(event),
+        ...clock(),
+        steers: () => waiting.splice(0),
+      },
+    );
+    return { done, events, reviewed };
+  };
+  const STEERED = { by: "owner" as const, text: "Keep the old reader." };
+
+  for (const driver of [CLAUDE, CODEX]) {
+    test(`${driver.title}: told at once on its input, said on the trail where it was taken, and judged against`, async () => {
+      const box = vm();
+      const waiting: RunSteer[] = [];
+      const run = task(driver, box, waiting);
+      await box.until(() => box.follows.length === 1);
+      box.current().push(E(20, { type: "session", id: "ses_live" }), E(40, { type: "call", id: "call_1" }));
+      waiting.push(STEERED);
+      await box.until(() => box.told.length === 1);
+      const [said] = box.told as { say: string; id: string }[];
+      // In the run's own words for a steer, as its next message would carry it.
+      expect(said!.say).toBe(steersSaid([STEERED]));
+      box.current().push(E(60, { type: "steer", id: said!.id, state: "queued" }), E(80, { type: "tool", tool: "shell", input: "pytest", output: "ok", ok: true, id: "call_1" }), E(100, { type: "steer", id: said!.id, state: "taken" }), E(120, { type: "text", text: "Kept the old reader." }), S(false, 0, 120));
+      const outcome = await run.done;
+      expect(outcome.status).toBe("done");
+      // One launch: the run went on with your words in it.
+      expect(box.commands.filter((command) => command.startsWith("mkdir -p /work/.agent")).length).toBe(1);
+      expect(run.events.filter((event) => event.type === "steered")).toEqual([{ type: "steered", step: 0, by: "owner", text: "Keep the old reader." }]);
+      expect(run.reviewed.some((asked) => asked.includes("Keep the old reader."))).toBe(true);
+    });
+  }
+
+  test("OpenCode: its run ended between its calls, and its own session told your words in the run that follows", async () => {
+    const box = vm();
+    const waiting: RunSteer[] = [];
+    const run = task(OPENCODE, box, waiting);
+    await box.until(() => box.follows.length === 1);
+    box.current().push(`E40 ${JSON.stringify({ sessionID: "ses_oc", type: "step_start", part: {} })}`);
+    waiting.push(STEERED);
+    // Ended for it, then a run of its session that carries it.
+    await box.until(() => box.follows.length === 2);
+    box.current().push(`E90 ${JSON.stringify({ sessionID: "ses_oc", type: "text", part: { text: "Kept the old reader." } })}`, S(false, 0, 90));
+    const outcome = await run.done;
+    expect(outcome.status).toBe("done");
+    const launches = box.commands.filter((command) => command.startsWith("mkdir -p /work/.agent"));
+    expect(launches).toHaveLength(2);
+    // (Inside the launch's own quoted script: its quotes escaped.)
+    expect(launches[1]).toContain("--session '\\''ses_oc'\\''");
+    const second = Buffer.from(launches[1]!.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
+    expect(second).toContain("The owner says, while you work: Keep the old reader.");
+    expect(box.told).toEqual([]);
+    expect(run.events.filter((event) => event.type === "steered")).toHaveLength(1);
+  });
+
+  test("words a live run never took (it had stopped taking any) are said in its next run, in its own session", async () => {
+    const box = vm();
+    const waiting: RunSteer[] = [];
+    const run = task(CLAUDE, box, waiting);
+    await box.until(() => box.follows.length === 1);
+    box.current().push(E(20, { type: "session", id: "ses_live" }), E(40, { type: "text", text: "Done, I think." }));
+    waiting.push(STEERED);
+    await box.until(() => box.told.length === 1);
+    const id = (box.told[0] as { id: string }).id;
+    box.current().push(E(60, { type: "steer", id, state: "late" }), S(false, 0, 60));
+    await box.until(() => box.follows.length === 2);
+    box.current().push(E(90, { type: "text", text: "Kept the old reader." }), S(false, 0, 90));
+    const outcome = await run.done;
+    expect(outcome.status).toBe("done");
+    const launches = box.commands.filter((command) => command.startsWith("mkdir -p /work/.agent"));
+    expect(launches).toHaveLength(2);
+    // (Inside the launch's own quoted script: its quotes escaped.)
+    expect(launches[1]).toContain("--session '\\''ses_live'\\''");
+    const second = Buffer.from(launches[1]!.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
+    expect(second).toBe(`${steersSaid([STEERED])} Then end with a short summary and the evidence.`);
+    // Said once on the trail, where it was taken: not again for its second telling.
+    expect(run.events.filter((event) => event.type === "steered")).toHaveLength(1);
+  });
+});
