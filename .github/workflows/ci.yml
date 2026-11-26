@@ -8,13 +8,15 @@
 #  test        │ every push and PR
 #  vocabulary  │ no word of the old theme in any tracked file (bench/vocabulary.ts, docs/ARCHITECTURE.md §10)
 #  bench       │ the scorecard's quality gates (bun run bench --ci)
+#  vectors     │ the parity vectors the Apple and Android apps test against are what this repository's code makes now
+#  android     │ the Android app's JVM tests (held to the same vectors)
+#  apple       │ the iPhone's tests and the Mac build, on the owner's Mac runner (label macos-xcode; sovware.io alone)
 #  secrets     │ gitleaks over what the push (or the pull request) adds
 #  sweep       ┘ the owner's private details, by the forge's secret list, in what it adds (sovware.io alone)
 #  sandbox     real-Docker sandbox tests; opt-in via the repo variable SANDBOX_TESTS=true (a runner with Docker and
 #              no KVM skips the microVM cases)
 #
-# The apps' jobs (the parity vectors, Android's tests, the iPhone's tests and the Mac build) and the website's come
-# back with apps/apple, apps/android and apps/site.
+# The website's job comes back with apps/site.
 #
 # Hardening: read-only token, actions pinned to commit SHAs, no pull_request_target,
 # credentials not persisted in the checkout, superseded runs cancelled.
@@ -128,6 +130,113 @@ jobs:
           id ci >/dev/null 2>&1 || useradd --create-home --uid 1001 ci
           chown -R ci "$GITHUB_WORKSPACE"
           su ci -c "cd '$GITHUB_WORKSPACE' && INVINCIBLE_KEYSTORE=file INVINCIBLE_CHROME_NO_SANDBOX=1 CHROME='$CHROME_PATH' bun run bench --ci"
+
+  # The parity vectors: apps/apple/InvincibleTests/Fixtures/core-vectors.json is what this repository's packages/core and
+  # apps/web/src/lib make now, so the Apple and Android apps' tests hold them to it.
+  vectors:
+    name: Parity vectors
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun apps/apple/scripts/vectors.ts --check
+
+  # The Android app's JVM tests, held to the same vectors.
+  android:
+    name: Android unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      # GitHub's runners come with the Android SDK; sovware.io's do not. There Google's command-line tools are fetched
+      # and checked, the licenses accepted, and Gradle downloads the platform and build tools the app names. Version 19.0,
+      # because from 23.0 `sdkmanager --licenses` writes no licenses and Gradle then refuses to download. Google publishes
+      # only SHA-1 sums; this SHA-256 is of the file that matched its SHA-1.
+      - name: Android SDK, where the runner has none
+        run: |
+          set -euo pipefail
+          if [ -n "${ANDROID_HOME:-}" ]; then exit 0; fi
+          zip=commandlinetools-linux-13114758_latest.zip
+          sdk="$RUNNER_TEMP/android-sdk"
+          curl -fsSLo "$RUNNER_TEMP/$zip" "https://dl.google.com/android/repository/$zip"
+          echo "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  $RUNNER_TEMP/$zip" | sha256sum -c -
+          mkdir -p "$sdk/cmdline-tools"
+          unzip -q "$RUNNER_TEMP/$zip" -d "$sdk/cmdline-tools"
+          mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
+          # yes ends on SIGPIPE when sdkmanager is done, which pipefail would take for a failure.
+          { yes || true; } | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+      # Also checks the Gradle wrapper against Gradle's published checksums.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - run: ./gradlew --no-daemon :app:testDebugUnitTest
+        working-directory: apps/android
+
+  # The iPhone's tests and the Mac build: on sovware.io alone, on the owner's Mac runner for this repository (label
+  # macos-xcode, on its host: Xcode 27 and xcodegen), on a simulator made for the run and deleted after, the Mac app built
+  # and never launched (it would load that Mac's own device key), and unregistered from Launch Services after. Only the
+  # owner and their agents push to sovware.io, and GitHub's macOS runners have no macOS 27 SDK, so it is skipped there.
+  apple:
+    name: iPhone tests and Mac build
+    if: github.server_url != 'https://github.com'
+    runs-on: macos-xcode
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      # The host runner has no Node, so no actions/checkout.
+      - name: Check out
+        run: |
+          git init -q .
+          git -c "http.extraHeader=Authorization: token ${{ github.token }}" fetch -q --depth 1 \
+            "${{ github.server_url }}/${{ github.repository }}.git" "${{ github.ref }}"
+          git checkout -q FETCH_HEAD
+          git log --oneline -1
+      # Swift packages (Sparkle) are fetched anonymously (-packageAuthorizationProvider netrc, and no .netrc): by default
+      # Xcode looks for a github.com password in the login keychain, and a Mac that holds one asks whether xcodebuild may
+      # use it, a prompt no one answers.
+      - name: iPhone tests, on a simulator of their own
+        working-directory: apps/apple
+        run: |
+          set -euo pipefail
+          xcodegen generate --quiet
+          # An XcodeGen that can't find its setting presets makes a project with no SDK, whose iPhone app is a Mac one.
+          grep -q 'SDKROOT = iphoneos' Invincible.xcodeproj/project.pbxproj || { echo "::error::XcodeGen made the project without its setting presets (share/xcodegen beside its bin)"; exit 1; }
+          # A cancelled job is killed, so its trap never deletes its simulator: delete any an earlier job left (this runner
+          # runs one job at a time).
+          xcrun simctl list devices -j | python3 -c 'import json,sys; [print(d["udid"]) for r in json.load(sys.stdin)["devices"].values() for d in r if d["name"].startswith("Invincible CI ")]' |
+            while read -r left; do xcrun simctl shutdown "$left" 2>/dev/null || true; xcrun simctl delete "$left"; done
+          # The newest iOS runtime the Mac has.
+          runtime=$(xcrun simctl list runtimes iOS -j | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x.get("isAvailable")]; print(max(r, key=lambda x: [int(n) for n in x["version"].split(".")])["identifier"])')
+          udid=$(xcrun simctl create "Invincible CI ${GITHUB_RUN_NUMBER:-0}" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$runtime")
+          trap 'xcrun simctl delete "$udid"' EXIT
+          xcrun simctl bootstatus "$udid" -b > /dev/null
+          xcodebuild -project Invincible.xcodeproj -scheme Invincible -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath build -packageAuthorizationProvider netrc test -skip-testing:InvincibleTests/MacShotsTests -quiet
+      - name: Mac build (never launched)
+        working-directory: apps/apple
+        run: |
+          xcodebuild -project Invincible.xcodeproj -scheme InvincibleMac -destination 'platform=macOS' -derivedDataPath build \
+            -packageAuthorizationProvider netrc build -quiet
+      # The Mac must not keep these builds as apps it could open: each one built (the Mac app, the Sparkle updater inside
+      # it, and the iPhone app built for the simulator), whatever became of the steps before.
+      - name: Forget the builds
+        if: always()
+        working-directory: apps/apple
+        run: |
+          find "$PWD/build/Build/Products" -name '*.app' -type d \
+            -exec /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u {} \; 2>/dev/null || true
 
   # Secrets: gitleaks 8.30.1 (its checked release) over the commits this push or pull request adds. (The tests carry
   # fakes made for them: each is said to be one, in .gitleaksignore or in the test.)
