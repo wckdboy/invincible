@@ -56,8 +56,8 @@ export function snapshot(dir: string): Record<string, string> {
 }
 
 /** The import as the CLI runs it: what it said, and its exit code. */
-export async function runImport(old: string, home: Home, opts: { dryRun?: boolean; chats?: string; uid?: number } = {}): Promise<{ code: number; out: string }> {
+export async function runImport(old: string, home: Home, opts: { dryRun?: boolean; chats?: string; skip?: string; uid?: number } = {}): Promise<{ code: number; out: string }> {
   const lines: string[] = [];
-  const code = await importCommand("galahad", [old], { home, dryRun: opts.dryRun ?? false, chats: opts.chats, ...(opts.uid !== undefined ? { uid: opts.uid } : {}) }, (line) => lines.push(line));
+  const code = await importCommand("galahad", [old], { home, dryRun: opts.dryRun ?? false, chats: opts.chats, skip: opts.skip, ...(opts.uid !== undefined ? { uid: opts.uid } : {}) }, (line) => lines.push(line));
   return { code, out: lines.join("\n") };
 }

@@ -356,6 +356,42 @@ describe("what comes, kind by kind", () => {
   });
 });
 
+describe("what you leave behind (--skip)", () => {
+  test("a kind and a name: the agents, and a sign-in with its key, stay behind on your word; the rest comes; exit 0", async () => {
+    const { old, home } = await setup();
+    const dry = await runImport(old, home, { dryRun: true, skip: "agents,gmail" });
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain("  agents       4 left behind on your word (--skip): builder (engineer · native · example/app), goose (engineer · acp), quiet (engineer · opencode · sensitive), scout (researcher · native · made by your agent)");
+    expect(dry.out).toContain("  secrets      7 to bring, sealed anew in this node's vault and never shown: anthropic, deepseek, github, pin, search-api, weather, zai-coding; 1 left behind on your word (--skip): gmail");
+    expect(dry.out).toContain("  connectors   2 to bring: github (as Invincible ships it), weather (as you made it); 1 left behind on your word (--skip): gmail (as Invincible ships it)");
+    const run = await runImport(old, home, { skip: "agents,gmail" });
+    expect(run.code).toBe(0);
+    const { vault, store } = await opened(home);
+    try {
+      expect(vault.has("gmail")).toBe(false);
+      expect(vault.has("github")).toBe(true);
+    } finally {
+      store.close();
+    }
+    const team = new TeamStore(join(home.dir, "team.db"));
+    try {
+      expect(team.agents().map((agent) => agent.id)).toEqual([]);
+    } finally {
+      team.close();
+    }
+    // A later run without --skip brings what was left, and nothing twice.
+    const later = await runImport(old, home, {});
+    expect(later.code).toBe(0);
+    expect(later.out).toContain("  agents       4 brought: builder");
+    expect(later.out).toContain("  secrets      1 brought, sealed anew in this node's vault and never shown: gmail");
+  });
+
+  test("a name it can't find is refused, so a slip of the pen is never silently ignored", async () => {
+    const { old, home } = await setup();
+    await expect(runImport(old, home, { dryRun: true, skip: "agents,gmial" })).rejects.toThrow("--skip names nothing in that home called gmial");
+  });
+});
+
 describe("what can't come is said by name, and the rest comes", () => {
   test("a home whose keys aren't its vault's node's, or don't open its key, or are in the OS keychain: every secret skipped by name, never shown", async () => {
     for (const [n, [why, change]] of ([

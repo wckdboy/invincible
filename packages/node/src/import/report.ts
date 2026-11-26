@@ -44,6 +44,7 @@ function line(kind: Kind, items: readonly Item[], dryRun: boolean): string[] {
   }
   if (of("here").length) parts.push(`${of("here").length} here already`);
   if (of("differs").length) parts.push(`${of("differs").length} here already and different, kept as they are here${COUNTED.has(kind) ? "" : `: ${named(of("differs"))}`}`);
+  if (of("left").length) parts.push(`${of("left").length} left behind on your word (--skip)${COUNTED.has(kind) ? "" : `: ${named(of("left"))}`}`);
   if (of("removed").length) parts.push(`${of("removed").length} removed here, not brought back${COUNTED.has(kind) ? "" : `: ${named(of("removed"))}`}`);
   if (parts.length) out.push(`  ${pad} ${parts.join("; ")}`);
   for (const item of of("skip")) out.push(`  ${out.length ? " ".repeat(12) : pad} skipped ${item.name}: ${item.note}`);

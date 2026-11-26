@@ -7,7 +7,7 @@ import { loadEnv } from "../env.ts";
 import type { Home } from "../home.ts";
 import { TeamStore } from "../team-store.ts";
 import { Uploads } from "../uploads.ts";
-import { type ChatChoice, type Into, type Kind, makePlan, type Plan } from "./plan.ts";
+import { type ChatChoice, type Into, type Kind, KINDS, leaveBehind, makePlan, type Plan } from "./plan.ts";
 import { report } from "./report.ts";
 import { GalahadHome } from "./source.ts";
 import { ImportError } from "./sqlite.ts";
@@ -20,18 +20,19 @@ import { TargetView } from "./target.ts";
  * stores (agents, chats). Never Galahad's identity, devices or fleet.
  */
 
-export const IMPORT_HELP = `  import galahad <its home> [--dry-run] [--chats all|none|<id>,<id>]
+export const IMPORT_HELP = `  import galahad <its home> [--dry-run] [--chats all|none|<id>,<id>] [--skip <kind|name>,…]
                                                            your world from Galahad, once, read from its home and never
                                                            written there: providers and plans, the roster and prices,
                                                            the vault's keys (sealed anew here, never shown), memory and
                                                            what it learned of you, projects, connectors, and its agents
                                                            as profiles (their looks stay behind); chats only as --chats
-                                                           says. Never its identity, devices or fleet. --dry-run says
+                                                           says; --skip leaves a kind (agents, chats…) or anything by
+                                                           its name behind. Never its identity, devices or fleet. --dry-run says
                                                            what would come and writes nothing; a run writes with this
                                                            node stopped, and again brings only what isn't here yet.
                                                            Exit code 0: done; 2: done, but something couldn't come`;
 
-const USAGE = "usage: invincible import galahad <its home> [--dry-run] [--chats all|none|<id>,<id>]";
+const USAGE = "usage: invincible import galahad <its home> [--dry-run] [--chats all|none|<id>,<id>] [--skip <kind|name>,…]";
 
 /** Which chats: none (the default), all, or those named, each by its id there. */
 export function chatChoice(said: string | undefined): ChatChoice {
@@ -64,6 +65,8 @@ export interface ImportOptions {
   home: Home;
   dryRun: boolean;
   chats: string | undefined;
+  /** What to leave behind, by kind or by name, joined by commas (--skip). */
+  skip?: string | undefined;
   /** Whether this node is running (tests say so; otherwise its port is asked). */
   running?: () => Promise<boolean>;
   /** The user it runs as (tests say another; otherwise this process's). */
@@ -101,6 +104,9 @@ export async function importCommand(system: string | undefined, args: readonly s
     } finally {
       target.close();
     }
+    const skip = [...new Set((opts.skip ?? "").split(",").map((name) => name.trim()).filter(Boolean))];
+    const unknown = leaveBehind(plan, skip);
+    if (unknown.length) throw new ImportError(`--skip names nothing in that home called ${unknown.join(", ")}: a kind (${KINDS.join(", ")}) or the name of something it would bring`);
     // With nothing to bring, nothing here is opened to be written either: a run again leaves this home as it was.
     if (!opts.dryRun && plan.items.some((i) => i.state === "bring")) bring(plan, home, config.fleet, identity);
     const said = report(plan, { dryRun: opts.dryRun, from: old, into: here, node: source.name });

@@ -41,9 +41,10 @@ export type Kind = (typeof KINDS)[number];
 
 /**
  * bring: it comes (a dry run's word); brought: it came; here: this node holds it already, the same; differs: this node
- * holds another by that name, kept; removed: it was removed here, and stays so; skip: it can't come, and `note` says why.
+ * holds another by that name, kept; removed: it was removed here, and stays so; skip: it can't come, and `note` says why; left: it could come, and stays
+ * behind because you said so (--skip).
  */
-export type State = "bring" | "brought" | "here" | "differs" | "removed" | "skip";
+export type State = "bring" | "brought" | "here" | "differs" | "removed" | "skip" | "left";
 
 export interface Item {
   kind: Kind;
@@ -95,6 +96,22 @@ export const titleOf = (title: string): string => {
   const said = redact(title).replace(/\s+/g, " ").trim();
   return said.length > 60 ? `${said.slice(0, 59)}…` : said;
 };
+
+/**
+ * Leaves behind what you named (`--skip`): a kind (every item of it) or a name (an item of any kind called that, so a
+ * connector's name leaves its key too). Only what would come is left; what is here already stays as it is. A name that
+ * matches nothing in this home is refused, so a slip of the pen is never silently ignored.
+ */
+export function leaveBehind(plan: Plan, names: readonly string[]): string[] {
+  const unknown: string[] = [];
+  for (const name of names) {
+    const kind = (KINDS as readonly string[]).includes(name);
+    const matched = plan.items.filter((item) => (kind ? item.kind === name : item.name === name));
+    if (!matched.length) unknown.push(name);
+    for (const item of matched) if (item.state === "bring") item.state = "left";
+  }
+  return unknown;
+}
 
 export function makePlan(source: GalahadHome, target: TargetView, opts: { node: string; chats: ChatChoice }): Plan {
   const items: Item[] = [];

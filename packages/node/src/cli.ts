@@ -736,6 +736,8 @@ async function main(): Promise<void> {
       // The one-time import: `import <system> <its home> [--dry-run] [--chats all|none|<id>,<id>]`.
       "dry-run": { type: "boolean" },
       chats: { type: "string" },
+      // `import … --skip agents,outlook`: what the import leaves behind, by kind or by name.
+      skip: { type: "string" },
       // The doctor: `doctor [--offline] [--quick] [--json]`.
       offline: { type: "boolean" },
       quick: { type: "boolean" },
@@ -2154,7 +2156,7 @@ Evidence: invincible artifact ${i!.artifact}`));
     }
 
     case "import": {
-      process.exitCode = await importCommand(sub, rest, { home, dryRun: flags["dry-run"] === true, chats: str("chats") }, console.log);
+      process.exitCode = await importCommand(sub, rest, { home, dryRun: flags["dry-run"] === true, chats: str("chats"), skip: str("skip") }, console.log);
       return;
     }
 
