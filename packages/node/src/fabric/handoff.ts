@@ -739,20 +739,64 @@ export class Handoffs implements FabricTools {
 }
 
 
+/** The most a VM's tool input may be, and how many calls one VM may make to its giver's tools in a minute. */
+const TOOL_INPUT_MAX = 1 << 20;
+const VM_CALLS_PER_MINUTE = 60;
+/** Each VM's calls in the last minute, by its VM: its gateway token is never spent by them, so they are counted here. */
+const vmCalls = new Map<string, number[]>();
+
+/** Whether one more call of this VM's fits its minute (and it is counted when it does). */
+function spendCall(sandbox: string, now: number): boolean {
+  const recent = (vmCalls.get(sandbox) ?? []).filter((at) => now - at < 60_000);
+  const fits = recent.length < VM_CALLS_PER_MINUTE;
+  if (fits) recent.push(now);
+  vmCalls.set(sandbox, recent);
+  // (VMs whose minute is over are forgotten, so the count holds as many VMs as are calling.)
+  if (vmCalls.size > 1024) for (const [vm, calls] of vmCalls) if (!calls.some((at) => now - at < 60_000)) vmCalls.delete(vm);
+  return fits;
+}
+
+/** A request's body as text, read as it comes up to `max` bytes: past them (said or found), null, and the rest unread. */
+async function boundedBody(req: Request, max: number): Promise<string | null> {
+  const said = req.headers.get("content-length");
+  if (said && /^\d{1,16}$/.test(said) && Number(said) > max) {
+    await req.body?.cancel().catch(() => {});
+    return null;
+  }
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  return Buffer.concat(parts).toString("utf8");
+}
+
 /**
  * The VM's way to the tools its task was given by the node that handed it over: POST /fabric/tool/<name> on its node's
- * gateway, with the VM's own gateway token (whose label names its VM) and the tool's input as JSON. Its node carries it
- * over Q-AMP under the run's own chain (Handoffs.callGiver), which the VM never sees, as it never sees a key.
+ * gateway, with the VM's own gateway token (whose label names its VM) and the tool's input as JSON (1 MiB at most, read
+ * as it comes; at most VM_CALLS_PER_MINUTE calls a minute from one VM). Its node carries it over Q-AMP under the run's
+ * own chain (Handoffs.callGiver), which the VM never sees, as it never sees a key.
  */
-export async function handleFabricTool(req: Request, ctx: { tokens: { liveLabel(token: string): string | null }; handoffs: Pick<Handoffs, "callGiver"> | null }): Promise<Response> {
+export async function handleFabricTool(req: Request, ctx: { tokens: { liveLabel(token: string): string | null }; handoffs: Pick<Handoffs, "callGiver"> | null; now?: () => number }): Promise<Response> {
   const answer = (status: number, body: unknown) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
   if (req.method !== "POST") return answer(405, { error: "POST" });
   const label = ctx.tokens.liveLabel(req.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1] ?? "");
   if (!label?.startsWith("sandbox:")) return answer(401, { error: "this VM's gateway token, as its model access uses it" });
   const tool = new URL(req.url).pathname.slice("/fabric/tool/".length);
   if (!/^[a-z][a-z0-9_]{0,63}$/.test(tool)) return answer(404, { error: "no such tool" });
-  const text = await req.text();
-  if (text.length > 1 << 20) return answer(413, { error: "a tool's input is at most 1 MiB" });
+  const sandbox = label.slice("sandbox:".length);
+  if (!spendCall(sandbox, (ctx.now ?? Date.now)())) return answer(429, { error: `at most ${VM_CALLS_PER_MINUTE} calls a minute from one VM to the tools its task was given` });
+  const text = await boundedBody(req, TOOL_INPUT_MAX);
+  if (text === null) return answer(413, { error: "a tool's input is at most 1 MiB" });
   let input: unknown = {};
   try {
     input = text.trim() ? JSON.parse(text) : {};
@@ -761,6 +805,6 @@ export async function handleFabricTool(req: Request, ctx: { tokens: { liveLabel(
   }
   if (!input || typeof input !== "object" || Array.isArray(input)) return answer(400, { error: "the tool's input is a JSON object" });
   if (!ctx.handoffs) return answer(404, { error: "this node has no fabric" });
-  const done = await ctx.handoffs.callGiver(label.slice("sandbox:".length), tool, input as Record<string, unknown>, req.signal);
+  const done = await ctx.handoffs.callGiver(sandbox, tool, input as Record<string, unknown>, req.signal);
   return answer(done.status, done.body);
 }

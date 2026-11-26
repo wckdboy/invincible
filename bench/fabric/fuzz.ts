@@ -232,7 +232,9 @@ const campaigns: Campaign[] = [];
 
 // ---- gateway ----
 {
-  const ctx = { tokens: { liveLabel: (t: string) => (t === "gw_ok" ? "sandbox:0a1b2c3d4e" : null) }, handoffs: { callGiver: async () => ({ status: 200, body: { ok: true } }) } };
+  // (Its clock moves a minute a call, so the count of a VM's calls never stands between the fuzzer and the parsing.)
+  let minute = 0;
+  const ctx = { tokens: { liveLabel: (t: string) => (t === "gw_ok" ? "sandbox:0a1b2c3d4e" : null) }, handoffs: { callGiver: async () => ({ status: 200, body: { ok: true } }) }, now: () => (minute += 61_000) };
   const paths = ["/fabric/tool/fleet", "/fabric/tool/", "/fabric/tool/a/b", "/fabric/tool/%2e%2e", "/fabric/tool/fleet?x=1", "/fabric/tool/FLEET", "/fabric/tool/x".padEnd(300, "y")];
   campaigns.push({
     name: "gateway",

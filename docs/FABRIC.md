@@ -132,7 +132,8 @@ transport keys carries all of it:
 
    The tools are the read-only ones, `fleet`, `compute`, `place` and `ledger`: your word for agents outside the fleet.
 5. **The run calls them** from its VM: `POST ${INVINCIBLE_GATEWAY%/gw}/fabric/tool/<tool>` with
-   `Authorization: Bearer $INVINCIBLE_TOKEN` and the tool's input as JSON (1 MiB at most). It is told how through its
+   `Authorization: Bearer $INVINCIBLE_TOKEN` and the tool's input as JSON (1 MiB at most, read as it comes; 60 calls
+   a minute at most from one VM). It is told how through its
    task's skills.
    - **The runner's node carries the call.** It signs a link from the run's key to its own transport key (a QDT token:
      the command for that tool, the same policy, never past the grant's end). It then calls the giver with the chain

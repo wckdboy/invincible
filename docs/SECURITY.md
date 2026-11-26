@@ -533,7 +533,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   `fabric-runner.test.ts` (the review's proof of concept, which ended its process with exit 1 before the fix).
 - **Bounded input.** The node's side of the socket bounds a message's length before it buffers it (65 MiB, as the
   sidecar), decodes CBOR under Q-AMP's decode budget, checks every hand-off message with its schema, keeps a hand-off's
-  trail to 2,000 lines of 4,000 characters, and takes a VM's tool input up to 1 MiB.
+  trail to 2,000 lines of 4,000 characters, and takes a VM's tool input up to 1 MiB, read as it comes (refused past
+  the length it says or past the bound as it arrives, never read whole first), and at most 60 of one VM's calls to
+  its giver's tools a minute, as its gateway token is never spent by them (the review's I6; `fabric-gateway.test.ts`).
   - **CBOR's budget counts every chunk** of an indefinite-length string as an item, so a few MiB of empty chunks are
     refused before anything is built (the review's L8; `fabric.test.ts`).
   - **A token is read as Q-AMP's SPEC 9.3 writes it:** no float anywhere in its payload, so an `exp` written as a float
