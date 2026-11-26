@@ -307,7 +307,9 @@ The run loop is carried and renamed (§10), the most proven part of it:
     text, then a picture of the screen. Any other model works the desktop by the command: `desktop find`, then `desktop
     tree`, then its eyes (`desktop look`). The eyes' check measures the space they answer places in (the picture's
     pixels, their own 0 to 1000, or a frame of their own), and their places come back in the screen's pixels: the space
-    goes beside their name to every command (`INVINCIBLE_EYES_SPACE`, or `--space` to the held session). A Mac makes
+    goes beside their name to every command (`INVINCIBLE_EYES_SPACE`, or `--space` to the held session). Desktop work
+    is proven by a gate that reads what it was for (what a form received, a file's content, a stored setting, an
+    export read back): work whose trail acted on the desktop, with no gate, is never verified. A Mac makes
     none yet: there an agent's VM is made without one, and the
     ledger says why. What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).
 - **Shipping:** a run's verified changes become a pull request. Its CI and the review comments come back to the same

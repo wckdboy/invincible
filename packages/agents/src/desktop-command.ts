@@ -15,6 +15,15 @@ const DIRECT = new Set([
 /** Verbs whose last argument may be a file to write (with --base64 the picture is printed instead). */
 const WRITES = new Set(["shot", "screenshot", "zoom"]);
 
+/**
+ * Whether a command acts on the desktop: runs a `desktop` verb that changes what is on it (opens, clicks, types, keys,
+ * scrolls, moves, drags, starts an app, answers a dialog), anywhere a command may begin in it. Looking (text, tree,
+ * find, a screenshot, a look) isn't acting. Work that acted on the desktop is proven by a gate (C1 step 8).
+ */
+export function actsOnDesktop(command: string): boolean {
+  return /(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+(open|click|type|key|scroll|move|drag|app|dialog|left_click|right_click|middle_click|double_click|triple_click|left_click_drag|mouse_move|left_mouse_down|left_mouse_up|hold_key)\b/.test(command);
+}
+
 /** The words of a command as a POSIX shell would split them, or null where it would do anything but split them. */
 export function plainWords(command: string): string[] | null {
   const words: string[] = [];

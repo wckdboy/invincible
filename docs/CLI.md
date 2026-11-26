@@ -151,7 +151,7 @@ A promise: a code keeps its meaning, and a new one is added only with a new mean
 
 | Code | Meaning |
 |---|---|
-| 0 | **Proven:** every gate passed, at least one of them failed before the work (so it shows the work was done), and a reviewer that didn't write it passed it. For a command that gives no verdict, it succeeded. |
+| 0 | **Proven:** every gate passed, at least one of them failed before the work (so it shows the work was done), and a reviewer that didn't write it passed it. Work that acted on a desktop is proven only by a gate: with none, it is not proven, whatever the reviewer says. For a command that gives no verdict, it succeeded. |
 | 1 | **An error:** the command couldn't be done (the node refused it, or no such task). Or a task ended in a way none of the codes below names: its agent gave up before any gate or review, or its run broke. |
 | 2 | **Bad usage:** an unknown command or flag, or a missing or malformed argument. |
 | 10 | **A gate failed:** the task ended with a gate that didn't pass. |

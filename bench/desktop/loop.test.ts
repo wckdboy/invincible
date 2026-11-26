@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ExecResult } from "../../packages/core/src/index.ts";
+import { UNPROVEN } from "../../packages/agents/src/run.ts";
 import { type Asked, dollarsOf, loopAsk, modelsContext, standIn, throughGateway, viaLoop } from "./loop.ts";
 import { GOALS, shapeOf, standInTurns } from "./tasks.ts";
 
@@ -36,7 +37,9 @@ test("the stand-in drives a task through the loop in the toolset's own shape: se
   const ctx = modelsContext("bench-stand-in-key-FAKE-0000", standIn(standInTurns("form", where, ""), asked));
   const vm = desk();
   const run = await viaLoop(GOALS.form(""), loopAsk(ctx, counted), vm.exec, counted);
-  expect([run.error, run.outcome?.status]).toEqual([null, "done"]);
+  // (Given no gate of its own, its desktop work is never verified by the run: the bench's own gate reads what it did.)
+  expect([run.error, run.outcome?.status]).toEqual([null, "unverified"]);
+  expect(run.outcome?.review).toContain(UNPROVEN);
   expect([run.calls, run.actions, run.commands]).toEqual([3, 14, 0]);
   // What it ran, as said: the toolset's actions as the VM's desktop commands.
   expect(run.said.slice(0, 3)).toEqual(["desktop key ctrl+l", "desktop type http://127.0.0.1:8000/form.html", "desktop key Return"]);

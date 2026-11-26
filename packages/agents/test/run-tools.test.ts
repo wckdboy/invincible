@@ -255,7 +255,8 @@ describe("the engineer with Claude's computer toolset (C1 step 7)", () => {
       { computer: true },
     );
     const outcome = await h.run;
-    expect([outcome.status, outcome.steps]).toEqual(["done", 3]);
+    // (Unverified: desktop work with no gate to prove it, as below, C1 step 8.)
+    expect([outcome.status, outcome.steps]).toEqual(["unverified", 3]);
     const asks = engineerAsks(h);
     expect(asks[0]!.tools).toEqual(["bash", "read", "edit", "write", "computer"]);
     expect(commands(h)).toEqual(["desktop left_click 640 450", "desktop type Ada", "desktop key Return"]);
@@ -307,5 +308,26 @@ describe("the engineer with Claude's computer toolset (C1 step 7)", () => {
     expect(engineerAsks(h)[0]!.tools).toEqual(["bash", "read", "edit", "write"]);
     expect(engineerAsks(h)[1]!.messages.at(-1)!.results).toEqual([{ id: expect.any(String), content: 'There is no tool "left_click": there is bash, read, edit, write.', error: true }]);
     expect(h.desk()).toEqual([]);
+  });
+});
+
+describe("desktop work is proven by a gate (C1 step 8)", () => {
+  const click = { name: "left_click", input: { coordinate: [640, 450] } };
+
+  test("with no gate it is never verified, whatever the reviewer says: the screen is evidence, never the proof", async () => {
+    const h = harness([{ calls: [click] }, "DONE\nSent the form."], { computer: true });
+    const outcome = await h.run;
+    expect(outcome.status).toBe("unverified");
+    expect(outcome.review).toContain("Its desktop work has no gate to prove it");
+    // The same done through the shell's own desktop command.
+    const shell = harness([{ calls: [bash("desktop click 640 450 && desktop key Return")] }, "DONE\nSent the form."]);
+    expect((await shell.run).status).toBe("unverified");
+  });
+
+  test("a gate that passes proves it; only looking at the screen is no desktop work", async () => {
+    const gated = harness([{ calls: [click] }, "DONE\nSent the form."], { computer: true, gates: ["true"] });
+    expect((await gated.run).status).toBe("done");
+    const looked = harness([{ calls: [{ name: "screenshot", input: {} }, bash("desktop tree")] }, "DONE\nRead what it says."], { computer: true });
+    expect((await looked.run).status).toBe("done");
   });
 });

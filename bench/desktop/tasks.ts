@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecResult, Usage } from "../../packages/core/src/index.ts";
 import type { ModelsContext } from "../../packages/models/src/index.ts";
+import { UNPROVEN } from "../../packages/agents/src/run.ts";
 import { OUT_DIR } from "../scorecard.ts";
 import { type Asked, type LoopRun, loopAsk, modelsContext, standIn, type Turn, viaLoop, type Where } from "./loop.ts";
 import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
@@ -192,7 +193,9 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     commands += looped.actions + looped.commands;
     shape = shapeOf(asked, !way);
     if (looped.error) throw new Error(`the loop failed: ${looped.error}`);
-    if (looped.outcome?.status !== "done") throw new Error(`the loop ended ${looped.outcome?.status}: ${looped.outcome?.summary.slice(0, 200)}`);
+    // (Given no gate of its own, desktop work ends unverified by the run (C1 step 8): the task's gate, below, decides.)
+    const ended = looped.outcome;
+    if (ended?.status !== "done" && !(ended?.status === "unverified" && ended.review?.includes(UNPROVEN))) throw new Error(`the loop ended ${ended?.status}: ${ended?.summary.slice(0, 200)}`);
   };
   const settle = () => (careful ? sh(`python3 ${IN_VM}/probe.py settle-full 3 250`) : policy === "settled" ? sh("desktop settle") : Promise.resolve(null));
   const focusIs = async (rx: RegExp, tries = 20) => {

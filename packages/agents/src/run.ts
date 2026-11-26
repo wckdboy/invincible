@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type RuleDoes } from "@invincible/core";
 import { COMPUTER, type ToolSpec } from "@invincible/models";
 import { type AgentDriver, type AgentModel, type AgentRunDeps, agentModelName, runAgent } from "./harnesses.ts";
+import { actsOnDesktop } from "./desktop-command.ts";
 import { COMPUTER_MEMBERS, ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput, NOT_EXECUTED, screenAfter } from "./engineer-tools.ts";
 import { engramBriefing, engramProject } from "./engram.ts";
 import { changesOf, checkOf, contentsOf, readOf, readsOf, testFilesOf, writesOf } from "./shell-paths.ts";
@@ -751,6 +752,10 @@ export const MAX_CALLS = 16;
 /** How much of one call's result is kept: a little under what the chat route takes of one (core ClientResult, 200,000). */
 const RESULT_KEPT = { head: 140_000, tail: 50_000 } as const;
 
+/** Why work that acted on the desktop, with no gate, isn't verified (C1 step 8). */
+export const UNPROVEN =
+  "Its desktop work has no gate to prove it: what it did on the screen is evidence, never the proof. A gate proves it by reading what the work was for: what a form received, a file's content, a stored setting, an export read back.";
+
 /** What the coding agent is asked to do first. */
 const agentBriefing = (o: Resolved, plan: string, gates: readonly Gate[], before?: readonly GateResult[], locked: readonly string[] = []): string => `Run: ${o.goal}${planSection(plan)}
 
@@ -1325,7 +1330,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     }
     return got;
   };
-  const finish = (outcome: Omit<RunOutcome, "steps" | "revisions" | "plan" | "gates">): RunOutcome => {
+  /** The run's trail as its commands ran (the engineer's loop's, or a coding agent's): what its end must know of it. */
+  let ranTrail: readonly Step[] = [];
+  const finish = (given: Omit<RunOutcome, "steps" | "revisions" | "plan" | "gates">): RunOutcome => {
+    // Desktop work is proven by a gate (C1 step 8): what it did on the screen is evidence, never the proof. Work whose
+    // trail acted on the desktop, accepted with no gate in force, is unverified, whoever accepted it.
+    const outcome = given.status === "done" && !gates.length && ranTrail.some((s) => actsOnDesktop(s.command)) ? { ...given, status: "unverified" as const, review: [given.review, UNPROVEN].filter(Boolean).join("\n\n") } : given;
     const last = gateRounds.at(-1);
     const done = { ...outcome, steps, revisions, plan, ...(last ? { gates: last } : {}), ...(before ? { gatesBefore: before } : {}), ...(malformed ? { malformed } : {}), ...(tripped ? { tripped } : {}), timing: { ...timing } };
     emit({ type: "finished", outcome: done });
@@ -1592,6 +1602,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     // (On the run's own clock, as each look at it is: deps.now, which is Date.now outside a test.)
     const deadline = agent.minutes === undefined ? Infinity : clock() + agent.minutes * 60_000;
     const trail: Step[] = [];
+    ranTrail = trail;
     let warned = false;
     audits.at = clock();
     audits.step = steps;
@@ -1952,6 +1963,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
 
     const messages: ChatMessage[] = [{ role: "user", content: (o.tools ? toolsBriefing : briefing)(o, plan, gates, before, [...locked.keys()]), effort: STEP_EFFORT.start }];
     const trail: Step[] = [];
+    ranTrail = trail;
     // How much of the trail the reviewer has judged, and what it said: work it sent back is judged again as it stands
     // only once there is more of it (a review that spends the budget would otherwise be followed by a second look).
     let judged = 0;
