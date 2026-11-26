@@ -32,6 +32,23 @@ export class UsageStore {
     db.exec("CREATE TABLE IF NOT EXISTS usage_budget (k TEXT PRIMARY KEY, usd REAL, per TEXT NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS spent_windows (provider TEXT PRIMARY KEY, until INTEGER NOT NULL, noted INTEGER NOT NULL, said TEXT NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS refused_keys (provider TEXT PRIMARY KEY, refused_at INTEGER NOT NULL, said TEXT NOT NULL)");
+    db.exec("CREATE TABLE IF NOT EXISTS spent_sign_ins (who TEXT PRIMARY KEY, until INTEGER NOT NULL, noted INTEGER NOT NULL, said TEXT NOT NULL)");
+  }
+
+  /**
+   * The vendors' tools' own sign-ins whose plan is spent, by agent and tool (brain windows.ts signInWindowsOf), kept
+   * through a restart: each goes last on its agent's tasks until it resets. One that has ended is dropped.
+   */
+  spentSignIns(): { provider: string; until: number; noted: number; said: string }[] {
+    this.db.query("DELETE FROM spent_sign_ins WHERE until <= ?").run(this.now());
+    return this.db.query<{ who: string; until: number; noted: number; said: string }, []>("SELECT who, until, noted, said FROM spent_sign_ins ORDER BY who").all().map(({ who, ...window }) => ({ provider: who, ...window }));
+  }
+
+  /** A sign-in's spent window, as its tool said it: kept until it ends (the latest told wins). */
+  keepSpentSignIn(window: { provider: string; until: number; noted: number; said: string }): void {
+    this.db
+      .query("INSERT INTO spent_sign_ins (who, until, noted, said) VALUES (?, ?, ?, ?) ON CONFLICT (who) DO UPDATE SET until = excluded.until, noted = excluded.noted, said = excluded.said")
+      .run(window.provider, window.until, window.noted, window.said);
   }
 
   /**

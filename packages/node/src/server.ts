@@ -120,7 +120,7 @@ import {
   type LiveTopic,
 } from "@invincible/core";
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
-import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, windowsOf, choreRole, Steering, countable, nowLine } from "@invincible/models";
+import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, nowLine } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
 import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
@@ -2438,6 +2438,12 @@ export function createApp(ctx: AppContext) {
       brain: (member) => ({ ...brainFor(agentPrincipal(member.id)), ...(ctx.fetch ? { fetch: overFleet(ctx.fetch) } : {}) }),
       enter: (signal) => ctx.governor.enterModel({ wait: true }, signal),
       exec: execTeam, execArgv: execTeamArgv, follow: followTeam, prepare: prepareTeam, renew: renewTeam, agent: teamMember,
+      // A vendor's tool's own sign-in in an agent's VM whose plan its tool said is spent: remembered until its reset (kept
+      // through a restart), so its next task begins on the roster's models and asks it last.
+      ownSpent: (member, harness) => signInWindowsOf(ctx.store).spent(`${member.id}/${harness}`),
+      window: (member, harness, window) => {
+        if (window.own && window.status === "rejected" && window.resetsAt) signInWindowsOf(ctx.store).hold(`${member.id}/${harness}`, window.resetsAt, `${harness}'s own sign-in in ${member.name}'s VM: its ${window.name} window is spent`);
+      },
       // An agent on the roster's engineer models works with its own tools, as was measured (team-runtime toolsLoop).
       toolsLoop: true,
       files: (refs) => filesFor(refs, ctx.uploads),
@@ -2986,7 +2992,7 @@ export function createApp(ctx: AppContext) {
         }
         // (What its next task's lease will cover: the providers with a key now.)
         const usable = harnessModels(id, role, keyedProviders(), agent.models);
-        const { ready, on, reason } = harnessReadiness(driver, await execTeam(member, driver.check, 30, req.signal), usable.models, usable.outside, role);
+        const { ready, on, reason } = harnessReadiness(driver, await execTeam(member, driver.check, 30, req.signal), usable.models, usable.outside, role, false, signInWindowsOf(ctx.store).spent(`${member.id}/${id}`));
         harnesses.push({ id, ready, ...(on ? { on } : {}), ...(reason ? { reason } : {}) });
       }
       // The notes store: the node's switch, and whether this VM has the pinned binary (asked as a harness is: of an

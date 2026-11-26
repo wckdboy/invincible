@@ -14,7 +14,7 @@ import type { TeamRunContext } from "@invincible/agents";
 export interface TeamServiceOptions {
   store: TeamStore;
   respond(agent: Agent, room: TeamRoom, history: TeamMessage[], context: TeamRunContext): Promise<string | { text: string }>;
-  executeTask(agent: Agent, task: TeamTask, context: TeamRunContext): Promise<{ verified: boolean; output: string; error?: string; record?: TeamTaskRecord; changes?: TeamTaskChanges }>;
+  executeTask(agent: Agent, task: TeamTask, context: TeamRunContext): Promise<{ verified: boolean; output: string; error?: string; record?: TeamTaskRecord; changes?: TeamTaskChanges; rest?: { until: number; why: string } }>;
   /** The primary's answer in a room it was asked in (TeamStore.post says when): its words, posted for it. Absent: it
    * sits in no room on this node, and what was for it waits. */
   answer?(room: TeamRoom, history: TeamMessage[], ask: { asker: TeamAsker; trigger: TeamMessage | null }, signal: AbortSignal): Promise<string>;
@@ -521,7 +521,9 @@ export class TeamService {
       const task = this.store.task(job.id)!;
       const outcome = await this.options.executeTask(agent, task, context);
       current();
-      this.store.finish(job.id, outcome.verified ? "done" : "failed", outcome.error ?? (outcome.verified ? null : "The work was not independently verified."), outcome);
+      // Every model it could run on spent, its plan saying when it resets: it rests until then, and goes on by itself.
+      if (!outcome.verified && outcome.rest) this.store.rest(job.id, outcome.rest.until, outcome.rest.why, outcome);
+      else this.store.finish(job.id, outcome.verified ? "done" : "failed", outcome.error ?? (outcome.verified ? null : "The work was not independently verified."), outcome);
     }
   }
 }

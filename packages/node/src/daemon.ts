@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonical, decodeHlc, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
-import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, windowsOf } from "@invincible/models";
+import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, signInWindowsOf, windowsOf } from "@invincible/models";
 // The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
 import { activityOf } from "../../../apps/web/src/lib/live-activity.ts";
 import { costWords, factsOfRecord, verdictOf } from "../../../apps/web/src/lib/steps.ts";
@@ -265,6 +265,10 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const spentWindows = windowsOf(store);
   spentWindows.restore(usage.spentWindows());
   spentWindows.kept = (window) => usage.keepSpentWindow(window);
+  // So does a vendor's tool's own sign-in whose plan its tool said is spent: it goes last on its agent's tasks until then.
+  const spentSignIns = signInWindowsOf(store);
+  spentSignIns.restore(usage.spentSignIns());
+  spentSignIns.kept = (window) => usage.keepSpentSignIn(window);
   // A provider whose key a call got refused stays said through a restart, too: the doctor and the Inbox say it until a
   // later call gets through (which forgets it) or the key is set again (which the doctor reads as the refusal being moot).
   const refusedKeys = refusedKeysOf(store);

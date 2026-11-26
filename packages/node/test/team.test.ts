@@ -829,3 +829,22 @@ describe("a steer of a running task", () => {
     expect(() => service.steer({ text: "neither" } as never, "owner")).toThrow(TeamError);
   });
 });
+
+describe("work whose plan is spent (I15 step 8)", () => {
+  test("every model it could run on spent, its plan saying when it resets: it rests until then, not failed, and its agent takes other work meanwhile", async () => {
+    const reset = Date.now() + 2 * 3_600_000;
+    const { store, service } = setup({
+      executeTask: async (_agent, task) =>
+        task.title === "Spent"
+          ? { verified: false, output: "Wrote half the parser.", error: "gave-up", rest: { until: reset, why: "Codex's allowance is spent; it resets soon" } }
+          : { verified: true, output: "Verified" },
+    });
+    const spent = service.createTask({ room: "workshop", assignee: "ada", title: "Spent", goal: "Write the parser" });
+    const other = service.createTask({ room: "workshop", assignee: "ada", title: "Other", goal: "Write the reader" });
+    service.start();
+    await service.settled();
+    expect(store.task(spent.id)).toMatchObject({ status: "interrupted", output: "Wrote half the parser." });
+    expect(store.task(spent.id)!.error).toStartWith("Codex's allowance is spent; it resets soon. It rests until its plan's window resets, and goes on by itself at ");
+    expect(store.task(other.id)!.status).toBe("done");
+  });
+});

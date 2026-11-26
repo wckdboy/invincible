@@ -288,6 +288,11 @@ def variant(name):
         return frames
     if name == "lingering":
         return lingering(scenario("hello"))
+    if name == "windows":
+        # Its plan's windows as 2.1.311 said them on a real plan: allowed, a quarter of each used.
+        frames = scenario("hello")
+        at = next(i for i, f in enumerate(frames) if f["dir"] == "out" and f["line"].get("isReplay"))
+        return frames[:at + 1] + [dict(frames[at], line=LIMIT)] + frames[at + 1:]
     return scenario(name)
 
 resumed = args[args.index("--resume") + 1] if "--resume" in args else None
@@ -395,6 +400,18 @@ def variant(name):
         return frames
     if name == "lingering":
         return lingering(scenario("hello"))
+    if name == "windows":
+        # Its two windows as 0.172.0 said them from its plan's headers (26 November 2026, against the loopback): a fifth
+        # of five hours, and an eighth of a week, used.
+        frames = scenario("hello")
+        for f in outs(frames, lambda l: l.get("method") == "account/rateLimits/updated"):
+            f["line"]["params"]["rateLimits"].update(primary={"usedPercent": 43, "windowDurationMins": 300, "resetsAt": 1795734640}, secondary={"usedPercent": 12, "windowDurationMins": 10080, "resetsAt": 1796159440})
+        return frames
+    if name == "windows spent":
+        frames = variant("windows")
+        for f in outs(frames, lambda l: l.get("method") == "account/rateLimits/updated"):
+            f["line"]["params"]["rateLimits"]["primary"]["usedPercent"] = 100
+        return frames
     return scenario(name)
 
 # Its app server: asked for the account it holds (a seat's status), or given a thread to work in (a run), told apart by
@@ -685,7 +702,12 @@ describe("Claude Code, on its own sign-in", () => {
     // (A tool waiting for its window would wait: the bridge stops it by its own interrupt.)
     expect(Date.now() - started).toBeLessThan(15_000);
     expect(run.exit).toBe(1);
-    expect(run.events).toEqual([{ type: "error", message: "Claude Code's allowance is spent; it resets 2026-01-01 04:00 UTC" }]);
+    expect(run.events).toEqual([
+      // Its windows as it said them: the one it was refused in, and the other it lists.
+      { type: "window", name: "five_hour", status: "rejected", resetsAt: 1767240000000 },
+      { type: "window", name: "seven_day", status: "allowed", usedPercent: 25, resetsAt: 1767240000000 },
+      { type: "error", message: "Claude Code's allowance is spent; it resets 2026-01-01 04:00 UTC" },
+    ]);
     expect(box.trace().filter((item) => item.signal)).toEqual([{ signal: 2 }]);
     // (As recorded on a real plan, the allowance fine, beside "overageStatus":"rejected": only `status` says a run is refused.)
     expect(LIMIT).toContain('"overageStatus":"rejected"');
@@ -754,6 +776,39 @@ describe("a run cut off before it ended, taken up again in its own session", () 
     const added = Object.keys(cut.env).filter((name) => !(name in box.env));
     expect(added.filter((name) => !HOST_ADDED.has(name))).toEqual([]);
     expect(box.trace().filter((item) => "told" in item).map((item) => item.told)).toEqual(["initialized", "thread/resume", "turn/start"]);
+  });
+});
+
+describe("a plan's windows, as each tool says them", () => {
+  test("Claude Code: each window its rate_limit_event names (on a claude.ai sign-in), its status, how much is used and when it resets", async () => {
+    const run = await vm("claude").run(OWN, "work", "windows");
+    expect(run.exit).toBe(0);
+    expect(run.events.filter((event) => event.type === "window")).toEqual([
+      { type: "window", name: "five_hour", status: "allowed", resetsAt: 1767240000000 },
+      { type: "window", name: "seven_day", status: "allowed", usedPercent: 25, resetsAt: 1767240000000 },
+    ]);
+  });
+
+  test("Codex: its two windows after each response (account/rateLimits/updated), named by their length; one used whole is refused", async () => {
+    const run = await vm("codex").run(OWN, "work", "windows");
+    expect(run.exit).toBe(0);
+    expect(run.events.filter((event) => event.type === "window")).toEqual([
+      { type: "window", name: "five_hour", status: "allowed", usedPercent: 43, resetsAt: 1795734640000 },
+      { type: "window", name: "seven_day", status: "allowed", usedPercent: 12, resetsAt: 1796159440000 },
+    ]);
+    const spent = await vm("codex").run(OWN, "work", "windows spent");
+    expect(spent.events.find((event) => event.type === "window")).toEqual({ type: "window", name: "five_hour", status: "rejected", usedPercent: 100, resetsAt: 1795734640000 });
+    // (Without its plan's headers, a gateway model's say nothing: its windows are null, and nothing is said of them.)
+    expect((await vm("codex").run(OWN)).events.filter((event) => event.type === "window")).toEqual([]);
+  });
+
+  test("what a VM says of a window is data: a name of another shape, a status it never says, a share past whole, are dropped", () => {
+    for (const driver of [CLAUDE, CODEX]) {
+      expect(driver.read('{"type":"window","name":"five_hour","status":"allowed","usedPercent":43,"resetsAt":1795734640000}')).toEqual([{ type: "window", name: "five_hour", status: "allowed", usedPercent: 43, resetsAt: 1795734640000 }]);
+      expect(driver.read('{"type":"window","name":"Five Hours; rm -rf /","status":"allowed"}')).toEqual([]);
+      expect(driver.read('{"type":"window","name":"five_hour","status":"exhausted"}')).toEqual([]);
+      expect(driver.read('{"type":"window","name":"five_hour","status":"allowed","usedPercent":140,"resetsAt":-1}')).toEqual([{ type: "window", name: "five_hour", status: "allowed" }]);
+    }
   });
 });
 

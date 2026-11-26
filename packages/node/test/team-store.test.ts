@@ -1168,3 +1168,81 @@ describe("a steer of a running task", () => {
     expect(store.task(task.id)!.steers).toEqual([{ by: "owner", text: "Use the new schema.", at: expect.any(Number) }]);
   });
 });
+
+/*
+ * Work whose coding agent found every model it could run on spent, its plan's window saying when it resets (I15 step 8):
+ * it rests until then and is taken up again by itself, in its own session, its agent's other work going on meanwhile.
+ * Spent again after TeamStore.RESTS rests, it waits for you.
+ */
+describe("work that rests for its plan's window", () => {
+  const running = (store: TeamStore) => {
+    setup(store);
+    const task = store.createTask({ room: "workshop", assignee: "ada", title: "Schema", goal: "Write the parser" });
+    expect(store.claim(task.id)).toBe(true);
+    return task;
+  };
+  const NOW = Date.UTC(2026, 10, 26, 21, 45);
+  const WHY = "Claude Code's allowance is spent; it resets 2026-11-26 23:45 UTC";
+
+  test("it rests until its reset, said so, and is taken up again by itself then, every steer told again; nothing of its agent's waits", () => {
+    let clock = NOW;
+    const store = make(":memory:", () => clock);
+    const task = running(store);
+    store.steer(task.id, "owner", "Use the new schema.");
+    expect(store.takeSteers(task.id, 2)).toHaveLength(1);
+    store.rest(task.id, NOW + 2 * 3_600_000, WHY, { verified: false, output: "Wrote half the parser." });
+    expect(store.task(task.id)).toMatchObject({ status: "interrupted", error: `${WHY}. It rests until its plan's window resets, and goes on by itself at 23:45 UTC, in its own session.`, output: "Wrote half the parser." });
+    expect(store.trail(task.id).entries.at(-1)?.text).toBe("Resting · its plan's window is spent: it goes on by itself at 23:45 UTC");
+    // (Its agent's other work goes on meanwhile: a rest holds nothing back, as a restart's wait does.)
+    expect(store.restartWaits().has("ada")).toBe(false);
+    clock = NOW + 2 * 3_600_000 - 1;
+    expect(store.resumeRestarted()).toBe(0);
+    clock = NOW + 2 * 3_600_000;
+    expect(store.resumeRestarted()).toBe(1);
+    expect(store.task(task.id)!.status).toBe("queued");
+    expect(store.trail(task.id).entries.at(-1)?.text).toBe("Taken up again by itself: its plan's window has reset.");
+    expect(store.claim(task.id)).toBe(true);
+    expect(store.takeSteers(task.id, 0).map((s) => s.text)).toEqual(["Use the new schema."]);
+  });
+
+  test("a reset on another day says the day; spent again after three rests, it waits for you, and isn't taken up by itself", () => {
+    let clock = NOW;
+    const store = make(":memory:", () => clock);
+    const task = running(store);
+    store.rest(task.id, Date.UTC(2026, 10, 27, 1, 0), WHY);
+    expect(store.task(task.id)!.error).toContain("goes on by itself at 01:00 UTC on 2026-11-27, in its own session.");
+    for (let n = 1; n <= 3; n++) {
+      clock = Date.UTC(2026, 10, 27 + n, 1, 0);
+      expect(store.resumeRestarted()).toBe(1);
+      expect(store.claim(task.id)).toBe(true);
+      store.rest(task.id, clock + 3_600_000, WHY);
+    }
+    expect(store.task(task.id)).toMatchObject({ status: "interrupted", error: `${WHY}. It has rested for its plan's window 3 times already, so it waits for you: resume it when you like.` });
+    expect(store.trail(task.id).entries.at(-1)?.text).toBe("Resting · its plan's window is spent again: it waits for you");
+    clock += 30 * 86_400_000;
+    expect(store.resumeRestarted()).toBe(0);
+    // Yours to take up again, as any interrupted work.
+    store.resume({ task: task.id });
+    expect(store.task(task.id)!.status).toBe("queued");
+  });
+
+  test("paused or stopped while it rests, or resumed by you before its reset, it isn't taken up by itself as well", () => {
+    let clock = NOW;
+    const store = make(":memory:", () => clock);
+    const paused = running(store);
+    store.rest(paused.id, NOW + 3_600_000, WHY);
+    store.holdRestarts({ task: paused.id }, "interrupted", "Paused by you.");
+    clock = NOW + 2 * 3_600_000;
+    expect(store.resumeRestarted()).toBe(0);
+    expect(store.task(paused.id)).toMatchObject({ status: "interrupted", error: "Paused by you." });
+    const early = store.createTask({ room: "workshop", assignee: "ada", title: "Early", goal: "Write the reader" });
+    expect(store.claim(early.id)).toBe(true);
+    store.rest(early.id, clock + 3_600_000, WHY);
+    store.resume({ task: early.id });
+    expect(store.claim(early.id)).toBe(true);
+    store.finish(early.id, "done", null, { verified: true, output: "Done." });
+    clock += 2 * 3_600_000;
+    expect(store.resumeRestarted()).toBe(0);
+    expect(store.task(early.id)!.status).toBe("done");
+  });
+});

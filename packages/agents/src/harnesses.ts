@@ -55,7 +55,9 @@ export type AgentEvent =
    * Words the node told a run as it went (runAgent: a live steer), by its id: queued by the tool, taken into its work, or
    * late (it had stopped taking any: they are said in its next run).
    */
-  | { type: "steer"; id: string; state: "queued" | "taken" | "late" };
+  | { type: "steer"; id: string; state: "queued" | "taken" | "late" }
+  /** One of its plan's windows, as its tool said it: allowed, warning or rejected; how much is used (%); when it resets (ms). */
+  | { type: "window"; name: string; status: "allowed" | "warning" | "rejected"; usedPercent?: number; resetsAt?: number };
 
 /**
  * What a driver's tool can do as it runs, declared and never faked (T3 Code: "Declare only what the provider actually

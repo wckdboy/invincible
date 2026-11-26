@@ -87,6 +87,21 @@ def resets(at):
     except (OverflowError, OSError, ValueError):
         return ""
 
+WINDOW = re.compile(r"[a-z0-9][a-z0-9_]{0,31}")
+
+def window(name, status, used=None, at=None):
+    # One of its plan's windows as the tool said it: its name, allowed, warning or rejected, how much of it is used (%)
+    # and when it resets (seconds or ms since the epoch). Nothing else of what the tool says of its account is passed on.
+    if not isinstance(name, str) or not WINDOW.fullmatch(name) or status not in ("allowed", "warning", "rejected"):
+        return
+    said = {"name": name, "status": status}
+    if type(used) in (int, float) and 0 <= used <= 100:
+        said["usedPercent"] = int(round(used))
+    when = moment(at)
+    if when:
+        said["resetsAt"] = when
+    emit("window", **said)
+
 def own_path(env):
     # (Where a vendor's installer puts its tool for one user, whatever the shell's profile says.)
     env["PATH"] = os.path.join(os.path.expanduser("~"), ".local", "bin") + os.pathsep + env.get("PATH", "")
@@ -528,6 +543,17 @@ class Reader:
                          output=clip(text_of(block.get("content")), 4000), ok=block.get("is_error") is not True)
         elif kind == "rate_limit_event":
             info = e.get("rate_limit_info")
+            # Its plan's windows as it says them (on a claude.ai sign-in): the one this event is of, and each it lists.
+            if isinstance(info, dict):
+                status = {"allowed": "allowed", "allowed_warning": "warning", "rejected": "rejected"}.get(info.get("status"))
+                used = info.get("utilization")
+                window(info.get("rateLimitType") or "plan", status, used * 100 if type(used) in (int, float) else None, info.get("resetsAt"))
+                listed = info.get("unifiedWindows")
+                for name, held in (listed.items() if isinstance(listed, dict) else []):
+                    if isinstance(held, dict) and name != info.get("rateLimitType"):
+                        status = {"allowed": "allowed", "allowed_warning": "warning", "rejected": "rejected"}.get(held.get("status"))
+                        used = held.get("utilization")
+                        window(name, status, used * 100 if type(used) in (int, float) else None, held.get("resetsAt"))
             # Only status says a request was refused: a run within its allowance carries
             # "overageStatus": "rejected" beside "status": "allowed".
             if isinstance(info, dict) and info.get("status") == "rejected":
@@ -649,6 +675,8 @@ def through_gateway(env, base, token, model):
 LIMIT = re.compile("You['’]ve hit your usage limit")
 # The items that are calls of its: the start of each is said, as its end is.
 CALLS = ("commandExecution", "fileChange", "mcpToolCall", "webSearch", "dynamicToolCall")
+# Its windows by their length in minutes, as Claude Code names its own.
+WINDOWS = {300: "five_hour", 10080: "seven_day"}
 RECONNECT = re.compile(r"Reconnecting\.\.\. (\d{1,3})/\d{1,3}(?: \((.*)\))?$", re.S)
 AGAIN = re.compile(r"try again at (?:([A-Z][a-z]{2}) (\d{1,2})(?:st|nd|rd|th), (\d{4}) )?(\d{1,2}):(\d{2}) ([AP]M)")
 
@@ -804,6 +832,13 @@ class Reader:
                 self.trouble = message
         elif method == "thread/tokenUsage/updated" and isinstance(params.get("tokenUsage"), dict):
             self.tokens(params["tokenUsage"], params.get("turnId"))
+        elif method == "account/rateLimits/updated" and isinstance(params.get("rateLimits"), dict):
+            # Its plan's two windows as it says them after each response (named by their length: five hours, a week).
+            for held in (params["rateLimits"].get("primary"), params["rateLimits"].get("secondary")):
+                if isinstance(held, dict) and type(held.get("usedPercent")) in (int, float):
+                    minutes = held.get("windowDurationMins") if type(held.get("windowDurationMins")) is int else 0
+                    name = WINDOWS.get(minutes) or ("minutes_%d" % minutes if 0 < minutes < 10 ** 7 else None)
+                    window(name, "rejected" if held["usedPercent"] >= 100 else "allowed", held["usedPercent"], held.get("resetsAt"))
 
     def tokens(self, usage, turn):
         # Its thread's running totals: what this run spent is what they grew by in its own turns. (Resumed, a thread says

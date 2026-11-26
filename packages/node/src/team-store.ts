@@ -968,6 +968,29 @@ export class TeamStore {
     this.db.query("UPDATE team_jobs SET status=?,data=?,error=?,updated_at=? WHERE id=?").run(status, JSON.stringify(data), error ? teamOutput(error, 2000) : null, this.now(), key);
   }
   /**
+   * Work whose coding agent found every model it could run on spent, its plan's window saying when it resets (agents'
+   * RunOutcome.rest): it rests until then, and is taken up again by itself in its own session (resumeRestarted), its
+   * agent's other work going on meanwhile. Spent again after TeamStore.RESTS rests, it waits for you instead: a window
+   * that keeps saying it is spent isn't one that resets.
+   */
+  rest(key: string, until: number, why: string, result?: { verified: boolean; output: string; record?: TeamTaskRecord; changes?: TeamTaskChanges }): void {
+    this.db.transaction(() => {
+      const row = this.jobRow(key);
+      if (!row || row.status !== "running" || row.kind !== "task") return;
+      const rested = Number(JSON.parse(row.data).rest?.count) || 0;
+      const clock = new Date(until).toISOString();
+      const at = `${clock.slice(11, 16)} UTC${clock.slice(0, 10) === new Date(this.now()).toISOString().slice(0, 10) ? "" : ` on ${clock.slice(0, 10)}`}`;
+      const again = rested >= TeamStore.RESTS;
+      this.finish(key, "interrupted", again ? `${why}. It has rested for its plan's window ${rested} times already, so it waits for you: resume it when you like.` : `${why}. It rests until its plan's window resets, and goes on by itself at ${at}, in its own session.`, result);
+      const data = JSON.parse(this.jobRow(key)!.data);
+      data.rest = again ? { count: rested } : { until, count: rested + 1 };
+      this.db.query("UPDATE team_jobs SET data=? WHERE id=?").run(JSON.stringify(data), key);
+      this.trailLine(key, this.now(), again ? "Resting · its plan's window is spent again: it waits for you" : `Resting · its plan's window is spent: it goes on by itself at ${at}`);
+    })();
+  }
+  /** How many times work rests for its plan's window before it waits for you (TeamStore.rest). */
+  static readonly RESTS = 3;
+  /**
    * Work a planned restart (a deploy, an update: the node stopped on purpose) cut off: interrupted, and taken up again by
    * itself after `until`, when whatever it was running in its agent's VM has surely met its own deadline there. That
    * happens once: cut off a second time, it waits for you, its room held, as work a crash cut off does (`recover`).
@@ -1019,12 +1042,15 @@ export class TeamStore {
       let taken = 0;
       for (const row of this.db.query<JobRow, []>("SELECT * FROM team_jobs WHERE status='interrupted' ORDER BY seq").all()) {
         const data = JSON.parse(row.data);
-        if (typeof data.restart?.until !== "number" || data.restart.until > now) continue;
+        const restart = typeof data.restart?.until === "number";
+        const until = restart ? data.restart.until : typeof data.rest?.until === "number" ? data.rest.until : null;
+        if (until === null || until > now) continue;
         const room = this.room(row.room);
         if (!room || this.closed(room) || !this.agent(row.agent)?.enabled) continue;
-        data.restart = { resumed: true };
+        if (restart) data.restart = { resumed: true };
+        else data.rest = { count: data.rest.count };
         this.db.query("UPDATE team_jobs SET status='queued',error=NULL,chain_id=?,data=?,updated_at=? WHERE id=?").run(this.chain(room), JSON.stringify(untaken(data)), now, row.id);
-        if (row.kind === "task") this.trailLine(row.id, now, "Taken up again by itself after Invincible restarted.");
+        if (row.kind === "task") this.trailLine(row.id, now, restart ? "Taken up again by itself after Invincible restarted." : "Taken up again by itself: its plan's window has reset.");
         taken++;
       }
       return taken;
@@ -1035,8 +1061,9 @@ export class TeamStore {
     this.db.transaction(() => {
       for (const row of this.db.query<JobRow, []>("SELECT * FROM team_jobs WHERE status='interrupted'").all()) {
         const data = JSON.parse(row.data);
-        if (typeof data.restart?.until !== "number" || !matches(jobOf(row), select)) continue;
+        if ((typeof data.restart?.until !== "number" && typeof data.rest?.until !== "number") || !matches(jobOf(row), select)) continue;
         delete data.restart;
+        if (data.rest) data.rest = { count: data.rest.count };
         this.db.query("UPDATE team_jobs SET status=?,error=?,data=?,updated_at=? WHERE id=?").run(status, teamOutput(error, 2000), JSON.stringify(data), this.now(), row.id);
       }
     })();
@@ -1086,7 +1113,9 @@ export class TeamStore {
       for (const row of rows) {
         let chain = chains.get(row.room);
         if (!chain) { chain = this.chain(this.requireRoom(row.room)); chains.set(row.room, chain); }
-        this.db.query("UPDATE team_jobs SET status='queued',error=NULL,chain_id=?,data=?,updated_at=? WHERE id=?").run(chain, JSON.stringify(untaken(JSON.parse(row.data))), this.now(), row.id);
+        const data = untaken(JSON.parse(row.data));
+        if (data.rest) data.rest = { count: data.rest.count };
+        this.db.query("UPDATE team_jobs SET status='queued',error=NULL,chain_id=?,data=?,updated_at=? WHERE id=?").run(chain, JSON.stringify(data), this.now(), row.id);
       }
     })();
   }

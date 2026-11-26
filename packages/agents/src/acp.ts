@@ -349,6 +349,10 @@ export function readBridge(line: string): AgentEvent[] {
   if (e.type === "call" && callId(e.id)) return [{ type: "call", id: e.id }];
   if (e.type === "tokens" && [e.input, e.output].every((v) => Number.isSafeInteger(v) && v >= 0)) return [{ type: "tokens", input: e.input, output: e.output }];
   if (e.type === "retry" && Number.isSafeInteger(e.attempt) && e.attempt > 0 && typeof e.error === "string") return [{ type: "retry", attempt: e.attempt, error: redact(e.error), waitMs: Number.isSafeInteger(e.waitMs) && e.waitMs >= 0 ? e.waitMs : 0 }];
+  // One of its plan's windows, as its tool said it (vendor-cli.ts window): its name, its status, used %, its reset.
+  if (e.type === "window" && typeof e.name === "string" && /^[a-z0-9][a-z0-9_]{0,31}$/.test(e.name) && (e.status === "allowed" || e.status === "warning" || e.status === "rejected")) {
+    return [{ type: "window", name: e.name, status: e.status, ...(Number.isSafeInteger(e.usedPercent) && e.usedPercent >= 0 && e.usedPercent <= 100 ? { usedPercent: e.usedPercent } : {}), ...(Number.isSafeInteger(e.resetsAt) && e.resetsAt > 0 ? { resetsAt: e.resetsAt } : {}) }];
+  }
   // Words the node told it, by its own id for them: how far they got.
   if (e.type === "steer" && typeof e.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(e.id) && (e.state === "queued" || e.state === "taken" || e.state === "late")) return [{ type: "steer", id: e.id, state: e.state }];
   return [];

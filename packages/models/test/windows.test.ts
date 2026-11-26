@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { chat } from "../src/index.ts";
-import { type SpentWindow, SpentWindows, spentUntil, windowScope, windowsOf } from "../src/windows.ts";
+import { type SpentWindow, SpentWindows, signInWindowsOf, spentUntil, windowScope, windowsOf } from "../src/windows.ts";
 
 /*
  * A plan's allowance runs in windows (OpenCode Go: five hours). Once its provider has said the window is spent and
@@ -142,5 +142,35 @@ describe("a provider whose allowance is spent", () => {
     windowsOf(a.store).note("plan", GO);
     expect(windowsOf(a.store).spent("plan")).not.toBeNull();
     expect(windowsOf(b.store).spent("plan")).toBeNull();
+  });
+});
+
+/*
+ * A vendor's tool's own sign-in, spent (I15 step 8): its window said whole by the tool as it ran (its reset given, not
+ * read from words), kept by agent and tool, apart from the providers' windows: an account, not a provider, so it never
+ * holds a provider's models back from chat or the gateway.
+ */
+describe("a sign-in's spent window", () => {
+  test("held until the reset its tool gave; one already over, or more than a month off, isn't held", () => {
+    const windows = new SpentWindows();
+    let now = 1_000_000;
+    windows.now = () => now;
+    const kept: SpentWindow[] = [];
+    windows.kept = (window) => kept.push(window);
+    expect(windows.hold("ada/claude", now + 2 * 3_600_000, "claude's own sign-in in Ada's VM: its five_hour   window is spent")).toEqual({ provider: "ada/claude", until: now + 2 * 3_600_000, noted: now, said: "claude's own sign-in in Ada's VM: its five_hour window is spent" });
+    expect(kept).toHaveLength(1);
+    expect(windows.spent("ada/claude")?.until).toBe(now + 2 * 3_600_000);
+    expect(windows.hold("lin/codex", now - 1, "over")).toBeNull();
+    expect(windows.hold("lin/codex", now + 32 * 86_400_000, "too far")).toBeNull();
+    now += 2 * 3_600_000;
+    expect(windows.spent("ada/claude")).toBeNull();
+  });
+
+  test("kept apart from the providers' windows: a sign-in's never passes a provider's models over", () => {
+    const store = {};
+    signInWindowsOf(store).hold("ada/claude", Date.now() + 3_600_000, "spent");
+    expect(signInWindowsOf(store).spent("ada/claude")).not.toBeNull();
+    expect(windowsOf(store).list()).toEqual([]);
+    expect(windowsOf(store).spentFor("anthropic/claude-opus-5-5")).toBeNull();
   });
 });

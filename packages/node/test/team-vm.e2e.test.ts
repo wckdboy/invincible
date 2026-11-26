@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { avatarExpression, bodyFingerprint, ceilingThreads, clientIdFromKey, KERNEL, type LedgerEntry, type NoticeView, REFERENCE_SINGLE, routes, type Scope, signRequest, teamArmLabel, type RouteName, type SandboxView, type TeamEngramStatus, type TeamSnapshot, type TeamTask, utf8 } from "@invincible/core";
-import { windowsOf } from "@invincible/models";
+import { signInWindowsOf, windowsOf } from "@invincible/models";
 import { requestPairing, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { NETWORKS } from "@invincible/sandbox";
@@ -342,6 +342,15 @@ test("harness readiness says what each would run on: a vendor's tool on its own 
     // Signed in, it runs on its sign-in first, with that model through the gateway after it.
     toolStatus.set("claude", { code: 0, stdout: told({ installed: true, signedIn: true, method: "claude.ai" }) });
     expect((await readiness()).claude).toEqual({ id: "claude", ready: true, on: "its own sign-in in this VM (claude.ai), then claude-api/claude-opus-5-5 through the gateway" });
+    // Its own sign-in's plan said spent by the tool as it ran (I15 step 8): that model first, and its sign-in last until its
+    // reset, which a restart remembers too. Another agent's tool, or another tool of Ada's, isn't held back by it.
+    const reset = Date.UTC(2099, 0, 1, 23, 45);
+    signInWindowsOf(daemon.store).now = () => reset - 3_600_000;
+    signInWindowsOf(daemon.store).hold("ada/claude", reset, "claude's own sign-in in Ada's VM: its five_hour window is spent");
+    expect((await readiness()).claude).toEqual({ id: "claude", ready: true, on: "claude-api/claude-opus-5-5 through the gateway: its own sign-in in this VM (claude.ai) is spent until 23:45 UTC, and goes last" });
+    signInWindowsOf(daemon.store).now = () => reset;
+    expect((await readiness()).claude!.on).toBe("its own sign-in in this VM (claude.ai), then claude-api/claude-opus-5-5 through the gateway");
+    signInWindowsOf(daemon.store).now = Date.now;
     // (An Anthropic-API model is not one Codex can speak to, covered or not.)
     toolStatus.set("codex", { code: 0, stdout: told({ installed: true, signedIn: false }) });
     expect((await readiness()).codex!.reason).toBe("Sign Codex in in this agent's VM (codex login --device-auth), or put an OpenAI-compatible model that speaks the Responses API on the engineer's roster");

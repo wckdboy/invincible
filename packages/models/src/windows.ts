@@ -89,6 +89,19 @@ export class SpentWindows {
     return window;
   }
 
+  /**
+   * A window its tool said whole (its reset given, not read from words: a vendor's tool's rate limit, as it ran):
+   * remembered for `key` until then. One already over, or more than a month away, is no window.
+   */
+  hold(key: string, until: number, said: string): SpentWindow | null {
+    const noted = this.now();
+    if (!(until > noted) || until - noted > 31 * 86_400_000) return null;
+    const window: SpentWindow = { provider: key, until, noted, said: said.replace(/\s+/g, " ").slice(0, 300) };
+    this.windows.set(key, window);
+    this.kept?.(window);
+    return window;
+  }
+
   /** Windows kept from before a restart: each still open is as it was told; one that has ended is left out. */
   restore(windows: readonly SpentWindow[]): void {
     for (const window of windows) if (window.until > this.now()) this.windows.set(window.provider, window);
@@ -123,6 +136,21 @@ export class SpentWindows {
 }
 
 const kept = new WeakMap<object, SpentWindows>();
+const signIns = new WeakMap<object, SpentWindows>();
+
+/**
+ * A node's own record of the vendors' tools' own sign-ins whose plan is spent, by agent and tool (`<agent>/<harness>`):
+ * an account, not a provider, so never a reason for the gateway to refuse a call or for chat to pass a model over. Its
+ * next task begins on the roster's models and asks it last, until its reset (agents' harnessReadiness).
+ */
+export function signInWindowsOf(store: object): SpentWindows {
+  let windows = signIns.get(store);
+  if (!windows) {
+    windows = new SpentWindows();
+    signIns.set(store, windows);
+  }
+  return windows;
+}
 
 /** A node's own record of spent allowances: one for each mind it keeps (a node keeps one). */
 export function windowsOf(store: object): SpentWindows {

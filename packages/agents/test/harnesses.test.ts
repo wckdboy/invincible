@@ -119,12 +119,14 @@ describe("a driver and the notes store", () => {
   // replays the real 2.1.326 and 0.172.0 as their bridges drove them. OpenCode's and Hermes' are as they were. And again
   // that day (I15 step 7), when a run cut off came to be taken up in its own session (--cut-off, and Claude Code's own
   // setting for the turn it was in) and Codex's session came to be named once its first call began: each one's text
-  // with exactly those lines taken out is its text at 518cc3c, whose pins were 7ceaaf3f… and 7d7ef05d….
+  // with exactly those lines taken out is its text at 518cc3c, whose pins were 7ceaaf3f… and 7d7ef05d…. And again
+  // that day (I15 step 8), when each came to say its plan's windows as its tool says them (window()): each one's text
+  // with exactly those lines taken out is its text at b6d7835, whose pins were 0a59dcd5… and 37a28b03….
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "91daad81e7e298606abf3e1974f9b26adfa3cb50841073baed40aa037e32c5ec",
-    claude: "0a59dcd5e57cc974de1f4a329f5a4d7d2302a3a96c1bfa1cce7148c088fd404e",
-    codex: "37a28b0321057ea2cecb148a5129921745e87faa5e75a1282cf4be727db997ed",
+    claude: "1a94bf08a0d1e12109d281c03f8fc350d00d63152ab77965eb917df6923dd96d",
+    codex: "ba84ed24006f06b74520b4d09cba1e31ea82d73b29d594ed039fd6954b9177af",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

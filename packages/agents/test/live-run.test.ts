@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { ExecResult } from "@invincible/core";
 import { FOLLOW, followArgv, FOLLOW_TICK_MS, OPENCODE, OWN_SIGN_IN, runAgent, STOP_GRACE_SECONDS, type AgentDriver, type AgentRun, type FollowedRun } from "../src/harnesses.ts";
-import { type RunEvent, type RunSteer, runLoop, steersSaid } from "../src/run.ts";
+import { type RunEvent, type RunSteer, runLoop, spentReset, steersSaid } from "../src/run.ts";
+import { harnessReadiness } from "../src/team-runtime.ts";
 import { CLAUDE, CODEX } from "../src/vendor-cli.ts";
 
 /*
@@ -418,5 +419,71 @@ describe("steering a coding agent's task", () => {
     expect(second).toBe(`${steersSaid([STEERED])} Then end with a short summary and the evidence.`);
     // Said once on the trail, where it was taken: not again for its second telling.
     expect(run.events.filter((event) => event.type === "steered")).toHaveLength(1);
+  });
+});
+
+/*
+ * A plan's windows as its tool says them, and the way on when it is spent (I15 step 8): each window is said on the run's
+ * events, its own sign-in's marked so; a task whose every model is spent, its plan saying when it resets, rests until then
+ * (its caller takes it up again, in its own session); and an own sign-in that is spent goes last on the next task.
+ */
+describe("a plan's windows, and the way on when it is spent", () => {
+  const NOW = Date.UTC(2026, 10, 26, 21, 45);
+  test("when a spent run can go on: the window its tool refused, else the reset its bridge said, if it is ahead and within a month", () => {
+    expect(spentReset("Codex's allowance is spent; it resets 2026-11-26 23:45 UTC", 0, NOW)).toBe(Date.UTC(2026, 10, 26, 23, 45));
+    expect(spentReset("Claude Code's allowance is spent (it needs usage credits to go on); it resets 2026-11-27 01:00 UTC", 0, NOW)).toBe(Date.UTC(2026, 10, 27, 1, 0));
+    // A window it refused says it whole, and comes first.
+    expect(spentReset("Claude Code ended with an error (rate_limit): API Error: Request rejected (429)", NOW + 3_600_000, NOW)).toBe(NOW + 3_600_000);
+    // Not spent, a reset gone by, one more than a month off, or no reset said: nothing to rest for.
+    expect(spentReset("Codex stopped: unexpected status 404", 0, NOW)).toBeNull();
+    expect(spentReset("Codex's allowance is spent; it resets 2026-11-26 20:00 UTC", 0, NOW)).toBeNull();
+    expect(spentReset("Codex's allowance is spent; it resets 2027-03-01 00:00 UTC", 0, NOW)).toBeNull();
+    expect(spentReset("Claude Code's allowance is spent", 0, NOW)).toBeNull();
+  });
+
+  test("a task whose every model is spent, its plan saying when it resets, rests until then; each window its tool said is on its events", async () => {
+    const box = vm();
+    const events: RunEvent[] = [];
+    const time = clock();
+    const reset = time.now() + 2 * 3_600_000;
+    const done = runLoop(
+      { goal: "Write the parser", environment: "a stand-in VM", plan: "1. Write it.\nDone when: its test passes.", agent: { driver: CLAUDE, models: [OWN_SIGN_IN], workdir: "/work/repo" } },
+      { ask: async (role) => ({ text: "PASS", model: `stand-in/${role}` }), exec: box.exec, follow: box.follow, emit: (event) => events.push(event), ...time },
+    );
+    await box.until(() => box.follows.length === 1);
+    box.current().push(
+      E(20, { type: "window", name: "five_hour", status: "rejected", resetsAt: reset }),
+      E(40, { type: "window", name: "seven_day", status: "allowed", usedPercent: 41, resetsAt: reset + 86_400_000 }),
+      E(60, { type: "error", message: "Claude Code's allowance is spent; it resets 2026-11-27 00:00 UTC" }),
+      S(false, 1, 60),
+    );
+    const outcome = await done;
+    expect(outcome.status).toBe("gave-up");
+    // (Its tool's window says its reset whole: that, not the words.)
+    expect(outcome.rest).toEqual({ until: reset, why: "Claude Code's allowance is spent; it resets 2026-11-27 00:00 UTC" });
+    expect(events.filter((event) => event.type === "window")).toEqual([
+      { type: "window", model: "its own sign-in", own: true, name: "five_hour", status: "rejected", resetsAt: reset },
+      { type: "window", model: "its own sign-in", own: true, name: "seven_day", status: "allowed", usedPercent: 41, resetsAt: reset + 86_400_000 },
+    ]);
+    // A run that failed for another reason leaves no rest: it gives up as before.
+    const other = vm();
+    const failed = runLoop(
+      { goal: "Write the parser", environment: "a stand-in VM", plan: "1. Write it.\nDone when: its test passes.", agent: { driver: CLAUDE, models: [OWN_SIGN_IN], workdir: "/work/repo" } },
+      { ask: async (role) => ({ text: "PASS", model: `stand-in/${role}` }), exec: other.exec, follow: other.follow, ...clock() },
+    );
+    await other.until(() => other.follows.length === 1);
+    other.current().push(E(20, { type: "error", message: "Claude Code ended with an error (error_max_turns)" }), S(false, 1, 20));
+    expect((await failed).rest).toBeUndefined();
+  });
+
+  test("its own sign-in spent: the roster's models first, and it last, said with its reset; otherwise first, as ever", () => {
+    const probe = { exitCode: 0, stdout: JSON.stringify({ type: "status", installed: true, signedIn: true, method: "claude.ai" }) };
+    const roster = [{ provider: "anthropic", model: "claude-opus-5-5" }];
+    expect(harnessReadiness(CLAUDE, probe, roster).models).toEqual([OWN_SIGN_IN, ...roster]);
+    const spent = harnessReadiness(CLAUDE, probe, roster, [], "engineer", false, { until: Date.UTC(2026, 10, 26, 23, 45) });
+    expect(spent.models).toEqual([...roster, OWN_SIGN_IN]);
+    expect(spent.on).toBe("anthropic/claude-opus-5-5 through the gateway: its own sign-in in this VM (claude.ai) is spent until 23:45 UTC, and goes last");
+    // With nothing else to run on, it is still the one to try: there is no other account of the vendor's to move to.
+    expect(harnessReadiness(CLAUDE, probe, [], [], "engineer", false, { until: Date.UTC(2026, 10, 26, 23, 45) }).models).toEqual([OWN_SIGN_IN]);
   });
 });

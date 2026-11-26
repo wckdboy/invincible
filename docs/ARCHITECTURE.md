@@ -192,6 +192,18 @@ The run loop is carried and renamed (§10), the most proven part of it:
     once, on the same model, in its own session, told it was cut off. Claude Code is given its own setting for that
     (`CLAUDE_CODE_RESUME_INTERRUPTED_TURN`), so the turn it was in is taken up again with the message in it; Codex resumes
     its thread. Measured with the real tools, each killed mid-command: working again 1.5 to 1.6 s after (3 runs each).
+  - A plan's windows as each tool says them as it runs: Claude Code's `rate_limit_event` on a claude.ai sign-in, each
+    window it names (five hours, seven days); Codex's `account/rateLimits/updated`, its two windows named by their
+    length. Each with its status (allowed, warning, refused), how much of it is used and when it resets.
+  - A tool's own sign-in whose window it refused is remembered until its reset, through a restart and apart from the
+    providers' windows (an account, not a provider): its agent's next task begins on the roster's models and asks it
+    last. It is never moved to another account of the vendor's (D1, D2): there is no switch between them.
+  - A task whose every model is spent, its plan saying when it resets, rests until then and is taken up again by itself
+    in its own session, its agent's other work going on meanwhile. Spent again after three rests, it waits for you.
+    Claude's usage credits and ChatGPT's credit use are never turned on: they are money, and yours to decide.
+  - Measured with the real tools against a loopback model that refused the first model as each vendor does (10 runs
+    each): working again on the next model 0.61 s after the refusal (p50; 1.68 s p95) for Claude Code, 1.03 s (1.54 s)
+    for Codex. A seat's own windows wait for runs on seats (the scheduler, next).
   - A node that stops on purpose (a deploy, an update) stops its tasks' runs by each tool's own interrupt, and takes the
     tasks up again by itself once it is back, each tool in its own session. Following a run that outlived its node, its
     run loop's own state (its plan, its gates' first run, the steers it had taken) kept beside it, is not built yet.

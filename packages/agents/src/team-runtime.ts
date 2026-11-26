@@ -85,6 +85,10 @@ export interface TeamRuntimeDeps {
   models(agent: Agent): AgentModel[];
   /** When there are none: roster models it could speak to, on providers its VM's gateway token doesn't cover. */
   modelsOutside?(agent: Agent): AgentModel[];
+  /** Whether a vendor's tool's own sign-in in this agent's VM is spent now (a window it refused): then it runs last. */
+  ownSpent?(agent: Agent, harness: string): { until: number } | null;
+  /** Told of each window of its plan that a coding agent's tool says as it runs (RunEvent window). */
+  window?(agent: Agent, harness: string, window: Extract<RunEvent, { type: "window" }>): void;
   /** The node's switch for the VMs' notes store (Engram): on, a task is given the store when its VM has the pinned binary. Absent: off. */
   engram?(): boolean;
   memories(query: string): string;
@@ -331,13 +335,16 @@ export interface HarnessReadiness {
  * one in: with nothing to run on, the reason says what the owner can do. `outside`: roster models it could speak
  * to, on providers this VM's token doesn't cover (a task's token covers the providers with a key when it began).
  */
-export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false): HarnessReadiness {
+export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false, ownSpent: { until: number } | null = null): HarnessReadiness {
   const on = role === "engineer" ? "the engineer's roster" : `the ${role} role`;
   if (probe.exitCode !== 0) return { ready: false, models: [], reason: `Install ${driver.title} in this agent's VM (Your agent never installs or signs in a harness)` };
   const gateway = roster[0] ? `${agentModelName(roster[0])} through the gateway` : null;
   // (What the VM printed is data: the driver reads one flag and one known word from it.)
   const told = driver.signIn?.read(probe.stdout);
   // (Work in sensitive mode runs on its own models alone, through the gateway: never the tool's own sign-in.)
+  // Its own sign-in spent (a window it refused, until its reset): the roster's models first, and it last, so a task
+  // doesn't begin by asking a spent plan (it isn't moved to another account of the vendor's: there is none to move to).
+  if (told?.signedIn && !held && ownSpent && gateway) return { ready: true, models: [...roster, OWN_SIGN_IN], on: `${gateway}: its own sign-in in this VM${told.method ? ` (${told.method})` : ""} is spent until ${new Date(ownSpent.until).toISOString().slice(11, 16)} UTC, and goes last` };
   if (told?.signedIn && !held) return { ready: true, models: [OWN_SIGN_IN, ...roster], on: `its own sign-in in this VM${told.method ? ` (${told.method})` : ""}${gateway ? `, then ${gateway}` : ""}` };
   // An ACP agent you named runs as you set it up in its VM: the role's model through the gateway is offered to it.
   if (driver.ownSetup && !held) return { ready: true, models: gateway ? [...roster] : [OWN_SIGN_IN], on: gateway ? `its own setup in this VM, with ${gateway} for an agent that reads OPENAI_BASE_URL` : "its own setup in this VM" };
@@ -580,7 +587,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       } finally { leave(); }
     },
 
-    async executeTask(agent: Agent, task: TeamTask, ctx: TeamRunContext): Promise<{ verified: boolean; output: string; error?: string; record: TeamTaskRecord; changes?: TeamTaskChanges }> {
+    async executeTask(agent: Agent, task: TeamTask, ctx: TeamRunContext): Promise<{ verified: boolean; output: string; error?: string; record: TeamTaskRecord; changes?: TeamTaskChanges; rest?: { until: number; why: string } }> {
       // What the run comes to is counted here, by the runner: when it began, and every model call as its provider reports it.
       const startedAt = Date.now();
       const spent: UsageLine[] = [];
@@ -674,7 +681,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         const worker = held ? { ...agent, models: [...held] } : agent;
         const roster = deps.models(worker);
         const offered = task.budgetUsd !== undefined && deps.countable ? roster.filter((m) => m.own || deps.countable!(`${m.provider}/${m.model}`)) : roster;
-        const ready = harnessReadiness(driver, probe, offered, deps.modelsOutside?.(worker), workRole(agent.role), held !== null);
+        const ready = harnessReadiness(driver, probe, offered, deps.modelsOutside?.(worker), workRole(agent.role), held !== null, deps.ownSpent?.(agent, driver.name) ?? null);
         // (A tool signed in on its own in this VM still runs on that, as ever: only the gateway's models are held to it.)
         if (!ready.ready && roster.length && !offered.length) throw new Error(`${driver.title} has no model its budget can count: you've set no price for ${roster.map(agentModelName).join(", ")} (invincible price set <provider/model> <$ per million in> <$ per million out>), and a task with a budget never runs on what it would count as nothing`);
         if (!ready.ready) throw new Error(`${driver.title} can't work in this VM yet: ${ready.reason}`);
@@ -735,6 +742,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         },
         exec, signal: ctx.signal,
         emit: (event) => {
+          // A window its coding agent's tool said: the node's to remember (a spent own sign-in goes last until its reset).
+          if (event.type === "window") {
+            deps.window?.(agent, agent.harness, event);
+            return;
+          }
           trail.on(event);
           // A review answered by the same model that did the work after all is said, once, before its verdict.
           if (event.type === "review" && !saidSameReview && worked !== undefined && sameModel(event.model, worked)) {
@@ -820,7 +832,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       }
       // (Whatever the task left in its temporary directory goes with it.)
       await deps.exec(agent, `rm -rf ${quote(temp)}`, 60, ctx.signal).catch(() => {});
-      return { verified, output: `${outcome.summary}\n\nReview: ${outcome.review ?? outcome.status}\nWorkspace: ${root}${changed}${notes ? `\nNotes: ${notes}` : ""}`, ...(verified ? {} : { error: outcome.status }), record, ...(changes ? { changes } : {}) };
+      return { verified, output: `${outcome.summary}\n\nReview: ${outcome.review ?? outcome.status}\nWorkspace: ${root}${changed}${notes ? `\nNotes: ${notes}` : ""}`, ...(verified ? {} : { error: outcome.status }), record, ...(changes ? { changes } : {}), ...(!verified && outcome.rest ? { rest: outcome.rest } : {}) };
     },
   };
 }

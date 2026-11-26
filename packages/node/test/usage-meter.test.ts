@@ -81,3 +81,17 @@ test("nothing priced yet is $0, never at least $0", () => {
   const meter = { node: "ultra", per: "month" as const, since: "2026-11-01", budgetUsd: null, spentUsd: 0, complete: false, unpriced: [], tokens: 0, calls: 14, leftUsd: null, top: [] };
   expect(meterLine(meter)).toBe("This month: $0 no budget (invincible usage budget <usd> sets one) · 0 tokens in 14 calls");
 });
+
+test("a vendor's tool's own sign-in whose plan is spent is kept through a restart apart from the providers' windows, until its reset (I15 step 8)", () => {
+  let now = 1_000_000;
+  const db = new Database(":memory:");
+  const usage = new UsageStore(db, () => now);
+  usage.keepSpentSignIn({ provider: "ada/claude", until: now + 3_600_000, noted: now, said: "claude's own sign-in in Ada's VM: its five_hour window is spent" });
+  usage.keepSpentWindow({ provider: "opencode-go", until: now + 60_000, noted: now, said: "Go usage limit reached" });
+  // (Opened again, as after a restart.)
+  const again = new UsageStore(db, () => now);
+  expect(again.spentSignIns()).toEqual([{ provider: "ada/claude", until: now + 3_600_000, noted: now, said: "claude's own sign-in in Ada's VM: its five_hour window is spent" }]);
+  expect(again.spentWindows().map((w) => w.provider)).toEqual(["opencode-go"]);
+  now += 3_600_000;
+  expect(again.spentSignIns()).toEqual([]);
+});

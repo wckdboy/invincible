@@ -260,6 +260,11 @@ export interface RunOutcome {
   tripped?: number;
   /** Where its time went (RunTiming). */
   timing?: RunTiming;
+  /**
+   * Every model its coding agent could run on was spent, the last saying when its plan's window resets: it rests until
+   * then, and goes on by itself in its own session (the caller's to arrange). Absent: it didn't, or no reset was said.
+   */
+  rest?: { until: number; why: string };
 }
 
 /**
@@ -315,6 +320,11 @@ export type RunEvent =
   | { type: "submitted"; summary: string }
   | { type: "review"; verdict: "pass" | "revise"; notes: string; model: string }
   | { type: "retry"; role: RunRole; attempt: number; error: string; waitMs: number }
+  /**
+   * One of a plan's windows as a coding agent's tool said it as it ran (vendor-cli.ts): on its own sign-in (`own`), or
+   * on the model named. Allowed, warning or rejected; how much of it is used (%); when it resets (ms).
+   */
+  | { type: "window"; model: string; own?: true; name: string; status: "allowed" | "warning" | "rejected"; usedPercent?: number; resetsAt?: number }
   /** A model of the role's couldn't answer and another did (`answered`): said once for each, never passed over in silence. */
   | { type: "skipped"; role: RunRole; model: string; error: string; answered: string }
   /** A gate failed again as it failed the submission before: the rest of the work is that role's (escalate). */
@@ -854,6 +864,19 @@ const failedWork = (command: string, result: ExecResult | null | undefined): boo
 
 /** What whoever does the work is told of an audit's steer (RunOptions.audit). */
 const steered = (note: string): string => `An independent audit of the work so far says: ${note}\nTake that up from where you are.`;
+
+/** How a vendor's tool's bridge says a plan's allowance is spent, and when it resets (vendor-cli.ts: resets()). */
+const SPENT_RESET = /allowance is spent(?: \([^)]*\))?; it resets (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}) UTC/;
+/**
+ * When a run whose plan was spent can go on: the latest window its tool refused, else the reset its bridge said, if it
+ * is ahead and within a month (a window that far off isn't one). Null: not spent, or no reset said.
+ */
+export function spentReset(error: string, refused: number, now: number): number | null {
+  if (!/allowance is spent|rate_limit|usage limit/i.test(error) && !refused) return null;
+  const said = SPENT_RESET.exec(error);
+  const at = refused || (said ? Date.UTC(Number(said[1]), Number(said[2]) - 1, Number(said[3]), Number(said[4]), Number(said[5])) : 0);
+  return at > now && at - now <= 31 * 86_400_000 ? at : null;
+}
 
 /**
  * What whoever does the work is told of steers taken now (RunDeps.steers), in order: yours as yours, your agent's as its
@@ -1566,6 +1589,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     /** A run of its was cut off (its process stopped without an exit code) and the next is its own session taken up again: once. */
     let cutOff = false;
     let cutOffs = 0;
+    /** When the windows its tool refused in this run reset (the latest), and the latest spent run's rest. */
+    let refusedUntil = 0;
+    let rest: { until: number; why: string } | null = null;
     /** What a coding agent is told of steers in its session, and what to do once they are done. */
     const steerPrompt = (steers: readonly RunSteer[]): string => `${steersSaid(steers, o.unreviewed)} Then end with a short summary and the evidence.`;
     /**
@@ -1590,7 +1616,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
      * reviewer (submitAtLimit), as the engineer's is when its commands run out. What they pass is done; `otherwise` is
      * how it ends if they don't, with what they did said after it.
      */
-    const asItStands = async (said: string, limit: string, otherwise: { status: "stopped" | "gave-up"; summary: string }): Promise<RunOutcome> => {
+    const asItStands = async (said: string, limit: string, otherwise: { status: "stopped" | "gave-up"; summary: string; rest?: RunOutcome["rest"] }): Promise<RunOutcome> => {
       const verdict = await submit(said, trail.slice(-40));
       if (verdict.verdict === "pass") {
         return finish({
@@ -1634,6 +1660,10 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           sleep: pause,
           now: clock,
           event: (event) => {
+            if (event.type === "window") {
+              if (event.status === "rejected" && event.resetsAt !== undefined) refusedUntil = Math.max(refusedUntil, event.resetsAt);
+              emit({ type: "window", model: agentModelName(model), ...(model.own ? { own: true as const } : {}), name: event.name, status: event.status, ...(event.usedPercent !== undefined ? { usedPercent: event.usedPercent } : {}), ...(event.resetsAt !== undefined ? { resetsAt: event.resetsAt } : {}) });
+            }
             if (event.type === "text") emit({ type: "thought", step: steps, text: event.text, model: `${agent.driver.name} · ${agentModelName(model)}` });
             if (event.type === "retry") emit({ type: "retry", role: "engineer", attempt: event.attempt, error: redact(event.error), waitMs: event.waitMs });
             if (event.type === "tool") {
@@ -1648,6 +1678,11 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       );
       session = run.session ?? session;
       cutOff = false;
+      // Spent, saying when its window resets (a window its tool refused, or its bridge's own words): kept, and the last
+      // one's rest is the task's if nothing it could run on is left. A run that wasn't spent leaves none to rest for.
+      const spentTill = run.status === "failed" ? spentReset(run.error ?? "", refusedUntil, clock()) : null;
+      rest = spentTill !== null ? { until: spentTill, why: (run.error ?? "").split("\n")[0]!.slice(0, 300) } : null;
+      refusedUntil = 0;
       if (run.status === "stopped") return finish({ status: "stopped", summary: "Stopped at your request." });
       // (Its message reached a run that went on: what it carried needn't be said again.)
       if (run.status !== "failed") carried = "";
@@ -1701,9 +1736,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         // Failed on its every model with work done: judged as it stands too. (22 November 2026: an agent's run that had
         // written its report couldn't start again once its model access was gone, and the report was given up unjudged.)
         if (run.status === "failed" && o.submitAtLimit && trail.length > judged) {
-          return await asItStands("Its run failed on every model before it said it was done: this is the work as it stands.", "Its run failed on every model", { status: "gave-up", summary: gaveUp });
+          return await asItStands("Its run failed on every model before it said it was done: this is the work as it stands.", "Its run failed on every model", { status: "gave-up", summary: gaveUp, ...(rest ? { rest } : {}) });
         }
-        return finish({ status: "gave-up", summary: gaveUp, ...(review ? { review } : {}) });
+        return finish({ status: "gave-up", summary: gaveUp, ...(review ? { review } : {}), ...(rest ? { rest } : {}) });
       }
       // Words that waited as it ended of itself, or that it never took as it worked, are said in its own session before it
       // is judged.
