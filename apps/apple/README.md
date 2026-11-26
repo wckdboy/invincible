@@ -123,12 +123,12 @@ recorded in every run as an expected failure until it is):
 | | Limit | X2's target | Measured, 26 Nov (before → after) |
 |---|---|---|---|
 | From the app's first line to Home's first frame with what it shows (median of five; the whole launch is reported beside it) | 1.5 s | 0.4 s | the whole: 3.3–3.7 s → 2.0 s launched plainly; the app's part 0.42–0.45 s plainly, 0.83–1.0 s under XCUITest (I9); from its first line as it is now counted, 0.27 s plainly on a quiet Mac and 0.52 s under XCUITest, main and I10 alike (I10) |
-| What it asks the node in a minute at rest | 2 | 2 | 144 → 0 |
-| From something needing you on the node to Home counting it (95th percentile) | 1 s | 1 s | 4.0–4.3 s → 0.18 s |
-| A dead link (the node gone silent) noticed / back once it can be reached | 5 s / 2 s | 5 s / 2 s | 63 s / 5.3–6.8 s → 4.0–4.5 s / 0.8 s |
-| CPU at rest on Home | 5 % | 1 % | 14–23 % → 0.0–3.7 % |
-| Memory at rest on Home | 150 MB | 150 MB | 101–104 MB → 40–41 MB |
-| Frames that came late scrolling Home's long list | 15 ms a second | 5 | 137–145 → 8.8 |
+| What it asks the node in a minute at rest | 2 | 2 | 144 → 0; 0 (I10) |
+| From something needing you on the node to Home counting it (95th percentile) | 0.5 s | 1 s | 4.0–4.3 s → 0.18 s; 0.16–0.21 s (I10) |
+| A dead link (the node gone silent) noticed / back once it can be reached | 5 s / 1.5 s | 5 s / 2 s | 63 s / 5.3–6.8 s → 4.0–4.5 s / 0.8 s; 4.2 s / 0.94–1.02 s (I10) |
+| CPU at rest on Home | 5 % | 1 % | 14–23 % → 0.0–3.7 %; 0.1 % (I10) |
+| Memory at rest on Home | 80 MB | 150 MB | 101–104 MB → 40–41 MB; 42–43 MB (I10) |
+| Frames that came late scrolling Home's long list (the limit holds the best of three rounds, the target their median) | 15 ms a second | 5 | 137–145 → 8.8 |
 
 On a simulator Apple's launch metric reports nothing and its scroll metric only a duration, so the app measures those
 itself, and only when the suite launches it to be measured (`-InvincibleMeasure YES`; `App/PerfProbe.swift`). Launch is
