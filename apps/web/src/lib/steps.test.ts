@@ -267,6 +267,23 @@ describe("a steer, as its trail says it", () => {
     expect(steersOf(trail("Running · ls", "Exit 0 · ok"))).toEqual([]);
   });
 
+  test("what a review judged with is the runner's own count, said just before it: a run taken up again is told each steer anew", () => {
+    // Cut off by a restart after it took the steer, then taken up again: its new run is told it again, and judged with it once.
+    const again = trail(
+      "Steered · You: Use the new schema.",
+      "Running · ls",
+      "Taken up again by itself after Invincible restarted.",
+      "Steered · You: Use the new schema.",
+      "Submitted for review · on the new schema",
+      "Judged · against its goal and 1 steer, in order",
+      "Review · pass",
+    );
+    expect(steersOf(again)).toHaveLength(2);
+    expect(judgedWith(again)).toBe(1);
+    // A review with no such line before it judged with none, whatever steers came before in an earlier run.
+    expect(judgedWith(trail("Steered · You: x", "Taken up again by itself after Invincible restarted.", "Review · pass"))).toBe(0);
+  });
+
   test("the live line, when a steer was the last thing on its trail: it is taking up whose words", () => {
     expect(liveStep(trail("Running · ls", "Exit 0 · ok", "Steered · You: Use the new schema."))).toMatchObject({ text: "Taking up your words", command: false });
     expect(liveStep(trail("Steered · Your agent: Keep the old reader."))).toMatchObject({ text: "Taking up your agent's words", command: false });

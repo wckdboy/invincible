@@ -223,8 +223,17 @@ export function proofLines(proof: ProofJson, style: Style): string[] {
     const n = proof.steers.length;
     const reached = proof.steers.filter((steer) => steer.step !== null).length;
     const whose = proof.steers.every((steer) => steer.by === "owner") ? "yours" : proof.steers.every((steer) => steer.by === "primary") ? "your agent's" : "yours and your agent's";
-    const judged = !proof.review ? "no review yet" : proof.review.steers === n ? `the review judged the work against ${n === 1 ? "it" : "them, in order"}` : `the review judged the work against ${proof.review.steers} of them`;
-    body.push(`steered ${n === 1 ? "once" : `${n} times`}, ${whose} · ${judged}${reached < n ? ` · ${n - reached} never reached it` : ""}`);
+    // (Measured against those that reached the work: one that never did was judged by no one.)
+    const judged = !proof.review
+      ? "no review yet"
+      : proof.review.steers === 0
+        ? `its review came before ${reached === 1 ? "it" : "them"}`
+        : proof.review.steers >= reached
+          ? `the review judged the work against ${reached === 1 ? "it" : "them, in order"}`
+          : `the review judged the work against ${proof.review.steers} of them`;
+    const never = n - reached;
+    const ending = !reached ? (n === 1 ? "it never reached the work" : "none of them reached the work") : `${judged}${never ? ` · ${never} never reached it` : ""}`;
+    body.push(`steered ${n === 1 ? "once" : `${n} times`}, ${whose} · ${ending}`);
   }
   if (proof.changes) body.push(`change  ${proof.changes.files} ${proof.changes.files === 1 ? "file" : "files"} · kept as ${proof.changes.artifact}`);
   const money = proof.costUsd === null ? null : `${proof.costComplete ? "" : "at least "}${usdLabel(proof.costUsd)}`;

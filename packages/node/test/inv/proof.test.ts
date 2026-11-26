@@ -3,7 +3,7 @@ import type { RunEvent } from "@invincible/agents";
 import type { TeamTask } from "@invincible/core";
 import { EXIT } from "../../src/inv/exit.ts";
 import { proofFor, reasonOf, STATE_EXIT } from "../../src/inv/proof.ts";
-import { GATE, gated, reviewed, T0, task, trail, worked } from "./fixtures.ts";
+import { GATE, gated, judged, reviewed, T0, task, trail, worked } from "./fixtures.ts";
 
 /*
  * The proof and its verdict (docs/CLI.md, "The proof" and "Exit codes"): what proves a task is what the runner wrote on
@@ -101,7 +101,7 @@ describe("a steered task's proof (fields added: none changes its meaning)", () =
 
   test("the new form: each steer, whose and the step its run took it at (null: it never did), and how many the review judged with", () => {
     const steered: RunEvent[] = [...worked([1]), { type: "steered", step: 2, by: "owner", text: "Use the new schema." }, ...gated([0]), ...reviewed("pass")];
-    const shown = proof({ status: "done", verified: true, steers: [{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }, { by: "primary", text: "Keep the old reader.", at: T0 }] }, steered);
+    const shown = proofFor(task({ status: "done", verified: true, steers: [{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }, { by: "primary", text: "Keep the old reader.", at: T0 }] }), judged(trail(steered), 1), { word: "Verified", node: "ultra", project: "invincible", prices: PRICES, asking: false });
     expect(shown.steers).toEqual([{ by: "owner", text: "Use the new schema.", step: 2 }, { by: "primary", text: "Keep the old reader.", step: null }]);
     expect(shown.review).toMatchObject({ verdict: "pass", steers: 1 });
     // What it proves is what it proved: the verdict follows the gates and the review, steered or not.

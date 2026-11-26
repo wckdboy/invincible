@@ -4,7 +4,7 @@ import type { NodeClient } from "../../src/inv/client.ts";
 import { endType, Tracker } from "../../src/inv/events.ts";
 import { EXIT } from "../../src/inv/exit.ts";
 import { follow, needsYou } from "../../src/inv/follow.ts";
-import { action, GATE, gated, reviewed, snapshot, T0, task, trail, worked } from "./fixtures.ts";
+import { action, GATE, gated, judged, reviewed, snapshot, T0, task, trail, worked } from "./fixtures.ts";
 
 /*
  * --stream's events (docs/CLI.md, "Events"): what each line of the runner's trail makes, what an agent's approvals make,
@@ -43,7 +43,7 @@ describe("the events a task's trail makes", () => {
   });
 
   test("a steer, where its run took it: whose words and what they said; the review after it says how many it judged the work against", () => {
-    const entries = trail([...worked([1]), { type: "steered", step: 2, by: "owner", text: "Use the new schema." }, { type: "steered", step: 2, by: "primary", text: "Keep the old reader.\nIt still has users." }, ...gated([0]), ...reviewed("pass")]);
+    const entries = judged(trail([...worked([1]), { type: "steered", step: 2, by: "owner", text: "Use the new schema." }, { type: "steered", step: 2, by: "primary", text: "Keep the old reader.\nIt still has users." }, ...gated([0]), ...reviewed("pass")]), 2);
     const at = entries.filter((entry) => entry.text.startsWith("Steered · ")).map((entry) => entry.n);
     const events = new Tracker("task-a1b2c3d4e5f6", [GATE], T0).trail(entries);
     expect(events.filter((event) => event.type === "task.steered").map(({ n, by, text }) => ({ n, by, text }))).toEqual([

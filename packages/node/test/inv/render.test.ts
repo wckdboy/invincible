@@ -4,7 +4,7 @@ import { proofFor } from "../../src/inv/proof.ts";
 import { askLines, type AskView, boardLines, PLAIN, proofLines, styleFor } from "../../src/inv/render.ts";
 import { askView } from "../../src/inv/asks.ts";
 import { boardView, type BoardData } from "../../src/inv/view.ts";
-import { action, agent, gated, reviewed, snapshot, T0, task, trail, worked } from "./fixtures.ts";
+import { action, agent, gated, judged, reviewed, snapshot, T0, task, trail, worked } from "./fixtures.ts";
 
 /*
  * What inv prints for people (docs/CLI.md, "Output"): in a terminal, the apps' words in their colours, frames, and no line
@@ -119,17 +119,21 @@ describe("the proof's frame", () => {
 });
 
 describe("a steered task's proof, for people", () => {
-  const steered = (steers: NonNullable<Parameters<typeof task>[0]>["steers"], events = [...worked([1]), { type: "steered" as const, step: 2, by: "owner" as const, text: "Use the new schema." }, ...gated([0]), ...reviewed("pass")]) =>
-    proofLines(proofFor(task({ status: "done", verified: true, steers }), trail(events), { word: "Verified", node: null, project: null, prices: {}, asking: false }), PLAIN);
+  const steered = (steers: NonNullable<Parameters<typeof task>[0]>["steers"], count = 1, events = [...worked([1]), { type: "steered" as const, step: 2, by: "owner" as const, text: "Use the new schema." }, ...gated([0]), ...reviewed("pass")]) =>
+    proofLines(proofFor(task({ status: "done", verified: true, steers }), judged(trail(events), count), { word: "Verified", node: null, project: null, prices: {}, asking: false }), PLAIN);
 
   test("its frame says how often it was steered, whose words they were, and what its review judged the work against", () => {
     expect(steered([{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }])).toContain("  steered once, yours · the review judged the work against it");
     const both = steered([{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }, { by: "primary", text: "Keep the old reader.", at: T0 }]);
-    expect(both).toContain("  steered 2 times, yours and your agent's · the review judged the work against 1 of them · 1 never reached it");
+    expect(both).toContain("  steered 2 times, yours and your agent's · the review judged the work against it · 1 never reached it");
+    // A review that came before the steer judged the work without it.
+    expect(steered([{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }], 0)).toContain("  steered once, yours · its review came before it");
+    // One the task ended before taking was judged by no one, and is said to be.
+    expect(steered([{ by: "primary", text: "Keep the old reader.", at: T0 }], 0)).toContain("  steered once, your agent's · it never reached the work");
   });
 
   test("a task nothing was said to has no such line", () => {
-    expect(steered(undefined, [...worked([1]), ...gated([0]), ...reviewed("pass")]).some((line) => line.includes("steered"))).toBe(false);
+    expect(steered(undefined, 0, [...worked([1]), ...gated([0]), ...reviewed("pass")]).some((line) => line.includes("steered"))).toBe(false);
   });
 });
 

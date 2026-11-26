@@ -100,6 +100,16 @@ export const gated = (exits: number[], gates: string[] = [GATE]): RunEvent[] => 
 
 export const reviewed = (verdict: "pass" | "revise", notes = "Looks right.\nThe test now waits for the retry."): RunEvent[] => [{ type: "review", verdict, notes, model: "stand-in/reviewer" }];
 
+/**
+ * A trail with what its runtime says just before each review of steered work (team-runtime.ts: "Judged · against its
+ * goal and 2 steers, in order"), which is not one of the run's events: put in before its last review, then numbered.
+ */
+export function judged(entries: TeamTrailEntry[], steers: number): TeamTrailEntry[] {
+  const at = entries.findLastIndex((entry) => entry.text.startsWith("Review · pass") || entry.text.startsWith("Review · revise"));
+  const lines = steers && at >= 0 ? [...entries.slice(0, at), { n: 0, at: entries[at]!.at, text: `Judged · against its goal and ${steers} steer${steers === 1 ? "" : "s"}, in order` }, ...entries.slice(at)] : entries;
+  return lines.map((entry, i) => ({ ...entry, n: i + 1 }));
+}
+
 /** An Io that keeps what is written, for a command run whole in a test (plain, as when piped). */
 export function testIo(env: Record<string, string | undefined>): Io & { stdout: () => string; stderr: () => string } {
   let out = "";

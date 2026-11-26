@@ -262,16 +262,18 @@ export function steersOf(entries: readonly TeamTrailEntry[]): TrailSteer[] {
 }
 
 /**
- * How many steers the latest review judged the work against: those taken before it (the reviewer is told every one, in
- * order). Null: no review yet.
+ * How many steers the latest review judged the work against, as its runner said on the line just before it ("Judged ·
+ * against its goal and 2 steers, in order"): every steer its run had taken. Counting a trail's steers would not do: a
+ * run taken up again (after a restart, or your Resume) is told each steer anew, so a trail can hold one twice. No such
+ * line: none. Null: no review yet.
  */
 export function judgedWith(entries: readonly TeamTrailEntry[]): number | null {
-  let last = -1;
-  entries.forEach((entry, i) => {
-    if (read(entry.text).kind === "review") last = i;
-  });
-  if (last < 0) return null;
-  return entries.slice(0, last).filter((entry) => read(entry.text).kind === "steer").length;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (read(entries[i]!.text).kind !== "review") continue;
+    const before = i > 0 ? read(entries[i - 1]!.text) : null;
+    return before?.kind === "judged" ? before.steers : 0;
+  }
+  return null;
 }
 
 /** What the work came to in figures, for its folded line ("Worked for 6m 12s · ran 14 commands · edited 5 files"). */

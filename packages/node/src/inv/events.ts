@@ -36,8 +36,8 @@ export class Tracker {
   private sameModel = false;
   private told = new Map<string, string>();
   private stood: string | null = null;
-  /** The steers its run has taken so far: each review is told every one of them. */
-  private steers = 0;
+  /** What its runner said the next review judged the work against: how many steers (its Judged line, just before it). */
+  private judged = 0;
 
   constructor(
     readonly task: string,
@@ -85,12 +85,15 @@ export class Tracker {
           out.push(this.event("step.completed", at, { n: entry.n, kind: "submitted", text: plainLine(line.summary), exit: null }));
           break;
         case "review":
-          out.push(this.event("review.verdict", at, { verdict: line.verdict, sameModel: this.sameModel, notes: line.notes.split("\n").filter((l) => l.trim()).length, steers: this.steers }));
+          out.push(this.event("review.verdict", at, { verdict: line.verdict, sameModel: this.sameModel, notes: line.notes.split("\n").filter((l) => l.trim()).length, steers: this.judged }));
+          this.judged = 0;
           break;
         case "steer":
           // Your words, or your agent's, where its run took them.
-          this.steers += 1;
           out.push(this.event("task.steered", at, { n: entry.n, by: line.by, text: plainText(line.text) }));
+          break;
+        case "judged":
+          this.judged = line.steers;
           break;
         case "note": {
           if (line.text.startsWith("Review · by the same model")) this.sameModel = true;
@@ -101,7 +104,6 @@ export class Tracker {
         }
         case "thought":
         case "gated":
-        case "judged":
           break;
       }
       this.lastAt = at;
