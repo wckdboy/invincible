@@ -1327,6 +1327,58 @@ const liveActivities = activityCases.map((c) => {
   return { ...c, at: NOW, state, line: activityLine(state), short: activityShort(state) };
 });
 
+// ---- an agent's mark, the Grille (core's agent-mark.ts): the palette, the forms, the marks a node gives, the snap, the
+// geometry: every app draws the mark from these numbers ---------------------------------------------------------------
+const markFleet = ["builder", "writer", "researcher", "coder", "reviewer", "operator", "designer", "tester", "ops", "docs", "scout", "scribe", "warden", "pilot", "smith"];
+const markGiven: core.AgentMark[] = [];
+for (const id of markFleet) markGiven.push(core.assignMark(id, markGiven));
+const markGeometryCases = (() => {
+  const out: { id: string; mark: core.AgentMark; seed: number; state: core.MarkState; size: number; theme: core.MarkTheme; t: number | null; since: number | null; geometry: core.MarkGeometry; colors: { body: string; key: string } }[] = [];
+  // Two slots and three; 64 pt and 16 pt (a slot is 7.5 units from 18 pt up, wider below: nothing else depends on size).
+  for (const id of ["builder", "coder"]) {
+    const mark = markGiven[markFleet.indexOf(id)]!;
+    const seed = core.handleSeed(id);
+    for (const state of core.MARK_STATES) {
+      for (const [n, size] of [64, 16].entries()) {
+        const theme: core.MarkTheme = n % 2 ? "dark" : "light";
+        const moments: [number | null, number | null][] = [[null, null], [1.3, null], [2.1, null]];
+        if (state === "done" || state === "failed") moments.push([0.3, 0.3], [0.7, 0.7], [3, 3]);
+        for (const [t, since] of moments) out.push({ id, mark, seed, state, size, theme, t, since, geometry: core.markGeometry({ mark, seed, state, size, t, since }), colors: core.markColors(mark.color, state, theme) });
+      }
+    }
+  }
+  return out;
+})();
+const marks = {
+  palette: core.MARK_PALETTE,
+  queued: core.MARK_QUEUED,
+  paused: core.MARK_PAUSED,
+  page: core.MARK_PAGE,
+  ink: core.MARK_INK,
+  red: core.MARK_RED,
+  forms: Array.from({ length: core.MARK_FORMS }, (_, n) => core.markForm(n)),
+  timing: core.MARK_TIMING,
+  states: core.MARK_STATES,
+  stateOf: core.AVATAR_EXPRESSIONS.map((expression) => ({ expression, state: core.markState(expression) })),
+  // As a node gives them, one by one in the order they join: fifteen, so every form is worn and some colours twice.
+  given: markFleet.map((id, n) => ({ id, seed: core.handleSeed(id), ...markGiven[n]! })),
+  chosen: [
+    { id: "writer", others: [{ color: 0, form: 1 }], chosen: "#ffbc63", mark: core.assignMark("writer", [{ color: 0, form: 1 }], "#ffbc63") },
+    { id: "ops", others: markGiven.slice(0, 8), chosen: "#ff0000", mark: core.assignMark("ops", markGiven.slice(0, 8), "#ff0000") },
+  ],
+  snaps: ["#ff0000", "#3abeff", "#6eca73", "#fa86b6", "#b9dfd4", "#000000", "#ffffff", ...core.AGENT_TINTS, ...core.MARK_PALETTE.flatMap((hue) => [hue.light, hue.dark])].map((hex) => ({ hex, color: core.snapColor(hex) })),
+  // Profiles as an agent has them: its mark (v 3); a colour chosen before the marks (v 2); nothing; and what reads as neither.
+  profiles: [
+    { id: "coder", profile: { v: 3, color: "#0084ba", form: 10 } },
+    { id: "coder", profile: { v: 2, color: "#3abeff" } },
+    { id: "coder", profile: null },
+    { id: "docs", profile: { v: 3, color: "#0084ba", form: 12 } },
+    { id: "docs", profile: { v: 3, color: "#3bb7f7", form: 1 } },
+    { id: "docs", profile: { v: 3, color: "#0084ba", form: 1, glow: true } },
+  ].map((c) => ({ ...c, saved: core.isMarkProfile(c.profile), mark: core.markOf(c.id, c.profile ?? undefined) })),
+  geometry: markGeometryCases,
+};
+
 const vectors = {
   about: "Made by apps/apple/scripts/vectors.ts from packages/core (and the PWA's roster). Every key here is a fake made for these tests.",
   auth: { domain: "invincible-req/v1", headers: core.AUTH, maxSkewMs: core.MAX_REQUEST_SKEW_MS },
@@ -1362,6 +1414,7 @@ const vectors = {
   live,
   verdicts,
   liveActivities,
+  marks,
 };
 const text = `${JSON.stringify(vectors, null, 2)}\n`;
 if (Bun.argv.includes("--check")) {
