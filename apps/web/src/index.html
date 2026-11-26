@@ -1430,7 +1430,6 @@
       .thread-steering-line { display: -webkit-box; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: var(--fs-13); color: var(--text); overflow-wrap: anywhere; }
       /* A steer among its steps: yours in ink, as what is yours is; your agent's as its other steps. */
       .thread-step[data-kind="steer"][data-by="owner"] .step-text, .thread-step[data-kind="steer"][data-by="owner"] .step-icon { color: var(--accent); }
-      .thread-composer textarea { min-height: 44px; max-height: 160px; field-sizing: content; }
       /* Its details: a card floating beside the thread on a wide screen (a sheet on a phone). */
       .thread-details { display: none; }
       .td { display: flex; flex-direction: column; }
@@ -1525,8 +1524,6 @@
       .team-system { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; padding-left: 44px; color: var(--text-3); font-size: var(--fs-12); overflow-wrap: anywhere; }
       .team-system > svg { align-self: center; }
       .team-composer { padding: var(--sp-2) var(--sp-6) var(--sp-5); width: 100%; max-width: 880px; margin: 0 auto; flex: none; }
-      .team-composer .composer { box-shadow: var(--shadow-1); }
-      .team-composer textarea { max-height: 160px; }
       .team-live { display: flex; flex-wrap: wrap; gap: var(--sp-3); min-height: 0; margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-12); }
       .team-live:empty, .team-send-error:empty { display: none; }
       .team-send-error { margin-bottom: var(--sp-2); }
@@ -1600,7 +1597,6 @@
         .team-head > .avatar { display: none; }
         .team-thread, .team-panel { padding: var(--sp-4); }
         .team-composer { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
-        .team-composer .hint { font-size: var(--fs-11); }
         .team-message.owner { margin-left: 30px; }
         .team-head .workspace-toggle { width: var(--control-h-sm); padding: 0; }
         .team-head .workspace-toggle > span { display: none; }
@@ -1661,6 +1657,8 @@
       /* The chat's title, or that it's temporary, or its place while it's opened: one height whichever it is. */
       .chat-sub { display: flex; align-items: center; gap: var(--sp-2); margin-top: calc(-1 * var(--sp-1)); padding-bottom: var(--sp-3); min-width: 0; min-height: calc(var(--fs-body) * 1.5 + 4px + var(--sp-3)); }
       .chat-sub-pending { width: 180px; }
+      /* A title that only repeats the first message under it isn't said: its place is kept (a pin, if pinned). */
+      .chat-sub-kept { display: inline-flex; min-width: 1px; }
       .chat-sub:empty { display: none; }
       .chat-title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font: inherit; font-weight: 600; color: var(--text); background: none; border: 0; cursor: pointer; padding: 2px 6px; margin-left: -6px; border-radius: var(--r-sm); max-width: min(100%, 520px); }
       .selector-trigger.icon-only { width: var(--control-h-sm); padding: 0; justify-content: center; flex: none; }
@@ -1743,14 +1741,34 @@
       @media (max-width: 639px) {
         .topbar .fleet-pill { display: none; }
       }
-      .composer { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-2); transition: border-color var(--d-1) var(--ease-out), box-shadow var(--d-1) var(--ease-out); }
-      .composer:focus-within { border-color: color-mix(in srgb, var(--focus) 60%, var(--border-strong)); box-shadow: var(--shadow-2), 0 0 0 3px color-mix(in srgb, var(--focus) 14%, transparent); }
-      .composer textarea { display: block; width: 100%; border: 0; outline: none; background: none; resize: none; padding: 12px 14px 4px; max-height: 40vh; min-height: 48px; line-height: 1.5; font-size: var(--fs-input); }
+      /* The one message box (ui/composer.ts; a chat's, a task's and an agent's alike, the shape of Home's bar): a capsule
+         with what leads it, the field, what trails it and the send circle; the files going with it above the field; its
+         hint under the capsule, only while you type. What trails it goes under the field, inside, where it doesn't fit. */
+      .composer {
+        --composer-h: 36px; display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border-strong); border-radius: 24px;
+        background: var(--surface); box-shadow: var(--shadow-2); transition: border-color var(--d-1) var(--ease-out), box-shadow var(--d-1) var(--ease-out);
+      }
+      @media (pointer: coarse) { .composer { --composer-h: 40px; } }
+      .composer:focus-within { border-color: color-mix(in srgb, var(--focus) 55%, var(--border-strong)); box-shadow: var(--shadow-2), 0 0 0 3px color-mix(in srgb, var(--focus) 12%, transparent); }
+      .composer-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px; min-width: 0; padding: 5px; }
+      .composer-lead, .composer-trail { display: flex; align-items: center; gap: 4px; flex: none; }
+      .composer-trail { margin-left: auto; }
+      .composer textarea {
+        display: block; flex: 1 1 12em; min-width: 0; min-height: var(--composer-h); max-height: 40vh; margin: 0; padding: calc((var(--composer-h) - 22px) / 2) 8px;
+        border: 0; outline: none; background: none; resize: none; color: var(--text); font: inherit; font-size: var(--fs-input); line-height: 22px; field-sizing: content;
+      }
+      .composer-row > textarea:first-child { padding-left: 14px; }
+      .composer-row .btn { flex: none; height: var(--composer-h); border-radius: var(--r-full); }
+      .composer-row :is(.btn.icon-only, .send) { width: var(--composer-h); padding: 0; }
+      .composer-row .btn.sm:not(.icon-only) { padding: 0 14px; font-size: var(--fs-13); }
+      /* The send circle: ink when there is something to send; until then quiet, never a grey slab. */
+      .composer .send:disabled { background: var(--surface-3); color: var(--text-3); box-shadow: none; opacity: 1; }
+      .composer-hint { display: none; align-items: center; gap: 6px; min-width: 0; padding: 0 16px 9px; font-size: var(--fs-12); line-height: 1.35; color: var(--text-3); }
+      .composer-hint > .hint { min-width: 0; }
+      .composer:focus-within:has(textarea:not(:placeholder-shown)) .composer-hint { display: flex; }
       /* Its placeholder on one line however narrow the box (a phone at 200 %): wrapped, it made the empty box three lines tall. */
       .composer textarea::placeholder, .home-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .composer .composer-bar { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 8px 8px 12px; }
       .composer .hint { font-size: var(--fs-12); color: var(--text-3); }
-      .composer .send { width: 34px; height: 34px; padding: 0; border-radius: 10px; flex: none; }
       /* Files with your next message, above its words; a box they're dropped on is outlined. */
       .composer.dropping { border-color: var(--focus); box-shadow: var(--shadow-2), 0 0 0 3px color-mix(in srgb, var(--focus) 24%, transparent); }
       .composer-files { display: flex; gap: 6px; padding: 10px 10px 0; overflow-x: auto; scrollbar-width: none; }
@@ -1766,7 +1784,6 @@
       .composer-file .file-name { font-size: var(--fs-13); }
       .composer-file .file-said { font-size: var(--fs-12); color: var(--text-3); }
       .composer-file.failed .file-said { color: var(--danger); }
-      @media (pointer: coarse) { .composer .send { width: 40px; height: 40px; } }
       .composer-wrap .callout { margin-bottom: var(--sp-2); box-shadow: var(--shadow-2); }
       /* "Latest", over the composer, when the thread is scrolled up (views/chat.ts). */
       .jump-anchor { position: relative; }
@@ -1791,8 +1808,6 @@
       .key-asks:not(:empty) { margin-bottom: var(--sp-2); }
       .key-asks .card { box-shadow: var(--shadow-2); }
       /* While it works: steer or queue (the one Enter does is in ink), and Stop. */
-      .composer .composer-bar .btn.sm { flex: none; }
-      @media (pointer: coarse) { .composer .composer-bar .btn.sm:not(.icon-only) { height: 40px; padding: 0 14px; font-size: var(--fs-13); } }
       /* What's waiting while it works: steers on their way, the queue (held or not), and what unattended work may do. */
       .chat-queue { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-2); font-size: var(--fs-13); min-width: 0; }
       .chat-queue-head { display: flex; align-items: center; gap: 8px; color: var(--text-2); min-width: 0; }

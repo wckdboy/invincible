@@ -17,6 +17,7 @@ import { giveAgain, timeline, timelineTasks } from "../lib/timeline.ts";
 import { relativeTime } from "../lib/time.ts";
 import { agentPanelShown, setAgentPanelShown } from "../prefs.ts";
 import { badge, button, callout, dot, empty, errorState, list, listRow, note, section, skeletonRows } from "../ui/controls.ts";
+import { composerBox } from "../ui/composer.ts";
 import { h, keepPlace, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
@@ -94,24 +95,25 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     changed: () => syncComposer(),
     disposed: () => scope.disposed,
   });
-  const send = button("Send", { variant: "primary", icon: "arrow-up", type: "submit" });
+  const send = button("Send", { variant: "primary", iconOnly: true, icon: "arrow-up", type: "submit", label: "Send" });
+  send.classList.add("send");
   // Giving a task (a goal and the commands that prove it) sits beside the message.
   const give = button("Give a task", { size: "sm", icon: "layers", onClick: () => room && giveTask(ctx, room) });
   const composerHint = h("span", { class: "hint grow" });
-  const composer = h(
-    "form",
-    {
-      class: "composer",
-      onsubmit: (event: Event) => {
-        event.preventDefault();
-        void deliver();
-      },
+  // The one message box (ui/composer.ts): the paperclip, the field, Give a task and the send circle.
+  const composer = composerBox({
+    onSubmit: (event: Event) => {
+      event.preventDefault();
+      void deliver();
     },
-    tray.row,
-    input,
-    tray.chooser,
-    h("div", { class: "composer-bar" }, tray.button, icon("shield-check", { size: 14, class: "subtle" }), composerHint, give, send),
-  );
+    files: tray.row,
+    lead: [tray.button],
+    field: input,
+    trail: [give],
+    send: [send],
+    chooser: tray.chooser,
+    hint: [icon("shield-check", { size: 13, class: "subtle" }), composerHint],
+  });
   tray.take(input, composer);
   tray.render();
   const composerWrap = h("div", { class: "team-composer", hidden: true }, status, problem, composer);

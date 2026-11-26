@@ -19,6 +19,7 @@ import { emptyTrail, takeTrail, type Trail, trailNext, type TrailPage } from "..
 import { byAttention, projectsOfAgents, seenOnOpen, shortSpan, taskState } from "../lib/work.ts";
 import { chatEnter, setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
 import { button, callout, dot, empty, errorState, skeletonBlock } from "../ui/controls.ts";
+import { composerBox } from "../ui/composer.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { cx, h, keepPlace, replace, type Child } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
@@ -121,18 +122,19 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   steerButton.hidden = queueButton.hidden = true;
   /** What is on its way to the work: your steers and your agent's that its run hasn't taken yet. */
   const onItsWay = h("div", { class: "thread-steering", role: "status", hidden: true });
-  const composer = h(
-    "form",
-    {
-      class: "composer thread-composer",
-      onsubmit: (event: Event) => {
-        event.preventDefault();
-        void deliver();
-      },
+  send.classList.add("send");
+  // The one message box (ui/composer.ts): Steer this task and Queue for after it trail the field while it works.
+  const composer = composerBox({
+    className: "thread-composer",
+    onSubmit: (event: Event) => {
+      event.preventDefault();
+      void deliver();
     },
-    input,
-    h("div", { class: "composer-bar" }, hint, queueButton, steerButton, send),
-  );
+    field: input,
+    trail: [queueButton, steerButton],
+    send: [send],
+    hint: [hint],
+  });
   const composerWrap = h("div", { class: "thread-composer-wrap", hidden: true }, onItsWay, problem, composer);
 
   replace(root, h("div", { class: "thread-page" }, head, h("div", { class: "thread-body" }, h("div", { class: "thread-column" }, scroller, liveLine, composerWrap), details)));

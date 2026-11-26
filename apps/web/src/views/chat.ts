@@ -4,7 +4,7 @@ import type { QueuedMessage, QueueHold, TurnView } from "@invincible/core/turns"
 import { type Api, ApiError, isAbort } from "../api.ts";
 import { errorMessage, type Live, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
-import { type ChatAction, chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent } from "../lib/chats.ts";
+import { type ChatAction, chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent, titleRepeats } from "../lib/chats.ts";
 import { primaryNow, type NowInput } from "../lib/now.ts";
 import { runInHand } from "../lib/runs.ts";
 import { primaryNeeds } from "../lib/roster.ts";
@@ -15,6 +15,7 @@ import { applyEvent, ASIDE_NOTHING_YET, asideOf, beginTurn, busyPlaceholder, com
 import { awaySince, chatEnter, lastRole, markAwaySeen, openChatId, rememberOpenChat, rememberRole } from "../prefs.ts";
 import type { RoleSpec } from "../types.ts";
 import { badge, button, callout, copyText, dot, empty, skeletonRows, spinner } from "../ui/controls.ts";
+import { composerBox } from "../ui/composer.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
 import { debounce, h, replace } from "../ui/dom.ts";
 import { orb } from "../ui/orb.ts";
@@ -979,6 +980,8 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
         return el;
       }),
     );
+    // (Whether its title repeats its first message is known once its turns are.)
+    renderSub();
   }
 
   let frame = 0;
@@ -1397,9 +1400,15 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   function renderSub(): void {
     options.refresh();
     if (current) {
+      // Its title, unless it is only its first message's first words, which the thread says right under it (nothing said
+      // twice): then its place is kept, quiet, so nothing under it moves, and Rename is in the ⋯ menu.
+      const first = thread.turns.find((turn) => turn.role === "user");
+      const repeats = first !== undefined && titleRepeats(current.title, first.content);
       replace(
         subHead,
-        h("button", { class: "chat-title", type: "button", title: "Rename", onclick: () => rename() }, current.pinned ? icon("pin", { size: 13, class: "subtle", label: "Pinned" }) : null, h("span", { class: "ellipsis" }, current.title)),
+        repeats
+          ? h("span", { class: "chat-sub-kept", "aria-hidden": "true" }, current.pinned ? icon("pin", { size: 13, class: "subtle" }) : null)
+          : h("button", { class: "chat-title", type: "button", title: "Rename", onclick: () => rename() }, current.pinned ? icon("pin", { size: 13, class: "subtle", label: "Pinned" }) : null, h("span", { class: "ellipsis" }, current.title)),
         current.project
           ? h("a", { class: "chip", href: "#/projects", onclick: (e: Event) => { e.preventDefault(); ctx.navigate("projects", { project: current!.project! }); } }, icon("folder", { size: 12 }), projectName(current.project))
           : null,
@@ -1471,20 +1480,21 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   keptChanged.add(onKept);
   scope.add(() => keptChanged.delete(onKept));
 
-  const form = h(
-    "form",
-    {
-      class: "composer",
-      onsubmit: (event: Event) => {
-        event.preventDefault();
-        void deliver();
-      },
+  // The one message box (ui/composer.ts): the paperclip, the field, Queue and Steer while it works, and the send circle
+  // (Stop in its place while it answers).
+  const form = composerBox({
+    onSubmit: (event: Event) => {
+      event.preventDefault();
+      void deliver();
     },
-    tray.row,
-    input,
-    tray.chooser,
-    h("div", { class: "composer-bar" }, tray.button, icon("shield-check", { size: 14, class: "subtle", label: "Checked for secrets before sending" }), meta, queueButton, steerButton, stopButton, sendButton),
-  );
+    files: tray.row,
+    lead: [tray.button],
+    field: input,
+    trail: [queueButton, steerButton],
+    send: [stopButton, sendButton],
+    chooser: tray.chooser,
+    hint: [icon("shield-check", { size: 13, class: "subtle", label: "Checked for secrets before sending" }), meta],
+  });
   // Pictures pasted alone, and files dropped on the message box, go with the message.
   tray.take(input, form);
   tray.render();
