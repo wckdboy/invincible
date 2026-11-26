@@ -495,8 +495,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   and the gates asked for; the node that handed it on checks the signature, and only then reads the facts for
   "Proven", and keeps it. A node that didn't run the work can't make it look proven: another key's signature, the
   runner's proof of another hand-off, of another goal or other gates, a changed exit, or a revoked node's proof are
-  each refused, and the hand-off says "Not proven: its proof didn't check". Tests: `fabric.test.ts` (each of those),
-  `fabric-handoff.e2e.test.ts` (a runner signing with another key, end to end).
+  each refused, and the hand-off says "Not proven: its proof didn't check". The proof also names the task and run key
+  it was taken as, says verified only as its own exits and review do, and covers the output and error shown beside it,
+  so a runner can't swap them (the review's I2). Tests: `fabric.test.ts` (each of those), `fabric-handoff.e2e.test.ts`
+  (a runner signing with another key, end to end).
 - **Revocation.** A node revoked is refused from its very next call wherever the revocation has reached (a push: on
   loopback about 25 ms over Q-AMP, 32 ms over HTTPS), and its calls under way at that node end. A run's key is cut off
   by revoking its grant at the giver's sidecar: its next call is refused (about 10 ms on loopback, most of it the

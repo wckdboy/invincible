@@ -267,7 +267,10 @@ export const ProofStatement = z.strictObject({
   /** Its task on the node that ran it, and the run's key. */
   task: z.string().regex(/^task-[a-z0-9_-]{12}$/),
   run: RunDid.nullable(),
-  /** SHA-256 of the goal as it was handed over (base64url), and its gates as they were run. */
+  /**
+   * SHA-256 of the goal as it was handed over (base64url), and the gates it was asked for, in order: each one's exits
+   * come first in `proof`; the planner's own gates, run after them, follow there unnamed.
+   */
   goal: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   gates: z.array(z.string()).max(MAX_RUN_GATES + MAX_PROPOSED_GATES),
   status: z.enum(["done", "failed", "stopped", "interrupted"]),
@@ -277,8 +280,13 @@ export const ProofStatement = z.strictObject({
   proof: TeamTaskProof.nullable(),
   startedAt: z.number().int().min(0).nullable(),
   endedAt: z.number().int().min(0).nullable(),
+  /** What it says beside its proof, its output and its error as it sent them (saidDigest): signed too, so neither can be swapped. */
+  said: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 });
 export type ProofStatement = z.infer<typeof ProofStatement>;
+
+/** The digest of what a runner says beside its proof: its output and its error, exactly as it sent them. */
+export const saidDigest = (output: string, error: string | null): string => sha256B64u(canonical({ output, error }));
 
 export const ProofAttestation = z.strictObject({ statement: ProofStatement, sig: z.string().regex(/^[A-Za-z0-9_-]{86}$/) });
 export type ProofAttestation = z.infer<typeof ProofAttestation>;
@@ -305,6 +313,11 @@ export interface ProofExpectation {
   goal: string;
   /** The gates it asked for: the proof's must begin with them, in order (the planner's may follow). */
   gates: readonly string[];
+  /** Its task there and its run's key, as the runner said them when it took the work (null: never taken, a proposal declined). */
+  task?: string | null;
+  run?: string | null;
+  /** What the runner said beside its proof, as it came: its output and its error. */
+  said?: { output: unknown; error: unknown };
   /** Whether a node is active in the fleet now (revoked nodes' proofs are refused). */
   active(node: string): boolean;
 }
@@ -332,6 +345,15 @@ export function proofRefusal(attestation: unknown, expect: ProofExpectation): st
   if (statement.handoff !== expect.handoff || statement.nonce !== expect.nonce) return "it is the proof of another hand-off";
   if (statement.goal !== goalDigest(expect.goal)) return "it is over another goal";
   if (expect.gates.some((gate, i) => statement.gates[i] !== gate)) return "its gates aren't the ones asked for";
+  if (expect.task && statement.task !== expect.task) return "it names another task than the one it was taken as";
+  if (expect.run && statement.run !== expect.run) return "it names another run's key than the one it was taken with";
+  // Verified, only as its own facts say: done, its end done, every gate passing after, no review asking for more.
+  const facts = statement.proof;
+  if (statement.verified && (statement.status !== "done" || statement.ended !== "done" || (facts !== null && (facts.after.some((exit) => exit !== 0) || facts.review === "revise")))) return "it says verified, but its own facts don't";
+  if (expect.said) {
+    const { output, error } = expect.said;
+    if (typeof output !== "string" || (error !== null && typeof error !== "string") || saidDigest(output, error) !== statement.said) return "what it said beside its proof isn't what it signed";
+  }
   return null;
 }
 

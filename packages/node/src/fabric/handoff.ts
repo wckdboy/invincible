@@ -26,6 +26,7 @@ import {
   RUN_GRANT_COMMAND,
   RUN_GRANT_TTL,
   runGrantPolicy,
+  saidDigest,
   signingPublicKey,
   signProof,
   signQdt,
@@ -330,6 +331,10 @@ export class Handoffs implements FabricTools {
         nonce: row.nonce,
         goal: row.goal,
         gates: JSON.parse(row.gates) as string[],
+        // The task and run it was taken as here, and what it said beside the proof, as it came.
+        task: row.task,
+        run: row.run,
+        said: { output: result?.task?.output, error: result?.task?.error === undefined ? undefined : result.task.error },
         active: (device) => this.deps.store.activeDevice(device)?.kind === "node",
       });
       const statement = refusal ? null : (result!.proof as { statement: ProofStatement }).statement;
@@ -639,6 +644,7 @@ export class Handoffs implements FabricTools {
       }
       if (inv.signal.aborted) return;
       const task = this.team.task(run.task)!;
+      const output = task.output.slice(0, 20_000);
       const statement: ProofStatement = {
         v: 1,
         by: this.deps.identity.id,
@@ -655,8 +661,10 @@ export class Handoffs implements FabricTools {
         proof: task.record?.proof ?? null,
         startedAt: task.record?.startedAt ?? null,
         endedAt: task.record?.endedAt ?? null,
+        // What it says beside the proof, signed with it: its output and its error, exactly as sent.
+        said: saidDigest(output, task.error),
       };
-      inv.complete({ task: { id: task.id, status: task.status, verified: task.verified, output: task.output.slice(0, 20_000), error: task.error }, proof: signProof(this.deps.identity, statement) });
+      inv.complete({ task: { id: task.id, status: task.status, verified: task.verified, output, error: task.error }, proof: signProof(this.deps.identity, statement) });
     } catch (error) {
       // Nobody can follow it now: the work stops here too, and the call fails (invoked says why).
       this.team?.stop(run.task, "This node failed while it followed the task, so it was stopped.");

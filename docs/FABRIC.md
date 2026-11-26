@@ -159,11 +159,12 @@ transport keys carries all of it:
   ProofStatement = { v: 1,
     by: <the runner's device id>, for: <the giver's>, handoff, nonce,       ; the giver's, echoed
     task: <its task there>, run: <the run's did:key>,
-    goal: base64url(SHA-256(goal as handed)), gates: [<the gates it ran, the giver's first>],
+    goal: base64url(SHA-256(goal as handed)), gates: [<the gates asked for, in order>],
     status: done | failed | stopped | interrupted, verified: bool,
     ended: done | unverified | gave-up | stopped | null,
     proof: { before: [exit…], after: [exit…], review: pass | revise | null, sameModel: bool } | null,
-    startedAt, endedAt }
+    startedAt, endedAt,
+    said: base64url(SHA-256(canonical JSON of {output, error} as sent)) }   ; what it says beside the proof
   signature = Ed25519(runner's device key, "invincible-proof/v1\n" + canonical JSON of the statement)
   attestation = { statement, sig: base64url(signature) }
   ```
@@ -173,7 +174,11 @@ transport keys carries all of it:
   - it is signed as the node the task was handed to, and that node is active in the fleet;
   - the signature verifies under that node's device key;
   - it is for this node, this hand-off and its nonce, over this goal;
-  - its gates begin with the ones asked for (the planner's proposals may follow).
+  - its gates begin with the ones asked for (the planner's own, run after them, follow in `proof` unnamed);
+  - it names the task and the run's key it was taken as there (its `accepted`);
+  - it says verified only as its own facts do: done, its end done, every gate passing after, no review asking for
+    more;
+  - its output and error, shown beside the verdict, are the ones it signed (`said`).
 
   A proof that fails any of these is kept as refused, with why, and the hand-off reads "Not proven: its proof didn't
   check (…)".

@@ -20,6 +20,7 @@ import {
   readHandoffTerms,
   readQdt,
   runGrantPolicy,
+  saidDigest,
   signingPublicKey,
   signProof,
   signQdt,
@@ -205,7 +206,7 @@ const campaigns: Campaign[] = [];
   const runner = newNodeIdentity();
   const giver = newNodeIdentity();
   const goal = "Make the gate pass";
-  const statement: ProofStatement = { v: 1, by: runner.id, for: giver.id, handoff: "h_AAAAAAAAAAAAAAAAAAAAAA", nonce: "n".repeat(22), task: "task-abcdefghijkl", run: null, goal: goalDigest(goal), gates: ["true"], status: "done", verified: true, ended: "done", proof: { before: [1], after: [0], review: "pass", sameModel: false }, startedAt: 1, endedAt: 2 };
+  const statement: ProofStatement = { v: 1, by: runner.id, for: giver.id, handoff: "h_AAAAAAAAAAAAAAAAAAAAAA", nonce: "n".repeat(22), task: "task-abcdefghijkl", run: null, goal: goalDigest(goal), gates: ["true"], status: "done", verified: true, ended: "done", proof: { before: [1], after: [0], review: "pass", sameModel: false }, startedAt: 1, endedAt: 2, said: saidDigest("done", null) };
   const good = signProof(runner, statement);
   const expect_ = { by: runner.id, for: giver.id, handoff: statement.handoff, nonce: statement.nonce, goal, gates: ["true"], active: () => true };
   if (proofRefusal(good, expect_) !== null) throw new Error("the genuine proof doesn't check");

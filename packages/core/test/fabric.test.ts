@@ -19,6 +19,7 @@ import {
   readHandoffTerms,
   readQdt,
   runGrantPolicy,
+  saidDigest,
   signingPublicKey,
   signEd25519,
   signProof,
@@ -208,12 +209,13 @@ describe("the proof a node signs for work it ran for another", () => {
   const giver = newNodeIdentity();
   const other = newNodeIdentity();
   const goal = "Make the failing test pass";
+  const said = { output: "The test passes.\n\nReview: PASS", error: null };
   const statement: ProofStatement = {
     v: 1, by: runner.id, for: giver.id, handoff: "h_AAAAAAAAAAAAAAAAAAAAAA", nonce: "n".repeat(22), task: "task-abcdefghijkl", run: ONE,
     goal: goalDigest(goal), gates: ["bun test"], status: "done", verified: true, ended: "done",
-    proof: { before: [1], after: [0], review: "pass", sameModel: false }, startedAt: 1, endedAt: 2,
+    proof: { before: [1], after: [0], review: "pass", sameModel: false }, startedAt: 1, endedAt: 2, said: saidDigest(said.output, said.error),
   };
-  const expect_ = { by: runner.id, for: giver.id, handoff: statement.handoff, nonce: statement.nonce, goal, gates: ["bun test"], active: (id: string) => id !== "revoked" };
+  const expect_ = { by: runner.id, for: giver.id, handoff: statement.handoff, nonce: statement.nonce, goal, gates: ["bun test"], task: statement.task, run: ONE, said, active: (id: string) => id !== "revoked" };
 
   test("the runner's signature over this hand-off checks", () => {
     expect(proofRefusal(signProof(runner, statement), expect_)).toBeNull();
@@ -244,6 +246,27 @@ describe("the proof a node signs for work it ran for another", () => {
     // The planner's own proposals may follow yours; yours never go missing.
     expect(proofRefusal(signProof(runner, { ...statement, gates: ["bun test", "bun run lint"] }), expect_)).toBeNull();
     expect(proofRefusal(signProof(runner, { ...statement, gates: [] }), expect_)).toBe("its gates aren't the ones asked for");
+  });
+
+  test("it names the task and the run it was taken as there (I2): another task's or another run's is refused", () => {
+    expect(proofRefusal(signProof(runner, { ...statement, task: "task-zzzzzzzzzzzz" }), expect_)).toBe("it names another task than the one it was taken as");
+    expect(proofRefusal(signProof(runner, { ...statement, run: TWO }), expect_)).toBe("it names another run's key than the one it was taken with");
+    // A proposal you declined there was never taken: no run to hold it to.
+    expect(proofRefusal(signProof(runner, { ...statement, status: "stopped", verified: false, ended: null, proof: null }), { ...expect_, run: null })).toBeNull();
+  });
+
+  test("it says verified only as its own facts do (I2): a gate failing after, a review asking for more, or another end, refused", () => {
+    expect(proofRefusal(signProof(runner, { ...statement, proof: { ...statement.proof!, after: [1] } }), expect_)).toBe("it says verified, but its own facts don't");
+    expect(proofRefusal(signProof(runner, { ...statement, proof: { ...statement.proof!, review: "revise" } }), expect_)).toBe("it says verified, but its own facts don't");
+    expect(proofRefusal(signProof(runner, { ...statement, ended: "unverified" }), expect_)).toBe("it says verified, but its own facts don't");
+    expect(proofRefusal(signProof(runner, { ...statement, status: "failed" }), expect_)).toBe("it says verified, but its own facts don't");
+    // Not verified: its facts may say anything.
+    expect(proofRefusal(signProof(runner, { ...statement, verified: false, ended: "unverified", proof: { ...statement.proof!, after: [1] } }), expect_)).toBeNull();
+  });
+
+  test("what it says beside its proof, its output and its error, is what it signed (I2): changed, refused", () => {
+    expect(proofRefusal(signProof(runner, statement), { ...expect_, said: { output: "All gates passed.", error: null } })).toBe("what it said beside its proof isn't what it signed");
+    expect(proofRefusal(signProof(runner, statement), { ...expect_, said: { output: said.output, error: "fine" } })).toBe("what it said beside its proof isn't what it signed");
   });
 
   test("a revoked node's proof is refused, and so is what isn't a proof", () => {
