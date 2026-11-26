@@ -99,19 +99,19 @@ All colour tokens use `light-dark()`, so one list serves both themes. The theme 
 
 ### Semantic tones
 
-Components never pick colours; they take a tone through `data-tone="ok|warn|danger|info|accent|agent|neutral"`, which sets `--tone` and `--tone-soft`.
+Monochrome (the owner's word, 26 November 2026, as the iPhone's Brand.swift has it): ink, paper and greys, colour kept for the agents, and red alone for what went wrong. `styles.test.ts` holds every chrome token to a grey, light and dark, and the reds to one red. Components never pick colours; they take a tone through `data-tone="ok|warn|danger|info|accent|agent|neutral"`, which sets `--tone` and `--tone-soft`.
 
 | Tone | Light | Dark | Means |
 |---|---|---|---|
-| `ok` | `#137a43` | `#4cc38a` | Online, allowed, isolated (safe), sealed |
-| `warn` | `#965a00` | `#f0b549` | Asks you, untrusted, on battery, internet-facing |
-| `danger` | `#c4281c` | `#ff7a7a` | Denied, revoked, destructive, possible interception |
+| `ok` | ink `#0a0a0b` | ink `#ffffff` | Online, allowed, isolated (safe), sealed: said in words, in ink |
+| `warn` | ink | ink | Asks you, untrusted, on battery, internet-facing: said in words and weight, in ink |
+| `danger` | `#c4141b` | `#ff6b6b` | Denied, revoked, destructive, possible interception: the one colour the app has of its own |
 | `info` | `#3f3f46` | `#c8c8d0` | Neutral facts, gateway (models only) |
 | `accent` | ink | ink | You: your memories, your approvals, this device |
 | `agent` | `#27272a` | `#e4e4e8` | Written by Invincible (with the star) |
-| `work` | `#0a5fcc` | `#58a6ff` | An agent (or Invincible) at work: its ring, its chip, its live dot |
-| `needs` | `#946200` | `#f0b549` | What waits on you among the agents (an agent's chip and ring, a needs mark, a line), and only that |
-| `failed` | `#c4141b` | `#ff6b6b` | An agent's work that failed (its ring and chip) |
+| `work` | ink | ink | An agent (or Invincible) at work: its chip and its live dot, the word saying it |
+| `needs` | ink | ink | What waits on you among the agents (an agent's chip, a needs mark, a line), and only that: in ink and weight |
+| `failed` | `#c4141b` | `#ff6b6b` | An agent's work that failed (its chip): the same red as `danger` |
 | `neutral` | `--text-2` | `--text-2` | Everything else |
 
 | Concept | Mapping |

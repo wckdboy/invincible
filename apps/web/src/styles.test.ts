@@ -190,3 +190,49 @@ describe("the stylesheet", () => {
     expect(forever.filter((selector) => !ALLOWED.includes(selector))).toEqual([]);
   });
 });
+
+describe("the look: monochrome, with colour only for the agents and for what went wrong", () => {
+  /* Each colour token as the page's root declares it, light and dark (`light-dark(a, b)`, or one colour for both). */
+  const root = rules.filter((r) => r.selectors.includes(":root")).map((r) => r.body).join(";");
+  const tokens = new Map<string, [string, string]>();
+  for (const [, name, value] of root.matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g)) {
+    const both = /^light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/.exec(value!.trim());
+    tokens.set(name!, both ? [both[1]!, both[2]!] : [value!.trim(), value!.trim()]);
+  }
+  /* A colour as [r, g, b] (0–255), from #rrggbb or rgb(r g b / a); null for anything else (a var, a gradient). */
+  const rgb = (text: string): [number, number, number] | null => {
+    const hex = /^#([0-9a-f]{6})$/i.exec(text.trim());
+    if (hex) return [0, 2, 4].map((i) => parseInt(hex[1]!.slice(i, i + 2), 16)) as [number, number, number];
+    const fn = /^rgb\(\s*(\d+)\s+(\d+)\s+(\d+)/.exec(text.trim());
+    return fn ? [Number(fn[1]), Number(fn[2]), Number(fn[3])] : null;
+  };
+  /* How far a colour is from grey: its channels' spread (0 is a pure grey; the page's zinc greys lean up to 9 to blue). */
+  const spread = (c: [number, number, number]) => Math.max(...c) - Math.min(...c);
+
+  test("every colour of the chrome is ink, paper or a grey, in light and in dark: at work, what needs you and what's done included", () => {
+    // (26 November 2026, the owner: "monochrome, with colour kept for the agents"; gold, amber, cream, blue at work and
+    // green done all go. The red of what went wrong is the one colour the app has of its own.)
+    // (A chart's series colours, --viz-*, are what it shows: data, not the chrome.)
+    const red = new Set(["--danger", "--danger-soft", "--danger-fill", "--failed"]);
+    const coloured: string[] = [];
+    for (const [name, pair] of tokens) {
+      if (red.has(name) || name.startsWith("--viz-")) continue;
+      for (const value of pair) {
+        const c = rgb(value);
+        if (c && spread(c) > 12) coloured.push(`${name}: ${value}`);
+      }
+    }
+    expect(coloured).toEqual([]);
+    for (const name of ["--work", "--needs", "--ok", "--warn"]) expect(tokens.has(name)).toBe(true);
+  });
+
+  test("the red is red, in light and in dark, and what failed is the same red as what can't be undone", () => {
+    for (const name of ["--danger", "--failed"]) {
+      for (const value of tokens.get(name)!) {
+        const [r, g, b] = rgb(value)!;
+        expect(r - Math.max(g, b)).toBeGreaterThan(80);
+      }
+    }
+    expect(tokens.get("--failed")).toEqual(tokens.get("--danger")!);
+  });
+});

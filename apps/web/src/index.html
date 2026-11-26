@@ -80,19 +80,21 @@
         --glow: light-dark(rgb(10 10 11 / 0.045), rgb(255 255 255 / 0.065));
         --glow-hero: light-dark(rgb(10 10 11 / 0.07), rgb(255 255 255 / 0.12));
 
-        /* What is going on among the agents (lib/agent-state.ts), one colour each and the Apple app's too (Brand.swift):
-           blue at work, amber for what waits on you (and only that), red for a failure; green (--ok) for what ended and is
-           new to you. No pair can be mistaken with full colour vision, light or dark; the words beside them say the rest. */
-        --work: light-dark(#0a5fcc, #58a6ff);
-        --needs: light-dark(#946200, #f0b549);
+        /* What is going on among the agents (lib/agent-state.ts), as the Apple app has it (Brand.swift): in ink and weight,
+           never a colour of its own (the owner's word, 26 November 2026: monochrome, colour kept for the agents). At work
+           and what waits on you are the ink, the word beside saying which in its weight; what ended is grey; only a
+           failure is red. The words always say it, the colour never alone. */
+        --work: light-dark(#0a0a0b, #ffffff);
+        --needs: light-dark(#0a0a0b, #ffffff);
         --failed: light-dark(#c4141b, #ff6b6b);
 
-        /* Semantic tones (status, trust, verdict, network risk): the only colour, kept for meaning */
-        --ok: light-dark(#137a43, #4cc38a);
-        --ok-soft: light-dark(#e8f4ed, #11221a);
-        --warn: light-dark(#965a00, #f0b549);
-        --warn-soft: light-dark(#fbf2e2, #261f13);
-        --danger: light-dark(#c4281c, #ff7a7a);
+        /* Semantic tones (status, trust, verdict, network risk): ink for what stands out, grey for the rest, red alone for
+           what went wrong or can't be undone */
+        --ok: light-dark(#0a0a0b, #ffffff);
+        --ok-soft: light-dark(rgb(10 10 11 / 0.05), rgb(255 255 255 / 0.07));
+        --warn: light-dark(#0a0a0b, #ffffff);
+        --warn-soft: light-dark(rgb(10 10 11 / 0.05), rgb(255 255 255 / 0.07));
+        --danger: light-dark(#c4141b, #ff6b6b);
         --danger-soft: light-dark(#fcedeb, #2a1618);
         --danger-fill: light-dark(#c4281c, #c42b2b);
         --info: light-dark(#3f3f46, #c8c8d0);
@@ -721,7 +723,7 @@
       }
       .count.quiet { background: var(--surface-3); color: var(--text-2); }
       /* What waits on you, amber (count(n, false, "needs")): dark figures on it on a dark page, white on a light one. */
-      .count[data-tone="needs"] { background: var(--needs); color: light-dark(#ffffff, #1c1405); }
+      .count[data-tone="needs"] { background: var(--needs); color: var(--on-accent); }
       /* A count that changes rolls to its new figure (ui/controls.ts setCount): up as it grows, down as it shrinks. */
       .count { position: relative; overflow: hidden; }
       .count > .count-was { position: absolute; inset: 0; display: grid; place-items: center; }
