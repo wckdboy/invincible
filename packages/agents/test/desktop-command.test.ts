@@ -53,6 +53,15 @@ test("a look needs its command's own environment (its eyes and their gateway), a
   expect(plainWords("a 'b c' \"d\"")).toEqual(["a", "b c", "d"]);
 });
 
+test("a picture printed as a data address (--base64) and an action with keys held (--hold) are the session's: no file, no shell", () => {
+  expect(desktopArgv("desktop screenshot --base64")).toEqual(["screenshot", "--base64"]);
+  expect(desktopArgv("desktop zoom 0 0 640 400 --base64")).toEqual(["zoom", "0", "0", "640", "400", "--base64"]);
+  expect(desktopArgv("desktop shot --now --base64")).toEqual(["shot", "--now", "--base64"]);
+  expect(desktopArgv("desktop left_click 10 20 --hold ctrl+shift")).toEqual(["left_click", "10", "20", "--hold", "ctrl+shift"]);
+  // A file named beside it is still a file, relative or not.
+  expect(desktopArgv("desktop shot --base64 mine.png")).toBeNull();
+});
+
 test("a look goes to the session only told its eyes by name (the task's own): their gateway and token are the VM's lease's, never an argument", () => {
   expect(desktopArgv('desktop look "Where is Send?"', "vision/model-1")).toEqual(["look", "--eyes", "vision/model-1", "Where is Send?"]);
   expect(desktopArgv('desktop look "Where is Send?"', null)).toBeNull();

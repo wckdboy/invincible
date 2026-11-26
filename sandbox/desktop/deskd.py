@@ -1819,11 +1819,13 @@ desktop dialog accept [text] | dismiss   answer a JavaScript dialog on the page 
 desktop app <terminal|editor>      start a terminal (xterm) or an editor (mousepad) on the screen
 desktop shot [file.png|file.jpg]   a screenshot (the pointer drawn in), once the screen has settled; prints its path
 desktop zoom <x0> <y0> <x1> <y1> [file]   that part of the screen, larger
+                                   (shot or zoom --base64: printed as a PNG's data address on one line, no file)
 desktop look [--eyes p/m] "<question>"   ask a model that can see what is on the screen, or where something is
                                    (it answers a place as x,y, to click or move to)
 desktop click <x> <y> [left|right|middle|double|triple]
 desktop move <x> <y>               desktop drag <x0> <y0> <x1> <y1>
 desktop scroll <up|down|left|right> [times] [x y]
+                                   (a click, drag or scroll --hold shift|ctrl|alt|super, or ctrl+shift: held while it acts)
 desktop type <text>                type text where the keyboard's focus is, exactly: into the browser's page by
                                    its own input (and checked), elsewhere pasted or key by key; an error when
                                    nothing that takes text has the focus (click there first)
@@ -1841,6 +1843,8 @@ The display is 1280 by 800; x runs right from 0, y runs down from 0. The clipboa
 (xclip -selection clipboard), and text everywhere is UTF-8."""
 
 ALIASES = {"shot": "screenshot", "move": "mouse_move", "drag": "left_click_drag"}
+# The verbs that act with keys held (--hold), as the toolset's clicks, drag and scroll take them.
+HOLDING = {"click", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "scroll"}
 
 
 def describe(answer):
@@ -1873,6 +1877,14 @@ def cli(desk, argv, cwd="/work", env=None):
     args = argv[1:]
     verb = ALIASES.get(verb, verb)
     try:
+        # Keys held while it acts (the toolset's `text` on a click, a drag or a scroll): --hold shift, --hold ctrl+shift.
+        held = {}
+        if verb in HOLDING and "--hold" in args:
+            at = args.index("--hold")
+            combo = args[at + 1] if at + 1 < len(args) else ""
+            if not combo or any(part.lower() not in MODIFIERS for part in combo.split("+")):
+                raise Refused("--hold takes the keys to hold while it acts: shift, ctrl, alt or super, joined by + (--hold ctrl+shift)")
+            held, args = {"text": combo}, args[:at] + args[at + 2:]
         if verb in ("help", "--help", "-h"):
             return 0, HELP + "\n", ""
         if verb == "start":
@@ -1915,13 +1927,19 @@ def cli(desk, argv, cwd="/work", env=None):
             desk.pieces._spawn(app, "app-%s.log" % args[0])
             return 0, "Started the %s (%s).\n" % (args[0], app[0]), ""
         if verb in ("screenshot", "zoom"):
+            now, printed = "--now" in args, "--base64" in args
+            args = [a for a in args if a not in ("--now", "--base64")]
             region = None
             if verb == "zoom":
                 if len(args) < 4:
                     raise Refused("zoom takes a region: desktop zoom <x0> <y0> <x1> <y1> [file]")
                 region, args = [int(v) if re.fullmatch(r"\d{1,5}", v) else -1 for v in args[:4]], args[4:]
-            now = "--now" in args
-            args = [a for a in args if a != "--now"]
+            if printed:
+                # (For a loop that hands the picture to its model: a PNG, as a data address on one line, and no file.)
+                if args:
+                    raise Refused("--base64 prints the picture: it writes no file")
+                got = desk.tool(verb, {"format": "png", "settle": not now, **({"region": region} if region else {})})["image"]
+                return 0, "data:%s;base64,%s\n" % (got["media_type"], base64.b64encode(got["data"]).decode()), ""
             path = args[0] if args else os.path.join(RUN, "shot-%d%d.png" % (int(time.time()), os.getpid()))
             path = path if os.path.isabs(path) else os.path.join(cwd, path)
             fmt = "jpeg" if re.search(r"\.jpe?g$", path, re.I) else "png"
@@ -1965,7 +1983,7 @@ def cli(desk, argv, cwd="/work", env=None):
             name = {"left": "left_click", "right": "right_click", "middle": "middle_click", "double": "double_click", "triple": "triple_click"}.get(kind)
             if not name:
                 raise Refused("the button is left, right, middle, double or triple")
-            answer = desk.tool(name, {"coordinate": [x + w // 2, y + h // 2]})
+            answer = desk.tool(name, {"coordinate": [x + w // 2, y + h // 2], **held})
             answer = dict(answer, did="%s (ref=%d, %s \"%s\")" % (answer.get("did", ""), ref, node["role"], node["name"][:80]))
         elif verb == "click":
             if len(args) < 2:
@@ -1975,9 +1993,9 @@ def cli(desk, argv, cwd="/work", env=None):
             name = {"left": "left_click", "right": "right_click", "middle": "middle_click", "double": "double_click", "triple": "triple_click"}.get(kind)
             if not name:
                 raise Refused("the button is left, right, middle, double or triple")
-            answer = desk.tool(name, {"coordinate": [x, y]})
+            answer = desk.tool(name, {"coordinate": [x, y], **held})
         elif verb in ("left_click", "right_click", "middle_click", "double_click", "triple_click"):
-            answer = desk.tool(verb, {"coordinate": [args[0], args[1]]} if len(args) >= 2 else {})
+            answer = desk.tool(verb, {**({"coordinate": [args[0], args[1]]} if len(args) >= 2 else {}), **held})
         elif verb == "mouse_move":
             if len(args) < 2:
                 raise Refused("move takes two whole numbers: desktop move <x> <y>")
@@ -1985,7 +2003,7 @@ def cli(desk, argv, cwd="/work", env=None):
         elif verb == "left_click_drag":
             if len(args) < 4:
                 raise Refused("drag takes where it starts and ends: desktop drag <x0> <y0> <x1> <y1>")
-            answer = desk.tool(verb, {"start_coordinate": args[0:2], "coordinate": args[2:4]})
+            answer = desk.tool(verb, {"start_coordinate": args[0:2], "coordinate": args[2:4], **held})
         elif verb in ("left_mouse_down", "left_mouse_up", "cursor_position", "windows", "settle"):
             answer = desk.tool(verb, {})
         elif verb == "scroll":
@@ -1994,7 +2012,7 @@ def cli(desk, argv, cwd="/work", env=None):
             times = _whole(args[1], "scroll") if len(args) > 1 else 1
             if not 1 <= times <= 50:
                 raise Refused("scroll takes a whole number of times, from 1 to 50")
-            answer = desk.tool(verb, {"scroll_direction": args[0], "scroll_amount": times, **({"coordinate": args[2:4]} if len(args) >= 4 else {})})
+            answer = desk.tool(verb, {"scroll_direction": args[0], "scroll_amount": times, **({"coordinate": args[2:4]} if len(args) >= 4 else {}), **held})
         elif verb == "type":
             if not args:
                 raise Refused("type takes the text to type: desktop type <text>")

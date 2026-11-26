@@ -12,7 +12,7 @@ const DIRECT = new Set([
   "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move",
   "left_mouse_down", "left_mouse_up", "cursor_position", "hold_key", "wait", "screenshot", "shot", "zoom",
 ]);
-/** Verbs whose last argument may be a file to write. */
+/** Verbs whose last argument may be a file to write (with --base64 the picture is printed instead). */
 const WRITES = new Set(["shot", "screenshot", "zoom"]);
 
 /** The words of a command as a POSIX shell would split them, or null where it would do anything but split them. */
@@ -57,7 +57,7 @@ export function desktopArgv(command: string, eyes?: string | null): string[] | n
   if (words && words[0] === "desktop" && words[1] === "look" && eyes && words.length > 2 && words[2] !== "--eyes") return ["look", "--eyes", eyes, ...words.slice(2)];
   if (!words || words.length < 2 || words[0] !== "desktop" || !DIRECT.has(words[1]!)) return null;
   if (WRITES.has(words[1]!)) {
-    const file = words.slice(2).filter((w) => w !== "--now").find((w) => !/^\d+$/.test(w));
+    const file = words.slice(2).filter((w) => w !== "--now" && w !== "--base64").find((w) => !/^\d+$/.test(w));
     if (file !== undefined && !file.startsWith("/")) return null;
   }
   return words.slice(1);

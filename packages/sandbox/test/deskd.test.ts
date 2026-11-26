@@ -253,6 +253,44 @@ describe("the desktop command: deskd's thin client", () => {
     expect(decodePng(readFileSync(join(here, "mine.png"))).at(50, 60)).toEqual([255, 0, 0]);
   });
 
+  test("a screenshot or a zoom with --base64 is printed as a data address on one line, for a loop to hand its model: no file is written", async () => {
+    if (!needs()) return;
+    const r = await deskd();
+    desktop(r, ["mouse_move", "50", "60"]);
+    const before = Bun.spawnSync(["ls", "-A", r.run]).stdout.toString();
+    const shot = desktop(r, ["screenshot", "--base64"]);
+    expect(shot).toMatchObject({ code: 0, err: "" });
+    const [, data] = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})\n$/.exec(shot.out) ?? [];
+    const png = decodePng(Buffer.from(data!, "base64"));
+    expect([png.width, png.height, ...png.at(50, 60)]).toEqual([1280, 800, 255, 0, 0]);
+    const zoom = desktop(r, ["zoom", "0", "0", "640", "400", "--base64"]);
+    const [, zoomed] = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})\n$/.exec(zoom.out) ?? [];
+    expect(decodePng(Buffer.from(zoomed!, "base64")).width).toBe(1280);
+    expect(Bun.spawnSync(["ls", "-A", r.run]).stdout.toString()).toBe(before);
+  });
+
+  test("a click, a drag or a scroll holds the keys it is given (--hold) while it acts, as the toolset's own text asks", async () => {
+    if (!needs()) return;
+    const r = await deskd();
+    expect(desktop(r, ["left_click", "10", "20", "--hold", "shift"])).toMatchObject({ code: 0, err: "" });
+    expect(desktop(r, ["click", "30", "40", "right", "--hold", "ctrl"]).code).toBe(0);
+    expect(desktop(r, ["left_click_drag", "10", "20", "30", "40", "--hold", "alt"]).code).toBe(0);
+    expect(desktop(r, ["scroll", "down", "2", "100", "200", "--hold", "ctrl+shift"]).code).toBe(0);
+    const t = r.trace().filter((e) => e.call === "key" || e.call === "button");
+    const said = t.map((e) => (e.call === "key" ? `${e.down ? "+" : "-"}${e.key}` : `${e.down ? "+" : "-"}b${e.button}`));
+    expect(said).toEqual([
+      "+Shift_L", "+b1", "-b1", "-Shift_L",
+      "+Control_L", "+b3", "-b3", "-Control_L",
+      "+Alt_L", "+b1", "-b1", "-Alt_L",
+      "+Control_L", "+Shift_L", "+b5", "-b5", "+b5", "-b5", "-Shift_L", "-Control_L",
+    ]);
+    // A key it can't hold is refused before anything is touched.
+    const before = r.trace().length;
+    expect(desktop(r, ["left_click", "10", "20", "--hold", "ctrl;reboot"]).code).toBe(2);
+    expect(desktop(r, ["left_click", "10", "20", "--hold"]).code).toBe(2);
+    expect(r.trace().slice(before).filter((e) => ["motion", "button", "key"].includes(String(e.call)))).toEqual([]);
+  });
+
   test("look puts the question and a fresh picture to the eyes named for this VM, with its token from the environment, never an argument", async () => {
     if (!needs()) return;
     let asked: { auth: string | null; body: any } | null = null;
