@@ -275,6 +275,26 @@ export interface TeamOutcome {
   updatedAt: number;
 }
 
+/**
+ * Words to a running task (a steer): yours, or your agent's. Its run takes them at its next safe point (a command that's
+ * running finishes first, and a coding tool takes them in its own session), its trail says them where they were taken,
+ * and its reviewer judges the work against its goal and every steer, in order. `task` names the task; `agent`, the task
+ * that agent is running now (one only: an agent works one thing at a time). A task takes TEAM_LIMITS.steers in all.
+ */
+export const TeamSteerInput = z
+  .strictObject({ task: TeamTaskId.optional(), agent: AgentId.optional(), text: z.string().trim().min(1).max(TEAM_LIMITS.steer) })
+  .refine((input) => Boolean(input.task) !== Boolean(input.agent), "name the task, or the agent whose running task it is (one of them)");
+export type TeamSteerInput = z.infer<typeof TeamSteerInput>;
+
+/** A steer as a task keeps it: whose words (you, or your agent), when, and when its run took them, at which step. */
+export interface TeamSteer {
+  by: typeof TEAM_OWNER | typeof TEAM_PRIMARY;
+  text: string;
+  at: number;
+  /** When its run took it, and the step it had reached (the commands it had run). Absent: not yet; and on a task that has ended, never. */
+  taken?: { at: number; step: number };
+}
+
 /** An agent's page (its conversation with you and its tasks), or a room, looked at by you. */
 export const TeamSeenInput = z.union([z.strictObject({ agent: AgentId }), z.strictObject({ room: TeamRoomId })]);
 export type TeamSeenInput = z.infer<typeof TeamSeenInput>;
@@ -485,6 +505,8 @@ export interface TeamTask {
   fix?: TeamTaskFix;
   /** Its pull request, once you shipped its work from an app (PLAN #37; absent: not shipped that way). */
   shipped?: TeamTaskShipped;
+  /** What you and your agent said to it while it ran (TeamSteer), in order; absent: nothing. */
+  steers?: TeamSteer[];
 }
 
 /** Where an agent's verified work went as a pull request, on your word: its address, and its number. */

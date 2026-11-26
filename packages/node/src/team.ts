@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  TEAM_PRIMARY, TEAM_LIMITS, TeamControlInput, TeamRoomId, type TeamSayInput, AgentId,
+  TEAM_PRIMARY, TEAM_LIMITS, TeamControlInput, TeamRoomId, type TeamSayInput, AgentId, TeamSteerInput, type TeamSteer,
   type Agent, type AgentInput, type TeamRecruitInput, type TeamRoom, type TeamRoomInput, type TeamPostInput, type TeamWorkspace,
   type TeamMessage, type TeamTask, type TeamTaskChanges, type TeamTaskInput, type TeamTaskRecord, type TeamTrailEntry, type TeamSnapshot, type TeamRoomView, type TeamOverview, type TeamSeenInput,
   type InterventionKind, type TeamWorkStatus, type TeamTaskFix, type TeamTaskShipped,
@@ -204,6 +204,25 @@ export class TeamService {
     return message;
   }
   createTask(input: TeamTaskInput, givenBy?: string, fix?: TeamTaskFix): TeamTask { this.accepting(); const task = this.store.createTask(input, { ...(givenBy ? { givenBy } : {}), ...(fix ? { fix } : {}) }); this.changed(); this.kick(); return task; }
+  /**
+   * Your words, or your agent's, to a running task (core's TeamSteerInput): by its id, or as the task an agent is running
+   * now. Kept on it (TeamStore.steer) until its run takes them at its next safe point; refused in words when it isn't
+   * running. The caller is the route that may: yours (fleet:admin), or your agent's own (its team_steer).
+   */
+  steer(raw: TeamSteerInput, by: TeamSteer["by"]): { task: TeamTask; steer: TeamSteer } {
+    this.accepting();
+    const input = teamInput(TeamSteerInput, raw);
+    let id = input.task;
+    if (!id) {
+      const agent = this.store.requireAgent(input.agent!);
+      const running = this.store.runningTaskOf(agent.id);
+      if (!running) throw new TeamError(409, `${agent.name} isn't at work on a task now: say it in its conversation, or give it a task.`);
+      id = running.id;
+    }
+    const steer = this.store.steer(id, by, input.text);
+    this.changed();
+    return { task: this.store.task(id)!, steer };
+  }
 
   start(): void {
     if (this.running) return;
@@ -478,6 +497,16 @@ export class TeamService {
       },
       recruit: (worker) => { budget(); const made = this.store.recruit(worker, job.agent, job.room); this.recruited(made); return made; },
       emit: (progress) => { current(); this.store.progress(job.id, progress); this.changed(); },
+      // A task's run takes what was said to it at its safe points: each once, at the step it reached (a reply takes none).
+      ...(job.kind === "task"
+        ? {
+            steers: (step: number) => {
+              const taken = this.store.takeSteers(job.id, step);
+              if (taken.length) this.changed();
+              return taken.map(({ by, text }) => ({ by, text }));
+            },
+          }
+        : {}),
     };
     current();
     const agent = this.store.requireAgent(job.agent);

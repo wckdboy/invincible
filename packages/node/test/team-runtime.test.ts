@@ -1336,3 +1336,37 @@ test("a model's reason for not answering that ends its own sentence isn't given 
   // "…purchase credits.. orcarouter/… answers instead" was seen on a trail on 22 November 2026.
   expect(progress({ type: "skipped", role: "planner", model: "anthropic/claude-opus-5-5", error: "400: Please purchase credits.", answered: "orcarouter/anthropic/claude-opus-5.5" })).toBe("anthropic/claude-opus-5-5 couldn't answer as planner: 400: Please purchase credits. orcarouter/anthropic/claude-opus-5.5 answers instead");
 });
+
+test("a task's run takes what was said to it at its safe points: its trail says whose words they were where it took them, and that its review judged the work against them", async () => {
+  const f = fixture([say("1. Write it.\nDone when: its test passes."), say("Next.\n```sh\necho step 1\n```"), say("DONE\nWritten on the new schema."), say("PASS\nIt reads the new schema, and the old reader still works.")]);
+  const lines: string[] = [];
+  let asked = 0;
+  // Asked at each safe point: before its first turn, before its command starts, then before its next turn, after it ran.
+  const steers = () => (asked++ === 2 ? [{ by: "owner" as const, text: "Use the new schema." }, { by: "primary" as const, text: "Keep the old reader." }] : []);
+  const outcome = await f.runtime.executeTask(member, task, { ...f.context, emit: (line) => void lines.push(line), steers });
+  expect(outcome.verified).toBe(true);
+  const ran = lines.findIndex((line) => line.startsWith("Exit 0 · "));
+  expect(ran).toBeGreaterThan(-1);
+  const owner = lines.indexOf("Steered · You: Use the new schema.");
+  expect(owner).toBeGreaterThan(ran);
+  expect(lines[owner + 1]).toBe("Steered · Your agent: Keep the old reader.");
+  const judged = lines.indexOf("Judged · against its goal and 2 steers, in order");
+  expect(judged).toBeGreaterThan(owner);
+  expect(lines[judged + 1]).toStartWith("Review · pass");
+  const review = JSON.stringify(f.bodies.at(-1).messages);
+  expect(review).toContain("1. The owner, at step 1: Use the new schema.");
+  expect(review).toContain("2. The primary, which leads the work for the owner, at step 1: Keep the old reader.");
+});
+
+test("a task nothing was said to keeps its trail as it was: no steer and no judged line", async () => {
+  const f = fixture([say("1. Write it.\nDone when: its test passes."), say("DONE\nWritten."), say("PASS\nIt holds.")]);
+  const lines: string[] = [];
+  const outcome = await f.runtime.executeTask(member, task, { ...f.context, emit: (line) => void lines.push(line), steers: () => [] });
+  expect(outcome.verified).toBe(true);
+  expect(lines.some((line) => line.startsWith("Steered · ") || line.startsWith("Judged · "))).toBe(false);
+});
+
+test("a steer's line on the trail: yours as You, your agent's as Your agent, its words after", () => {
+  expect(progress({ type: "steered", step: 4, by: "owner", text: "Use the new schema." })).toBe("Steered · You: Use the new schema.");
+  expect(progress({ type: "steered", step: 0, by: "primary", text: "Keep the old reader.\nIt still has users." })).toBe("Steered · Your agent: Keep the old reader.\nIt still has users.");
+});

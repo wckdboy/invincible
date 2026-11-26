@@ -44,3 +44,11 @@ describe("the north star (#28)", () => {
     expect(star).toMatchObject({ completed: 1, interventions: 4, byKind: { again: 1, rewritten: 3 } });
   });
 });
+
+describe("a steer of yours", () => {
+  test("is its own kind of stepping in, counted and said in words (your agent's steers are not yours, as an audit's are not)", () => {
+    expect(interventionWords({ steer: 1 })).toBe("a steer");
+    expect(interventionWords({ message: 1, steer: 2 })).toBe("a message and two steers");
+    expect(northStar([{ status: "done", verified: true, updatedAt: 100, interventions: { steer: 2 } }], 0)).toMatchObject({ completed: 1, interventions: 2, perCompleted: 2, byKind: { steer: 2 } });
+  });
+});

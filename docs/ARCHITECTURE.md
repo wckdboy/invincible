@@ -131,8 +131,8 @@ Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, 
 - **Memory:** what it learned about you (each fact yours to keep or drop), notes, and the archive it searches.
 - **Tools:** search and fetch, files, code in its own computer (a persistent VM with a desktop you can watch and take
   over), connectors you add.
-- **Orchestration:** the primary's tools for work are give, check, steer, stop, again-from-a-step, and ship. It
-  decides who does what:
+- **Orchestration:** the primary's tools for work are give, check, steer, stop, again-from-a-step, and ship (its steer is
+  `team_steer`: its words reach a task that is running, as yours do, §6). It decides who does what:
   - small work it does itself;
   - work in a repository it gives to a coding agent;
   - research to a research agent;
@@ -154,6 +154,18 @@ The run loop is carried and renamed (§10), the most proven part of it:
 - **Tripwires, checks and tells:** rules of yours at fixed points of the work.
 - **Audited, never capped:** no command count and no time limit. An independent audit steers the run, and only your
   budget stops it.
+- **Steered while it runs:** your words to a running task (`POST /api/team/steer`, `fleet:admin`, as giving and stopping
+  one are), or your agent's (`team_steer`, through `POST /api/team/primary-steer`, `mind:write`), reach it at its next
+  safe point.
+  - In the native loop: a command that's running finishes first, and one it asked for but hasn't started isn't run.
+  - A coding harness's run is ended between its tool calls (a call it is in finishes first, for up to 15 minutes; its
+    stream says when one begins, but OpenCode's only when one ends) and its own session is told, as the audit's steer is.
+  - The trail says it where it was taken ("You: …", "Your agent: …"), and every audit is told it.
+  - The reviewer judges the work against its goal and every steer, in order, and the trail says so before its verdict.
+    A steer changes what is wanted; it is never a way around the gates or the review. One that comes while the work is
+    judged comes before its end: the work takes it up and is judged again.
+  - A task takes 20 at most, of 4,000 characters each. One that isn't running is refused in words ("It has ended: give
+    it again from a step instead"). A message to a busy agent is queued, as ever: it waits until the agent is free.
 - **The work as commits:** each step a commit, so a task can be given again from a step.
 - **Effort per step,** and escalation when stuck.
 - **Harnesses:**

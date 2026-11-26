@@ -6,11 +6,11 @@
 
 /**
  * How you step in on an agent's task: an approve card its work raised and you answered, a message of yours in its room
- * while it worked, its desktop taken over, the task paused or stopped, resumed, given again, or rewritten (given
- * again with a different goal or gates). The audit's steers are
- * not yours, and giving it the first time is the ask itself.
+ * while it worked, a steer of yours as it ran, its desktop taken over, the task paused or stopped, resumed, given again,
+ * or rewritten (given again with a different goal or gates). The audit's steers and your agent's are not yours, and
+ * giving it the first time is the ask itself.
  */
-export const INTERVENTIONS = ["approval", "message", "takeover", "stop", "resume", "again", "rewritten"] as const;
+export const INTERVENTIONS = ["approval", "message", "steer", "takeover", "stop", "resume", "again", "rewritten"] as const;
 export type InterventionKind = (typeof INTERVENTIONS)[number];
 
 /** Interventions per completed task, over the tasks that ended since a moment. */
@@ -48,6 +48,7 @@ const NUMBER = ["", "one", "two", "three", "four", "five", "six", "seven", "eigh
 const WORDS: Record<InterventionKind, (n: number) => string> = {
   approval: (n) => (n === 1 ? "an approval" : `${count(n)} approvals`),
   message: (n) => (n === 1 ? "a message" : `${count(n)} messages`),
+  steer: (n) => (n === 1 ? "a steer" : `${count(n)} steers`),
   takeover: () => "its desktop taken over",
   stop: (n) => (n === 1 ? "a stop" : `${count(n)} stops`),
   resume: (n) => (n === 1 ? "a resume" : `${count(n)} resumes`),

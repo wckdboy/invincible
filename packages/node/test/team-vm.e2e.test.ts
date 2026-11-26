@@ -31,6 +31,10 @@ let daemon: Daemon;
 let alphaEntered = false;
 let releaseAlpha: (() => void) | undefined;
 let alphaHold: Promise<void> | undefined;
+/** The steered task's command, running in its VM until it's let go (`write-steer`). */
+let steerEntered = false;
+let releaseSteer: (() => void) | undefined;
+let steerHold: Promise<void> | undefined;
 /** A command of its on its computer that runs until it's let go (`hold-its`). */
 let hisEntered = false;
 let releaseHis: (() => void) | undefined;
@@ -43,7 +47,7 @@ const toolStatus = new Map<"claude" | "codex", { code: number; stdout: string }>
 let engramSays: { code: number; stdout: string; stderr?: string } | undefined;
 // An agent's face as the agents page draws it: from the snapshot the node serves, by the page's own rule.
 const faceOf = (id: string, team: TeamSnapshot) => avatarExpression(team.agents.find((member) => member.id === id)!, team, Date.now());
-const summaries: Record<string, string> = { ALPHA: "Verified predecessor contract: packet-v1.", BETA: "Verified independent follow-up.", GAMMA: "Verified consumer of packet-v1." };
+const summaries: Record<string, string> = { ALPHA: "Verified predecessor contract: packet-v1.", BETA: "Verified independent follow-up.", GAMMA: "Verified consumer of packet-v1.", STEER: "Written on the new schema." };
 const model = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (request) => {
   const body = await request.json() as (typeof prompts)[number];
   prompts.push(body);
@@ -61,7 +65,7 @@ const model = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (request)
     const delta = turns.some((message) => message.role === "tool") ? { content: "It ran on my computer." } : call;
     return new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
   }
-  const task = /TASK_(ALPHA|BETA|GAMMA|CLEANUP)/.exec(turns[0]?.content ?? "")?.[1] ?? "UNKNOWN";
+  const task = /TASK_(ALPHA|BETA|GAMMA|CLEANUP|STEER)/.exec(turns[0]?.content ?? "")?.[1] ?? "UNKNOWN";
   events.push({ kind: "model", target: task, text: body.model });
   let text = "1. Make the change.\n2. Run the required gate.\nDone when: the gate and independent review pass.";
   if (body.model === "engineer") {
@@ -145,6 +149,7 @@ beforeAll(async () => {
       if (told) return told;
       if (command.at(-1) === "/opt/engram/bin/engram version") return engramSays ?? { code: 127, stdout: "", stderr: "bash: line 1: /opt/engram/bin/engram: No such file or directory" };
       if (text.includes("write-alpha")) { alphaEntered = true; await alphaHold; }
+      if (text.includes("write-steer")) { steerEntered = true; await steerHold; }
       if (text.includes("hold-its")) { hisEntered = true; await hisHold; }
       return { code: 0, stdout: text.includes("gate-") ? "required gate passed" : "command completed" };
     } finally { active.set(container, count - 1); }
@@ -156,7 +161,7 @@ beforeAll(async () => {
   for (const id of ["ada", "lin"]) await api("saveAgent", { id, name: id.toUpperCase(), role: "engineer" });
   await api("saveTeamRoom", { id: "vm-forge", name: "VM Forge", members: ["ada", "lin"] });
 });
-afterAll(async () => { releaseAlpha?.(); await daemon?.stop(); model.stop(true); rmSync(root, { recursive: true, force: true }); });
+afterAll(async () => { releaseAlpha?.(); releaseSteer?.(); await daemon?.stop(); model.stop(true); rmSync(root, { recursive: true, force: true }); });
 
 test("first task provisions one persistent VM; same-worker tasks serialize and verified dependencies cross agents", async () => {
   expect(runs).toHaveLength(0);
@@ -232,6 +237,55 @@ test("first task provisions one persistent VM; same-worker tasks serialize and v
     }
   } finally { releaseAlpha?.(); }
 }, 15000);
+
+test("a running task steered over HTTP: the command it runs finishes first, the next thing its agent is told is your words, its trail says them where they were taken, and its reviewer judges the work against them", async () => {
+  steerHold = new Promise<void>((resolve) => { releaseSteer = resolve; });
+  const { task: given } = await api<{ task: TeamTask }>("createTeamTask", { room: "vm-forge", assignee: "ada", title: "STEER", goal: "TASK_STEER: Build and verify this bounded change.", gates: ["test -f result.txt # gate-steer"] });
+  const raw = (name: RouteName, input: unknown) => fetch(`http://127.0.0.1:${port}${routes[name].path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify(input) });
+  try {
+    await until(() => steerEntered);
+    const before = prompts.length;
+    const { task: steered, steer } = await api<{ task: TeamTask; steer: { by: string; text: string; at: number } }>("steerTeamTask", { task: given.id, text: "Use the new schema." });
+    expect(steer).toMatchObject({ by: "owner", text: "Use the new schema." });
+    expect(steered.steers).toEqual([{ by: "owner", text: "Use the new schema.", at: steer.at }]);
+    // Its command is still running: nothing was said to it yet, and no model was asked.
+    await Bun.sleep(50);
+    expect(prompts.length).toBe(before);
+    expect((await task(given.id)).steers![0]!.taken).toBeUndefined();
+    // Your agent's own route is its alone; a credential never goes to the work; the words are held to the contract.
+    const theirs = await raw("primarySteer", { task: given.id, text: "Keep the old reader." });
+    expect(theirs.status).toBe(403);
+    expect(((await theirs.json()) as { error: string }).error).toContain("only your agent itself steers");
+    expect((await raw("steerTeamTask", { task: given.id, text: `Use ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` })).status).toBe(422);
+    expect((await raw("steerTeamTask", { task: given.id, text: "x".repeat(4001) })).status).toBe(400);
+    releaseSteer!();
+    await until(async () => (await task(given.id)).status === "done");
+  } finally { releaseSteer?.(); }
+  const ended = await task(given.id);
+  expect(ended).toMatchObject({ status: "done", verified: true, interventions: { steer: 1 } });
+  expect(ended.steers).toEqual([{ by: "owner", text: "Use the new schema.", at: expect.any(Number), taken: { at: expect.any(Number), step: 1 } }]);
+  // The engineer was told it with its command's result; the reviewer judged the work against it.
+  const engineer = prompts.filter((p) => p.model === "engineer" && JSON.stringify(p.messages).includes("TASK_STEER"));
+  expect(JSON.stringify(engineer.at(-1)!.messages)).toContain("The owner says, while you work: Use the new schema.");
+  const review = prompts.filter((p) => p.model === "reviewer" && JSON.stringify(p.messages).includes("TASK_STEER")).at(-1)!;
+  expect(JSON.stringify(review.messages)).toContain("1. The owner, at step 1: Use the new schema.");
+  const lines = (await api<{ entries: { text: string }[] }>("teamTrail", { task: given.id })).entries.map((entry) => entry.text.split("\n")[0]!);
+  const ran = lines.findIndex((line) => line.startsWith("Running · ") && line.includes("write-steer"));
+  const said = lines.indexOf("Steered · You: Use the new schema.");
+  expect(ran).toBeGreaterThan(-1);
+  expect(said).toBeGreaterThan(ran);
+  expect(said).toBeLessThan(lines.findIndex((line) => line.startsWith("Submitted for review")));
+  const judged = lines.indexOf("Judged · against its goal and 1 steer, in order");
+  expect(judged).toBeGreaterThan(said);
+  expect(lines[judged + 1]).toBe("Review · pass");
+  // Ended, it takes no more: refused in words that say what to do instead.
+  const late = await raw("steerTeamTask", { task: given.id, text: "And name it v2." });
+  expect(late.status).toBe(409);
+  expect(await late.json()).toEqual({ error: "It has ended: give it again from a step instead." });
+  // A device that may read the agents but not command them may not steer them.
+  const reader = await pairDevice("steer-reader", ["chat"]);
+  expect((await reader("steerTeamTask", { task: given.id, text: "x" })).status).toBe(403);
+}, 20000);
 
 test("harness readiness says what each would run on: a vendor's tool on its own sign-in, asked of the tool itself; otherwise the roster through the gateway, or what to do", async () => {
   type Harness = { id: string; ready: boolean; on?: string; reason?: string };

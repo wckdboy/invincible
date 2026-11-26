@@ -17,7 +17,7 @@ import { PricedModel, PriceSchema, SpendLines, type EvalSpent, UsageBudgetInput 
 import { type ComputeUsage, EffortAsk, EffortLevel } from "./compute.ts";
 import { DecisionRequest } from "./decisions.ts";
 import { CancelLookInput, ConversationId, LookLaterInput, ProjectBranchInput, ProjectCommitInput, ProjectGitInput, ProjectId, ProjectInput } from "./chats.ts";
-import { AgentId, AgentInput, TeamBacklogInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
+import { AgentId, AgentInput, TeamBacklogInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamSteerInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
 import { RunGates, RunProgressInput } from "./runs.ts";
 import { type StopReason, TURN_ID } from "./turns.ts";
 import { type ArchiveContextEntry, ArchiveBudgetInput, ArchiveDeleteInput, ArchiveId, ArchiveReindexInput, ArchiveSearchInput, NoteIdeaInput } from "./archive.ts";
@@ -371,6 +371,13 @@ export const routes = {
   /** A task given to the agents: the agent best suited to it takes it, and the answer says who and why (everyone considered, each with its reasons). */
   giveTeamTask: { method: "POST", path: "/api/team/give", scope: "fleet:admin", input: TeamGiveInput },
   controlTeam: { method: "POST", path: "/api/team/control", scope: "fleet:admin", input: TeamControlInput },
+  /**
+   * Your words to a running task (a steer), as giving and stopping one are yours: its run takes them at its next safe
+   * point, its trail says them there ("You: …"), and its reviewer judges the work against its goal and every steer, in
+   * order. A task that isn't running is refused in words (409), and one that has taken TEAM_LIMITS.steers (429).
+   * Answers `{ task, steer }`: the task as it stands, with its steers, and this one.
+   */
+  steerTeamTask: { method: "POST", path: "/api/team/steer", scope: "fleet:admin", input: TeamSteerInput },
   /** Yours alone, and for good. A worker with a VM goes only with `destroyWorkspace`, from a device that also holds `sandbox`. */
   removeAgent: { method: "POST", path: "/api/team/remove", scope: "fleet:admin", input: TeamRemoveInput },
   teamMemory: { method: "POST", path: "/api/team/memory", scope: "fleet:admin", input: z.strictObject({ id: z.string().min(1).max(32), text: z.string().max(20000) }) },
@@ -382,13 +389,16 @@ export const routes = {
   teamBacklog: { method: "POST", path: "/api/team/backlog", scope: "fleet:admin", input: TeamBacklogInput },
   /** An agent's verified work as a pull request, on your word (PLAN #37): filed as its agent's ship and answered by you at once, so the outbox (and the CI watcher) has it. */
   shipTeamTask: { method: "POST", path: "/api/team/ship", scope: "fleet:admin", input: TeamShipInput },
-  /* The primary's own way to the other agents, from your conversation with it (its tools: team, team_recruit, team_message).
+  /* The primary's own way to the other agents, from your conversation with it (its tools: team, team_recruit, team_message,
+   * team_give, team_steer).
    * Refused to everyone else whatever their scopes, you included: the routes above are yours. */
   teamOverview: { method: "POST", path: "/api/team/overview", scope: "mind:read", input: z.strictObject({ room: TeamRoomId.optional() }) },
   recruitAgent: { method: "POST", path: "/api/team/recruit", scope: "mind:write", input: TeamRecruitInput },
   sayToTeam: { method: "POST", path: "/api/team/say", scope: "mind:write", input: TeamSayInput },
   /** Its work for the agents: the agent best suited to it takes it, as when you give one; within its allowance for the day. */
   giveToTeam: { method: "POST", path: "/api/team/primary-give", scope: "mind:write", input: TeamGiveInput },
+  /** Its words to a running task (its team_steer), as yours reach one: said as its ("Your agent: …"), and within the task's steers. */
+  primarySteer: { method: "POST", path: "/api/team/primary-steer", scope: "mind:write", input: TeamSteerInput },
   teamWorkspace: { method: "POST", path: "/api/team/workspace", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32) }) },
   /** A folder of an agent's workspace (its VM's /work; `primary`: its computer's), read; yours alone. */
   teamFiles: { method: "POST", path: "/api/team/files", scope: "sandbox", input: TeamFilesInput },

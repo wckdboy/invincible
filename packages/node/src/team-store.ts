@@ -6,7 +6,7 @@ import { z } from "zod";
 import {
   TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, AgentId, AgentInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
   type Agent, type TeamRoom, type TeamMessage, type TeamTask, type TeamDelivery, type TeamSnapshot, type TeamRoomView, type TeamWorkStatus, type TeamOverview,
-  TeamOutcomeInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, heldModels, SENSITIVE_WORK,
+  TeamOutcomeInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
 } from "../../core/src/team.ts";
 import { type InterventionKind, type NorthStar, northStar } from "../../core/src/interventions.ts";
 
@@ -106,6 +106,24 @@ const DAY = 24 * 3_600_000;
 /** What the primary is told of a room when it asks: its latest messages, each clipped; and of a worker's job, its start. */
 const OVERVIEW = { messages: 20, message: 1200, job: 300 } as const;
 const clipped = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text);
+/** Why a task that isn't running takes no steer, and what to do instead (the route says it in these words). */
+const ENDED = "It has ended: give it again from a step instead.";
+const NOT_STEERED: Readonly<Record<Exclude<TeamWorkStatus, "running">, string>> = {
+  proposed: "It hasn't started: it waits for your approval. Approve it and steer it once it runs, or decline it and give it again with what you want.",
+  queued: "It hasn't started yet: steer it once it runs, or stop it and give it again with what you want.",
+  interrupted: "It isn't running: it was interrupted. Resume it, then steer it.",
+  done: ENDED,
+  failed: ENDED,
+  stopped: ENDED,
+};
+/**
+ * A task's data as it is queued again (by itself after a restart, or by your Resume): its steers are untaken, so its new
+ * run, which begins from its goal, takes every one of them at its first safe point and its reviewer judges with them.
+ */
+const untaken = <T extends { steers?: TeamSteer[] }>(data: T): T =>
+  Array.isArray(data.steers) && data.steers.some((s) => s.taken) ? { ...data, steers: data.steers.map(({ taken: _, ...steer }) => steer) } : data;
+/** A steer's words, as the route takes them (core's TeamSteerInput): checked again here, where they are kept. */
+const SteerText = z.string().trim().min(1, "say what it should take up").max(TEAM_LIMITS.steer, `at most ${TEAM_LIMITS.steer} characters`);
 /** Why work stopped when its worker is gone, and why a direct conversation with a removed worker takes nothing new. */
 const REMOVED = "Its agent was removed.";
 const CLOSED = "This conversation is kept to read: its agent was removed.";
@@ -678,7 +696,7 @@ export class TeamStore {
   private jobRow(id: string): JobRow | null { return this.db.query<JobRow, [string]>("SELECT * FROM team_jobs WHERE id = ?").get(id); }
   job(id: string): TeamJob | null { const row = this.jobRow(id); return row ? jobOf(row) : null; }
   private taskOf(row: JobRow): TeamTask {
-    const data = JSON.parse(row.data) as Pick<TeamTask, "title" | "goal" | "dependsOn" | "gates" | "budgetUsd" | "verified" | "progress" | "output" | "record" | "changes" | "givenBy" | "proposedBy" | "interventions" | "outcome" | "models" | "from" | "fix" | "shipped">;
+    const data = JSON.parse(row.data) as Pick<TeamTask, "title" | "goal" | "dependsOn" | "gates" | "budgetUsd" | "verified" | "progress" | "output" | "record" | "changes" | "givenBy" | "proposedBy" | "interventions" | "outcome" | "models" | "from" | "fix" | "shipped" | "steers">;
     return { ...data, id: row.id, room: row.room, assignee: row.agent, chainId: row.chain_id, status: row.status, error: row.error, createdAt: row.created_at, updatedAt: row.updated_at };
   }
   task(id: string): TeamTask | null { const row = this.jobRow(id); return row?.kind === "task" ? this.taskOf(row) : null; }
@@ -821,6 +839,46 @@ export class TeamStore {
     })();
     return true;
   }
+  /**
+   * Your words, or your agent's, to a task that is running (core's TeamSteer): kept on it until its run takes them
+   * (takeSteers), TEAM_LIMITS.steers in all. Yours is stepping in (#28), counted in the same write; your agent's is not.
+   * Its trail says nothing yet: its run says them where it takes them.
+   */
+  steer(key: string, by: TeamSteer["by"], raw: string): TeamSteer {
+    const text = teamInput(SteerText, raw);
+    teamText(text);
+    return this.db.transaction(() => {
+      const row = this.jobRow(key);
+      if (!row || row.kind !== "task") throw new TeamError(404, "No such team task.");
+      if (row.status !== "running") throw new TeamError(409, NOT_STEERED[row.status]);
+      const data = JSON.parse(row.data) as { steers?: TeamSteer[]; interventions?: Partial<Record<InterventionKind, number>> };
+      const steers = Array.isArray(data.steers) ? data.steers : [];
+      if (steers.length >= TEAM_LIMITS.steers) throw new TeamError(429, `It has been steered ${steers.length} times, as many as one task takes: give it again with what you want now.`);
+      const steer: TeamSteer = { by, text, at: this.now() };
+      const interventions = by === TEAM_OWNER ? { ...data.interventions, steer: (data.interventions?.steer ?? 0) + 1 } : data.interventions;
+      this.db.query("UPDATE team_jobs SET data=? WHERE id=?").run(JSON.stringify({ ...data, steers: [...steers, steer], ...(interventions ? { interventions } : {}) }), key);
+      return steer;
+    })();
+  }
+  /** The steers its run hasn't taken, taken now, at `step` (the commands it had run): each once, in order, and only while it runs. */
+  takeSteers(key: string, step: number): TeamSteer[] {
+    return this.db.transaction(() => {
+      const row = this.jobRow(key);
+      if (!row || row.kind !== "task" || row.status !== "running") return [];
+      const data = JSON.parse(row.data) as { steers?: TeamSteer[] };
+      if (!Array.isArray(data.steers) || data.steers.every((s) => s.taken)) return [];
+      const taken = { at: this.now(), step: Number.isSafeInteger(step) && step >= 0 ? step : 0 };
+      const now: TeamSteer[] = [];
+      const steers = data.steers.map((s) => (s.taken ? s : (now.push({ ...s, taken }), { ...s, taken })));
+      this.db.query("UPDATE team_jobs SET data=? WHERE id=?").run(JSON.stringify({ ...data, steers }), key);
+      return now;
+    })();
+  }
+  /** The task an agent is running now, or null (it is at none, or at a reply). */
+  runningTaskOf(agent: string): TeamTask | null {
+    const row = this.db.query<JobRow, [string]>("SELECT * FROM team_jobs WHERE kind='task' AND agent=? AND status='running' ORDER BY seq LIMIT 1").get(agent);
+    return row ? this.taskOf(row) : null;
+  }
   /** The tasks in any of these states: one by its id, an agent's or a room's. */
   tasksIn(select: TeamSelection, statuses: readonly TeamWorkStatus[]): TeamTask[] {
     if (!statuses.length) return [];
@@ -921,7 +979,7 @@ export class TeamStore {
         const room = this.room(row.room);
         if (!room || this.closed(room) || !this.agent(row.agent)?.enabled) continue;
         data.restart = { resumed: true };
-        this.db.query("UPDATE team_jobs SET status='queued',error=NULL,chain_id=?,data=?,updated_at=? WHERE id=?").run(this.chain(room), JSON.stringify(data), now, row.id);
+        this.db.query("UPDATE team_jobs SET status='queued',error=NULL,chain_id=?,data=?,updated_at=? WHERE id=?").run(this.chain(room), JSON.stringify(untaken(data)), now, row.id);
         if (row.kind === "task") this.trailLine(row.id, now, "Taken up again by itself after Invincible restarted.");
         taken++;
       }
@@ -984,7 +1042,7 @@ export class TeamStore {
       for (const row of rows) {
         let chain = chains.get(row.room);
         if (!chain) { chain = this.chain(this.requireRoom(row.room)); chains.set(row.room, chain); }
-        this.db.query("UPDATE team_jobs SET status='queued',error=NULL,chain_id=?,updated_at=? WHERE id=?").run(chain, this.now(), row.id);
+        this.db.query("UPDATE team_jobs SET status='queued',error=NULL,chain_id=?,data=?,updated_at=? WHERE id=?").run(chain, JSON.stringify(untaken(JSON.parse(row.data))), this.now(), row.id);
       }
     })();
   }

@@ -1022,3 +1022,111 @@ describe("an agent brought whole (the import of the system Invincible succeeds)"
     expect(store.agents().map((a) => a.id)).toEqual(["scout"]);
   });
 });
+
+describe("a steer of a running task", () => {
+  const running = (store: TeamStore) => {
+    setup(store);
+    const task = store.createTask({ room: "workshop", assignee: "ada", title: "Schema", goal: "Write the parser" });
+    expect(store.claim(task.id)).toBe(true);
+    return task;
+  };
+
+  test("kept on it until its run takes it: each once, in order, at the step it reached; yours counts as stepping in, your agent's doesn't", () => {
+    let clock = 1_000;
+    const store = make(":memory:", () => clock);
+    const task = running(store);
+    clock = 2_000;
+    expect(store.steer(task.id, "owner", "Use the new schema.")).toEqual({ by: "owner", text: "Use the new schema.", at: 2_000 });
+    clock = 3_000;
+    store.steer(task.id, "primary", "Keep the old reader.");
+    expect(store.task(task.id)!.steers).toEqual([{ by: "owner", text: "Use the new schema.", at: 2_000 }, { by: "primary", text: "Keep the old reader.", at: 3_000 }]);
+    expect(store.task(task.id)!.interventions).toEqual({ steer: 1 });
+    // Nothing on its trail yet: its run says them where it takes them.
+    expect(store.trail(task.id).entries).toEqual([]);
+    clock = 4_000;
+    expect(store.takeSteers(task.id, 7).map(({ by, text }) => [by, text])).toEqual([["owner", "Use the new schema."], ["primary", "Keep the old reader."]]);
+    expect(store.takeSteers(task.id, 8)).toEqual([]);
+    expect(store.task(task.id)!.steers!.map((s) => s.taken)).toEqual([{ at: 4_000, step: 7 }, { at: 4_000, step: 7 }]);
+    clock = 5_000;
+    store.steer(task.id, "owner", "And name it v2.");
+    expect(store.takeSteers(task.id, 9).map((s) => s.text)).toEqual(["And name it v2."]);
+    expect(store.task(task.id)!.interventions).toEqual({ steer: 2 });
+  });
+
+  test("a task that isn't running is refused in words that say what to do instead", () => {
+    const store = make();
+    setup(store);
+    const refused = (task: string): [number, string] => {
+      try {
+        store.steer(task, "owner", "Use the new schema.");
+      } catch (error) {
+        return [(error as TeamError).status, (error as Error).message];
+      }
+      return [0, "taken"];
+    };
+    const queued = store.createTask({ room: "workshop", assignee: "ada", title: "Q", goal: "g" });
+    expect(refused(queued.id)).toEqual([409, "It hasn't started yet: steer it once it runs, or stop it and give it again with what you want."]);
+    const proposed = store.createTask({ room: "workshop", assignee: "lin", title: "P", goal: "g", budgetUsd: 1 }, { givenBy: "primary", propose: true });
+    expect(refused(proposed.id)).toEqual([409, "It hasn't started: it waits for your approval. Approve it and steer it once it runs, or decline it and give it again with what you want."]);
+    store.claim(queued.id);
+    store.finish(queued.id, "done", null, { verified: true, output: "ok" });
+    expect(refused(queued.id)).toEqual([409, "It has ended: give it again from a step instead."]);
+    const cut = store.createTask({ room: "workshop", assignee: "ada", title: "C", goal: "g" });
+    store.claim(cut.id);
+    store.finish(cut.id, "interrupted", "The node stopped during this work.");
+    expect(refused(cut.id)).toEqual([409, "It isn't running: it was interrupted. Resume it, then steer it."]);
+    expect(refused("task-nosuchtask00")).toEqual([404, "No such team task."]);
+    // None of them was kept, or counted.
+    expect(store.tasks().every((task) => !task.steers && !task.interventions)).toBe(true);
+  });
+
+  test(`a task takes ${TEAM_LIMITS.steers} in all, yours and your agent's together; a credential in one is refused before it is kept`, () => {
+    const store = make();
+    const task = running(store);
+    expect(() => store.steer(task.id, "owner", `Use ${"sk-ant-" + "obviouslyfaketest".repeat(3)}`)).toThrow("This looks like a credential");
+    for (let n = 0; n < TEAM_LIMITS.steers; n++) store.steer(task.id, n % 2 ? "owner" : "primary", `Step ${n}.`);
+    expect(() => store.steer(task.id, "owner", "One more.")).toThrow(`It has been steered ${TEAM_LIMITS.steers} times, as many as one task takes: give it again with what you want now.`);
+    expect(store.task(task.id)!.steers).toHaveLength(TEAM_LIMITS.steers);
+    // Words too long for one are refused at the store as at the route.
+    const other = make();
+    const next = running(other);
+    expect(() => other.steer(next.id, "owner", "x".repeat(TEAM_LIMITS.steer + 1))).toThrow();
+  });
+
+  test("the task an agent is running is found by the agent; an agent at no task is said to be", () => {
+    const store = make();
+    const task = running(store);
+    expect(store.runningTaskOf("ada")?.id).toBe(task.id);
+    expect(store.runningTaskOf("lin")).toBeNull();
+  });
+
+  test("a task taken up again (by itself after a restart, or by your Resume) tells its new run every steer it was given, at its first safe point", () => {
+    let clock = 1_000;
+    const store = make(":memory:", () => clock);
+    const task = running(store);
+    store.steer(task.id, "owner", "Use the new schema.");
+    expect(store.takeSteers(task.id, 4)).toHaveLength(1);
+    // A planned restart cuts it off; its wait over, it is queued again by itself, and runs again.
+    store.interruptForRestart(task.id, clock + 10, 1);
+    clock += 20;
+    expect(store.resumeRestarted()).toBe(1);
+    expect(store.task(task.id)!.steers).toEqual([{ by: "owner", text: "Use the new schema.", at: 1_000 }]);
+    expect(store.claim(task.id)).toBe(true);
+    expect(store.takeSteers(task.id, 0).map((s) => s.text)).toEqual(["Use the new schema."]);
+    // Your Resume of a task that failed does the same.
+    store.finish(task.id, "failed", "It gave up.");
+    store.resume({ task: task.id });
+    expect(store.task(task.id)!.steers![0]!.taken).toBeUndefined();
+    // (Counted once, when you said it: being told again isn't stepping in again.)
+    expect(store.task(task.id)!.interventions).toEqual({ steer: 1 });
+  });
+
+  test("what its run never took stays as it was said, and is never taken once the task has ended", () => {
+    const store = make();
+    const task = running(store);
+    store.steer(task.id, "owner", "Use the new schema.");
+    store.finish(task.id, "stopped", "Stopped by you.");
+    expect(store.takeSteers(task.id, 3)).toEqual([]);
+    expect(store.task(task.id)!.steers).toEqual([{ by: "owner", text: "Use the new schema.", at: expect.any(Number) }]);
+  });
+});

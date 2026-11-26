@@ -140,3 +140,32 @@ describe("sensitive mode", () => {
     expect(routes.prepareTeamWorkspace.input.safeParse({ id: "0123456789", run: "arm.team.abcdef0123.ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"] }).success).toBe(true);
   });
 });
+
+describe("a steer of a running task", () => {
+  test("its words, at most TEAM_LIMITS.steer of them, to one task or the task an agent is running; nothing else", async () => {
+    const { TeamSteerInput } = await import("../src/team.ts");
+    const { TEAM_LIMITS } = await import("../src/team-limits.ts");
+    expect(TeamSteerInput.parse({ task: "task-abcdefghijkl", text: "  Use the new schema.  " })).toEqual({ task: "task-abcdefghijkl", text: "Use the new schema." });
+    expect(TeamSteerInput.parse({ agent: "coder", text: "Use the new schema." })).toEqual({ agent: "coder", text: "Use the new schema." });
+    expect(TeamSteerInput.safeParse({ task: "task-abcdefghijkl", text: "x".repeat(TEAM_LIMITS.steer) }).success).toBe(true);
+    for (const wrong of [
+      { task: "task-abcdefghijkl", text: "x".repeat(TEAM_LIMITS.steer + 1) },
+      { task: "task-abcdefghijkl", text: "   " },
+      { task: "task-abcdefghijkl" },
+      { text: "Use the new schema." },
+      { task: "task-abcdefghijkl", agent: "coder", text: "both" },
+      { task: "not-a-task", text: "x" },
+      { agent: "primary", text: "x" },
+      { task: "task-abcdefghijkl", text: "x", by: "owner" },
+    ]) expect([wrong, TeamSteerInput.safeParse(wrong).success]).toEqual([wrong, false]);
+    expect(TEAM_LIMITS.steer).toBe(4000);
+    expect(TEAM_LIMITS.steers).toBe(20);
+  });
+
+  test("yours to give with fleet:admin, as giving and stopping a task are; your agent's with mind:write, as its giving is", () => {
+    expect(routes.steerTeamTask).toMatchObject({ method: "POST", path: "/api/team/steer", scope: "fleet:admin" });
+    expect(routes.primarySteer).toMatchObject({ method: "POST", path: "/api/team/primary-steer", scope: "mind:write" });
+    // One schema for both: whoever steers, it is the same words to the same work.
+    expect(routes.primarySteer.input).toBe(routes.steerTeamTask.input);
+  });
+});

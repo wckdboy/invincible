@@ -3,7 +3,7 @@ import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
-import { commandsRun, runLoop, type RunEvent } from "./run.ts";
+import { commandsRun, runLoop, type RunEvent, type RunSteer } from "./run.ts";
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
@@ -28,6 +28,11 @@ export interface TeamRunContext {
    * by itself and doing it twice (TeamStore.interruptForRestart).
    */
   acting?(): void;
+  /**
+   * What you and your agent said to this task as it ran that its run hasn't taken (a task's run only): taken now, at
+   * `step` (the commands it had run), each once, in order (RunDeps.steers). Absent: nothing reaches it.
+   */
+  steers?(step: number): readonly RunSteer[];
 }
 
 export interface TeamRuntimeDeps {
@@ -364,6 +369,8 @@ export function progress(event: RunEvent): string {
     case "retry": return `Retry · the ${event.role}'s call failed (${event.error.split("\n")[0]}): asked again in ${Math.round(event.waitMs / 1000)} s`;
     // An independent audit while the work runs (RunOptions.audit): what it found, and what it told the agent (an audit stopped work before 19 November 2026).
     case "audit": return `Audit · ${{ on: "on its task", steer: "steered", stop: "stopped the work", unread: "no answer that could be read: the work goes on" }[event.verdict]}${event.note ? `\n${event.note}` : ""}`;
+    // Your words, or your agent's, where the work took them (RunDeps.steers): every client reads whose they were from this line.
+    case "steered": return `Steered · ${event.by === "owner" ? "You" : "Your agent"}: ${event.text}`;
     default: return event.type;
   }
 }
@@ -679,6 +686,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let worked = coding?.models[0] && !coding.models[0].own ? `${coding.models[0].provider}/${coding.models[0].model}` : undefined;
       // A review answered by the same model as the work is said once, whatever it is answered by on later submissions.
       let saidSameReview = false;
+      /** How many steers the work has taken (each review is told every one of them). */
+      let steered = 0;
       /** What proves it, as the run goes (its record keeps it). */
       const proof: { before: number[]; after: number[]; review: "pass" | "revise" | null } = { before: [], after: [], review: null };
       // Its own tools where they were measured: on the roster's engineer models, in the primary's own loop (toolsLoop).
@@ -718,6 +727,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
             saidSameReview = true;
             ctx.emit(`Review · by the same model that did the work (${event.model}): no other reviewer model could answer`);
           }
+          // What a review judged the work against, when the work was steered: its goal and every steer it had taken, in order.
+          if (event.type === "steered") steered += 1;
+          if (event.type === "review" && steered) ctx.emit(`Judged · against its goal and ${steered} steer${steered === 1 ? "" : "s"}, in order`);
           // What proves it, kept for its record: each gate before the work and in the last round, and the last verdict.
           if (event.type === "baseline") proof.before = event.results.map((g) => g.exitCode);
           else if (event.type === "gated") proof.after = event.results.map((g) => g.exitCode);
@@ -746,6 +758,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           return { usd: cost.usd, complete: cost.complete };
         },
         stopAgent: () => deps.stopWorker(agent),
+        // What you and your agent said to it as it ran, taken at its safe points.
+        ...(ctx.steers ? { steers: (step: number) => ctx.steers!(step) } : {}),
         agentSession: async (id) => {
           if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(id)) throw new Error("Invalid harness session identifier");
           const saved = await exec(`mkdir -p /work/.agent/sessions && printf %s ${quote(id)} > ${quote(`${sessionFile}.new`)} && mv ${quote(`${sessionFile}.new`)} ${quote(sessionFile)}`, 10);

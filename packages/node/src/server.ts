@@ -2656,6 +2656,13 @@ export function createApp(ctx: AppContext) {
       for (const task of moved) steppedIn({ task: task.id }, input.action === "resume" ? "resume" : "stop", said);
       return moved.length ? team.snapshot() : snapshot;
     },
+    // Your words to a running task: its run takes them at its next safe point. They go to a model, so nothing
+    // credential-shaped goes with them; and they are stepping in (#28), counted where they are kept (TeamStore.steer).
+    steerTeamTask: (input, p) => {
+      ownerOnly(p);
+      guardAgainstSecrets(input.text);
+      return teamOf().steer(input, TEAM_OWNER);
+    },
     teamMemory: (input, p) => { ownerOnly(p); return { agent: teamOf().remember(input.id, input.text) }; },
     teamEngram: (input, p) => { ownerOnly(p); return { engram: teamOf().setEngram(input.on) }; },
     teamCi: (input, p) => { ownerOnly(p); return { ci: teamOf().setCiBack(input.on) }; },
@@ -2733,6 +2740,12 @@ export function createApp(ctx: AppContext) {
     sayToTeam: (input, p) => {
       if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself writes to the other agents as itself; you write to them among the agents");
       return { message: teamOf().say(input) };
+    },
+    // Its words to a running task (its team_steer): said there as its, within the task's steers, and never counted as yours.
+    primarySteer: (input, p) => {
+      if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself steers the agents' work as itself; you steer a task among the agents");
+      guardAgainstSecrets(input.text);
+      return teamOf().steer(input, TEAM_PRIMARY);
     },
     provisionAgent: (input, p, req) => {
       ownerOnly(p);

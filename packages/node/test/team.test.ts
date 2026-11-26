@@ -792,3 +792,40 @@ describe("removing an agent", () => {
     expect(store.agent("ada")).not.toBeNull();
   });
 });
+
+describe("a steer of a running task", () => {
+  test("it reaches the task's own run at its next safe point, once, in order; a run that asks again finds nothing new", async () => {
+    const started = deferred();
+    const go = deferred();
+    const handed: unknown[][] = [];
+    const { store, service } = setup({
+      executeTask: async (_agent, _task, context) => {
+        started.resolve();
+        await go.promise;
+        handed.push([...(context.steers?.(3) ?? [])]);
+        handed.push([...(context.steers?.(4) ?? [])]);
+        return { verified: true, output: "Verified" };
+      },
+    });
+    const task = service.createTask({ room: "workshop", assignee: "ada", title: "Schema", goal: "Write the parser" });
+    service.start();
+    await started.promise;
+    expect(service.steer({ task: task.id, text: "Use the new schema." }, "owner")).toMatchObject({ task: { id: task.id, steers: [{ by: "owner", text: "Use the new schema." }] }, steer: { by: "owner", text: "Use the new schema." } });
+    // Found by the agent whose running task it is, as your agent names it.
+    expect(service.steer({ agent: "ada", text: "Keep the old reader." }, "primary").task.id).toBe(task.id);
+    go.resolve();
+    await service.settled();
+    expect(handed).toEqual([[{ by: "owner", text: "Use the new schema." }, { by: "primary", text: "Keep the old reader." }], []]);
+    expect(store.task(task.id)!.steers!.map((s) => s.taken?.step)).toEqual([3, 3]);
+  });
+
+  test("an agent at no task is said to be, by its name; a task that has ended is refused in the store's words", async () => {
+    const { service } = setup();
+    expect(() => service.steer({ agent: "lin", text: "Use the new schema." }, "owner")).toThrow("Lin isn't at work on a task now: say it in its conversation, or give it a task.");
+    const task = service.createTask({ room: "workshop", assignee: "ada", title: "Schema", goal: "Write the parser" });
+    service.start();
+    await service.settled();
+    expect(() => service.steer({ task: task.id, text: "Use the new schema." }, "owner")).toThrow("It has ended: give it again from a step instead.");
+    expect(() => service.steer({ text: "neither" } as never, "owner")).toThrow(TeamError);
+  });
+});
