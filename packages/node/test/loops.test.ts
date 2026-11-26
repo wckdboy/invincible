@@ -361,9 +361,9 @@ describe("what wakes a loop (a webhook, new mail, a GitHub event)", () => {
 });
 
 describe("a loop whose task this version no longer has", () => {
-  /** As a fleet's mind holds it from before: his review of the 3D world, removed on 14 November 2026. */
+  /** As a fleet's mind holds it from before: his journal, removed on 14 November 2026. */
   const retired = (w: ReturnType<typeof world>, name = "look-over") =>
-    w.store.emit(w.a, "loop.set", { name, schedule: "every 30m", tz: "UTC", on: w.a.id, enabled: true, task: { kind: "review" }, label: "His review" });
+    w.store.emit(w.a, "loop.set", { name, schedule: "every 30m", tz: "UTC", on: w.a.id, enabled: true, task: { kind: "reflect" }, label: "His review" });
 
   test("is still listed, with its schedule, and says its task no longer exists and how to remove it", () => {
     const w = world();

@@ -92,9 +92,9 @@ describe("a sandbox on a Mac", () => {
     expect(m.minted).toEqual([]);
   });
 
-  test("the desktop, the Lab and Gazebo are refused with their reasons, nothing made", async () => {
+  test("the desktop and the Lab are refused with their reasons, nothing made", async () => {
     const m = macHost();
-    for (const [ask, why] of [[{ desktop: true }, CONTAINER_CANNOT.desktop], [{ lab: true }, CONTAINER_CANNOT.lab], [{ gazebo: true }, CONTAINER_CANNOT.gazebo]] as const) {
+    for (const [ask, why] of [[{ desktop: true }, CONTAINER_CANNOT.desktop], [{ lab: true }, CONTAINER_CANNOT.lab]] as const) {
       await expect(m.host.create({ ...ASK, ...ask })).rejects.toThrow(why);
     }
     expect(commands(m.fake.calls, "run")).toEqual([]);

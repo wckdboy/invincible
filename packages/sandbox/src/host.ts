@@ -41,13 +41,11 @@ import {
   execArgs,
   gatewayEnv,
   DESKTOP_IMAGE,
-  GAZEBO_IMAGE,
   LAB_IMAGE,
   LABEL,
   NETWORKS,
   networkCreateArgs,
   OWN_IMAGES,
-  RETIRED_SCOPE,
   runArgs,
   type SandboxSpec,
   SEARCH_SCOPE,
@@ -203,8 +201,6 @@ export interface CreateInput {
   isolation?: "container" | "vm";
   /** The Lab image (mathematics, physics, engineering) instead of the workshop. */
   lab?: boolean;
-  /** The Gazebo image (robotics simulation) instead of the workshop. */
-  gazebo?: boolean;
   /** The desktop image (a display, a window manager and a browser) instead of the workshop. */
   desktop?: boolean;
   /** Web search through the gateway (the node's own SearXNG): `websearch` in the images. */
@@ -239,7 +235,7 @@ export class SandboxError extends Error {
 
 /**
  * The gateway scopes a sandbox's token carries: the model providers asked for, and web search
- * by its own flag. An internal scope (search, git:…, the retired world) asked for by name is
+ * by its own flag. An internal scope (search, git:…) asked for by name is
  * refused, however the request got here.
  */
 export function sandboxScopes(input: { network: CreateInput["network"]; providers?: string[]; search?: boolean }): string[] {
@@ -591,11 +587,11 @@ export class SandboxHost {
     if (isolation === "vm" && !this.opts.microVMs) {
       throw new SandboxError("this host can't run microVMs: it needs KVM and Kata Containers, which a deploy with sudo installs", 424);
     }
-    const image = input.lab ? LAB_IMAGE : input.gazebo ? GAZEBO_IMAGE : input.desktop ? DESKTOP_IMAGE : (input.image ?? DEFAULT_IMAGE);
+    const image = input.lab ? LAB_IMAGE : input.desktop ? DESKTOP_IMAGE : (input.image ?? DEFAULT_IMAGE);
     const own = OWN_IMAGES[image];
     if (own && !(await this.hasImage(image))) {
       // Gone (pruned) or never built: building it is Galahad's to do (create), rather than failing the quest.
-      if (!this.opts.imageContext) throw new SandboxError(`${image} is not built on this node yet: run \`galahad sandbox build${input.lab ? " --lab" : input.gazebo ? " --gazebo" : input.desktop ? " --desktop" : ""}\``, 424);
+      if (!this.opts.imageContext) throw new SandboxError(`${image} is not built on this node yet: run \`galahad sandbox build${input.lab ? " --lab" : input.desktop ? " --desktop" : ""}\``, 424);
       // Made from another of his own (the desktop from the workshop's): that one first, when it's gone too.
       const base = own.base && !(await this.hasImage(own.base)) ? own.base : null;
       for (const tag of base ? [base, image] : [image]) {
@@ -1480,7 +1476,7 @@ function toView(labels: Record<string, string>, image: string, status: string, u
     expiresAt: Number(labels[`${LABEL}.expires`] ?? 0),
     status,
     ephemeral: labels[`${LABEL}.ephemeral`] !== "false",
-    providers: (labels[`${LABEL}.providers`] ?? "").split(",").filter((p) => p && p !== RETIRED_SCOPE),
+    providers: (labels[`${LABEL}.providers`] ?? "").split(",").filter((p) => p),
     disk: limit > 0 ? { limitGb: limit, usedGb: used === undefined ? null : Math.round((used / 2 ** 30) * 10) / 10 } : null,
     isolation: labels[`${LABEL}.isolation`] === "vm" ? "vm" : "container",
   };

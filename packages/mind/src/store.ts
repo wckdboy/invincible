@@ -59,8 +59,7 @@ CREATE TABLE IF NOT EXISTS pending (id TEXT PRIMARY KEY, device TEXT NOT NULL, h
 /**
  * PRAGMA user_version. 0: a replica from before versions (events, views, pending).
  * 1: log_devices, v_slots and the kind, loop and (device, hlc, id) indexes.
- * 2: companion.named and companion.unnamed (kinds since retired, still folded: core's events.ts). The tables
- *    are the same; a replica that held such events before it knew the kinds applies them once, by a replay.
+ * 2: two kinds since retired; the tables are the same, and nothing applies them now.
  * 3: skills (skill.written and the rest; v_skills, v_skill_versions, v_skill_uses), applied the same way
  *    by a replica that held such events before it knew them.
  * 4: your rules (rule.set, rule.removed; in v_lww as rule:<name>), applied the same way by a replica that held
@@ -282,9 +281,6 @@ export class MindStore {
         // Opened by an older version in between, which wrote events without keeping these, and
         // applied them its own way.
         this.recountLog();
-        this.replay();
-      } else if (from < 2 && this.db.query("SELECT 1 FROM events WHERE kind IN ('companion.named', 'companion.unnamed') LIMIT 1").get()) {
-        // Kept while this replica didn't know the kinds (a newer node wrote them): applied now, as a rebuild would.
         this.replay();
       } else if (from < 3 && this.db.query("SELECT 1 FROM events WHERE kind LIKE 'skill.%' LIMIT 1").get()) {
         // Skills a newer node wrote while this replica didn't know them: applied now, as a rebuild would.
@@ -1159,18 +1155,6 @@ export class MindStore {
         }
         const body = bodyOf(event, "rule.set");
         this.putLww(`rule:${body.name}`, event, { name: body.name, rule: body.rule as Json, ...(event.prov.via ? { via: event.prov.via } : {}) });
-        return null;
-      }
-      // The two retired kinds (core's events.ts): folded as they always were, their refusals worded as they always
-      // were (a refusal's reason is part of the digest), so a log that holds them gives every replica the same mind.
-      case "companion.named": {
-        if (!isFullNode(signer)) return "only full nodes may name his dog";
-        this.putLww("companion", event, { name: bodyOf(event, "companion.named").name });
-        return null;
-      }
-      case "companion.unnamed": {
-        if (!isFullNode(signer)) return "only full nodes may name his dog";
-        this.putLww("companion", event, null);
         return null;
       }
       case "skill.written": {

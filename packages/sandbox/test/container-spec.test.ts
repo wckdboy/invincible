@@ -154,10 +154,9 @@ describe("a sandbox on a Mac: its networks", () => {
 });
 
 describe("what a Mac doesn't make yet", () => {
-  test("the desktop, the Lab and Gazebo go to a Linux host, each with its reason; the workshop is made here", () => {
+  test("the desktop and the Lab go to a Linux host, each with its reason; the workshop is made here", () => {
     expect(containerCannot({ network: "online", desktop: true })).toBe(CONTAINER_CANNOT.desktop);
     expect(containerCannot({ network: "gateway", lab: true })).toBe(CONTAINER_CANNOT.lab);
-    expect(containerCannot({ network: "gateway", gazebo: true })).toBe(CONTAINER_CANNOT.gazebo);
     expect(containerCannot({ network: "gateway" })).toBeNull();
     expect(containerCannot({ network: "online" })).toBeNull();
     for (const why of Object.values(CONTAINER_CANNOT)) expect(why).toMatch(/Linux/);

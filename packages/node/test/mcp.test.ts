@@ -99,9 +99,9 @@ describe("arm credentials", () => {
       const body = (await response.json()) as { error: string; issues?: { message: string }[] };
       return { status: response.status, error: body.error, why: body.issues?.map((i) => i.message) };
     };
-    // The git gateway's scope (every private repository the GitHub key reads) and search are the node's to give; the retired world scope stays refused.
-    for (const name of ["git:github:someone:private-repo", "search", "world"]) {
-      expect(await refused([name])).toEqual({ status: 400, error: "invalid input", why: ["search, world and git:… are Galahad's own gateway scopes, not model providers"] });
+    // The git gateway's scope (every private repository the GitHub key reads) and search are the node's to give.
+    for (const name of ["git:github:someone:private-repo", "search"]) {
+      expect(await refused([name])).toEqual({ status: 400, error: "invalid input", why: ["search and git:… are Galahad's own gateway scopes, not model providers"] });
     }
     // A name this fleet has no provider for.
     expect(await refused(["no-such-provider"])).toEqual({ status: 400, error: "no model provider no-such-provider on this fleet (galahad providers lists them)", why: undefined });

@@ -96,8 +96,8 @@ export interface Caps {
   localModels?: { runtime: string; models: string[] }[];
   /**
    * Present when it can host sandboxes; vm: it can run them as KVM microVMs (Kata). On a Mac with Apple's container:
-   * engine "container", every sandbox a VM, `cannot` what it won't make (an isolated sandbox, the desktop, the Lab,
-   * Gazebo), and `grows: false` (a running VM pauses to take more).
+   * engine "container", every sandbox a VM, `cannot` what it won't make (an isolated sandbox, the desktop, the Lab),
+   * and `grows: false` (a running VM pauses to take more).
    */
   sandbox?: { image: boolean; networks: boolean; vm?: boolean; engine?: "container"; cannot?: string[]; grows?: false } | null;
   /** Apple's container, where a Mac has it: its version, and whether its service answers. */

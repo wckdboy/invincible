@@ -36,14 +36,12 @@ const Name = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
  * Gateway scopes that aren't model providers. The node gives them itself, on its own typed
  * paths: `search` through a sandbox's search flag, `git:<connector>:<owner>:<repo>` in a token
  * minted through gateway:mint. Never a provider's id, so nobody can ask for one by name.
- * `world` is retired (the SANDBOX it served was removed on 14 November 2026): tokens and sandboxes
- * from before still carry it, so it stays reserved and no provider is ever reached under that name.
  */
-export const isReservedGatewayScope = (name: string): boolean => name === "search" || name === "world" || name.startsWith("git:");
+export const isReservedGatewayScope = (name: string): boolean => name === "search" || name.startsWith("git:");
 
 /** A model provider's id: a name that isn't one of the gateway's own scopes. */
 export const ProviderId = Name.refine((name) => !isReservedGatewayScope(name), {
-  message: "search, world and git:… are Galahad's own gateway scopes, not model providers",
+  message: "search and git:… are Galahad's own gateway scopes, not model providers",
 });
 
 const ModelRef = z.string().min(3).max(256);
@@ -155,8 +153,6 @@ export const SandboxRequest = z.strictObject({
   isolation: z.enum(["container", "vm"]).optional(),
   /** The Lab image: mathematics, physics and engineering (FEniCSx, OpenFOAM, OpenCascade, MuJoCo, JSBSim, RocketPy, ngspice, …). */
   lab: z.boolean().optional(),
-  /** The Gazebo image: robotics simulation (gz-sim 8, headless, DART physics). */
-  gazebo: z.boolean().optional(),
   /** The desktop image: the workshop with a display, a window manager and a browser (`desktop help` inside it). */
   desktop: z.boolean().optional(),
   /** Web search through the gateway (the node's own SearXNG), even without the internet: `websearch <words>`. */
@@ -274,7 +270,6 @@ export const ConnectorRequestInput = z.strictObject({
  * it never runs, and every surface that lists it says its task no longer exists (loops.ts' loopRecords).
  */
 export const RETIRED_LOOP_TASKS: Readonly<Record<string, string>> = {
-  review: "his review of the 3D world, removed with it on 14 November 2026",
   reflect: "his journal, removed on 14 November 2026; what he wrote is still in his memory",
 };
 
@@ -959,7 +954,7 @@ export const routes = {
     method: "POST",
     path: "/api/sandboxes/build",
     scope: "sandbox",
-    input: z.strictObject({ on: NodeRef.optional(), lab: z.boolean().optional(), gazebo: z.boolean().optional(), desktop: z.boolean().optional() }),
+    input: z.strictObject({ on: NodeRef.optional(), lab: z.boolean().optional(), desktop: z.boolean().optional() }),
   },
   loops: { method: "GET", path: "/api/loops", scope: "mind:read", input: null },
   setLoop: {

@@ -3461,9 +3461,9 @@ export function createApp(ctx: AppContext) {
       return longRunning(
         onNode<{ sandbox: { id: string; node: string } }>(p, on, routes.createSandbox.path, scoped, async () => ({ sandbox: await ctx.sandbox!.create(scoped, { signal: req.signal }) }), {
           create: true,
-          // (What it asks of its host: a Mac makes no isolated sandbox, no desktop, no Lab, no Gazebo; an image of his own
+          // (What it asks of its host: a Mac makes no isolated sandbox, no desktop, no Lab; an image of his own
           // is made where its release knows it.)
-          needs: { network: scoped.network, kept: scoped.persistent, ...(scoped.desktop ? { desktop: true } : {}), ...(scoped.lab ? { lab: true } : {}), ...(scoped.gazebo ? { gazebo: true } : {}), ...(scoped.image ? { image: scoped.image } : {}) },
+          needs: { network: scoped.network, kept: scoped.persistent, ...(scoped.desktop ? { desktop: true } : {}), ...(scoped.lab ? { lab: true } : {}), ...(scoped.image ? { image: scoped.image } : {}) },
         }).then((made) => {
           remember(made.sandbox.id, made.sandbox.node);
           if (attempt) ctx.compute.attemptSandbox(attempt, made.sandbox.id, ctx.store.device(made.sandbox.node)?.name ?? made.sandbox.node);
@@ -4162,14 +4162,12 @@ export function createApp(ctx: AppContext) {
     },
     buildSandboxImage: (input, p) =>
       longRunning(
-        onNode(p, input.on, routes.buildSandboxImage.path, input.lab ? { lab: true } : input.gazebo ? { gazebo: true } : input.desktop ? { desktop: true } : {}, async () => {
+        onNode(p, input.on, routes.buildSandboxImage.path, input.lab ? { lab: true } : input.desktop ? { desktop: true } : {}, async () => {
           const result = input.lab
             ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/lab`, undefined, "galahad/lab:1")
-            : input.gazebo
-              ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/gazebo`, undefined, "galahad/gazebo:1")
-              : input.desktop
-                ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/desktop`, undefined, DESKTOP_IMAGE)
-                : await ctx.sandbox!.build(ctx.sandboxContext!);
+            : input.desktop
+              ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/desktop`, undefined, DESKTOP_IMAGE)
+              : await ctx.sandbox!.build(ctx.sandboxContext!);
           if (!result.ok) throw new HttpError(500, `image build failed: ${result.output.slice(-400)}`);
           return { ok: true };
         }),

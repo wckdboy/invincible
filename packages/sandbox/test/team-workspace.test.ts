@@ -60,8 +60,7 @@ function teammateHost(opts: {
   const labels = {
     [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.quest`]: QUEST,
     [`${LABEL}.network`]: "gateway", [`${LABEL}.ephemeral`]: "false", [`${LABEL}.isolation`]: "vm",
-    // A VM made before the world was removed: its label still names that scope, and it is read as nothing.
-    [`${LABEL}.providers`]: "openai,world", [`${LABEL}.disk`]: "20", ...opts.labels,
+    [`${LABEL}.providers`]: "openai", [`${LABEL}.disk`]: "20", ...opts.labels,
   };
   const host = new SandboxHost({
     node: "test", maxCpus: 8, maxMemoryGb: 16, workspaces,

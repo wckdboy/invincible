@@ -39,7 +39,7 @@ const LIST = [
   // Galahad himself, the one you talk to (your word, 23 November 2026): his address stays #/chat, and "chat" still finds him.
   { id: "chat", label: "Galahad", icon: "chat", under: "primary", scope: "chat", key: "c", keywords: ["galahad", "chat", "counsel", "ask", "talk", "history", "conversations", "orb"], about: "" },
   // (Its address stays #/team, and #/roundtable is the same page. Its older names still find it.)
-  { id: "team", label: "Roundtable", icon: "roundtable", under: "primary", scope: "chat", key: "h", keywords: ["knights", "roundtable", "give", "rooms", "messages", "tasks", "coordination", "team", "squires", "hermes"], about: "The knights: who works on what, their rooms" },
+  { id: "team", label: "Roundtable", icon: "roundtable", under: "primary", scope: "chat", key: "h", keywords: ["knights", "roundtable", "give", "rooms", "messages", "tasks", "coordination", "team", "hermes"], about: "The knights: who works on what, their rooms" },
   // A task's own thread (#/task/<id>): its brief, its work folded, what proves it, and its details. Opened from its row;
   // #/task alone opens the one that needs you most.
   { id: "task", label: "Task", icon: "layers", under: "thread", scope: "chat", key: "", keywords: [], about: "" },

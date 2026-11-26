@@ -51,7 +51,7 @@ Start here (galahad.sh's installer founds the fleet and keeps the node running w
   doctor                            what's wrong here, and what to do about it
 
 The Roundtable (your knights beside Galahad, none beneath another: each with a lasting job, a room and verified work in a VM
-of its own; "roundtable", "squires" and "team" are the same command)
+of its own; "roundtable" and "team" are the same command)
   roundtable                        knights, rooms and tasks (those Galahad seated say so:
                                     ask him in chat to seat and brief a knight)
   roundtable add <id> --name <name> [--instructions text] [--role planner] [--agent native|opencode|hermes|claude|codex|acp]
@@ -277,12 +277,12 @@ Work
                                   open a pull request from a quest's kept changes (the node commits them on
                                   a new branch with the connector's key; the sandbox never holds it)
   place [--docker] [--vm] [--gpu] [--mem 16] [--tools git,opencode] [--long] [--untrusted] [--interactive]
-  sandbox run [--on ultra] [--net gateway|online|isolated] [--cpus 4] [--mem 8] [--disk 20] [--ttl 120] [--vm|--container] [--lab|--gazebo|--desktop]
+  sandbox run [--on ultra] [--net gateway|online|isolated] [--cpus 4] [--mem 8] [--disk 20] [--ttl 120] [--vm|--container] [--lab|--desktop]
               [--providers deepseek,anthropic] [--image img] [--timeout 600] [--keep] -- <command…>
   sandbox ls [--on ultra] | sandbox exec <id> [--on ultra] -- <command…> | sandbox rm <id> [--on ultra]
   sandbox save <id> [/work/dir] [--label …]   keep a sandbox's work (default /work/out) after it's gone
-  sandbox build [--on ultra] [--lab|--gazebo|--desktop]
-                                  build the sandbox image (or the Lab, Gazebo, or the knights' desktop) on a host
+  sandbox build [--on ultra] [--lab|--desktop]
+                                  build the sandbox image (or the Lab, or the knights' desktop) on a host
   sandbox setup [status] [--json]
                                   a Mac given its knights' VMs: Apple's container (its signed installer, checked, when
                                   it has none), its service and kernel, the sandbox firewall, the node restarted to host
@@ -579,7 +579,6 @@ async function main(): Promise<void> {
       vm: { type: "boolean" },
       container: { type: "boolean" },
       lab: { type: "boolean" },
-      gazebo: { type: "boolean" },
       desktop: { type: "boolean" },
       "no-desktop": { type: "boolean" },
       out: { type: "string" },
@@ -1773,9 +1772,9 @@ Evidence: galahad artifact ${i!.artifact}`));
         process.stderr.write(dim(`[exit ${r.exitCode} · ${r.durationMs} ms${r.truncated ? " · output truncated" : ""}]\n`));
       };
       if (sub === "build") {
-        console.log(dim(flags.lab ? "Building the Lab image (the first build takes 10 minutes or more)…" : flags.gazebo ? "Building the Gazebo image (a few minutes the first time)…" : flags.desktop ? "Building the desktop image (a minute or two the first time; the sandbox image must be built first)…" : "Building the sandbox image (first build takes a few minutes)…"));
-        await admin.call("buildSandboxImage", { ...(on ? { on } : {}), ...(flags.lab ? { lab: true } : flags.gazebo ? { gazebo: true } : flags.desktop ? { desktop: true } : {}) });
-        console.log(flags.lab ? "Lab image ready." : flags.gazebo ? "Gazebo image ready." : flags.desktop ? "Desktop image ready." : "Sandbox image ready.");
+        console.log(dim(flags.lab ? "Building the Lab image (the first build takes 10 minutes or more)…" : flags.desktop ? "Building the desktop image (a minute or two the first time; the sandbox image must be built first)…" : "Building the sandbox image (first build takes a few minutes)…"));
+        await admin.call("buildSandboxImage", { ...(on ? { on } : {}), ...(flags.lab ? { lab: true } : flags.desktop ? { desktop: true } : {}) });
+        console.log(flags.lab ? "Lab image ready." : flags.desktop ? "Desktop image ready." : "Sandbox image ready.");
         return;
       }
       const shape = (s: SandboxView) => (s.isolation === "vm" ? "microVM" : "container");
@@ -1825,7 +1824,7 @@ Evidence: galahad artifact ${i!.artifact}`));
           ...(str("mem") ? { memoryGb: Number(str("mem")) } : {}),
           ...(str("disk") ? { diskGb: Number(str("disk")) } : {}),
           ...(isolation() ? { isolation: isolation() } : {}),
-          ...(flags.lab ? { lab: true } : flags.gazebo ? { gazebo: true } : flags.desktop ? { desktop: true } : {}),
+          ...(flags.lab ? { lab: true } : flags.desktop ? { desktop: true } : {}),
           ...(str("ttl") ? { ttlMinutes: Number(str("ttl")) } : {}),
           ...(str("providers") ? { providers: str("providers")!.split(",").filter(Boolean) } : {}),
           ...(str("image") ? { image: str("image") } : {}),
@@ -2142,8 +2141,6 @@ Evidence: galahad artifact ${i!.artifact}`));
       return;
     }
     case "roundtable":
-    case "squires":
-    case "squire":
     case "team":
       await teamCommand(new Admin(home), sub, rest, flags, console.log, confirm, process.stdout.isTTY ? process.stdout.columns : undefined);
       return;

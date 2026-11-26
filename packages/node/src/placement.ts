@@ -128,7 +128,7 @@ export function fleetCandidates(fleet: {
 
 /**
  * The host for a sandbox nobody pinned to a node: the best-ranked candidate that hosts sandboxes at all and can make
- * this one (a Mac makes no isolated sandbox, no desktop, no Lab, no Gazebo: its `cannot`), the one with room, by what
+ * this one (a Mac makes no isolated sandbox, no desktop, no Lab: its `cannot`), the one with room, by what
  * each measured; when every host is full, the one with the shortest queue. A knight's own VM leans a little to a host
  * whose VMs grow while they run (a Mac's pause to), and its reasons say which. Null: none online can.
  */

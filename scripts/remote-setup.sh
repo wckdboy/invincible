@@ -262,14 +262,6 @@ UNIT
       else
         echo "desktop image build failed; sandboxes still work, without a desktop" >&2
       fi
-      # Gazebo (robotics simulation, headless): a few minutes the first time, cached after.
-      if runuser -u "$SVC" -- env -i HOME="$SVC_HOME" PATH="$SYSTEM_PATH" docker build -q -t galahad/gazebo:1 "$APP/sandbox/gazebo" >/dev/null; then
-        GZ=$(docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 --mount type=volume,dst=/work \
-          --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --network none galahad/gazebo:1 gz-check 2>/dev/null | tail -1)
-        echo "→ Gazebo image ready: ${GZ:-gz-check gave no report}"
-      else
-        echo "Gazebo image build failed; sandboxes still work, without Gazebo" >&2
-      fi
       if [[ -e /usr/local/bin/containerd-shim-kata-v2 ]]; then
         GUEST=$(docker run --rm --runtime io.containerd.kata.v2 --network none --user 1000:1000 galahad/sandbox:1 uname -r 2>&1 | tail -1)
         [[ -n $GUEST && $GUEST != "$(uname -r)" ]] && echo "→ microVM check: a sandbox booted its own kernel ($GUEST)" || echo "microVM check failed: $GUEST" >&2

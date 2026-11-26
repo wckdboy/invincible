@@ -385,8 +385,8 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
   if ((sub === "approve" || sub === "decline") && args[0]) {
     await api.call("controlTeam", { action: sub === "approve" ? "approve" : "stop", task: args[0] }); print(`${sub === "approve" ? "approved" : "declined"}: task ${args[0]}`); return;
   }
-  if (["pause", "resume", "stop"].includes(sub) && ["room", "knight", "squire", "teammate", "task"].includes(args[0] ?? "")) {
-    await api.call("controlTeam", { action: sub, [args[0] === "knight" || args[0] === "squire" ? "teammate" : args[0]!]: args[1] }); print(`${sub}: ${args[0]} ${args[1]}`); return;
+  if (["pause", "resume", "stop"].includes(sub) && ["room", "knight", "teammate", "task"].includes(args[0] ?? "")) {
+    await api.call("controlTeam", { action: sub, [args[0] === "knight" ? "teammate" : args[0]!]: args[1] }); print(`${sub}: ${args[0]} ${args[1]}`); return;
   }
   if (sub === "remove") {
     const state = await api.call<TeamSnapshot>("team");

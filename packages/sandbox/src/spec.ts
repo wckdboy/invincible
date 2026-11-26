@@ -61,9 +61,6 @@ export const KEEPER = "galahad-sandbox-image";
 /** The Lab: mathematics, physics and engineering tools (sandbox/lab/Dockerfile). */
 export const LAB_IMAGE = "galahad/lab:1";
 
-/** Gazebo: robotics simulation, headless (sandbox/gazebo/Dockerfile). */
-export const GAZEBO_IMAGE = "galahad/gazebo:1";
-
 /** The knights' desktop: the workshop with a display, a window manager and a browser (sandbox/desktop/Dockerfile). Built after the workshop image, which it is made from. */
 export const DESKTOP_IMAGE = "galahad/desktop:1";
 /** Claude Code in the workshop image, for trials alone (sandbox/claude-code): tagged by its pinned release. */
@@ -76,7 +73,6 @@ export const CLAUDE_CODE_IMAGE = "galahad/claude-code:2.1.319";
 export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: string; base?: string }>> = {
   [DEFAULT_IMAGE]: { context: ".", keeper: KEEPER },
   [LAB_IMAGE]: { context: "lab", keeper: "galahad-lab-image" },
-  [GAZEBO_IMAGE]: { context: "gazebo", keeper: "galahad-gazebo-image" },
   [DESKTOP_IMAGE]: { context: "desktop", keeper: "galahad-desktop-image", base: DEFAULT_IMAGE },
   [CLAUDE_CODE_IMAGE]: { context: "claude-code", keeper: "galahad-claude-code-image", base: DEFAULT_IMAGE },
 };
@@ -85,7 +81,7 @@ export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: stri
  * The images of his own every release has made: what a host is taken to make when its release says nothing of its
  * images (it is older than saying), so a sandbox in an image newer than that host goes where it is made.
  */
-export const FIRST_IMAGES: readonly string[] = [DEFAULT_IMAGE, LAB_IMAGE, GAZEBO_IMAGE, DESKTOP_IMAGE];
+export const FIRST_IMAGES: readonly string[] = [DEFAULT_IMAGE, LAB_IMAGE, DESKTOP_IMAGE];
 
 export const containerName = (id: string) => `galahad-sbx-${id}`;
 export const volumeName = (id: string) => `galahad-sbx-${id}-work`;
@@ -169,12 +165,6 @@ export function runArgs(spec: SandboxSpec): string[] {
 
 /** The gateway scope for web search (the node's own SearXNG): not a model provider. */
 export const SEARCH_SCOPE = "search";
-/**
- * A scope every networked sandbox carried until 14 November 2026 (for the SANDBOX world, since removed). A
- * sandbox from before still names it in its label: it is read as nothing, never as a model provider.
- */
-export const RETIRED_SCOPE = "world";
-
 /** Environment that points tools at the sandbox gateway with a scoped token (never a key). */
 /** `keys`: the lease is good for keys of yours (PLAN #17): GALAHAD_KEYS says where the key gateway is. */
 export function gatewayEnv(token: string, providers: string[], keys = false): Record<string, string> {

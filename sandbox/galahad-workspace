@@ -24,7 +24,7 @@ set -u
 set -f  # no globbing: the line is words, never patterns
 umask 077
 ROOT=/var/lib/galahad-workspaces
-SQUIRE=1000:1000
+WORK_OWNER=1000:1000
 MAX_GIB=4096
 
 fail() { echo "error $*"; exit 0; }
@@ -50,7 +50,7 @@ case "$verb" in
     img="$ROOT/$id.img" mnt="$ROOT/$id"
     [ -e "$img" ] || [ -e "$mnt" ] && fail "exists"
     truncate -s "${gib}G" "$img" || fail "cannot create the image"
-    if ! mkfs.ext4 -q -F -m 0 -L galahad-work -E "root_owner=$SQUIRE,lazy_itable_init=1,lazy_journal_init=1" "$img" >/dev/null 2>&1; then
+    if ! mkfs.ext4 -q -F -m 0 -L galahad-work -E "root_owner=$WORK_OWNER,lazy_itable_init=1,lazy_journal_init=1" "$img" >/dev/null 2>&1; then
       rm -f "$img"; fail "mkfs failed"
     fi
     # Unmounted, the mountpoint is a dead end (root-owned, mode 000): a container

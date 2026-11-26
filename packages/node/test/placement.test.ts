@@ -212,10 +212,10 @@ describe("a Mac with Apple's container", () => {
     expect(sandboxRefusals([mini, ultra], { network: "isolated" })).toEqual([{ name: "mini", reason: CONTAINER_CANNOT.isolated }]);
   });
 
-  test("the desktop, the Lab and Gazebo go past it too", () => {
+  test("the desktop and the Lab go past it too", () => {
     const mini = node("mini", mac(), { delivered: 40 }, { free: 4 });
     const ultra = node("ultra", caps({ cores: 16, sandbox: { image: true, networks: true, vm: true } }), { delivered: 8 }, { free: 1 });
-    for (const ask of [{ desktop: true }, { lab: true }, { gazebo: true }]) expect(sandboxHost([mini, ultra], { network: "online", ...ask })?.name).toBe("ultra");
+    for (const ask of [{ desktop: true }, { lab: true }]) expect(sandboxHost([mini, ultra], { network: "online", ...ask })?.name).toBe("ultra");
     expect(sandboxRefusals([mini], { network: "online", desktop: true })).toEqual([{ name: "mini", reason: CONTAINER_CANNOT.desktop }]);
   });
 

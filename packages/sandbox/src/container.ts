@@ -62,7 +62,6 @@ export const CONTAINER_CANNOT = {
     "a Mac can't make a sandbox with no network at all: Apple's container has no network like Docker's none, and none of its networks is proven to isolate yet, so an isolated sandbox is made on a Linux host with Docker",
   desktop: "the desktop image (Computer Use) isn't built for Apple silicon yet: a desktop is made on a Linux host",
   lab: "the Lab isn't proven on Apple silicon yet: a Lab sandbox is made on a Linux host",
-  gazebo: "Gazebo's image is built for x86-64 alone: a Gazebo sandbox is made on a Linux host",
 } as const;
 export type Unmade = keyof typeof CONTAINER_CANNOT;
 export const CONTAINER_UNMADE = Object.keys(CONTAINER_CANNOT) as Unmade[];
@@ -74,14 +73,13 @@ export interface SandboxAsk {
   network?: SandboxNetwork;
   desktop?: boolean;
   lab?: boolean;
-  gazebo?: boolean;
   image?: string;
 }
 
 /** Why a host that can't make `cannot` can't make this sandbox (its first reason), or null when it can. */
 export function cannotMake(ask: SandboxAsk, cannot: readonly string[]): string | null {
   const why = (what: Unmade) => (cannot.includes(what) ? CONTAINER_CANNOT[what] : null);
-  return (ask.network === "isolated" ? why("isolated") : null) ?? (ask.desktop ? why("desktop") : null) ?? (ask.lab ? why("lab") : null) ?? (ask.gazebo ? why("gazebo") : null);
+  return (ask.network === "isolated" ? why("isolated") : null) ?? (ask.desktop ? why("desktop") : null) ?? (ask.lab ? why("lab") : null);
 }
 
 /** Why a Mac can't make this sandbox, or null when it can. */
