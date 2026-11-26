@@ -14,6 +14,9 @@ import { TeamStore } from "../../src/team-store.ts";
 import { COMING, PHRASES, STAYING } from "./fixture-data.ts";
 import { newHome, oldHome, runImport, snapshot } from "./homes.ts";
 
+/** SQLite's open flags, read only and the name a URI: Linux's SQLite reads a `file:` name as a URI only when asked. */
+const READ_ONLY_URI = 0x00000001 | 0x00000040;
+
 /*
  * `invincible import galahad` against the fixture Galahad home, which Galahad's own code made (make-fixture.ts): each
  * kind comes as it should, nothing in that home is written, a second run changes nothing, and what can't come is said
@@ -41,7 +44,7 @@ const OLD_NODE = nodeIdentity(fromPhrase(PHRASES.sign), fromPhrase(PHRASES.box))
 
 /** The fixture's chats by their titles (their ids were made when it was). */
 function chatIds(old: string): Record<string, string> {
-  const db = new Database(`file:${join(old, "chats.db")}?mode=ro`, { readonly: true });
+  const db = new Database(`file:${join(old, "chats.db")}?mode=ro`, READ_ONLY_URI);
   try {
     return Object.fromEntries(db.query<{ id: string; title: string }, []>("SELECT id, title FROM conversations").all().map((r) => [r.title, r.id]));
   } finally {
@@ -116,7 +119,7 @@ describe("what comes, kind by kind", () => {
     expect(info("pin").hint).toBeNull();
     for (const name of [...Object.keys(STAYING), "telegram:device"]) expect([name, vault.has(name)]).toEqual([name, false]);
     // Sealed under this node's own vault key: not the old ciphertext copied.
-    const oldMind = new Database(`file:${join(old, "mind.db")}?immutable=1`, { readonly: true });
+    const oldMind = new Database(`file:${join(old, "mind.db")}?immutable=1`, READ_ONLY_URI);
     const oldCt = JSON.parse(oldMind.query<{ v: string }, []>("SELECT v FROM v_lww WHERE k = 'secret:github'").get()!.v).ct;
     oldMind.close();
     expect(store.lww<{ ct: string; kid: string }>("secret:github")!.value!.ct).not.toBe(oldCt);
@@ -221,7 +224,7 @@ describe("what comes, kind by kind", () => {
       updatedAt: builder.updatedAt,
     });
     // When it was made there, not when it came: a worker your agent made long ago is no worker made today.
-    const made = new Database(`file:${join(old, "team.db")}?mode=ro`, { readonly: true });
+    const made = new Database(`file:${join(old, "team.db")}?mode=ro`, READ_ONLY_URI);
     const was = JSON.parse(made.query<{ value: string }, []>("SELECT value FROM team_teammates WHERE id = 'builder'").get()!.value);
     made.close();
     expect([builder.createdAt, builder.updatedAt]).toEqual([was.createdAt, was.updatedAt]);
