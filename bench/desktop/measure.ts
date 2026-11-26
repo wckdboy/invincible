@@ -243,7 +243,8 @@ export async function typing(vm: BenchVm, n: number): Promise<Typing> {
     let wrong: string | undefined;
     for (let i = 0; i < n; i++) {
       const file = `${IN_VM}/out/xterm-${i}.txt`;
-      await startApp(vm, `xterm -geometry 100x20+100+100 -e sh -c 'cat > ${file}'`);
+      // (Its title set: given a command, xterm names its window after it, and the focus it waits for would never come.)
+      await startApp(vm, `xterm -T xterm -geometry 100x20+100+100 -e sh -c 'cat > ${file}'`);
       if (await focusWindow(vm, "^xterm$")) {
         const typed = await vm.raw(["desktop", "type", TEST_STRING], { env: { LC_ALL: "C.UTF-8" } });
         await vm.raw(["desktop", "key", "Return"]);
