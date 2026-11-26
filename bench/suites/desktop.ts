@@ -35,13 +35,22 @@ function tasks(ctx: SuiteContext, runs: TaskRun[], n: number, span: [number, num
       const these = runs.filter((r) => r.task === task && r.policy === policy);
       const passed = these.filter((r) => r.pass).length;
       const failed = these.find((r) => !r.pass);
-      ctx.quality(`desktop.task.${task}.${policy}`, passed, "of 5", "higher", { n, note: `${task}, the ${policy} way, with perfect targeting: runs that passed their gate${failed ? `; one that didn't: ${failed.why.slice(0, 160)}` : ""}` });
+      const way = policy === "toolset" ? "through the agent's tool loop with Claude's computer toolset, its model the stand-in (its places the oracle's)" : `the ${policy} way, with perfect targeting`;
+      ctx.quality(`desktop.task.${task}.${policy}`, passed, "of 5", "higher", { n, note: `${task}, ${way}: runs that passed their gate${failed ? `; one that didn't: ${failed.why.slice(0, 160)}` : ""}` });
       const acted = these.filter((r) => r.actedMs !== null).map((r) => r.actedMs!);
       if (acted.length) ctx.speed(`desktop.task.${task}.${policy}.ms`, acted, "ms", "lower", span, `${task}, ${policy}: from its first command to its last action's return (no model)`);
       if (passed) {
         const ok = these.filter((r) => r.pass);
         ctx.quality(`desktop.task.${task}.${policy}.commands`, Math.max(...ok.map((r) => r.commands)), "commands", "lower", { note: `${task}, ${policy}: commands a passing run took (each one an agent turn with a model)` });
         ctx.quality(`desktop.task.${task}.${policy}.looks`, Math.max(...ok.map((r) => r.looks)), "looks", "lower", { note: `${task}, ${policy}: where it would have asked its eyes (each one a model's call)` });
+        // Through the loop: a model call a turn, each turn several actions (C1 step 7: one model call per verified action at most).
+        const looped = ok.filter((r) => r.loop);
+        if (looped.length) {
+          const most = (f: (l: NonNullable<TaskRun["loop"]>) => number) => Math.max(...looped.map((r) => f(r.loop!)));
+          ctx.quality(`desktop.task.${task}.${policy}.calls`, most((l) => l.calls), "model calls", "lower", { note: `${task}, ${policy}: the engineer's model calls a passing run took, each a turn` });
+          ctx.quality(`desktop.task.${task}.${policy}.actions`, most((l) => l.actions), "actions", "lower", { note: `${task}, ${policy}: the toolset's actions a passing run ran, each the VM's desktop command` });
+          ctx.quality(`desktop.task.${task}.${policy}.calls-per-action`, sig(most((l) => l.calls / Math.max(1, l.actions)), 2), "calls per action", "lower", { resolution: 0.05, note: `${task}, ${policy}: model calls over the actions they made (today's agent: a turn a command, and an eyes call a look)` });
+        }
       }
     }
   }
@@ -91,6 +100,15 @@ export const suite: Suite = {
     "desktop.task.editor.naive": 5,
     "desktop.task.editor.settled": 5,
     "desktop.task.editor.careful": 5,
+    // C1 step 7: every task through the agent's loop with the computer toolset, and never more than a model call an action.
+    "desktop.task.form.toolset": 5,
+    "desktop.task.terminal.toolset": 5,
+    "desktop.task.settings.toolset": 5,
+    "desktop.task.editor.toolset": 5,
+    "desktop.task.form.toolset.calls-per-action": 1,
+    "desktop.task.terminal.toolset.calls-per-action": 1,
+    "desktop.task.settings.toolset.calls-per-action": 1,
+    "desktop.task.editor.toolset.calls-per-action": 1,
     "desktop.type.chromium.exact": 1,
     "desktop.type.xterm.exact": 1,
     "desktop.type.mousepad.exact": 1,

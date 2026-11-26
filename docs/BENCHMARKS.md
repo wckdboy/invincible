@@ -83,9 +83,11 @@ everything but the model.
   - the agent's path: `true`, a click, a key, a screenshot; the owner's: a look, a click, a key;
   - a look, a click and a look with the stand-in eyes;
   - typing the test string `Søren Ærø – blåbærgrød 25 °C ✓ € ü 日本語 🙂` (40 characters), exactly, and how long;
-  - the four tasks (a form, a terminal command, a browser setting, a file saved in an editor), five runs each, three
-    ways: naive, settled (naive with `desktop settle` before a key that commits) and careful (focus checked, the screen
-    let settle by pictures compared), each to its gate;
+  - the four tasks (a form, a terminal command, a browser setting, a file saved in an editor), five runs each, four
+    ways: naive, settled (naive with `desktop settle` before a key that commits), careful (focus checked, the screen
+    let settle by pictures compared) and toolset (through an agent's own tool loop with Claude's computer toolset, its
+    model a stand-in speaking Anthropic's stream, its places the oracle's: the adapters, the loop, deskd and the apps,
+    everything but the model; its model calls, its actions and the calls per action), each to its gate;
   - what breaks (the F tests): typing with nothing focused, a JavaScript alert, the tab in front, the picture after a
     click that navigates, double clicks, a killed browser, the last tab closed;
   - the accessibility tree: the form's controls where `desktop find` puts them against the DOM's, a lookup's time, and
@@ -97,5 +99,5 @@ everything but the model.
   spread), not only past 2×; memory and CPU past their stated resolution; a count of passes, or a check that held,
   going down.
 - **Held:** what C1's steps reached is held to bars whatever the baseline says: every task's passes, each way (the
-  editor the naive way included: step 3 broke it and C0's 0/5 hid that), the test string exact in each app, and the
-  F tests' checks.
+  editor the naive way included: step 3 broke it and C0's 0/5 hid that), the toolset way at no more than a model call
+  an action, the test string exact in each app, and the F tests' checks.

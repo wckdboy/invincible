@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ExecResult } from "../../packages/core/src/index.ts";
 import { OUT_DIR } from "../scorecard.ts";
+import { type Asked, type LoopRun, loopAsk, modelsContext, standIn, type Turn, viaLoop, type Where } from "./loop.ts";
 import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
 
 /*
@@ -19,12 +21,15 @@ import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
  *  - settled: naive, and the VM's own `desktop settle` (150 ms with nothing drawn, 3 s at most) wherever careful lets
  *    the screen settle, before a key that commits: what an agent is told to do, and no more (BRIEF-C1 step 5);
  *  - careful (C0's): text typed only once the window that should take it has the keyboard's focus, and the screen let
- *    settle (250 ms with no pixel changing, by pictures compared) before a key that commits (Return).
+ *    settle (250 ms with no pixel changing, by pictures compared) before a key that commits (Return);
+ *  - toolset (C1 step 7): through an agent's own tool loop with Claude's computer toolset (loop.ts), its model the
+ *    stand-in: each turn several actions, the places it clicks read from the oracle at the turn's start, as a model
+ *    reads them from the screen it was shown, and one look at the turn's end. Its model calls are counted.
  */
 
 export const TASKS = ["form", "terminal", "settings", "editor"] as const;
 export type TaskName = (typeof TASKS)[number];
-export const POLICIES = ["naive", "settled", "careful"] as const;
+export const POLICIES = ["naive", "settled", "careful", "toolset"] as const;
 export type Policy = (typeof POLICIES)[number];
 
 export interface TaskRun {
@@ -38,9 +43,87 @@ export interface TaskRun {
   commands: number;
   /** Where an agent would have asked its eyes (a model's call). */
   looks: number;
+  /** Through the loop (toolset): its model calls (each a turn), the toolset's actions, and whether every request offered the toolset and every turn came back as the toolset's. */
+  loop?: { calls: number; actions: number; shape: string | null };
+}
+
+/** What each task asks of an agent, as its goal: done on the screen, the point being the desktop. */
+export const GOALS: Record<TaskName, (file: string) => string> = {
+  form: () => `In the browser on your desktop, open http://127.0.0.1:8000/form.html and fill in its form: name "${FORM_VALUES.name}", email "${FORM_VALUES.email}", plan "${FORM_VALUES.plan}", the terms accepted, note "${FORM_VALUES.note}". Then send it. This is a test of working the desktop: do it on the screen.`,
+  terminal: (file) => `In the terminal (xterm) on your desktop, type the command echo $((6*7)) > ${file} and run it. This is a test of working the desktop: type it into that terminal on the screen, not with your own shell.`,
+  settings: () => "In the browser on your desktop, set its font size to Large in its appearance settings (chrome://settings/appearance). This is a test of working the desktop: do it on the screen.",
+  editor: (file) => `In the editor (Mousepad) on your desktop, type the text Written on the desktop, then save it through its Save As dialog as ${file}. This is a test of working the desktop: do it on the screen, not with your own shell.`,
+};
+
+/** A turn's calls, in the toolset's own words. */
+const act = {
+  click: ([x, y]: [number, number]) => ({ name: "left_click", input: { coordinate: [x, y] } }),
+  type: (text: string) => ({ name: "type", input: { text } }),
+  key: (text: string) => ({ name: "key", input: { text } }),
+  scroll: (direction: string, amount: number, at: [number, number]) => ({ name: "scroll", input: { scroll_direction: direction, scroll_amount: amount, coordinate: at } }),
+};
+
+/** Asked until it says what `ok` wants, or `tries` times: the last answer. */
+async function polled(ask: () => Promise<Record<string, any>>, ok: (p: Record<string, any>) => boolean, tries: number, ms: number): Promise<Record<string, any>> {
+  let p: Record<string, any> = {};
+  for (let i = 0; i < tries; i++) {
+    p = await ask();
+    if (ok(p)) break;
+    await Bun.sleep(ms);
+  }
+  return p;
+}
+
+/**
+ * The stand-in's turns for each task: what a model that sees the screen would do, each place it clicks read from the
+ * oracle at the turn's start (the screen as the last turn's look left it), several actions a turn, then DONE.
+ */
+export async function* standInTurns(task: TaskName, where: Where, file: string): AsyncGenerator<Turn, void> {
+  const at = (p: Record<string, any>): [number, number] => {
+    if (typeof p.x !== "number") throw new Error(`no target: ${JSON.stringify(p).slice(0, 200)}`);
+    return [p.x, p.y];
+  };
+  if (task === "form") {
+    yield { calls: [act.key("ctrl+l"), act.type("http://127.0.0.1:8000/form.html"), act.key("Return")] };
+    const [name, email, plan, terms, note, send] = await Promise.all(["#name", "#email", "#plan", "#terms", "#note", "#send"].map(async (id) => at(await polled(() => where(`dom '${id}'`), (p) => typeof p.x === "number", 10, 300))));
+    yield { calls: [act.click(name!), act.type(FORM_VALUES.name), act.click(email!), act.type(FORM_VALUES.email), act.click(plan!), act.key("Down"), act.key("Return"), act.click(terms!), act.click(note!), act.type(FORM_VALUES.note), act.click(send!)] };
+    yield { text: "DONE\nThe form is filled in and sent." };
+  } else if (task === "terminal") {
+    const w = await polled(() => where("window '^xterm$'"), (p) => typeof p.x === "number", 20, 250);
+    yield { calls: [act.click(at(w)), act.type(`echo $((6*7)) > ${file}`), act.key("Return")] };
+    yield { text: "DONE\nRan it in the terminal." };
+  } else if (task === "settings") {
+    yield { calls: [act.key("ctrl+l"), act.type("chrome://settings/appearance"), act.key("Return")] };
+    let p = await polled(() => where("settings-font"), (q) => typeof q.x === "number" || Boolean(q.offscreen), 8, 400);
+    for (let i = 0; i < 4 && p.offscreen; i++) {
+      yield { calls: [act.scroll("down", 3, [640, 450])] };
+      p = await where("settings-font");
+    }
+    if (typeof p.x !== "number") return yield { text: `GIVE UP\nThe font size setting isn't on the screen: ${JSON.stringify(p).slice(0, 200)}` };
+    if (p.value !== "16") return yield { text: `GIVE UP\nThe font size was ${p.value} before the run, not 16.` };
+    yield { calls: [act.click(at(p)), act.key("Down"), act.key("Return")] };
+    yield { text: "DONE\nThe font size is Large." };
+  } else {
+    const w = await polled(() => where("window 'Mousepad$'"), (p) => typeof p.x === "number" && p.w > 600, 20, 250);
+    yield { calls: [act.click(at(w)), act.type("Written on the desktop"), act.key("ctrl+s")] };
+    await polled(() => where("window 'Save As'"), (p) => typeof p.x === "number", 10, 300);
+    yield { calls: [act.type(file), act.key("Return")] };
+    yield { text: "DONE\nSaved it." };
+  }
+}
+
+/** How the stand-in was asked, in a phrase when something wasn't the toolset's shape (null: every request was). */
+export function shapeOf(asked: readonly Asked[]): string | null {
+  if (!asked.length) return "it was never asked";
+  if (!asked.every((a) => a.toolset)) return "a request didn't offer the computer toolset";
+  if (asked.some((a) => a.echoed.calls !== a.echoed.asToolset)) return "a turn's toolset calls came back without toolset_name";
+  if (asked.some((a) => a.echoed.calls && a.echoed.resultsAsToolset !== a.echoed.calls)) return "a toolset call's result came back without toolset_name";
+  if (asked.slice(1).some((a) => a.echoed.calls && a.echoed.pictures !== 1)) return "a turn that acted didn't end with one picture of the screen";
+  return null;
 }
 
 const FORM = { name: "Søren Ærø", email: "soren@example.test", plan: "Team", terms: "on", note: "Ready by Friday" };
+const FORM_VALUES = FORM;
 
 export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: number): Promise<TaskRun> {
   let commands = 0;
@@ -65,6 +148,24 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     if (r.code !== 0) throw new Error(`the click failed: ${r.stderr.slice(-200)}`);
   };
   const careful = policy === "careful";
+  // Through the loop (toolset): the stand-in's turns, the VM's commands through the agent's path; what it took, kept.
+  const byLoop = policy === "toolset";
+  let looped: LoopRun | null = null;
+  let shape: string | null = null;
+  const loop = async (file: string) => {
+    const asked: Asked[] = [];
+    const counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
+    const ctx = modelsContext("bench-stand-in-key-FAKE-0000", standIn(standInTurns(task, where, file), asked));
+    const exec = async (command: string, timeoutSec: number): Promise<ExecResult> => {
+      const r = await vm.agent(command, timeoutSec);
+      return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr, durationMs: Math.round(r.ms), truncated: false };
+    };
+    looped = await viaLoop(GOALS[task](file), loopAsk(ctx, counted), exec, counted);
+    commands += looped.actions + looped.commands;
+    shape = shapeOf(asked);
+    if (looped.error) throw new Error(`the loop failed: ${looped.error}`);
+    if (looped.outcome?.status !== "done") throw new Error(`the loop ended ${looped.outcome?.status}: ${looped.outcome?.summary.slice(0, 200)}`);
+  };
   const settle = () => (careful ? sh(`python3 ${IN_VM}/probe.py settle-full 3 250`) : policy === "settled" ? sh("desktop settle") : Promise.resolve(null));
   const focusIs = async (rx: RegExp, tries = 20) => {
     for (let i = 0; i < tries; i++) {
@@ -82,18 +183,21 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
   try {
     if (task === "form") {
       const before = (await sh(`ls ${IN_VM}/out/form-*.json 2>/dev/null | wc -l`)).stdout.trim();
-      await sh("desktop open http://127.0.0.1:8000/form.html");
-      await click("dom '#name'");
-      await sh(`desktop type '${FORM.name}'`);
-      await click("dom '#email'");
-      await sh(`desktop type '${FORM.email}'`);
-      await click("dom '#plan'");
-      await sh("desktop key Down Return");
-      await click("dom '#terms'");
-      await click("dom '#note'");
-      await sh(`desktop type '${FORM.note}'`);
-      await settle();
-      await click("dom '#send'");
+      if (byLoop) await loop("");
+      else {
+        await sh("desktop open http://127.0.0.1:8000/form.html");
+        await click("dom '#name'");
+        await sh(`desktop type '${FORM.name}'`);
+        await click("dom '#email'");
+        await sh(`desktop type '${FORM.email}'`);
+        await click("dom '#plan'");
+        await sh("desktop key Down Return");
+        await click("dom '#terms'");
+        await click("dom '#note'");
+        await sh(`desktop type '${FORM.note}'`);
+        await settle();
+        await click("dom '#send'");
+      }
       done();
       let got = "";
       for (let i = 0; i < 10; i++) {
@@ -110,31 +214,34 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     } else if (task === "settings") {
       // Careful: its keys go to the browser only once the browser has the keyboard (after another app closed, nothing
       // may have it): a click on an empty part of its tab strip gives it, harmlessly.
-      if (careful && !(await focusIs(/Chromium/, 3))) {
-        await sh("desktop click 900 15");
-        if (!(await focusIs(/Chromium/))) throw new Error("the browser never took the focus");
-        // (And the pointer back over the page, where a scroll scrolls it.)
-        await sh("desktop move 640 450");
+      if (byLoop) await loop("");
+      else {
+        if (careful && !(await focusIs(/Chromium/, 3))) {
+          await sh("desktop click 900 15");
+          if (!(await focusIs(/Chromium/))) throw new Error("the browser never took the focus");
+          // (And the pointer back over the page, where a scroll scrolls it.)
+          await sh("desktop move 640 450");
+        }
+        await sh("desktop key ctrl+l");
+        await sh("desktop type chrome://settings/appearance");
+        await settle();
+        await sh("desktop key Return");
+        let p: Record<string, any> = {};
+        for (let i = 0; i < 8; i++) {
+          p = await where("settings-font");
+          if (typeof p.x === "number" || p.offscreen) break;
+          await Bun.sleep(400);
+        }
+        for (let i = 0; i < 4 && p.offscreen; i++) {
+          await sh("desktop scroll down 3");
+          p = await where("settings-font");
+        }
+        if (typeof p.x !== "number") throw new Error(`the font size select wasn't found: ${JSON.stringify(p)}`);
+        if (p.value !== "16") throw new Error(`the font size was ${p.value} before the run, not 16`);
+        await sh(`desktop click ${p.x} ${p.y}`);
+        await settle();
+        await sh("desktop key Down Return");
       }
-      await sh("desktop key ctrl+l");
-      await sh("desktop type chrome://settings/appearance");
-      await settle();
-      await sh("desktop key Return");
-      let p: Record<string, any> = {};
-      for (let i = 0; i < 8; i++) {
-        p = await where("settings-font");
-        if (typeof p.x === "number" || p.offscreen) break;
-        await Bun.sleep(400);
-      }
-      for (let i = 0; i < 4 && p.offscreen; i++) {
-        await sh("desktop scroll down 3");
-        p = await where("settings-font");
-      }
-      if (typeof p.x !== "number") throw new Error(`the font size select wasn't found: ${JSON.stringify(p)}`);
-      if (p.value !== "16") throw new Error(`the font size was ${p.value} before the run, not 16`);
-      await sh(`desktop click ${p.x} ${p.y}`);
-      await settle();
-      await sh("desktop key Down Return");
       done();
       const ui = await where("settings-font");
       let saved: unknown = null;
@@ -148,20 +255,23 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     } else if (task === "terminal") {
       if ((await sh("command -v xterm")).code !== 0) throw new Error("no terminal on this desktop (xterm isn't in the image)");
       await sh(`DISPLAY=:1 setsid xterm -geometry 90x20+200+200 >/dev/null 2>&1 & echo $! > ${IN_VM}/out/app.pid; sleep 1`);
-      if (careful) {
-        let w: Record<string, any> = {};
-        for (let i = 0; i < 20; i++) {
-          w = await where("window '^xterm$'");
-          if (typeof w.x === "number") break;
-          await Bun.sleep(250);
-        }
-        if (typeof w.x !== "number") throw new Error(`no terminal window: ${JSON.stringify(w)}`);
-        await sh(`desktop click ${w.x} ${w.y}`);
-        if (!(await focusIs(/^xterm$/))) throw new Error("the terminal never took the focus");
-      } else await click("window '^xterm$'");
-      await sh(`desktop type 'echo $((6*7)) > ${IN_VM}/out/t2-${policy}-${run}.txt'`);
-      await settle();
-      await sh("desktop key Return");
+      if (byLoop) await loop(`${IN_VM}/out/t2-${policy}-${run}.txt`);
+      else {
+        if (careful) {
+          let w: Record<string, any> = {};
+          for (let i = 0; i < 20; i++) {
+            w = await where("window '^xterm$'");
+            if (typeof w.x === "number") break;
+            await Bun.sleep(250);
+          }
+          if (typeof w.x !== "number") throw new Error(`no terminal window: ${JSON.stringify(w)}`);
+          await sh(`desktop click ${w.x} ${w.y}`);
+          if (!(await focusIs(/^xterm$/))) throw new Error("the terminal never took the focus");
+        } else await click("window '^xterm$'");
+        await sh(`desktop type 'echo $((6*7)) > ${IN_VM}/out/t2-${policy}-${run}.txt'`);
+        await settle();
+        await sh("desktop key Return");
+      }
       done();
       let got = "";
       for (let i = 0; i < 10; i++) {
@@ -178,35 +288,38 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
       if ((await sh("command -v mousepad")).code !== 0) throw new Error("no editor on this desktop (mousepad isn't in the image)");
       const file = `${IN_VM}/out/t4-${policy}-${run}.txt`;
       await sh(`DISPLAY=:1 setsid mousepad >/dev/null 2>&1 & echo $! > ${IN_VM}/out/app.pid; sleep 2`);
-      if (careful) {
-        let w: Record<string, any> = {};
-        for (let i = 0; i < 20; i++) {
-          w = await where("window 'Mousepad$'");
-          if (typeof w.x === "number" && w.w > 600) break;
-          await Bun.sleep(250);
+      if (byLoop) await loop(file);
+      else {
+        if (careful) {
+          let w: Record<string, any> = {};
+          for (let i = 0; i < 20; i++) {
+            w = await where("window 'Mousepad$'");
+            if (typeof w.x === "number" && w.w > 600) break;
+            await Bun.sleep(250);
+          }
+          if (!(typeof w.x === "number" && w.w > 600)) throw new Error(`no editor window: ${JSON.stringify(w)}`);
+          await sh(`desktop click ${w.x} ${w.y}`);
+          if (!(await focusIs(/Mousepad$/))) throw new Error("the editor never took the focus");
+        } else await click("window 'Mousepad'");
+        await sh("desktop type 'Written on the desktop'");
+        await sh("desktop key ctrl+s");
+        if (careful) {
+          if (!(await focusIs(/^Save As$/))) throw new Error("the Save As dialog never took the focus");
+          await settle();
+        } else {
+          let d: Record<string, any> = {};
+          for (let i = 0; i < 10; i++) {
+            d = await where("window 'Save As'");
+            if (typeof d.x === "number") break;
+            await Bun.sleep(300);
+          }
+          if (typeof d.x !== "number") throw new Error("the Save As dialog didn't appear");
+          await settle();
         }
-        if (!(typeof w.x === "number" && w.w > 600)) throw new Error(`no editor window: ${JSON.stringify(w)}`);
-        await sh(`desktop click ${w.x} ${w.y}`);
-        if (!(await focusIs(/Mousepad$/))) throw new Error("the editor never took the focus");
-      } else await click("window 'Mousepad'");
-      await sh("desktop type 'Written on the desktop'");
-      await sh("desktop key ctrl+s");
-      if (careful) {
-        if (!(await focusIs(/^Save As$/))) throw new Error("the Save As dialog never took the focus");
+        await sh(`desktop type '${file}'`);
         await settle();
-      } else {
-        let d: Record<string, any> = {};
-        for (let i = 0; i < 10; i++) {
-          d = await where("window 'Save As'");
-          if (typeof d.x === "number") break;
-          await Bun.sleep(300);
-        }
-        if (typeof d.x !== "number") throw new Error("the Save As dialog didn't appear");
-        await settle();
+        await sh("desktop key Return");
       }
-      await sh(`desktop type '${file}'`);
-      await settle();
-      await sh("desktop key Return");
       done();
       let got = "";
       for (let i = 0; i < 10; i++) {
@@ -233,7 +346,12 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     }
   }
   await tidy(vm, task);
-  return { task, policy, run, pass, why, actedMs, commands, looks };
+  const through = looped as LoopRun | null;
+  if (through && pass && shape) {
+    pass = false;
+    why = `it passed its gate, but not in the toolset's shape: ${shape}`;
+  }
+  return { task, policy, run, pass, why, actedMs, commands, looks, ...(through ? { loop: { calls: through.calls, actions: through.actions, shape } } : {}) };
 }
 
 /**
