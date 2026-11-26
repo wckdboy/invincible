@@ -111,9 +111,9 @@ targets:
           - CFBundleURLName: sh.invincible.bot.invite
             CFBundleURLSchemes: [invincible]
         # Updates (Sparkle): Invincible's own signed feed, and the public key each update is checked against. The key is
-        # the owner's to make (Sparkle's generate_keys, its private half in their login keychain as the account
-        # `invincible`); while it is empty, as it is until they make it, the updater stays off. scripts/mac-release.sh
-        # makes a release and its feed.
+        # the owner's (Sparkle's generate_keys, made 26 November 2026, its private half in their login keychain as the
+        # account `invincible`); while it is empty the updater stays off. scripts/mac-release.sh makes a release and its
+        # feed.
         SUFeedURL: https://invincible.sh/mac/appcast.xml
         SUPublicEDKey: $(INVINCIBLE_SPARKLE_PUBLIC_KEY)
         # Checked once a day without asking first: a node's Mac is meant to keep up by itself.
@@ -122,8 +122,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.mac
         PRODUCT_NAME: Invincible
-        # Sparkle's public EdDSA key (base64), once the owner has made Invincible's: its private half never in here.
-        INVINCIBLE_SPARKLE_PUBLIC_KEY: ""
+        # Sparkle's public EdDSA key (base64), Invincible's own: its private half is never in here.
+        INVINCIBLE_SPARKLE_PUBLIC_KEY: "fGmi0V7McrwLLcVYohLgL23IxUiLqSq8SofCP4VeSMk="
         PRODUCT_MODULE_NAME: Invincible
         ASSETCATALOG_COMPILER_APPICON_NAME: MacIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

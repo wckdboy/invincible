@@ -98,8 +98,9 @@ app), and its binary is the node's launcher. An everyday build carries no node, 
 `scripts/mac-node-bundle.sh` puts it into a built app and signs it (with the Developer ID for a release).
 `scripts/mac-release.sh` makes a release: built, its node bundled, notarized and stapled, the zip signed with the
 owner's Sparkle key (the login keychain's account `invincible`), and `apps/site/public/mac/appcast.xml` written for it.
-**Updates stay off until the owner makes Invincible's Sparkle key** (Sparkle's `generate_keys --account invincible`) and
-puts its public half in `project.yml`'s `INVINCIBLE_SPARKLE_PUBLIC_KEY`, which is empty until then.
+**Invincible's Sparkle key** was made on 26 November 2026 (Sparkle's `generate_keys --account invincible`): its private
+half is in the owner's login keychain, its public half in `project.yml`'s `INVINCIBLE_SPARKLE_PUBLIC_KEY`. A build
+without that key leaves its updater off.
 
 `MacShotsTests` pictures the Mac app against a dev node; it launches the Mac app, so it runs only on a Mac set aside for
 it, never in CI or on a laptop whose own key the app would load.

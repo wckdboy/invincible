@@ -64,8 +64,9 @@ Q-AMP between the nodes and the agents.
   `apps/android/README.md`). Their tests, the Mac build and the vectors run in CI; the Apple job waits for the owner's
   Mac runner (label `macos-xcode`).
 - New identities in the stores: `sh.invincible.bot` (iPhone and iPad; App Store Connect's "Invincible Bot", push on),
-  `sh.invincible.bot.mac` (Developer ID), and Android's `sh.invincible.bot`. The owner makes the releases: TestFlight,
-  the Android release key, and the Mac's Sparkle key (its updates stay off until then).
+  `sh.invincible.bot.mac` (Developer ID), and Android's `sh.invincible.bot`. TestFlight has the first build
+  (202611261105, 26 November 2026); the Android release key and the Mac's Sparkle key are made (26 November), in the
+  owner's keychain and outside the repository.
 
 **Exit:**
 - the vectors pass in both apps;
