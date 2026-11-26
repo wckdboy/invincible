@@ -52,11 +52,12 @@ import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.Steps
 import sh.invincible.bot.core.Work
+import sh.invincible.bot.core.AgentMark
 
 /*
  * The work's rows, as every list of them draws them (a tablet's sidebar, a phone's Home): a task in three lines, as T3
  * Code's sidebar has it (your word, 26 November 2026: "project/tasks/coding t3code style for the agents"): its project's
- * badge and name with how it stands in a word in its state's colour; its title; its agent's orb, still, with its name and
+ * badge and name with how it stands in a word in its state's colour; its title; its agent's mark, still, with its name and
  * what it is doing or what it came to. A row opens the task's own thread. What the rows say is core/Work.kt's; this only
  * draws them. Nothing is asked of the node per row.
  */
@@ -143,7 +144,7 @@ fun StateWord(row: Work.Row) {
 }
 
 /**
- * A task as a row of three lines. [face]: its agent's orb's size (14 to 18; still: only the orb in focus moves).
+ * A task as a row of three lines. [face]: its agent's mark's size (14 to 18; still: only the mark in focus moves).
  * [current]: it is the task open now (a wide screen's sidebar marks it). Work in hand that only waits on its agent reads
  * quieter than what is new to you.
  */
@@ -175,7 +176,7 @@ fun WorkRow(row: Work.Row, onOpen: () -> Unit, face: Dp = 18.dp, current: Boolea
         }
         Text(row.title, style = Type.rowTitle, color = if (calm) quiet else MaterialTheme.colorScheme.onSurface, maxLines = if (big) 2 else 1, overflow = TextOverflow.Ellipsis)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            AgentOrb(row.agent, row.avatar, face)
+            AgentMarkView(row.agent, row.avatar, face, state = AgentMark.state(row.state))
             Text(row.agentName, style = Type.meta, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (calm) 0.72f else 0.86f), maxLines = 1)
             // (Not what its word says already: "Gave up", then "gave up".)
             if (row.detail.isNotEmpty() && !row.detail.equals(row.verdict?.word ?: row.word, ignoreCase = true)) Text(row.detail, style = if (row.mono) Type.mono else Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))

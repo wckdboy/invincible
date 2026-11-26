@@ -271,9 +271,12 @@ object Steps {
         return Summary(ms, commands, failed, read.size, edited.size)
     }
 
+    /** JavaScript's Math.round: half up, so every app comes to the same whole number. */
+    private fun jsRound(x: Double): Double = kotlin.math.floor(x + 0.5).let { if (it - x > 0.5) it - 1 else it }
+
     /** A span of work as its folded line says it: "42s", "6m 12s", "1h 04m". */
     fun workedFor(ms: Long): String {
-        val seconds = max(0L, FieldOrb.jsRound(ms / 1000.0).roundToLong())
+        val seconds = max(0L, jsRound(ms / 1000.0).roundToLong())
         if (seconds < 60) return "${seconds}s"
         val minutes = seconds / 60
         if (minutes < 60) return "${minutes}m ${(seconds % 60).toString().padStart(2, '0')}s"

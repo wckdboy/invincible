@@ -172,7 +172,7 @@ private fun UnderwayBar(app: AppModel, live: Boolean, openTask: (String) -> Unit
             val row = table.rows.firstOrNull { it.kind == "agent" && it.id == task.assignee }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
                 Row(Modifier.weight(1f).clickable { openTask(task.id) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                    AgentOrb(task.assignee, row?.avatar, 28.dp, description = task.name)
+                    AgentMarkView(task.assignee, row?.avatar, 28.dp, description = task.name)
                     Column(Modifier.weight(1f)) {
                         Text("${task.name} · ${UnderwayWords.state(task)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(task.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)

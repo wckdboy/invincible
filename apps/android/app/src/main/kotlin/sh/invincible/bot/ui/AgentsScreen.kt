@@ -52,11 +52,12 @@ import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
 import sh.invincible.bot.core.RosterRow
 import sh.invincible.bot.core.Primary
+import sh.invincible.bot.core.AgentMark
 
 /**
  * The agents, the app's home: the primary first (its row opens its chat), then each agent with its state's ring and
  * word and one line of what it's doing, then each room. What only you can answer is marked; what's new to you since you
- * last looked, on any device, has a green dot, as an unread email does.
+ * last looked, on any device, has a grey dot, as an unread email does.
  */
 @Composable
 fun AgentsScreen(app: AppModel, back: () -> Unit, openChat: () -> Unit, openAgent: (String) -> Unit, openRoom: (String) -> Unit) {
@@ -165,9 +166,9 @@ internal fun Refused(app: AppModel, p: NodeError) {
 }
 
 /**
- * One seat at the table: its orb (still: only the orb in focus moves), its name and role, its state in a word (a tinted
+ * One seat at the table: its mark (still: only the mark in focus moves), its name and role, its state in a word (a tinted
  * chip, never colour alone), one line of what it's doing, and what its work cost this week. What only you can answer is
- * in amber; what's new to you since you last looked, on any device, has a green dot, as an unread email does.
+ * in its word; what's new to you since you last looked, on any device, has a grey dot, as an unread email does.
  */
 @Composable
 private fun Seat(id: String, profile: Json?, name: String, state: AgentState?, line: String, needs: Boolean, unread: Boolean, role: String? = null, cost: String? = null, onClick: () -> Unit) {
@@ -183,7 +184,9 @@ private fun Seat(id: String, profile: Json?, name: String, state: AgentState?, l
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s3),
     ) {
-        Face(id, profile, 40.dp, description = null)
+        // (Its seat's state in its mark's shape: the top slat in ink while it asks you, the bottom one red and loose once it
+        // failed. Still, as every row is.)
+        Face(id, profile, 40.dp, state = AgentMark.state(state), description = null)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
                 Text(name, style = Type.rowTitle.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)

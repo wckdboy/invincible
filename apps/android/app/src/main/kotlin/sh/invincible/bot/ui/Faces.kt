@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.semantics.Role
@@ -39,30 +40,29 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import sh.invincible.bot.app.AppModel
-import sh.invincible.bot.core.Avatar
+import sh.invincible.bot.core.AgentMark
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.NodeError
-import sh.invincible.bot.core.Orb
-import sh.invincible.bot.core.OrbMotion
 
 /**
- * An agent's colour, as you choose it (the PWA's avatarEditor): its orb as it will be, the 24 colours to choose from, each
- * by its name, and the one its handle gives it. Nothing is saved until you touch it: then Save sends the colour you
- * chose (`{ "v": 2, "color" }`) or, for its handle's colour, null; Cancel leaves what is saved as it was. The node takes
- * the agent's name and its avatar alone, and keeps everything else about it as it was.
+ * An agent's colour, as you choose it (the PWA's avatarEditor): its mark as it will be, the eight colours of the Grille to
+ * choose from, each by its name, and "The node's choice". Nothing is saved until you touch it: then Save sends its mark
+ * with the colour you chose and its form kept (`{ "v": 3, "color", "form" }`), or null, which asks the node for the one it
+ * would give now; Cancel leaves what is saved as it was. The node takes the agent's name and its avatar alone.
  */
 @Composable
 fun ColourDialog(app: AppModel, id: String, name: String, profile: Json?, done: () -> Unit) {
-    var chosen by remember(id) { mutableStateOf(Avatar.chosen(profile)) }
+    val mark = remember(id, profile) { AgentMark.markOf(id, profile) }
+    var chosen by remember(id) { mutableStateOf<Int?>(mark.color) }
     var touched by remember(id) { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val brand = LocalBrand.current
-    val shown = chosen?.let(Avatar::orbProfile)
-    val handles = Avatar.AGENT_TINT_NAMES.getOrNull(Avatar.AGENT_TINTS.indexOf(Avatar.agentColors(id).tint)) ?: "this colour"
-    val choose = { color: String? ->
+    val dark = brand.paper.luminance() < 0.5f
+    val shown = chosen?.let { AgentMark.markProfile(mark.copy(color = it)) }
+    val choose = { color: Int? ->
         chosen = color
         touched = true
     }
@@ -72,34 +72,34 @@ fun ColourDialog(app: AppModel, id: String, name: String, profile: Json?, done: 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s3)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s4)) {
-                    AgentOrb(id, shown, 96.dp, OrbMotion.moodOfExpression("idle"), "$name's orb", key = "face:$id")
+                    AgentMarkView(id, shown ?: profile, 96.dp, description = "$name's mark")
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
                         Text(
-                            if (chosen != null) "The colour you chose." else "Its handle gives it $handles, the same on every device, until you choose one.",
+                            if (chosen != null) "${AgentMark.PALETTE[chosen!!].name}, the same on every device." else "The node gives it a colour no other agent has, while one is free.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        TextButton(onClick = { choose(null) }) { Text("Its handle's colour") }
+                        TextButton(onClick = { choose(null) }) { Text("The node's choice") }
                     }
                 }
                 FlowRow(Modifier.selectableGroup()) {
-                    Avatar.AGENT_TINTS.forEachIndexed { n, tint ->
-                        val picked = chosen == tint
+                    AgentMark.PALETTE.forEachIndexed { n, hue ->
+                        val picked = chosen == n
                         Box(
                             Modifier
                                 .size(Space.touch)
-                                .selectable(selected = picked, role = Role.RadioButton, onClick = { choose(tint) })
-                                .semantics { contentDescription = Avatar.AGENT_TINT_NAMES[n] },
+                                .selectable(selected = picked, role = Role.RadioButton, onClick = { choose(n) })
+                                .semantics { contentDescription = hue.name },
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(
                                 Modifier.size(40.dp).then(if (picked) Modifier.border(2.dp, brand.ink, CircleShape) else Modifier),
                                 contentAlignment = Alignment.Center,
-                            ) { Box(Modifier.size(32.dp).clip(CircleShape).background(Color(0xff000000 or Avatar.rgb(tint)))) }
+                            ) { Box(Modifier.size(32.dp).clip(CircleShape).background(Color(0xff000000 or (if (dark) hue.dark else hue.light).substring(1).toLong(16)))) }
                         }
                     }
                 }
-                problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
+                problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.danger) }
             }
         },
         confirmButton = {
@@ -107,7 +107,7 @@ fun ColourDialog(app: AppModel, id: String, name: String, profile: Json?, done: 
                 saving = true
                 scope.launch {
                     try {
-                        app.client?.post("/api/team/agents", Json.obj("id" to id, "name" to name, "avatar" to Avatar.edited(chosen, touched)))
+                        app.client?.post("/api/team/agents", Json.obj("id" to id, "name" to name, "avatar" to (shown ?: Json.Null)))
                         app.refresh()
                         done()
                     } catch (e: NodeError) {

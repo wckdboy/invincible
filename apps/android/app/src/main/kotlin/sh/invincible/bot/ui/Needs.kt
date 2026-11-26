@@ -241,7 +241,7 @@ private fun DecisionRow(d: Decision, busy: Boolean) {
         ) {
             Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
                 when (val lead = d.lead) {
-                    is Lead.Agent -> AgentOrb(lead.row.agent, lead.row.avatar, 28.dp)
+                    is Lead.Agent -> AgentMarkView(lead.row.agent, lead.row.avatar, 28.dp)
                     is Lead.Icon -> Box(Modifier.size(32.dp).clip(CircleShape).background(brand.ink.copy(alpha = 0.06f)), contentAlignment = Alignment.Center) {
                         Icon(lead.icon, null, Modifier.size(16.dp), tint = brand.quiet)
                     }
@@ -283,7 +283,7 @@ internal fun AnswerPill(label: String, onClick: () -> Unit, enabled: Boolean = t
     ) { Text(label, style = Type.word.copy(fontSize = 15.sp), maxLines = 1) }
 }
 
-/** What leads an item: its agent's orb (still), or an icon for what is no task's. */
+/** What leads an item: its agent's mark (still), or an icon for what is no task's. */
 private sealed interface Lead {
     class Agent(val row: Work.Row) : Lead
     class Icon(val icon: ImageVector) : Lead
@@ -296,7 +296,7 @@ private class Answer(val label: String, val danger: Boolean = false, val onClick
 private fun Who(lead: Lead, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
         when (lead) {
-            is Lead.Agent -> AgentOrb(lead.row.agent, lead.row.avatar, 20.dp)
+            is Lead.Agent -> AgentMarkView(lead.row.agent, lead.row.avatar, 20.dp)
             is Lead.Icon -> Box(Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)), contentAlignment = Alignment.Center) {
                 Icon(lead.icon, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }

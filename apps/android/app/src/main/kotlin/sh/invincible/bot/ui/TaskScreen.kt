@@ -74,7 +74,6 @@ import kotlinx.coroutines.launch
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeError
-import sh.invincible.bot.core.OrbMotion
 import sh.invincible.bot.core.Roster
 import sh.invincible.bot.core.Steps
 import sh.invincible.bot.core.TaskWords
@@ -88,6 +87,7 @@ import sh.invincible.bot.core.list
 import sh.invincible.bot.core.long
 import sh.invincible.bot.core.string
 import sh.invincible.bot.core.Primary
+import sh.invincible.bot.core.AgentMark
 
 /*
  * A task as a thread of its own (your words, 26 November 2026: "project/tasks/coding t3code style for the agents"), as
@@ -273,7 +273,7 @@ private suspend fun control(app: AppModel, task: String, action: String) {
 
 /**
  * The thread's head: back, what it is (its title; under it its project and its agent, or on a wide screen the crumb
- * "project / title"), its details, and its agent's orb (moving while it works: the orb in focus), which opens its page.
+ * "project / title"), its details, and its agent's mark (moving while it works: the mark in focus), which opens its page.
  */
 @Composable
 private fun ThreadHead(task: TeamTask, name: String, project: Work.Project, avatar: Json?, wide: Boolean, back: () -> Unit, showBack: Boolean, detailsOn: Boolean, details: () -> Unit, openAgent: () -> Unit) {
@@ -301,7 +301,8 @@ private fun ThreadHead(task: TeamTask, name: String, project: Work.Project, avat
                 Modifier.size(Space.touch).clip(CircleShape).clickable(onClick = openAgent).semantics { role = Role.Button; contentDescription = "$name${if (working) ", working" else ""}: its page" },
                 contentAlignment = Alignment.Center,
             ) {
-                AgentOrb(task.assignee, avatar, 28.dp, mood = if (working) OrbMotion.Mood.WORKING else null, key = "task:${task.assignee}")
+                // (Its agent's mark, in focus here: it moves while the task does, and arrives once as it ends.)
+                AgentMarkView(task.assignee, avatar, 28.dp, state = markStateOf(task.status), live = true)
             }
         }
         Hairline()
@@ -511,7 +512,7 @@ private fun InPlace(app: AppModel, task: TeamTask, name: String, give: () -> Uni
 private fun Said(task: TeamTask, name: String, avatar: Json?, said: String) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.s1), modifier = Modifier.semantics(mergeDescendants = false) { contentDescription = "What $name said" }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            AgentOrb(task.assignee, avatar, 16.dp)
+            AgentMarkView(task.assignee, avatar, 16.dp)
             Text(buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }; append(" said") }, style = Type.meta)
         }
         Markdown(said)
@@ -624,6 +625,17 @@ private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.
             }
         }
     }
+}
+
+/** The state a task's agent's mark shows in its thread, by how the task stands. */
+private fun markStateOf(status: String): AgentMark.State = when (status) {
+    "running" -> AgentMark.State.WORKING
+    "proposed", "interrupted" -> AgentMark.State.NEEDS
+    "queued" -> AgentMark.State.QUEUED
+    "stopped" -> AgentMark.State.PAUSED
+    "done" -> AgentMark.State.DONE
+    "failed" -> AgentMark.State.FAILED
+    else -> AgentMark.State.IDLE
 }
 
 /** A step's clock while it runs: "0:42", "12:05". */

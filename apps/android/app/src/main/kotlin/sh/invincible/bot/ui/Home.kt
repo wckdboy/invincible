@@ -61,7 +61,6 @@ import kotlinx.coroutines.launch
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.AgentState
-import sh.invincible.bot.core.OrbMotion
 import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.string
@@ -69,7 +68,7 @@ import sh.invincible.bot.core.Primary
 
 /*
  * Home: the primary, first (your words, 26 November 2026: "agent first (the primary)"; on a phone no tab bar, "a '…' sheet for
- * everything else"). Its orb, the one that moves on the screen, its name and a line of how things stand, the machine it
+ * everything else"). Its mark, the one that moves on the screen, its name and a line of how things stand, the machine it
  * runs on, and "…". Then what needs you, each with its answer in place (Needs.kt); then the work in one list by attention
  * (what is new to you, then what is at work, quieter; what is settled folds), each task a row of three lines that opens
  * its thread, with a filter for each project; and its message box docked at the foot, where whatever you ask it starts a
@@ -108,11 +107,8 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
     // (The one count of what needs you, as every place says it: AppModel.needsYou.)
     val needs by app.needsYou.collectAsState()
     val glance = work?.let { Work.atAGlance(it.working, needs, table.primary.line) } ?: Work.Glance(table.primary.line, false)
-    // Its orb: at work while it answers the chat you left, before the node has said so; else where it stands.
-    val standing = if (live) AgentState.WORKING else table.primary.state
-
     Column(Modifier.fillMaxSize().imePadding()) {
-        HomeHead(app, glance, OrbMotion.mood(standing), open = { app.chat.fresh(); nav.go("chat") }, settings = { nav.go("settings") }, places = places)
+        HomeHead(app, glance, open = { app.chat.fresh(); nav.go("chat") }, settings = { nav.go("settings") }, places = places)
         val shown = work?.let { Work.inProject(it, filtered?.takeIf { key -> it.projects.any { p -> p.key == key } }) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s6)) {
             problem?.let { p -> item(key = "problem") { Refused(app, p) } }
@@ -199,7 +195,7 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
  * open its own conversation.
  */
 @Composable
-private fun HomeHead(app: AppModel, glance: Work.Glance, mood: OrbMotion.Mood, open: () -> Unit, settings: () -> Unit, places: () -> Unit) {
+private fun HomeHead(app: AppModel, glance: Work.Glance, open: () -> Unit, settings: () -> Unit, places: () -> Unit) {
     val brand = LocalBrand.current
     val paired by app.paired.collectAsState()
     val fleet by app.fleet.collectAsState()

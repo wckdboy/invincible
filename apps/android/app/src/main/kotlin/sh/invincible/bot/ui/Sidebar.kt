@@ -41,14 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.AgentState
-import sh.invincible.bot.core.Orb
-import sh.invincible.bot.core.OrbMotion
 import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.Primary
 
 /*
  * A wide screen's sidebar, as T3 Code's (your words, 26 November 2026: "agent first (the primary), and project/tasks/coding
- * t3code style for the agents"): the mark, a task to give and the sidebar folded away; the primary's row pinned, its orb and
+ * t3code style for the agents"): the mark, a task to give and the sidebar folded away; the primary's row pinned, its mark and
  * what it is doing (it opens its own conversation); then the work in one list by attention, every task a row of three
  * lines: what needs you, what is new to you, what is at work (folded), what is settled (folded); and at its foot the
  * agents, the machine it talks to, and everything else ("…"). It asks the node nothing of its own. The web's sidebar.ts.
@@ -80,7 +78,7 @@ fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, colla
             IconButton(onClick = give, enabled = table.asOf == null, modifier = Modifier.semantics { contentDescription = "Give a task" }) { Icon(ComposeIcon, null, Modifier.size(20.dp)) }
             IconButton(onClick = collapse, modifier = Modifier.semantics { contentDescription = "Hide the sidebar" }) { Icon(PanelIcon, null, Modifier.size(20.dp)) }
         }
-        // ---- the primary, pinned: its orb still beside a pane with orbs of its own, moving as it does beside any other ----
+        // ---- the primary, pinned: its mark still beside a pane with marks of its own, moving as it does beside any other ----
         val standing = if (live) AgentState.WORKING else table.primary.state
         val elsewhere = top == Nav.HOME || top == "chat" || top == "agents" || top.startsWith("task:") || top.startsWith("agent:")
         val line = table.primary.line
@@ -104,7 +102,7 @@ fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, colla
             PrimaryMark(34.dp)
             Column(Modifier.weight(1f)) {
                 Text(Primary.name, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
-                Text(line, style = Type.meta, color = when (Orb.tone(table.primary.state)) { Orb.Tone.WARN -> brand.needs; Orb.Tone.ACCENT -> brand.working; Orb.Tone.OK -> brand.done; else -> MaterialTheme.colorScheme.onSurfaceVariant }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(line, style = Type.meta, color = table.primary.state?.tone?.let(brand::of) ?: MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         // ---- the work, by attention ----

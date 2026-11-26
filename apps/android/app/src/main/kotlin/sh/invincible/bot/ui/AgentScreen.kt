@@ -52,6 +52,7 @@ import sh.invincible.bot.core.list
 import sh.invincible.bot.core.long
 import sh.invincible.bot.core.string
 import sh.invincible.bot.core.Primary
+import sh.invincible.bot.core.AgentMark
 
 /** A line of an agent's timeline: something said, or a task as it stands. */
 private data class Entry(val at: Long, val key: String, val speaker: String?, val mine: Boolean, val text: String, val task: Json?)
@@ -106,8 +107,9 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
     ) {
         val scope = rememberCoroutineScope()
         Column(Modifier.fillMaxWidth().padding(Space.margin), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-            // Its orb, the one in focus on its own page: moving while it works, still otherwise.
-            AgentOrb(id, person?.avatar, 96.dp, mood = if (row?.state == AgentState.WORKING) sh.invincible.bot.core.OrbMotion.Mood.WORKING else null, description = person?.name, key = "agent:$id")
+            // Its mark, the one in focus on its own page: moving while it works, still otherwise.
+            // (Its mark, the one in focus here: it moves in its state's way.)
+            AgentMarkView(id, person?.avatar, 96.dp, state = AgentMark.state(row?.state), live = true, description = person?.name)
             Text(person?.name ?: id, style = MaterialTheme.typography.headlineSmallEmphasized)
             StateChip(row?.state)
             row?.let { Text(Roster.besideChip(it.line, it.state), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -117,7 +119,7 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
                     TextButton(onClick = {
                         scope.launch { runCatching { app.client?.post("/api/team/control", Json.obj("agent" to id, "action" to if (p.enabled) "pause" else "resume")); app.refresh() } }
                     }) { Text(if (p.enabled) "Pause ${p.name}" else "Resume ${p.name}") }
-                    // Its orb's colour, chosen once the node has answered (never from the agents this phone kept).
+                    // Its mark's colour, chosen once the node has answered (never from the agents this phone kept).
                     if (table.asOf == null) TextButton(onClick = { colouring = true }) { Text("Its colour") }
                 }
             }
@@ -147,7 +149,7 @@ fun RoomScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -
     ) {
         Column(Modifier.fillMaxWidth().padding(Space.margin), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s2)) {
             Row(horizontalArrangement = Arrangement.spacedBy(-Space.s3)) {
-                for (m in members.take(5)) AgentOrb(m.id, m.avatar, 56.dp, description = m.name)
+                for (m in members.take(5)) AgentMarkView(m.id, m.avatar, 56.dp, description = m.name)
             }
             Text(room?.name ?: "A room", style = MaterialTheme.typography.headlineSmallEmphasized)
             row?.let { Text(it.line, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
