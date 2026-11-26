@@ -679,6 +679,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let worked = coding?.models[0] && !coding.models[0].own ? `${coding.models[0].provider}/${coding.models[0].model}` : undefined;
       // A review answered by the same model as the work is said once, whatever it is answered by on later submissions.
       let saidSameReview = false;
+      /** What proves it, as the run goes (its record keeps it). */
+      const proof: { before: number[]; after: number[]; review: "pass" | "revise" | null } = { before: [], after: [], review: null };
       // Its own tools where they were measured: on the roster's engineer models, in the primary's own loop (toolsLoop).
       const tools = Boolean(deps.toolsLoop) && !coding && !held && !agent.models?.length;
       const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. /work/.invincible-gateway.json is your model access, written by your agent for this task: never move, change or delete it.${screen}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "" } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}) }, {
@@ -716,6 +718,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
             saidSameReview = true;
             ctx.emit(`Review · by the same model that did the work (${event.model}): no other reviewer model could answer`);
           }
+          // What proves it, kept for its record: each gate before the work and in the last round, and the last verdict.
+          if (event.type === "baseline") proof.before = event.results.map((g) => g.exitCode);
+          else if (event.type === "gated") proof.after = event.results.map((g) => g.exitCode);
+          else if (event.type === "review") proof.review = event.verdict;
           ctx.emit(progress(event));
           if (steps.on && event.type === "command") steps.command = event.command;
           else if (steps.on && event.type === "observation") keepStep(event.step);
@@ -748,7 +754,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       });
       // (A reply with no command to run spent a turn and ran nothing: it is not one of the commands.)
       // (Its coding tool's calls are in what it spent, under the role "tool".)
-      const record: TeamTaskRecord = { startedAt, endedAt: Date.now(), ended: outcome.status, commands: commandsRun(outcome), revisions: outcome.revisions, spent: mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)) };
+      const proven = proof.before.length || proof.after.length || proof.review ? { proof: { before: proof.before, after: proof.after, review: proof.review, sameModel: proof.review !== null && saidSameReview } } : {};
+      const record: TeamTaskRecord = { startedAt, endedAt: Date.now(), ended: outcome.status, commands: commandsRun(outcome), revisions: outcome.revisions, spent: mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), ...proven };
       const verified = outcome.status === "done";
       // Its verified work may teach a skill, as its own runs do (it waits for you): told, never waited on. Not work in
       // sensitive mode: what a skill is made of would go to its models.

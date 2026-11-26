@@ -407,6 +407,21 @@ export interface TeamDelivery {
  * role and model as the providers reported them (counts only). A coding harness's own calls, through the gateway
  * or on its own sign-in, are not in `spent` yet: with a harness it holds the planner's and the reviewer's.
  */
+/**
+ * What proves a task, as the runner saw it (never the agent's own account): each gate's exit before any work (`before`,
+ * in order; empty when none ran first) and in the last round (`after`), the reviewer's last verdict (null: none came),
+ * and whether that review was by the model that did the work. A gate that failed before and passes after shows the work
+ * was done; one that passed before shows nothing about it. Kept on the record so a list can say a task is proven
+ * without reading its trail.
+ */
+export const TeamTaskProof = z.strictObject({
+  before: z.array(z.number().int()).max(64),
+  after: z.array(z.number().int()).max(64),
+  review: z.enum(["pass", "revise"]).nullable(),
+  sameModel: z.boolean(),
+});
+export type TeamTaskProof = z.infer<typeof TeamTaskProof>;
+
 export const TeamTaskRecord = z.strictObject({
   startedAt: z.number().int().min(0),
   endedAt: z.number().int().min(0),
@@ -414,6 +429,8 @@ export const TeamTaskRecord = z.strictObject({
   commands: z.number().int().min(0).max(1_000_000),
   revisions: z.number().int().min(0).max(1000),
   spent: SpendLines,
+  /** What proves it (absent: a record from before proof was kept, or a run that never reached a gate or a review). */
+  proof: TeamTaskProof.optional(),
 });
 export type TeamTaskRecord = z.infer<typeof TeamTaskRecord>;
 

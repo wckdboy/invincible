@@ -614,6 +614,35 @@ test("failing task gates cannot be replaced by an approving review or an agent's
   expect(f.held()).toBe(0);
 });
 
+test("a task's record keeps what proves it, as the runner saw it: each gate's exit before the work and at the end, and the reviewer's verdict", async () => {
+  // Its gate fails before the work and passes after it: it shows the work was done.
+  let wrote = false;
+  const f = fixture([say("1. Make the change."), say("```sh\necho write\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
+    exec: async (_m, command) => {
+      if (command.includes("echo write")) wrote = true;
+      if (command.includes("bun test required-check")) return result({ exitCode: wrote ? 0 : 1, stdout: wrote ? "1 pass" : "1 fail" });
+      return result();
+    },
+  });
+  // (Reviewed by another model than did the work, as the reviewer's role is.)
+  f.setRoster("reviewer", ["local/reviewer"]);
+  const proven = await f.runtime.executeTask(member, task, f.context);
+  expect(proven.verified).toBe(true);
+  expect(proven.record!.proof).toEqual({ before: [1], after: [0], review: "pass", sameModel: false });
+  // A gate that passes before any work too, and a review by the model that did the work: the record says both.
+  const g = fixture([say("1. Tidy."), say("```sh\necho tidy\n```"), say("DONE\nTidied."), say("PASS\nFine.")]);
+  const reviewed = await g.runtime.executeTask(member, task, g.context);
+  expect(reviewed.verified).toBe(true);
+  expect(reviewed.record!.proof).toEqual({ before: [0], after: [0], review: "pass", sameModel: true });
+  // Failing to the end: the last round's exits, and no review.
+  const h = fixture([say("1. Build."), say("DONE\nWorks."), say("DONE\nWorks now."), say("DONE\nTrust me.")], {
+    exec: async (_m, command) => (command.includes("bun test required-check") ? result({ exitCode: 1, stdout: "required behavior failed" }) : result()),
+  });
+  const failed = await h.runtime.executeTask(member, task, h.context);
+  expect(failed.verified).toBe(false);
+  expect(failed.record!.proof).toEqual({ before: [1], after: [1], review: null, sameModel: false });
+});
+
 test("a stopped agent cannot use its VM even if a model returns a queued tool call", async () => {
   const f = fixture([call("workspace_exec", { command: "touch should-not-run" })]);
   const abort = new AbortController(); abort.abort();
